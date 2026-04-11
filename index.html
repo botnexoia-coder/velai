@@ -1,0 +1,909 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Velai — Tu negocio funciona aunque tú estés durmiendo.</title>
+  <meta name="description" content="Vai es el asistente IA que atiende, vende y gestiona tu negocio 24/7 en WhatsApp, web y redes sociales. Sin que toques nada.">
+  <link rel="preconnect" href="https://api.fontshare.com">
+  <link href="https://api.fontshare.com/v2/css?f[]=cabinet-grotesk@400,500,700,800,900&f[]=satoshi@300,400,500&display=swap" rel="stylesheet">
+
+  <style>
+    :root {
+      --orange:   #FF6B1A;
+      --orange2:  #FF8C40;
+      --orange3:  #FFB380;
+      --amber:    #FFAA00;
+      --bg:       #09070A;
+      --bg2:      #110D13;
+      --surface:  #181220;
+      --border:   rgba(255,107,26,0.12);
+      --border2:  rgba(255,107,26,0.22);
+      --white:    #FFF8F4;
+      --muted:    rgba(255,248,244,0.48);
+      --muted2:   rgba(255,248,244,0.22);
+      --font-d:   'Cabinet Grotesk', sans-serif;
+      --font-b:   'Satoshi', sans-serif;
+    }
+
+    *, *::before, *::after { margin:0; padding:0; box-sizing:border-box; }
+    html { scroll-behavior: smooth; }
+    body { font-family: var(--font-b); background: var(--bg); color: var(--white); overflow-x: hidden; line-height: 1.6; }
+
+    /* ── NAV ── */
+    nav {
+      position: fixed; top: 0; width: 100%; z-index: 100;
+      background: rgba(9,7,10,0.82); backdrop-filter: blur(20px);
+      border-bottom: 1px solid var(--border); padding: 0 2rem;
+    }
+    .nav-inner {
+      max-width: 1160px; margin: 0 auto;
+      display: flex; align-items: center; justify-content: space-between;
+      height: 68px;
+    }
+    .logo { display: flex; align-items: center; gap: 10px; text-decoration: none; }
+    .logo-icon {
+      width: 36px; height: 36px; border-radius: 10px;
+      background: var(--orange); display: flex; align-items: center; justify-content: center;
+      position: relative; overflow: hidden; flex-shrink: 0;
+    }
+    .logo-icon::after { content:''; position:absolute; inset:0; background: linear-gradient(135deg, rgba(255,255,255,0.18) 0%, transparent 60%); }
+    .logo-icon svg { width:20px; height:20px; position:relative; z-index:1; }
+    .wordmark { font-family: var(--font-d); font-weight: 900; font-size: 1.5rem; letter-spacing: -0.04em; color: var(--white); }
+    .wordmark span { color: var(--orange); }
+    .nav-links { display: flex; gap: 2rem; list-style: none; }
+    .nav-links a { color: var(--muted); text-decoration: none; font-size: 0.88rem; font-weight: 500; transition: color .2s; }
+    .nav-links a:hover { color: var(--white); }
+    .nav-cta {
+      background: var(--orange); color: #fff; border: none;
+      padding: 0.55rem 1.3rem; border-radius: 8px; font-family: var(--font-b);
+      font-weight: 600; font-size: 0.85rem; cursor: pointer; text-decoration: none;
+      transition: all .2s;
+    }
+    .nav-cta:hover { background: var(--orange2); transform: translateY(-1px); }
+    .hamburger { display:none; background:none; border:none; color:var(--white); font-size:1.4rem; cursor:pointer; }
+
+    /* ── HERO ── */
+    .hero {
+      min-height: 100vh; display: flex; align-items: center;
+      padding: 8rem 2rem 5rem; position: relative; overflow: hidden;
+    }
+    .hero-glow1 {
+      position: absolute; top: -150px; right: -100px; width: 600px; height: 600px;
+      background: radial-gradient(circle, rgba(255,107,26,0.12) 0%, transparent 65%);
+      pointer-events: none;
+    }
+    .hero-glow2 {
+      position: absolute; bottom: -100px; left: -150px; width: 500px; height: 500px;
+      background: radial-gradient(circle, rgba(255,170,0,0.06) 0%, transparent 65%);
+      pointer-events: none;
+    }
+    .hero-inner {
+      max-width: 1160px; margin: 0 auto; width: 100%;
+      display: grid; grid-template-columns: 1.1fr 0.9fr; gap: 4rem; align-items: center;
+      position: relative;
+    }
+    .hero-badge {
+      display: inline-flex; align-items: center; gap: 7px;
+      background: rgba(255,107,26,0.1); border: 1px solid rgba(255,107,26,0.28);
+      border-radius: 100px; padding: 5px 14px; font-size: 0.78rem;
+      color: var(--orange2); font-weight: 500; margin-bottom: 1.5rem; width: fit-content;
+    }
+    .badge-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--orange); animation: pulse 1.8s ease-in-out infinite; }
+    @keyframes pulse { 0%,100%{opacity:1;} 50%{opacity:.3;} }
+
+    .hero h1 {
+      font-family: var(--font-d); font-size: clamp(2.4rem, 5vw, 3.8rem);
+      font-weight: 900; letter-spacing: -0.05em; line-height: 1.02; margin-bottom: 1.4rem;
+    }
+    .hero h1 .fire { color: var(--orange); }
+    .hero p { font-size: 1.1rem; color: var(--muted); line-height: 1.75; margin-bottom: 2rem; max-width: 500px; font-weight: 300; }
+    .hero-btns { display: flex; gap: 1rem; flex-wrap: wrap; }
+    .btn-primary {
+      background: var(--orange); color: #fff; border: none;
+      padding: 0.85rem 2rem; border-radius: 10px; font-family: var(--font-b);
+      font-weight: 600; font-size: 0.95rem; cursor: pointer; text-decoration: none;
+      transition: all .3s;
+    }
+    .btn-primary:hover { background: var(--orange2); transform: translateY(-2px); box-shadow: 0 8px 30px rgba(255,107,26,0.3); }
+    .btn-secondary {
+      background: transparent; color: var(--white);
+      border: 1px solid var(--border2);
+      padding: 0.85rem 2rem; border-radius: 10px; font-family: var(--font-b);
+      font-weight: 500; font-size: 0.95rem; cursor: pointer; text-decoration: none;
+      transition: all .3s;
+    }
+    .btn-secondary:hover { background: var(--surface); }
+
+    .hero-stats {
+      display: flex; gap: 2.5rem; margin-top: 3rem;
+      padding-top: 2rem; border-top: 1px solid var(--border); flex-wrap: wrap;
+    }
+    .stat-num { font-family: var(--font-d); font-size: 1.8rem; font-weight: 800; color: var(--orange); }
+    .stat-label { font-size: 0.75rem; color: var(--muted); margin-top: 2px; text-transform: uppercase; letter-spacing: .05em; }
+
+    /* Hero right — chat preview */
+    .chat-preview {
+      background: var(--bg2); border: 1px solid var(--border2);
+      border-radius: 20px; overflow: hidden;
+      box-shadow: 0 24px 60px rgba(0,0,0,0.5);
+    }
+    .chat-header {
+      display: flex; align-items: center; gap: 10px;
+      padding: 14px 18px; background: var(--surface);
+      border-bottom: 1px solid var(--border);
+    }
+    .chat-avatar {
+      width: 34px; height: 34px; border-radius: 10px;
+      background: var(--orange); display: flex; align-items: center; justify-content: center;
+      flex-shrink: 0; position: relative; overflow: hidden;
+    }
+    .chat-avatar::after { content:''; position:absolute; inset:0; background: linear-gradient(135deg, rgba(255,255,255,0.18) 0%, transparent 60%); }
+    .chat-avatar svg { width:18px; height:18px; position:relative; z-index:1; }
+    .chat-header-info .chat-name { font-family: var(--font-d); font-weight: 700; font-size: 0.88rem; }
+    .chat-header-info .chat-live {
+      display: flex; align-items: center; gap: 4px;
+      font-size: 0.72rem; color: var(--orange2);
+    }
+    .live-dot { width:5px; height:5px; border-radius:50%; background: var(--orange); animation: pulse 1.2s infinite; }
+    .chat-body { padding: 1.2rem; display: flex; flex-direction: column; gap: 10px; min-height: 280px; }
+    .msg-vai { display: flex; }
+    .msg-user { display: flex; justify-content: flex-end; }
+    .bubble-vai {
+      background: var(--surface); border: 1px solid var(--border2);
+      border-radius: 14px 14px 14px 4px;
+      padding: 10px 14px; font-size: 0.82rem; color: var(--white);
+      line-height: 1.5; max-width: 80%;
+      opacity: 0; transform: translateY(8px);
+      transition: all .4s ease;
+    }
+    .bubble-user {
+      background: var(--orange); border-radius: 14px 14px 4px 14px;
+      padding: 10px 14px; font-size: 0.82rem; color: #fff;
+      line-height: 1.5; max-width: 80%;
+      opacity: 0; transform: translateY(8px);
+      transition: all .4s ease;
+    }
+    .bubble-vai.visible, .bubble-user.visible { opacity:1; transform:translateY(0); }
+    .action-tag {
+      display: flex; align-items: center; gap: 6px;
+      padding: 8px 12px; background: rgba(255,107,26,0.07);
+      border-radius: 10px; border: 1px solid rgba(255,107,26,0.18);
+      font-size: 0.72rem; color: var(--orange2);
+      opacity: 0; transition: all .4s ease;
+    }
+    .action-tag.visible { opacity: 1; }
+    .action-dot { width:5px; height:5px; border-radius:50%; background:var(--orange); animation:pulse 1.2s infinite; }
+
+    /* ── SECTION BASE ── */
+    section { padding: 6rem 2rem; }
+    .s-inner { max-width: 1160px; margin: 0 auto; }
+    .s-label { font-family: var(--font-b); font-size: 0.75rem; color: var(--orange); text-transform: uppercase; letter-spacing: .12em; margin-bottom: .7rem; font-weight: 500; }
+    .s-title { font-family: var(--font-d); font-size: clamp(1.8rem, 4vw, 2.6rem); font-weight: 800; letter-spacing: -0.04em; margin-bottom: .8rem; }
+    .s-sub { font-size: 1rem; color: var(--muted); max-width: 560px; margin-bottom: 3.5rem; font-weight: 300; line-height: 1.7; }
+
+    /* ── PROBLEM ── */
+    .problem-section { background: var(--bg2); border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); }
+    .problem-grid { display: grid; grid-template-columns: repeat(3,1fr); gap: 1.5rem; }
+    .problem-card {
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: 16px; padding: 2rem; position: relative; overflow: hidden;
+      transition: all .3s;
+    }
+    .problem-card:hover { border-color: rgba(255,107,26,0.35); transform: translateY(-4px); }
+    .problem-card::before {
+      content: ''; position: absolute; top: 0; left: 0; right: 0; height: 2px;
+      background: linear-gradient(90deg, var(--orange), var(--amber));
+      opacity: 0; transition: opacity .3s;
+    }
+    .problem-card:hover::before { opacity: 1; }
+    .problem-icon { font-size: 2rem; margin-bottom: 1rem; }
+    .problem-card h3 { font-family: var(--font-d); font-size: 1.1rem; font-weight: 700; margin-bottom: .6rem; }
+    .problem-card p { font-size: 0.88rem; color: var(--muted); line-height: 1.65; }
+    .problem-stat { font-family: var(--font-d); font-size: 2rem; font-weight: 900; color: var(--orange); margin-bottom: .4rem; }
+
+    /* ── HOW IT WORKS ── */
+    .flow-grid { display: grid; grid-template-columns: repeat(5,1fr); gap: 0; position: relative; }
+    .flow-grid::before {
+      content: ''; position: absolute; top: 36px; left: 10%; right: 10%; height: 1px;
+      background: linear-gradient(90deg, transparent, var(--orange), var(--amber), var(--orange), transparent);
+      opacity: .35;
+    }
+    .flow-step { text-align: center; padding: 0 0.5rem; position: relative; }
+    .flow-num {
+      width: 72px; height: 72px; border-radius: 50%;
+      background: var(--surface); border: 1.5px solid var(--border2);
+      display: flex; align-items: center; justify-content: center;
+      font-family: var(--font-d); font-size: 1.4rem; font-weight: 900; color: var(--orange);
+      margin: 0 auto 1rem; position: relative; z-index: 1;
+      transition: all .3s;
+    }
+    .flow-step:hover .flow-num { background: rgba(255,107,26,0.1); border-color: var(--orange); box-shadow: 0 0 24px rgba(255,107,26,0.2); }
+    .flow-step h4 { font-family: var(--font-d); font-size: 0.9rem; font-weight: 700; margin-bottom: .4rem; }
+    .flow-step p { font-size: 0.78rem; color: var(--muted); line-height: 1.55; }
+
+    /* ── INDUSTRIES ── */
+    .industries-section { background: var(--bg2); border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); }
+    .industry-tabs { display: flex; gap: .5rem; flex-wrap: wrap; margin-bottom: 2.5rem; }
+    .tab-btn {
+      padding: .5rem 1.2rem; border-radius: 100px;
+      border: 1px solid var(--border2); background: transparent;
+      color: var(--muted); font-family: var(--font-b); font-size: .85rem; font-weight: 500;
+      cursor: pointer; transition: all .2s;
+    }
+    .tab-btn.active, .tab-btn:hover { background: var(--orange); color: #fff; border-color: var(--orange); }
+    .industry-content { display: none; }
+    .industry-content.active { display: grid; grid-template-columns: 1fr 1fr; gap: 2rem; align-items: start; }
+    .industry-info h3 { font-family: var(--font-d); font-size: 1.5rem; font-weight: 800; letter-spacing: -.03em; margin-bottom: .8rem; }
+    .industry-info p { font-size: .95rem; color: var(--muted); line-height: 1.7; margin-bottom: 1.5rem; font-weight: 300; }
+    .industry-features { list-style: none; display: flex; flex-direction: column; gap: .7rem; }
+    .industry-features li { display: flex; align-items: center; gap: .6rem; font-size: .88rem; color: var(--muted); }
+    .feat-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--orange); flex-shrink: 0; }
+    .industry-chat {
+      background: var(--surface); border: 1px solid var(--border2);
+      border-radius: 16px; overflow: hidden;
+    }
+    .ind-chat-header {
+      display: flex; align-items: center; gap: 8px;
+      padding: 12px 16px; background: var(--bg2);
+      border-bottom: 1px solid var(--border);
+    }
+    .ind-chat-ico { width: 28px; height: 28px; border-radius: 8px; background: var(--orange); display:flex; align-items:center; justify-content:center; }
+    .ind-chat-ico svg { width:15px; height:15px; }
+    .ind-chat-name { font-family: var(--font-d); font-size: .82rem; font-weight: 700; }
+    .ind-chat-status { font-size: .68rem; color: var(--orange2); display:flex; align-items:center; gap:3px; }
+    .ind-chat-body { padding: 1rem; display:flex; flex-direction:column; gap:8px; }
+    .ind-bv {
+      background: var(--bg2); border: 1px solid var(--border);
+      border-radius: 12px 12px 12px 3px;
+      padding: 9px 13px; font-size: .78rem; color: var(--white); line-height: 1.5; max-width: 85%;
+    }
+    .ind-bu {
+      background: var(--orange); border-radius: 12px 12px 3px 12px;
+      padding: 9px 13px; font-size: .78rem; color: #fff; line-height: 1.5; max-width: 85%; align-self: flex-end;
+    }
+    .ind-action {
+      display:flex; align-items:center; gap:5px; margin-top:4px;
+      padding: 7px 11px; background: rgba(255,107,26,0.07);
+      border-radius: 9px; border: 1px solid rgba(255,107,26,0.18);
+      font-size: .7rem; color: var(--orange2);
+    }
+
+    /* ── VAI SECTION ── */
+    .vai-section { text-align: center; }
+    .vai-avatar {
+      width: 110px; height: 110px; border-radius: 30px; margin: 0 auto 1.5rem;
+      background: linear-gradient(145deg, #1A0D05 0%, #2E1500 100%);
+      border: 1.5px solid rgba(255,107,26,0.3);
+      display: flex; align-items: center; justify-content: center;
+      position: relative; overflow: hidden;
+    }
+    .vai-glow { position:absolute; width:80px; height:40px; background: radial-gradient(ellipse, rgba(255,107,26,0.12) 0%, transparent 70%); bottom:-5px; }
+    .vai-face { position:relative; z-index:1; display:flex; flex-direction:column; align-items:center; gap:9px; }
+    .vai-visor {
+      width:58px; height:20px; border-radius:10px;
+      background: rgba(255,107,26,0.1); border: 1px solid rgba(255,107,26,0.38);
+      display:flex; align-items:center; justify-content:center; gap:12px;
+    }
+    .vai-eye {
+      width:9px; height:9px; border-radius:50%; background: var(--orange);
+      box-shadow: 0 0 8px rgba(255,107,26,0.9);
+      animation: eyeglow 2.5s ease-in-out infinite alternate;
+    }
+    @keyframes eyeglow { from{opacity:.6;} to{opacity:1; box-shadow:0 0 14px rgba(255,107,26,1);} }
+    .vai-scan {
+      width:38px; height:3px; border-radius:2px;
+      background: rgba(255,107,26,0.2); overflow:hidden; position:relative;
+    }
+    .vai-scan::after {
+      content:''; position:absolute; left:-100%; top:0; width:50%; height:100%;
+      background: var(--orange); border-radius:2px; animation: scan 1.8s linear infinite;
+    }
+    @keyframes scan { to{left:200%;} }
+    .vai-pulse {
+      position:absolute; bottom:-4px; right:-4px; width:20px; height:20px;
+      border-radius:50%; background: var(--amber); border: 2.5px solid var(--bg);
+      animation: heartbeat 1.4s ease-in-out infinite;
+    }
+    @keyframes heartbeat { 0%,100%{transform:scale(1);} 50%{transform:scale(1.2);} }
+    .vai-name { font-family: var(--font-d); font-size: 2rem; font-weight: 900; letter-spacing:-.04em; margin-bottom:.3rem; }
+    .vai-role { font-size:.88rem; color:var(--muted); }
+    .vai-live { display:flex; align-items:center; justify-content:center; gap:5px; font-size:.78rem; color:var(--orange2); margin-top:.6rem; }
+
+    .vai-features-grid { display:grid; grid-template-columns:repeat(3,1fr); gap:1rem; margin-top:3rem; text-align:left; }
+    .vai-feat {
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius:14px; padding:1.5rem; transition:all .3s;
+    }
+    .vai-feat:hover { border-color: rgba(255,107,26,.35); transform:translateY(-3px); }
+    .vai-feat-icon { font-size:1.5rem; margin-bottom:.8rem; }
+    .vai-feat h4 { font-family:var(--font-d); font-size:.95rem; font-weight:700; margin-bottom:.4rem; }
+    .vai-feat p { font-size:.82rem; color:var(--muted); line-height:1.6; }
+
+    /* ── PRICING ── */
+    .pricing-section { background: var(--bg2); border-top:1px solid var(--border); border-bottom:1px solid var(--border); }
+    .pricing-grid { display:grid; grid-template-columns:repeat(3,1fr); gap:1.5rem; }
+    .price-card {
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius:20px; padding:2rem; transition:all .3s; position:relative; overflow:hidden;
+    }
+    .price-card.featured {
+      border-color: var(--orange); background: rgba(255,107,26,0.06);
+    }
+    .price-card.featured::before {
+      content:'Más popular'; position:absolute; top:16px; right:16px;
+      background:var(--orange); color:#fff; font-size:.65rem; font-weight:700;
+      padding:3px 10px; border-radius:100px; text-transform:uppercase; letter-spacing:.06em;
+    }
+    .price-name { font-family:var(--font-d); font-size:1rem; font-weight:700; margin-bottom:.5rem; color:var(--muted); text-transform:uppercase; letter-spacing:.08em; font-size:.75rem; }
+    .price-amount { font-family:var(--font-d); font-size:2.5rem; font-weight:900; letter-spacing:-.04em; margin-bottom:.3rem; }
+    .price-amount span { font-size:1rem; font-weight:400; color:var(--muted); }
+    .price-desc { font-size:.82rem; color:var(--muted); margin-bottom:1.5rem; line-height:1.6; }
+    .price-features { list-style:none; display:flex; flex-direction:column; gap:.7rem; margin-bottom:1.8rem; }
+    .price-features li { display:flex; align-items:center; gap:.6rem; font-size:.85rem; }
+    .price-features li::before { content:'✓'; color:var(--orange); font-weight:700; flex-shrink:0; }
+    .price-btn {
+      width:100%; padding:.85rem; border-radius:10px; font-family:var(--font-b);
+      font-weight:600; font-size:.9rem; cursor:pointer; transition:all .2s; border:none;
+      text-align:center; display:block; text-decoration:none;
+    }
+    .price-btn.outline { background:transparent; border:1px solid var(--border2); color:var(--white); }
+    .price-btn.outline:hover { background:var(--surface); }
+    .price-btn.solid { background:var(--orange); color:#fff; }
+    .price-btn.solid:hover { background:var(--orange2); }
+
+    /* ── CTA FINAL ── */
+    .cta-section { text-align:center; position:relative; overflow:hidden; }
+    .cta-glow {
+      position:absolute; top:50%; left:50%; transform:translate(-50%,-50%);
+      width:600px; height:400px;
+      background:radial-gradient(ellipse, rgba(255,107,26,0.1) 0%, transparent 70%);
+      pointer-events:none;
+    }
+    .cta-section h2 { font-family:var(--font-d); font-size:clamp(1.8rem,4vw,3rem); font-weight:900; letter-spacing:-.05em; margin-bottom:1rem; position:relative; }
+    .cta-section h2 span { color:var(--orange); }
+    .cta-section p { font-size:1.05rem; color:var(--muted); margin-bottom:2rem; position:relative; font-weight:300; }
+    .cta-btns { display:flex; gap:1rem; justify-content:center; flex-wrap:wrap; position:relative; }
+
+    /* ── FOOTER ── */
+    footer { border-top:1px solid var(--border); background:var(--bg2); padding:3rem 2rem; }
+    .footer-inner { max-width:1160px; margin:0 auto; display:grid; grid-template-columns:1.5fr 1fr 1fr; gap:3rem; }
+    .footer-brand p { font-size:.85rem; color:var(--muted); line-height:1.65; margin-top:.8rem; max-width:280px; }
+    .footer-col h4 { font-size:.8rem; font-weight:600; text-transform:uppercase; letter-spacing:.08em; color:var(--muted); margin-bottom:1rem; }
+    .footer-col a { display:block; color:var(--muted2); text-decoration:none; font-size:.85rem; margin-bottom:.5rem; transition:color .2s; }
+    .footer-col a:hover { color:var(--white); }
+    .footer-bottom {
+      max-width:1160px; margin:2rem auto 0; padding-top:1.5rem;
+      border-top:1px solid var(--border);
+      display:flex; justify-content:space-between; align-items:center;
+      font-size:.78rem; color:var(--muted2); flex-wrap:wrap; gap:.5rem;
+    }
+
+    /* ── ANIMATIONS ── */
+    .fade-up { opacity:0; transform:translateY(28px); transition:opacity .6s ease, transform .6s ease; }
+    .fade-up.visible { opacity:1; transform:translateY(0); }
+
+    /* ── RESPONSIVE ── */
+    @media(max-width:900px) {
+      .hero-inner { grid-template-columns:1fr; }
+      .chat-preview { display:none; }
+      .problem-grid { grid-template-columns:1fr; }
+      .flow-grid { grid-template-columns:1fr 1fr; gap:2rem; }
+      .flow-grid::before { display:none; }
+      .industry-content.active { grid-template-columns:1fr; }
+      .vai-features-grid { grid-template-columns:1fr; }
+      .pricing-grid { grid-template-columns:1fr; }
+      .footer-inner { grid-template-columns:1fr; gap:2rem; }
+      .nav-links { display:none; }
+      .hamburger { display:block; }
+    }
+    @media(max-width:600px) {
+      .hero-btns { flex-direction:column; }
+      .hero-stats { gap:1.5rem; }
+      .cta-btns { flex-direction:column; align-items:center; }
+    }
+  </style>
+</head>
+<body>
+
+<!-- NAV -->
+<nav>
+  <div class="nav-inner">
+    <a href="#" class="logo">
+      <div class="logo-icon">
+        <svg viewBox="0 0 20 20" fill="none">
+          <circle cx="10" cy="10" r="3.5" fill="white" opacity=".95"/>
+          <path d="M10 2.5v3.2" stroke="white" stroke-width="1.6" stroke-linecap="round" opacity=".55"/>
+          <path d="M10 14.3v3.2" stroke="white" stroke-width="1.6" stroke-linecap="round" opacity=".55"/>
+          <path d="M2.5 10h3.2" stroke="white" stroke-width="1.6" stroke-linecap="round" opacity=".55"/>
+          <path d="M14.3 10h3.2" stroke="white" stroke-width="1.6" stroke-linecap="round" opacity=".55"/>
+          <path d="M5 5l2.3 2.3" stroke="white" stroke-width="1.3" stroke-linecap="round" opacity=".3"/>
+          <path d="M12.7 12.7L15 15" stroke="white" stroke-width="1.3" stroke-linecap="round" opacity=".3"/>
+          <path d="M15 5l-2.3 2.3" stroke="white" stroke-width="1.3" stroke-linecap="round" opacity=".3"/>
+          <path d="M7.3 12.7L5 15" stroke="white" stroke-width="1.3" stroke-linecap="round" opacity=".3"/>
+        </svg>
+      </div>
+      <div class="wordmark">vel<span>ai</span></div>
+    </a>
+    <ul class="nav-links">
+      <li><a href="#como-funciona">Cómo funciona</a></li>
+      <li><a href="#industrias">Industrias</a></li>
+      <li><a href="#precios">Precios</a></li>
+      <li><a href="#vai">Vai</a></li>
+    </ul>
+    <a href="#contacto" class="nav-cta">Solicitar demo</a>
+    <button class="hamburger">☰</button>
+  </div>
+</nav>
+
+<!-- HERO -->
+<section class="hero">
+  <div class="hero-glow1"></div>
+  <div class="hero-glow2"></div>
+  <div class="hero-inner">
+    <div class="fade-up">
+      <div class="hero-badge">
+        <div class="badge-dot"></div>
+        Presentamos Vai — tu asistente IA
+      </div>
+      <h1>
+        Tu negocio funciona<br>
+        aunque tú <span class="fire">estés durmiendo.</span>
+      </h1>
+      <p>
+        Vai atiende, vende y gestiona tus clientes en WhatsApp, web y redes sociales —
+        las 24 horas, sin excepciones, sin que toques nada.
+      </p>
+      <div class="hero-btns">
+        <a href="#contacto" class="btn-primary">Ver demo en vivo →</a>
+        <a href="#como-funciona" class="btn-secondary">Cómo funciona</a>
+      </div>
+      <div class="hero-stats">
+        <div><div class="stat-num">24/7</div><div class="stat-label">Sin interrupciones</div></div>
+        <div><div class="stat-num">+40%</div><div class="stat-label">Ventas fuera de horario</div></div>
+        <div><div class="stat-num">8 seg</div><div class="stat-label">Tiempo de respuesta</div></div>
+        <div><div class="stat-num">−80%</div><div class="stat-label">Tareas repetitivas</div></div>
+      </div>
+    </div>
+
+    <!-- Chat preview animado -->
+    <div class="chat-preview fade-up" style="animation-delay:.2s">
+      <div class="chat-header">
+        <div class="chat-avatar">
+          <svg viewBox="0 0 20 20" fill="none">
+            <circle cx="10" cy="10" r="3.2" fill="white" opacity=".9"/>
+            <path d="M10 2.5v3" stroke="white" stroke-width="1.5" stroke-linecap="round" opacity=".55"/>
+            <path d="M10 14.5v3" stroke="white" stroke-width="1.5" stroke-linecap="round" opacity=".55"/>
+            <path d="M2.5 10h3" stroke="white" stroke-width="1.5" stroke-linecap="round" opacity=".55"/>
+            <path d="M14.5 10h3" stroke="white" stroke-width="1.5" stroke-linecap="round" opacity=".55"/>
+          </svg>
+        </div>
+        <div class="chat-header-info">
+          <div class="chat-name">Vai · Restaurante La Brasa</div>
+          <div class="chat-live"><div class="live-dot"></div>En línea ahora</div>
+        </div>
+      </div>
+      <div class="chat-body" id="chatBody">
+        <div class="msg-vai"><div class="bubble-vai" id="m1">¡Hola! Soy Vai, el asistente de La Brasa. ¿Te ayudo con una reserva, la carta o cualquier duda? 👋</div></div>
+        <div class="msg-user"><div class="bubble-user" id="m2">Quiero reservar para 4 el sábado a las 21h</div></div>
+        <div class="msg-vai"><div class="bubble-vai" id="m3">Tengo disponible el sábado 12 a las 21:00 para 4 personas. ¿A nombre de quién y un teléfono de contacto?</div></div>
+        <div class="msg-user"><div class="bubble-user" id="m4">A nombre de Carlos, 612 345 678</div></div>
+        <div class="msg-vai"><div class="bubble-vai" id="m5">¡Perfecto Carlos! Reserva confirmada para el sábado 12 a las 21:00. Te enviamos recordatorio el viernes. ¡Hasta pronto! 🎉</div></div>
+        <div class="action-tag" id="m6">
+          <div class="action-dot"></div>
+          Reserva registrada · Equipo notificado · Recordatorio programado
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- PROBLEMA -->
+<section class="problem-section">
+  <div class="s-inner">
+    <div class="s-label fade-up">// El problema</div>
+    <h2 class="s-title fade-up">Tu negocio pierde dinero cada día</h2>
+    <p class="s-sub fade-up">Cada mensaje sin respuesta a las 11pm es una venta perdida. Para siempre.</p>
+    <div class="problem-grid">
+      <div class="problem-card fade-up">
+        <div class="problem-stat">67%</div>
+        <h3>Clientes que no vuelven</h3>
+        <p>De los clientes que no reciben respuesta en menos de 1 hora compran en la competencia. Sin excepción.</p>
+      </div>
+      <div class="problem-card fade-up">
+        <div class="problem-stat">8h</div>
+        <h3>Sin cobertura cada día</h3>
+        <p>Tu negocio duerme 8 horas. Tu competencia con IA, no. Cada noche pierdes oportunidades que no se recuperan.</p>
+      </div>
+      <div class="problem-card fade-up">
+        <div class="problem-stat">−35%</div>
+        <h3>Productividad del equipo</h3>
+        <p>Tu equipo responde las mismas preguntas una y otra vez. Tiempo que podrían usar en lo que realmente importa.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- CÓMO FUNCIONA -->
+<section id="como-funciona">
+  <div class="s-inner">
+    <div class="s-label fade-up">// Cómo funciona</div>
+    <h2 class="s-title fade-up">El ciclo completo, automatizado</h2>
+    <p class="s-sub fade-up">Vai no solo responde — gestiona todo el flujo de principio a fin.</p>
+    <div class="flow-grid">
+      <div class="flow-step fade-up">
+        <div class="flow-num">01</div>
+        <h4>Atención</h4>
+        <p>Vai recibe el mensaje en WhatsApp, web o redes al instante. 24/7.</p>
+      </div>
+      <div class="flow-step fade-up">
+        <div class="flow-num">02</div>
+        <h4>Comprensión</h4>
+        <p>Entiende qué necesita el cliente: comprar, reservar, consultar o reclamar.</p>
+      </div>
+      <div class="flow-step fade-up">
+        <div class="flow-num">03</div>
+        <h4>Ejecución</h4>
+        <p>Procesa la venta, confirma la reserva o toma el pedido. Sin fricción.</p>
+      </div>
+      <div class="flow-step fade-up">
+        <div class="flow-num">04</div>
+        <h4>Notificación</h4>
+        <p>Avisa automáticamente al equipo correcto: cocina, vendedor, despachador.</p>
+      </div>
+      <div class="flow-step fade-up">
+        <div class="flow-num">05</div>
+        <h4>Seguimiento</h4>
+        <p>Envía confirmaciones, recordatorios y seguimiento post-venta solo.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- INDUSTRIAS -->
+<section id="industrias" class="industries-section">
+  <div class="s-inner">
+    <div class="s-label fade-up">// Industrias</div>
+    <h2 class="s-title fade-up">Se adapta a tu negocio</h2>
+    <p class="s-sub fade-up">No es una solución genérica. Vai aprende tu negocio, tu tono y tus procesos.</p>
+
+    <div class="industry-tabs fade-up">
+      <button class="tab-btn active" onclick="showIndustry('restaurante', this)">🍽️ Restaurante</button>
+      <button class="tab-btn" onclick="showIndustry('clinica', this)">🏥 Clínica</button>
+      <button class="tab-btn" onclick="showIndustry('tienda', this)">🛍️ Tienda</button>
+      <button class="tab-btn" onclick="showIndustry('inmobiliaria', this)">🏠 Inmobiliaria</button>
+    </div>
+
+    <!-- Restaurante -->
+    <div class="industry-content active" id="ind-restaurante">
+      <div class="industry-info">
+        <h3>Restaurantes & bares</h3>
+        <p>Vai gestiona reservas, pedidos para llevar y consultas de carta en tiempo real. Tu equipo solo se ocupa de cocinar y atender en sala.</p>
+        <ul class="industry-features">
+          <li><div class="feat-dot"></div>Reservas automáticas con confirmación instantánea</li>
+          <li><div class="feat-dot"></div>Gestión de pedidos para llevar y delivery</li>
+          <li><div class="feat-dot"></div>Carta digital interactiva con alérgenos</li>
+          <li><div class="feat-dot"></div>Recordatorios automáticos día antes</li>
+          <li><div class="feat-dot"></div>Notificación directa a cocina y sala</li>
+        </ul>
+      </div>
+      <div class="industry-chat">
+        <div class="ind-chat-header">
+          <div class="ind-chat-ico"><svg viewBox="0 0 20 20" fill="none"><circle cx="10" cy="10" r="3" fill="white" opacity=".9"/><path d="M10 2.5v3" stroke="white" stroke-width="1.5" stroke-linecap="round" opacity=".5"/><path d="M10 14.5v3" stroke="white" stroke-width="1.5" stroke-linecap="round" opacity=".5"/><path d="M2.5 10h3" stroke="white" stroke-width="1.5" stroke-linecap="round" opacity=".5"/><path d="M14.5 10h3" stroke="white" stroke-width="1.5" stroke-linecap="round" opacity=".5"/></svg></div>
+          <div><div class="ind-chat-name">Vai · La Trattoria</div><div class="ind-chat-status"><div class="live-dot"></div>En línea</div></div>
+        </div>
+        <div class="ind-chat-body">
+          <div class="ind-bv">¡Hola! Soy Vai. ¿Te ayudo con una reserva o consultas la carta de hoy?</div>
+          <div class="ind-bu">Mesa para 2 esta noche a las 21:30</div>
+          <div class="ind-bv">Tengo disponible esta noche a las 21:30. ¿A nombre de quién confirmo la reserva?</div>
+          <div class="ind-bu">Ana García</div>
+          <div class="ind-bv">¡Confirmado, Ana! Mesa para 2 esta noche a las 21:30. Te esperamos 🍷</div>
+          <div class="ind-action"><div class="action-dot"></div>Reserva confirmada · Sala notificada</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Clínica -->
+    <div class="industry-content" id="ind-clinica">
+      <div class="industry-info">
+        <h3>Clínicas & consultorios</h3>
+        <p>Vai gestiona citas, recordatorios de medicación y consultas médicas básicas. Tu recepcionista se libera de llamadas rutinarias.</p>
+        <ul class="industry-features">
+          <li><div class="feat-dot"></div>Agenda de citas en tiempo real</li>
+          <li><div class="feat-dot"></div>Recordatorios automáticos de citas</li>
+          <li><div class="feat-dot"></div>Triaje básico de urgencias</li>
+          <li><div class="feat-dot"></div>Información sobre servicios y precios</li>
+          <li><div class="feat-dot"></div>Seguimiento post-consulta</li>
+        </ul>
+      </div>
+      <div class="industry-chat">
+        <div class="ind-chat-header">
+          <div class="ind-chat-ico"><svg viewBox="0 0 20 20" fill="none"><circle cx="10" cy="10" r="3" fill="white" opacity=".9"/><path d="M10 2.5v3" stroke="white" stroke-width="1.5" stroke-linecap="round" opacity=".5"/><path d="M10 14.5v3" stroke="white" stroke-width="1.5" stroke-linecap="round" opacity=".5"/><path d="M2.5 10h3" stroke="white" stroke-width="1.5" stroke-linecap="round" opacity=".5"/><path d="M14.5 10h3" stroke="white" stroke-width="1.5" stroke-linecap="round" opacity=".5"/></svg></div>
+          <div><div class="ind-chat-name">Vai · Clínica Salud+</div><div class="ind-chat-status"><div class="live-dot"></div>En línea</div></div>
+        </div>
+        <div class="ind-chat-body">
+          <div class="ind-bv">Hola, soy Vai de Clínica Salud+. ¿En qué puedo ayudarte hoy?</div>
+          <div class="ind-bu">Necesito cita con el Dr. Martín para esta semana</div>
+          <div class="ind-bv">El Dr. Martín tiene disponibilidad el miércoles 14 a las 10:00 o el viernes 16 a las 16:30. ¿Cuál prefieres?</div>
+          <div class="ind-bu">El miércoles perfecto</div>
+          <div class="ind-bv">Cita confirmada para el miércoles 14 a las 10:00. Recibirás recordatorio 24h antes. 🩺</div>
+          <div class="ind-action"><div class="action-dot"></div>Cita agendada · Dr. Martín notificado</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Tienda -->
+    <div class="industry-content" id="ind-tienda">
+      <div class="industry-info">
+        <h3>Tiendas & e-commerce</h3>
+        <p>Vai convierte consultas en ventas, gestiona pedidos y hace seguimiento de envíos. Tu tienda vende mientras duermes.</p>
+        <ul class="industry-features">
+          <li><div class="feat-dot"></div>Catálogo de productos interactivo</li>
+          <li><div class="feat-dot"></div>Procesamiento de pedidos y pagos</li>
+          <li><div class="feat-dot"></div>Seguimiento de envíos en tiempo real</li>
+          <li><div class="feat-dot"></div>Gestión de devoluciones y reclamaciones</li>
+          <li><div class="feat-dot"></div>Recomendaciones personalizadas</li>
+        </ul>
+      </div>
+      <div class="industry-chat">
+        <div class="ind-chat-header">
+          <div class="ind-chat-ico"><svg viewBox="0 0 20 20" fill="none"><circle cx="10" cy="10" r="3" fill="white" opacity=".9"/><path d="M10 2.5v3" stroke="white" stroke-width="1.5" stroke-linecap="round" opacity=".5"/><path d="M10 14.5v3" stroke="white" stroke-width="1.5" stroke-linecap="round" opacity=".5"/><path d="M2.5 10h3" stroke="white" stroke-width="1.5" stroke-linecap="round" opacity=".5"/><path d="M14.5 10h3" stroke="white" stroke-width="1.5" stroke-linecap="round" opacity=".5"/></svg></div>
+          <div><div class="ind-chat-name">Vai · StyleShop</div><div class="ind-chat-status"><div class="live-dot"></div>En línea</div></div>
+        </div>
+        <div class="ind-chat-body">
+          <div class="ind-bv">¡Hola! Soy Vai de StyleShop. ¿Qué estás buscando hoy?</div>
+          <div class="ind-bu">Zapatillas blancas talla 42, precio máximo 80€</div>
+          <div class="ind-bv">Tengo 3 opciones perfectas para ti entre 45€ y 79€. ¿Te las envío con fotos y tallas disponibles?</div>
+          <div class="ind-bu">Sí, la segunda me gusta, la quiero</div>
+          <div class="ind-bv">¡Perfecto! Te mando el enlace de pago seguro. Entrega en 24-48h 📦</div>
+          <div class="ind-action"><div class="action-dot"></div>Pedido creado · Almacén notificado</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Inmobiliaria -->
+    <div class="industry-content" id="ind-inmobiliaria">
+      <div class="industry-info">
+        <h3>Inmobiliarias & agencias</h3>
+        <p>Vai cualifica leads, agenda visitas y envía fichas de inmuebles automáticamente. Tu agente solo atiende a quien ya está listo para comprar.</p>
+        <ul class="industry-features">
+          <li><div class="feat-dot"></div>Cualificación automática de leads</li>
+          <li><div class="feat-dot"></div>Envío de fichas y fotografías</li>
+          <li><div class="feat-dot"></div>Agendado de visitas en tiempo real</li>
+          <li><div class="feat-dot"></div>Seguimiento de interesados</li>
+          <li><div class="feat-dot"></div>Alertas de nuevas propiedades</li>
+        </ul>
+      </div>
+      <div class="industry-chat">
+        <div class="ind-chat-header">
+          <div class="ind-chat-ico"><svg viewBox="0 0 20 20" fill="none"><circle cx="10" cy="10" r="3" fill="white" opacity=".9"/><path d="M10 2.5v3" stroke="white" stroke-width="1.5" stroke-linecap="round" opacity=".5"/><path d="M10 14.5v3" stroke="white" stroke-width="1.5" stroke-linecap="round" opacity=".5"/><path d="M2.5 10h3" stroke="white" stroke-width="1.5" stroke-linecap="round" opacity=".5"/><path d="M14.5 10h3" stroke="white" stroke-width="1.5" stroke-linecap="round" opacity=".5"/></svg></div>
+          <div><div class="ind-chat-name">Vai · Inmobiliaria Clave</div><div class="ind-chat-status"><div class="live-dot"></div>En línea</div></div>
+        </div>
+        <div class="ind-chat-body">
+          <div class="ind-bv">Hola, soy Vai de Inmobiliaria Clave. ¿Buscas comprar, alquilar o vender?</div>
+          <div class="ind-bu">Busco piso de alquiler en Sevilla, máximo 900€, 2 habitaciones</div>
+          <div class="ind-bv">Tengo 4 pisos que encajan perfectamente. ¿Quieres que te envíe las fichas con fotos ahora?</div>
+          <div class="ind-bu">Sí por favor, el tercero me interesa mucho</div>
+          <div class="ind-bv">¡Perfecto! Puedo agendarte visita para mañana o el jueves. ¿Qué día te viene mejor?</div>
+          <div class="ind-action"><div class="action-dot"></div>Lead cualificado · Agente asignado</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- VAI -->
+<section id="vai" class="vai-section">
+  <div class="s-inner">
+    <div class="s-label fade-up">// El asistente</div>
+    <div class="fade-up">
+      <div class="vai-avatar" style="margin:0 auto 1.5rem;">
+        <div class="vai-glow"></div>
+        <div class="vai-face">
+          <div class="vai-visor">
+            <div class="vai-eye"></div>
+            <div class="vai-eye"></div>
+          </div>
+          <div class="vai-scan"></div>
+        </div>
+        <div class="vai-pulse"></div>
+      </div>
+      <div class="vai-name">Vai</div>
+      <div class="vai-role">Asistente IA de Velai</div>
+      <div class="vai-live"><div class="live-dot"></div>Activo ahora · 24/7</div>
+    </div>
+    <div class="vai-features-grid">
+      <div class="vai-feat fade-up">
+        <div class="vai-feat-icon">💬</div>
+        <h4>Multicanal</h4>
+        <p>WhatsApp, web, Instagram, Facebook Messenger. Vai está en todos los canales donde están tus clientes.</p>
+      </div>
+      <div class="vai-feat fade-up">
+        <div class="vai-feat-icon">⚡</div>
+        <h4>Respuesta en 8 segundos</h4>
+        <p>Vai responde antes de que el cliente se vaya. Sin tiempos de espera, sin colas, sin demoras.</p>
+      </div>
+      <div class="vai-feat fade-up">
+        <div class="vai-feat-icon">🔗</div>
+        <h4>Integrado con tu equipo</h4>
+        <p>Notifica a despachadores, vendedores o quién corresponda. Todos informados en tiempo real.</p>
+      </div>
+      <div class="vai-feat fade-up">
+        <div class="vai-feat-icon">🧠</div>
+        <h4>Aprende tu negocio</h4>
+        <p>Vai se entrena con tu catálogo, precios, horarios y procesos. Habla como tú, no como un robot.</p>
+      </div>
+      <div class="vai-feat fade-up">
+        <div class="vai-feat-icon">📊</div>
+        <h4>Panel unificado</h4>
+        <p>Todas las conversaciones, ventas y métricas en un solo lugar. Siempre sabes qué está pasando.</p>
+      </div>
+      <div class="vai-feat fade-up">
+        <div class="vai-feat-icon">🎯</div>
+        <h4>100% personalizado</h4>
+        <p>No es una solución genérica. Vai se adapta a tu sector, tu tono y tus flujos específicos.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- PRICING -->
+<section id="precios" class="pricing-section">
+  <div class="s-inner">
+    <div class="s-label fade-up">// Precios</div>
+    <h2 class="s-title fade-up">Claro, sin sorpresas</h2>
+    <p class="s-sub fade-up">Prueba 14 días gratis, sin tarjeta de crédito. Cancela cuando quieras.</p>
+    <div class="pricing-grid">
+      <div class="price-card fade-up">
+        <div class="price-name">Básico</div>
+        <div class="price-amount">€99<span>/mes</span></div>
+        <div class="price-desc">Para negocios que quieren empezar a automatizar su atención al cliente.</div>
+        <ul class="price-features">
+          <li>1 canal (WhatsApp o web)</li>
+          <li>Hasta 500 conversaciones/mes</li>
+          <li>Respuestas automatizadas 24/7</li>
+          <li>Panel de control básico</li>
+          <li>Soporte por email</li>
+        </ul>
+        <a href="#contacto" class="price-btn outline">Empezar gratis</a>
+      </div>
+      <div class="price-card featured fade-up">
+        <div class="price-name">Profesional</div>
+        <div class="price-amount">€249<span>/mes</span></div>
+        <div class="price-desc">Para negocios que quieren el ecosistema completo de gestión con IA.</div>
+        <ul class="price-features">
+          <li>Todos los canales incluidos</li>
+          <li>Conversaciones ilimitadas</li>
+          <li>Gestión completa de operaciones</li>
+          <li>Notificaciones al equipo</li>
+          <li>Integraciones con tu CRM/POS</li>
+          <li>Soporte prioritario 24/7</li>
+        </ul>
+        <a href="#contacto" class="price-btn solid">Solicitar demo</a>
+      </div>
+      <div class="price-card fade-up">
+        <div class="price-name">Empresa</div>
+        <div class="price-amount">Custom</div>
+        <div class="price-desc">Para cadenas, franquicias y empresas con múltiples locales o flujos complejos.</div>
+        <ul class="price-features">
+          <li>Todo lo de Profesional</li>
+          <li>Múltiples locales/sucursales</li>
+          <li>IA entrenada a medida</li>
+          <li>API propia y webhooks</li>
+          <li>SLA garantizado</li>
+          <li>Account manager dedicado</li>
+        </ul>
+        <a href="#contacto" class="price-btn outline">Hablar con ventas</a>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- CTA FINAL -->
+<section id="contacto" class="cta-section">
+  <div class="s-inner">
+    <div class="cta-glow"></div>
+    <div class="s-label fade-up" style="justify-content:center;display:flex;">// Empieza hoy</div>
+    <h2 class="fade-up">
+      Mientras lees esto, tu competencia<br>
+      pierde clientes a las <span>2am.</span> Tú no.
+    </h2>
+    <p class="fade-up">Agendemos una demo de 30 minutos y te mostramos Vai en acción con tu negocio real.</p>
+    <div class="cta-btns fade-up">
+      <a href="https://wa.me/34655433803" class="btn-primary" target="_blank">WhatsApp directo →</a>
+      <a href="mailto:hola@hirevai.com" class="btn-secondary">Escribirnos →</a>
+    </div>
+  </div>
+</section>
+
+<!-- FOOTER -->
+<footer>
+  <div class="footer-inner">
+    <div class="footer-brand">
+      <a href="#" class="logo">
+        <div class="logo-icon" style="width:30px;height:30px;border-radius:8px;">
+          <svg viewBox="0 0 20 20" fill="none" style="width:16px;height:16px;">
+            <circle cx="10" cy="10" r="3.5" fill="white" opacity=".95"/>
+            <path d="M10 2.5v3.2" stroke="white" stroke-width="1.6" stroke-linecap="round" opacity=".55"/>
+            <path d="M10 14.3v3.2" stroke="white" stroke-width="1.6" stroke-linecap="round" opacity=".55"/>
+            <path d="M2.5 10h3.2" stroke="white" stroke-width="1.6" stroke-linecap="round" opacity=".55"/>
+            <path d="M14.3 10h3.2" stroke="white" stroke-width="1.6" stroke-linecap="round" opacity=".55"/>
+          </svg>
+        </div>
+        <div class="wordmark" style="font-size:1.2rem;">vel<span>ai</span></div>
+      </a>
+      <p>El ecosistema de IA que gestiona tu negocio 24/7. Presentamos Vai — tu asistente que nunca duerme.</p>
+    </div>
+    <div class="footer-col">
+      <h4>Producto</h4>
+      <a href="#como-funciona">Cómo funciona</a>
+      <a href="#industrias">Industrias</a>
+      <a href="#precios">Precios</a>
+      <a href="#vai">Conoce a Vai</a>
+    </div>
+    <div class="footer-col">
+      <h4>Contacto</h4>
+      <a href="mailto:hola@hirevai.com">hola@hirevai.com</a>
+      <a href="https://wa.me/34655433803" target="_blank">WhatsApp</a>
+      <a href="#">LinkedIn</a>
+      <a href="#">hirevai.com</a>
+    </div>
+  </div>
+  <div class="footer-bottom">
+    <span>© 2026 Velai. Todos los derechos reservados.</span>
+    <span>Powered by Vai ·⚡</span>
+  </div>
+</footer>
+
+<script>
+  // ── CHAT ANIMATION ──
+  const msgs = ['m1','m2','m3','m4','m5','m6'];
+  const delays = [600, 1800, 3200, 4600, 5800, 7000];
+  msgs.forEach((id, i) => {
+    setTimeout(() => {
+      const el = document.getElementById(id);
+      if (el) el.classList.add('visible');
+    }, delays[i]);
+  });
+
+  // Loop chat animation
+  function restartChat() {
+    msgs.forEach(id => {
+      const el = document.getElementById(id);
+      if (el) el.classList.remove('visible');
+    });
+    setTimeout(() => {
+      msgs.forEach((id, i) => {
+        setTimeout(() => {
+          const el = document.getElementById(id);
+          if (el) el.classList.add('visible');
+        }, delays[i]);
+      });
+    }, 500);
+  }
+  setInterval(restartChat, 10000);
+
+  // ── SCROLL ANIMATIONS ──
+  const observer = new IntersectionObserver((entries) => {
+    entries.forEach(e => {
+      if (e.isIntersecting) { e.target.classList.add('visible'); }
+    });
+  }, { threshold: 0.12 });
+  document.querySelectorAll('.fade-up').forEach(el => observer.observe(el));
+
+  // ── INDUSTRY TABS ──
+  function showIndustry(id, btn) {
+    document.querySelectorAll('.industry-content').forEach(el => el.classList.remove('active'));
+    document.querySelectorAll('.tab-btn').forEach(el => el.classList.remove('active'));
+    document.getElementById('ind-' + id).classList.add('active');
+    btn.classList.add('active');
+  }
+
+  // ── NAV SCROLL ──
+  window.addEventListener('scroll', () => {
+    const nav = document.querySelector('nav');
+    nav.style.borderBottomColor = window.scrollY > 20 ? 'rgba(255,107,26,0.2)' : 'rgba(255,107,26,0.12)';
+  });
+</script>
+</body>
+</html>
