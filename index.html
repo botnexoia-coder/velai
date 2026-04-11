@@ -221,10 +221,11 @@
     .bb-right { position: relative; display: flex; justify-content: center; align-items: center; padding: 2rem 0; }
     .bb-phone { position: relative; z-index: 1; }
     .bb-phone-inner {
-      width: 175px; background: #0a0a0f;
-      border-radius: 44px; border: 8px solid #1a1a2a;
-      box-shadow: 0 40px 100px rgba(0,0,0,0.7), 0 0 0 1px rgba(255,107,26,0.15), 0 0 0 2px #111;
-      overflow: hidden; position: relative;
+      width: 195px; height: 408px;
+      border-radius: 44px; border: 8px solid #222;
+      box-shadow: 0 40px 100px rgba(0,0,0,0.7), 0 0 0 1px rgba(255,107,26,0.15), inset 0 0 0 1px rgba(255,255,255,0.05);
+      overflow: hidden; position: relative; background: #0a0a0f;
+      display: flex; flex-direction: column;
     }
     .bb-notch {
       width: 52px; height: 20px; background: #0a0a0f;
@@ -257,7 +258,7 @@
       display: flex; flex-direction: column; gap: 5px;
       background: #0d1117;
       background-image: url("data:image/svg+xml,%3Csvg width='60' height='60' viewBox='0 0 60 60' xmlns='http://www.w3.org/2000/svg'%3E%3Cg fill='none' fill-rule='evenodd'%3E%3Cg fill='%23ffffff' fill-opacity='0.02'%3E%3Cpath d='M36 34v-4h-2v4h-4v2h4v4h2v-4h4v-2h-4zm0-30V0h-2v4h-4v2h4v4h2V6h4V4h-4zM6 34v-4H4v4H0v2h4v4h2v-4h4v-2H6zM6 4V0H4v4H0v2h4v4h2V6h4V4H6z'/%3E%3C/g%3E%3C/g%3E%3C/svg%3E");
-      min-height: 160px;
+      flex: 1; overflow: hidden;
     }
     .bb-date-chip {
       text-align: center; margin: 4px 0;
@@ -328,7 +329,7 @@
     @media(max-width:900px) {
       .billboard-card { grid-template-columns: 1fr; padding: 2rem; gap: 2.5rem; }
       .bb-right { display: flex; justify-content: center; padding: 1rem 0 0; }
-      .bb-phone-inner { width: 160px; border-radius: 36px; }
+      .bb-phone-inner { width: 170px; height: 355px; border-radius: 36px; }
       .bb-floating-stat { display: none; }
       .bb-stat1, .bb-stat2, .bb-stat3 { display: none; }
     }
