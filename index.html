@@ -218,8 +218,12 @@
     .bb-btns { display: flex; gap: 1rem; flex-wrap: wrap; }
 
     /* Phone mockup */
-    .bb-right { position: relative; display: flex; justify-content: center; align-items: center; padding: 2rem 0; }
+    .bb-right { position: relative; display: flex; flex-direction: column; justify-content: center; align-items: center; gap: 1.5rem; }
     .bb-phone { position: relative; z-index: 1; }
+    .bb-stats-row { display: flex; gap: 1.2rem; justify-content: center; }
+    .bb-stat-inline { background: var(--bg2); border: 1px solid var(--border2); border-radius: 12px; padding: .6rem 1.2rem; text-align: center; }
+    .bb-stat-inline .bb-stat-num { font-family: var(--font-d); font-size: 1.1rem; font-weight: 900; color: var(--orange); }
+    .bb-stat-inline .bb-stat-lbl { font-size: .62rem; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; margin-top: 1px; }
     .bb-phone-inner {
       width: 195px; height: 408px;
       border-radius: 44px; border: 8px solid #222;
@@ -724,17 +728,10 @@
           </div>
           <div class="bb-phone-glow"></div>
         </div>
-        <div class="bb-floating-stat bb-stat1">
-          <div class="bb-stat-num">24/7</div>
-          <div class="bb-stat-lbl">Siempre activo</div>
-        </div>
-        <div class="bb-floating-stat bb-stat2">
-          <div class="bb-stat-num">8 seg</div>
-          <div class="bb-stat-lbl">Respuesta</div>
-        </div>
-        <div class="bb-floating-stat bb-stat3">
-          <div class="bb-stat-num">+40%</div>
-          <div class="bb-stat-lbl">Más ventas</div>
+        <div class="bb-stats-row">
+          <div class="bb-stat-inline"><div class="bb-stat-num">24/7</div><div class="bb-stat-lbl">Siempre activo</div></div>
+          <div class="bb-stat-inline"><div class="bb-stat-num">8 seg</div><div class="bb-stat-lbl">Respuesta</div></div>
+          <div class="bb-stat-inline"><div class="bb-stat-num">+40%</div><div class="bb-stat-lbl">Más ventas</div></div>
         </div>
       </div>
     </div>
