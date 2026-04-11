@@ -408,35 +408,9 @@
     .industry-features { list-style: none; display: flex; flex-direction: column; gap: .7rem; }
     .industry-features li { display: flex; align-items: center; gap: .6rem; font-size: .88rem; color: var(--muted); }
     .feat-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--orange); flex-shrink: 0; }
-    .industry-chat {
-      background: var(--surface); border: 1px solid var(--border2);
-      border-radius: 16px; overflow: hidden;
-    }
-    .ind-chat-header {
-      display: flex; align-items: center; gap: 8px;
-      padding: 12px 16px; background: var(--bg2);
-      border-bottom: 1px solid var(--border);
-    }
-    .ind-chat-ico { width: 28px; height: 28px; border-radius: 8px; background: var(--orange); display:flex; align-items:center; justify-content:center; }
-    .ind-chat-ico svg { width:15px; height:15px; }
-    .ind-chat-name { font-family: var(--font-d); font-size: .82rem; font-weight: 700; }
-    .ind-chat-status { font-size: .68rem; color: var(--orange2); display:flex; align-items:center; gap:3px; }
-    .ind-chat-body { padding: 1rem; display:flex; flex-direction:column; gap:8px; }
-    .ind-bv {
-      background: var(--bg2); border: 1px solid var(--border);
-      border-radius: 12px 12px 12px 3px;
-      padding: 9px 13px; font-size: .78rem; color: var(--white); line-height: 1.5; max-width: 85%;
-    }
-    .ind-bu {
-      background: var(--orange); border-radius: 12px 12px 3px 12px;
-      padding: 9px 13px; font-size: .78rem; color: #fff; line-height: 1.5; max-width: 85%; align-self: flex-end;
-    }
-    .ind-action {
-      display:flex; align-items:center; gap:5px; margin-top:4px;
-      padding: 7px 11px; background: rgba(255,107,26,0.07);
-      border-radius: 9px; border: 1px solid rgba(255,107,26,0.18);
-      font-size: .7rem; color: var(--orange2);
-    }
+    /* industry wa overrides */
+    .industry-content .wa-wrap { border-radius: 14px; }
+    .industry-content .wa-body { min-height: 210px; }
 
     /* ── VAI SECTION ── */
     .vai-section { text-align: center; }
@@ -546,6 +520,59 @@
       border-top:1px solid var(--border);
       display:flex; justify-content:space-between; align-items:center;
       font-size:.78rem; color:var(--muted2); flex-wrap:wrap; gap:.5rem;
+    }
+
+    /* ── PRICING NEW ── */
+    .pricing-flow { display:flex; align-items:center; gap:0; margin-bottom:2.5rem; flex-wrap:wrap; gap:.5rem; }
+    .pflow-step { text-align:center; flex:1; min-width:80px; }
+    .pflow-num { width:40px; height:40px; border-radius:50%; background:rgba(255,107,26,0.1); border:0.5px solid var(--border2); display:flex; align-items:center; justify-content:center; font-family:var(--font-d); font-size:13px; font-weight:700; color:var(--orange); margin:0 auto 6px; }
+    .pflow-lbl { font-size:.7rem; color:var(--muted); }
+    .pflow-val { font-family:var(--font-d); font-size:.75rem; font-weight:700; color:var(--white); margin-top:2px; }
+    .pflow-arrow { color:var(--orange); font-size:14px; opacity:.35; flex-shrink:0; }
+    .price-two { margin-bottom:1rem; }
+    .price-row-two { display:flex; align-items:baseline; gap:8px; padding:8px 0; }
+    .price-type-lbl { font-size:.65rem; color:var(--muted); text-transform:uppercase; letter-spacing:.08em; width:60px; flex-shrink:0; }
+    .price-amount-new { font-family:var(--font-d); font-size:1.4rem; font-weight:900; color:var(--orange); letter-spacing:-.03em; }
+    .price-amount-new.small { font-size:1.1rem; }
+    .price-once { font-size:.68rem; color:var(--muted); }
+    .price-divider-thin { height:0.5px; background:var(--border); }
+    .setup-note { display:flex; gap:12px; align-items:flex-start; margin-top:1.5rem; background:rgba(255,107,26,0.04); border:0.5px solid rgba(255,107,26,0.18); border-radius:14px; padding:1.1rem 1.3rem; }
+    .setup-note-icon { font-size:15px; flex-shrink:0; margin-top:1px; }
+    .setup-note-text { font-size:.82rem; color:var(--muted); line-height:1.75; }
+    .setup-note-text strong { color:var(--white); font-weight:500; }
+
+    /* ── FAQ ── */
+    .faq-section { border-top: 0.5px solid var(--border); }
+    .faq-list { max-width: 760px; }
+    .faq-item { border-bottom: 0.5px solid var(--border); overflow: hidden; }
+    .faq-item:first-child { border-top: 0.5px solid var(--border); }
+    .faq-q {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 1.2rem 0; cursor: pointer; gap: 1.5rem;
+      font-family: var(--font-d); font-size: 1rem; font-weight: 700;
+      color: var(--white); transition: color .2s; user-select: none;
+    }
+    .faq-q:hover { color: var(--orange2); }
+    .faq-icon {
+      width: 24px; height: 24px; border-radius: 50%;
+      border: 0.5px solid var(--border2); flex-shrink: 0;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 16px; font-weight: 300; color: var(--orange);
+      transition: all .3s;
+    }
+    .faq-item.open .faq-icon { background: rgba(255,107,26,0.1); transform: rotate(45deg); }
+    .faq-a {
+      font-size: .9rem; color: var(--muted); line-height: 1.8;
+      font-weight: 300; max-height: 0; overflow: hidden;
+      transition: max-height .4s ease, padding .4s ease;
+    }
+    .faq-a strong { color: var(--white); font-weight: 500; }
+    .faq-item.open .faq-a { max-height: 220px; padding-bottom: 1.2rem; }
+    .faq-tag {
+      display: inline-block; margin-top: 8px;
+      background: rgba(255,107,26,0.08); border: 0.5px solid rgba(255,107,26,0.22);
+      border-radius: 100px; padding: 3px 12px;
+      font-size: .75rem; color: var(--orange2);
     }
 
     /* ── ANIMATIONS ── */
@@ -866,19 +893,23 @@
           <li><div class="feat-dot"></div>Notificación directa a cocina y sala</li>
         </ul>
       </div>
-      <div class="industry-chat">
-        <div class="ind-chat-header">
-          <div class="ind-chat-ico"><svg viewBox="0 0 20 20" fill="none"><circle cx="10" cy="10" r="3" fill="white" opacity=".9"/><path d="M10 2.5v3" stroke="white" stroke-width="1.5" stroke-linecap="round" opacity=".5"/><path d="M10 14.5v3" stroke="white" stroke-width="1.5" stroke-linecap="round" opacity=".5"/><path d="M2.5 10h3" stroke="white" stroke-width="1.5" stroke-linecap="round" opacity=".5"/><path d="M14.5 10h3" stroke="white" stroke-width="1.5" stroke-linecap="round" opacity=".5"/></svg></div>
-          <div><div class="ind-chat-name">Vai · La Trattoria</div><div class="ind-chat-status"><div class="live-dot"></div>En línea</div></div>
+      <div class="wa-wrap">
+        <div class="wa-status-bar"><span>21:30</span><span>▋▋▋ WiFi ●</span></div>
+        <div class="wa-header">
+          <div class="wa-avatar">🍷</div>
+          <div><div class="wa-contact-name">Vai · La Trattoria</div><div class="wa-contact-status">● en línea</div></div>
+          <div class="wa-icons"><span>📹</span><span>📞</span><span>⋮</span></div>
         </div>
-        <div class="ind-chat-body">
-          <div class="ind-bv">¡Hola! Soy Vai. ¿Te ayudo con una reserva o consultas la carta de hoy?</div>
-          <div class="ind-bu">Mesa para 2 esta noche a las 21:30</div>
-          <div class="ind-bv">Tengo disponible esta noche a las 21:30. ¿A nombre de quién confirmo la reserva?</div>
-          <div class="ind-bu">Ana García</div>
-          <div class="ind-bv">¡Confirmado, Ana! Mesa para 2 esta noche a las 21:30. Te esperamos 🍷</div>
-          <div class="ind-action"><div class="action-dot"></div>Reserva confirmada · Sala notificada</div>
+        <div class="wa-body">
+          <div class="wa-date"><span>Hoy</span></div>
+          <div class="wa-msg-v">¡Hola! Soy Vai 🍷 ¿Te ayudo con una reserva o consultas la carta?<div class="wa-time">21:30</div></div>
+          <div class="wa-msg-u">Mesa para 2 esta noche a las 21:30<div class="wa-time">21:31 <span class="wa-tick">✓✓</span></div></div>
+          <div class="wa-msg-v">Tengo disponible esta noche a las 21:30. ¿A nombre de quién confirmo?<div class="wa-time">21:31</div></div>
+          <div class="wa-msg-u">Ana García<div class="wa-time">21:31 <span class="wa-tick">✓✓</span></div></div>
+          <div class="wa-msg-v">✅ <strong>Mesa para 2 a las 21:30, Ana.</strong> ¡Te esperamos esta noche!<div class="wa-time">21:31</div></div>
+          <div class="wa-action">🔒 Reserva confirmada · Sala notificada</div>
         </div>
+        <div class="wa-footer"><div class="wa-input">Escribe un mensaje</div><div class="wa-send">🎤</div></div>
       </div>
     </div>
 
@@ -886,7 +917,7 @@
     <div class="industry-content" id="ind-clinica">
       <div class="industry-info">
         <h3>Clínicas & consultorios</h3>
-        <p>Vai gestiona citas, recordatorios de medicación y consultas médicas básicas. Tu recepcionista se libera de llamadas rutinarias.</p>
+        <p>Vai gestiona citas, recordatorios y consultas básicas. Tu recepcionista se libera de llamadas rutinarias.</p>
         <ul class="industry-features">
           <li><div class="feat-dot"></div>Agenda de citas en tiempo real</li>
           <li><div class="feat-dot"></div>Recordatorios automáticos de citas</li>
@@ -895,19 +926,23 @@
           <li><div class="feat-dot"></div>Seguimiento post-consulta</li>
         </ul>
       </div>
-      <div class="industry-chat">
-        <div class="ind-chat-header">
-          <div class="ind-chat-ico"><svg viewBox="0 0 20 20" fill="none"><circle cx="10" cy="10" r="3" fill="white" opacity=".9"/><path d="M10 2.5v3" stroke="white" stroke-width="1.5" stroke-linecap="round" opacity=".5"/><path d="M10 14.5v3" stroke="white" stroke-width="1.5" stroke-linecap="round" opacity=".5"/><path d="M2.5 10h3" stroke="white" stroke-width="1.5" stroke-linecap="round" opacity=".5"/><path d="M14.5 10h3" stroke="white" stroke-width="1.5" stroke-linecap="round" opacity=".5"/></svg></div>
-          <div><div class="ind-chat-name">Vai · Clínica Salud+</div><div class="ind-chat-status"><div class="live-dot"></div>En línea</div></div>
+      <div class="wa-wrap">
+        <div class="wa-status-bar"><span>10:02</span><span>▋▋▋ WiFi ●</span></div>
+        <div class="wa-header">
+          <div class="wa-avatar">🩺</div>
+          <div><div class="wa-contact-name">Vai · Clínica Salud+</div><div class="wa-contact-status">● en línea</div></div>
+          <div class="wa-icons"><span>📹</span><span>📞</span><span>⋮</span></div>
         </div>
-        <div class="ind-chat-body">
-          <div class="ind-bv">Hola, soy Vai de Clínica Salud+. ¿En qué puedo ayudarte hoy?</div>
-          <div class="ind-bu">Necesito cita con el Dr. Martín para esta semana</div>
-          <div class="ind-bv">El Dr. Martín tiene disponibilidad el miércoles 14 a las 10:00 o el viernes 16 a las 16:30. ¿Cuál prefieres?</div>
-          <div class="ind-bu">El miércoles perfecto</div>
-          <div class="ind-bv">Cita confirmada para el miércoles 14 a las 10:00. Recibirás recordatorio 24h antes. 🩺</div>
-          <div class="ind-action"><div class="action-dot"></div>Cita agendada · Dr. Martín notificado</div>
+        <div class="wa-body">
+          <div class="wa-date"><span>Hoy</span></div>
+          <div class="wa-msg-v">Hola, soy Vai 🩺 ¿En qué puedo ayudarte hoy?<div class="wa-time">10:02</div></div>
+          <div class="wa-msg-u">Necesito cita con el Dr. Martín esta semana<div class="wa-time">10:03 <span class="wa-tick">✓✓</span></div></div>
+          <div class="wa-msg-v">El Dr. Martín tiene disponible:<br>📅 <strong>Miércoles 14</strong> a las 10:00<br>📅 <strong>Viernes 16</strong> a las 16:30<br>¿Cuál prefieres?<div class="wa-time">10:03</div></div>
+          <div class="wa-msg-u">El miércoles perfecto 👍<div class="wa-time">10:04 <span class="wa-tick">✓✓</span></div></div>
+          <div class="wa-msg-v">✅ <strong>Cita confirmada, miércoles 14 a las 10:00.</strong> Recibirás recordatorio 24h antes.<div class="wa-time">10:04</div></div>
+          <div class="wa-action">🔒 Cita agendada · Dr. Martín notificado</div>
         </div>
+        <div class="wa-footer"><div class="wa-input">Escribe un mensaje</div><div class="wa-send">🎤</div></div>
       </div>
     </div>
 
@@ -924,19 +959,23 @@
           <li><div class="feat-dot"></div>Recomendaciones personalizadas</li>
         </ul>
       </div>
-      <div class="industry-chat">
-        <div class="ind-chat-header">
-          <div class="ind-chat-ico"><svg viewBox="0 0 20 20" fill="none"><circle cx="10" cy="10" r="3" fill="white" opacity=".9"/><path d="M10 2.5v3" stroke="white" stroke-width="1.5" stroke-linecap="round" opacity=".5"/><path d="M10 14.5v3" stroke="white" stroke-width="1.5" stroke-linecap="round" opacity=".5"/><path d="M2.5 10h3" stroke="white" stroke-width="1.5" stroke-linecap="round" opacity=".5"/><path d="M14.5 10h3" stroke="white" stroke-width="1.5" stroke-linecap="round" opacity=".5"/></svg></div>
-          <div><div class="ind-chat-name">Vai · StyleShop</div><div class="ind-chat-status"><div class="live-dot"></div>En línea</div></div>
+      <div class="wa-wrap">
+        <div class="wa-status-bar"><span>23:14</span><span>▋▋▋ WiFi ●</span></div>
+        <div class="wa-header">
+          <div class="wa-avatar">👟</div>
+          <div><div class="wa-contact-name">Vai · StyleShop</div><div class="wa-contact-status">● en línea</div></div>
+          <div class="wa-icons"><span>📹</span><span>📞</span><span>⋮</span></div>
         </div>
-        <div class="ind-chat-body">
-          <div class="ind-bv">¡Hola! Soy Vai de StyleShop. ¿Qué estás buscando hoy?</div>
-          <div class="ind-bu">Zapatillas blancas talla 42, precio máximo 80€</div>
-          <div class="ind-bv">Tengo 3 opciones perfectas para ti entre 45€ y 79€. ¿Te las envío con fotos y tallas disponibles?</div>
-          <div class="ind-bu">Sí, la segunda me gusta, la quiero</div>
-          <div class="ind-bv">¡Perfecto! Te mando el enlace de pago seguro. Entrega en 24-48h 📦</div>
-          <div class="ind-action"><div class="action-dot"></div>Pedido creado · Almacén notificado</div>
+        <div class="wa-body">
+          <div class="wa-date"><span>Hoy</span></div>
+          <div class="wa-msg-v">¡Hola! Soy Vai 👟 ¿Qué estás buscando hoy?<div class="wa-time">23:14</div></div>
+          <div class="wa-msg-u">Zapatillas blancas talla 42, máximo 80€<div class="wa-time">23:14 <span class="wa-tick">✓✓</span></div></div>
+          <div class="wa-msg-v">Tengo 3 opciones perfectas entre 45€ y 79€. ¿Te las envío con fotos?<div class="wa-time">23:15</div></div>
+          <div class="wa-msg-u">Sí, la segunda me gusta, la quiero 🙌<div class="wa-time">23:15 <span class="wa-tick">✓✓</span></div></div>
+          <div class="wa-msg-v">✅ <strong>Pedido listo.</strong> Te mando el enlace de pago seguro. Entrega en 24-48h 📦<div class="wa-time">23:15</div></div>
+          <div class="wa-action">🔒 Pedido creado · Almacén notificado</div>
         </div>
+        <div class="wa-footer"><div class="wa-input">Escribe un mensaje</div><div class="wa-send">🎤</div></div>
       </div>
     </div>
 
@@ -944,7 +983,7 @@
     <div class="industry-content" id="ind-inmobiliaria">
       <div class="industry-info">
         <h3>Inmobiliarias & agencias</h3>
-        <p>Vai cualifica leads, agenda visitas y envía fichas de inmuebles automáticamente. Tu agente solo atiende a quien ya está listo para comprar.</p>
+        <p>Vai cualifica leads, agenda visitas y envía fichas automáticamente. Tu agente solo atiende a quien está listo para comprar.</p>
         <ul class="industry-features">
           <li><div class="feat-dot"></div>Cualificación automática de leads</li>
           <li><div class="feat-dot"></div>Envío de fichas y fotografías</li>
@@ -953,19 +992,23 @@
           <li><div class="feat-dot"></div>Alertas de nuevas propiedades</li>
         </ul>
       </div>
-      <div class="industry-chat">
-        <div class="ind-chat-header">
-          <div class="ind-chat-ico"><svg viewBox="0 0 20 20" fill="none"><circle cx="10" cy="10" r="3" fill="white" opacity=".9"/><path d="M10 2.5v3" stroke="white" stroke-width="1.5" stroke-linecap="round" opacity=".5"/><path d="M10 14.5v3" stroke="white" stroke-width="1.5" stroke-linecap="round" opacity=".5"/><path d="M2.5 10h3" stroke="white" stroke-width="1.5" stroke-linecap="round" opacity=".5"/><path d="M14.5 10h3" stroke="white" stroke-width="1.5" stroke-linecap="round" opacity=".5"/></svg></div>
-          <div><div class="ind-chat-name">Vai · Inmobiliaria Clave</div><div class="ind-chat-status"><div class="live-dot"></div>En línea</div></div>
+      <div class="wa-wrap">
+        <div class="wa-status-bar"><span>19:47</span><span>▋▋▋ WiFi ●</span></div>
+        <div class="wa-header">
+          <div class="wa-avatar">🏠</div>
+          <div><div class="wa-contact-name">Vai · Inmobiliaria Clave</div><div class="wa-contact-status">● en línea</div></div>
+          <div class="wa-icons"><span>📹</span><span>📞</span><span>⋮</span></div>
         </div>
-        <div class="ind-chat-body">
-          <div class="ind-bv">Hola, soy Vai de Inmobiliaria Clave. ¿Buscas comprar, alquilar o vender?</div>
-          <div class="ind-bu">Busco piso de alquiler en Sevilla, máximo 900€, 2 habitaciones</div>
-          <div class="ind-bv">Tengo 4 pisos que encajan perfectamente. ¿Quieres que te envíe las fichas con fotos ahora?</div>
-          <div class="ind-bu">Sí por favor, el tercero me interesa mucho</div>
-          <div class="ind-bv">¡Perfecto! Puedo agendarte visita para mañana o el jueves. ¿Qué día te viene mejor?</div>
-          <div class="ind-action"><div class="action-dot"></div>Lead cualificado · Agente asignado</div>
+        <div class="wa-body">
+          <div class="wa-date"><span>Hoy</span></div>
+          <div class="wa-msg-v">Hola, soy Vai 🏠 ¿Buscas comprar, alquilar o vender?<div class="wa-time">19:47</div></div>
+          <div class="wa-msg-u">Alquiler en Sevilla, máximo 900€, 2 habitaciones<div class="wa-time">19:48 <span class="wa-tick">✓✓</span></div></div>
+          <div class="wa-msg-v">Tengo 4 pisos perfectos. ¿Te envío las fichas con fotos ahora?<div class="wa-time">19:48</div></div>
+          <div class="wa-msg-u">Sí, el tercero me interesa mucho 👀<div class="wa-time">19:48 <span class="wa-tick">✓✓</span></div></div>
+          <div class="wa-msg-v">✅ Te agendo visita — ¿mañana o el jueves?<div class="wa-time">19:49</div></div>
+          <div class="wa-action">🔒 Lead cualificado · Agente asignado</div>
         </div>
+        <div class="wa-footer"><div class="wa-input">Escribe un mensaje</div><div class="wa-send">🎤</div></div>
       </div>
     </div>
   </div>
@@ -1030,50 +1073,206 @@
 <section id="precios" class="pricing-section">
   <div class="s-inner">
     <div class="s-label fade-up">Precios</div>
-    <h2 class="s-title fade-up">Claro, sin sorpresas</h2>
-    <p class="s-sub fade-up">Prueba 14 días gratis, sin tarjeta de crédito. Cancela cuando quieras.</p>
+    <h2 class="s-title fade-up">Claro desde el primer día</h2>
+    <p class="s-sub fade-up">Dos pagos, cero sorpresas — un setup único para configurar Vai en tu negocio, y una mensualidad para mantenerlo funcionando 24/7.</p>
+
+    <!-- Flow -->
+    <div class="pricing-flow fade-up">
+      <div class="pflow-step">
+        <div class="pflow-num">1</div>
+        <div class="pflow-lbl">Eliges tu plan</div>
+      </div>
+      <div class="pflow-arrow">→</div>
+      <div class="pflow-step">
+        <div class="pflow-num">2</div>
+        <div class="pflow-lbl">Setup único</div>
+        <div class="pflow-val">Pago único</div>
+      </div>
+      <div class="pflow-arrow">→</div>
+      <div class="pflow-step">
+        <div class="pflow-num">3</div>
+        <div class="pflow-lbl">Vai activo en 48h</div>
+      </div>
+      <div class="pflow-arrow">→</div>
+      <div class="pflow-step">
+        <div class="pflow-num">4</div>
+        <div class="pflow-lbl">Mensualidad</div>
+        <div class="pflow-val">Desde el mes 1</div>
+      </div>
+    </div>
+
     <div class="pricing-grid">
+
       <div class="price-card fade-up">
-        <div class="price-name">Básico</div>
-        <div class="price-amount">€99<span>/mes</span></div>
-        <div style="font-size:.78rem;color:var(--orange2);margin-bottom:.5rem;">Ahorra ~40h/mes de gestión manual</div><div class="price-desc">Para negocios que quieren empezar a automatizar su atención al cliente.</div>
+        <div class="price-name">Esencial</div>
+        <div class="price-two">
+          <div class="price-row-two">
+            <span class="price-type-lbl">Setup</span>
+            <span class="price-amount-new">€299</span>
+            <span class="price-once">pago único</span>
+          </div>
+          <div class="price-divider-thin"></div>
+          <div class="price-row-two">
+            <span class="price-type-lbl">Mensual</span>
+            <span class="price-amount-new small">€79</span>
+            <span class="price-once">/mes</span>
+          </div>
+        </div>
+        <div class="price-desc">Para negocios que quieren dejar de perder clientes fuera de horario.</div>
         <ul class="price-features">
-          <li>1 canal (WhatsApp o web)</li>
-          <li>Hasta 500 conversaciones/mes</li>
-          <li>Respuestas automatizadas 24/7</li>
+          <li>1 canal — WhatsApp o web</li>
+          <li>Hasta 300 conversaciones/mes</li>
+          <li>Respuestas automáticas 24/7</li>
           <li>Panel de control básico</li>
           <li>Soporte por email</li>
         </ul>
-        <a href="#contacto" class="price-btn outline">Empezar gratis</a>
+        <a href="#contacto" class="price-btn outline">Solicitar demo</a>
       </div>
-      <div class="price-card featured fade-up">
+
+      <div class="price-card featured fade-up" style="transition-delay:.1s">
         <div class="price-name">Profesional</div>
-        <div class="price-amount">€249<span>/mes</span></div>
-        <div style="font-size:.78rem;color:var(--orange2);margin-bottom:.5rem;">Equivale a 1/10 del coste de un empleado</div><div class="price-desc">Para negocios que quieren el ecosistema completo de gestión con IA.</div>
+        <div class="price-two">
+          <div class="price-row-two">
+            <span class="price-type-lbl">Setup</span>
+            <span class="price-amount-new">€599</span>
+            <span class="price-once">pago único</span>
+          </div>
+          <div class="price-divider-thin"></div>
+          <div class="price-row-two">
+            <span class="price-type-lbl">Mensual</span>
+            <span class="price-amount-new small">€179</span>
+            <span class="price-once">/mes</span>
+          </div>
+        </div>
+        <div class="price-desc">El ecosistema completo. Vai gestiona, vende, reserva y notifica a tu equipo.</div>
         <ul class="price-features">
-          <li>Todos los canales incluidos</li>
+          <li>Todos los canales — WA, web, redes</li>
           <li>Conversaciones ilimitadas</li>
           <li>Gestión completa de operaciones</li>
-          <li>Notificaciones al equipo</li>
-          <li>Integraciones con tu CRM/POS</li>
+          <li>Notificaciones al equipo en tiempo real</li>
+          <li>Panel unificado + métricas</li>
           <li>Soporte prioritario 24/7</li>
         </ul>
         <a href="#contacto" class="price-btn solid">Solicitar demo</a>
       </div>
-      <div class="price-card fade-up">
+
+      <div class="price-card fade-up" style="transition-delay:.2s">
         <div class="price-name">Empresa</div>
-        <div class="price-amount">Custom</div>
-        <div class="price-desc">Para cadenas, franquicias y empresas con múltiples locales o flujos complejos.</div>
+        <div class="price-two">
+          <div class="price-row-two">
+            <span class="price-type-lbl">Setup</span>
+            <span class="price-amount-new" style="font-size:1rem;">A medida</span>
+          </div>
+          <div class="price-divider-thin"></div>
+          <div class="price-row-two">
+            <span class="price-type-lbl">Mensual</span>
+            <span class="price-amount-new small" style="font-size:.9rem;">A medida</span>
+          </div>
+        </div>
+        <div class="price-desc">Para cadenas, franquicias y negocios con múltiples locales o flujos complejos.</div>
         <ul class="price-features">
           <li>Todo lo de Profesional</li>
-          <li>Múltiples locales/sucursales</li>
-          <li>IA entrenada a medida</li>
+          <li>Múltiples locales y sucursales</li>
+          <li>IA entrenada completamente a medida</li>
           <li>API propia y webhooks</li>
           <li>SLA garantizado</li>
           <li>Account manager dedicado</li>
         </ul>
         <a href="#contacto" class="price-btn outline">Hablar con ventas</a>
       </div>
+
+    </div>
+
+    <!-- Setup note -->
+    <div class="setup-note fade-up">
+      <div class="setup-note-icon">💡</div>
+      <div class="setup-note-text">
+        <strong>¿Qué incluye el setup?</strong> La configuración completa de Vai para tu negocio — entrenamiento con tu catálogo, precios, horarios y flujos, integración con WhatsApp Business y puesta en marcha. En menos de 48 horas Vai está activo y trabajando. <strong>Sin permanencia mínima. Sin costes ocultos.</strong>
+      </div>
+    </div>
+
+  </div>
+</section>
+
+<!-- FAQ -->
+<section class="faq-section">
+  <div class="s-inner">
+    <div class="s-label fade-up">Preguntas frecuentes</div>
+    <h2 class="s-title fade-up">Todo lo que te estás preguntando</h2>
+    <p class="s-sub fade-up">Sin letra pequeña. Sin tecnicismos. Las dudas reales de los dueños de negocio.</p>
+    <div class="faq-list fade-up">
+
+      <div class="faq-item open">
+        <div class="faq-q" onclick="toggleFaq(this)">
+          ¿Cuánto tarda en estar funcionando en mi negocio?
+          <div class="faq-icon">+</div>
+        </div>
+        <div class="faq-a">
+          En la mayoría de negocios, <strong>Vai está activo en menos de 48 horas.</strong> Nosotros nos encargamos de toda la configuración — tú solo nos cuentas cómo funciona tu negocio, tus precios, horarios y procesos. El resto lo hacemos nosotros.<br>
+          <span class="faq-tag">Sin instalaciones · Sin técnicos · Sin complicaciones</span>
+        </div>
+      </div>
+
+      <div class="faq-item">
+        <div class="faq-q" onclick="toggleFaq(this)">
+          ¿Qué pasa si Vai se equivoca con un cliente?
+          <div class="faq-icon">+</div>
+        </div>
+        <div class="faq-a">
+          Vai está entrenado específicamente para tu negocio, lo que minimiza los errores. Pero si algo sale mal, <strong>tú siempre puedes intervenir</strong> desde el panel de control. Además, Vai sabe cuándo una situación supera su capacidad y avisa a una persona de tu equipo al instante.
+        </div>
+      </div>
+
+      <div class="faq-item">
+        <div class="faq-q" onclick="toggleFaq(this)">
+          ¿Puedo desactivarlo o pausarlo cuando quiera?
+          <div class="faq-icon">+</div>
+        </div>
+        <div class="faq-a">
+          Sí, tienes control total. Puedes <strong>pausar Vai en cualquier momento</strong>, activarlo solo en ciertos horarios, o hacer que transfiera conversaciones a una persona de tu equipo con un clic. Tú mandas siempre.
+        </div>
+      </div>
+
+      <div class="faq-item">
+        <div class="faq-q" onclick="toggleFaq(this)">
+          ¿Vai reemplaza a mis empleados?
+          <div class="faq-icon">+</div>
+        </div>
+        <div class="faq-a">
+          No. Vai <strong>libera a tu equipo de las tareas repetitivas</strong> — responder siempre lo mismo, gestionar citas a mano, confirmar pedidos. Tu equipo se enfoca en lo que solo las personas pueden hacer: atender en persona, crear relaciones, resolver situaciones complejas.
+        </div>
+      </div>
+
+      <div class="faq-item">
+        <div class="faq-q" onclick="toggleFaq(this)">
+          ¿Funciona con mi WhatsApp Business actual?
+          <div class="faq-icon">+</div>
+        </div>
+        <div class="faq-a">
+          Sí. Vai se integra con la <strong>API oficial de WhatsApp Business</strong> — el mismo número que ya tienes, sin cambiar nada. También funciona en tu web, Instagram Direct y Facebook Messenger de forma simultánea.
+        </div>
+      </div>
+
+      <div class="faq-item">
+        <div class="faq-q" onclick="toggleFaq(this)">
+          ¿Mis clientes sabrán que hablan con una IA?
+          <div class="faq-icon">+</div>
+        </div>
+        <div class="faq-a">
+          Vai habla con el tono y el estilo de tu negocio — no suena a robot. La <strong>transparencia es tu decisión:</strong> puedes presentarlo como "Vai, nuestro asistente" sin más. La mayoría de clientes valoran la rapidez y la disponibilidad 24/7 por encima de cualquier otra cosa.
+        </div>
+      </div>
+
+      <div class="faq-item">
+        <div class="faq-q" onclick="toggleFaq(this)">
+          ¿Qué pasa con mis datos y los de mis clientes?
+          <div class="faq-icon">+</div>
+        </div>
+        <div class="faq-a">
+          Toda la información se almacena de forma segura y cumpliendo el <strong>RGPD europeo.</strong> Tus datos son tuyos — nunca los compartimos ni los usamos para entrenar modelos de terceros.
+        </div>
+      </div>
+
     </div>
   </div>
 </section>
@@ -1145,6 +1344,14 @@
   document.querySelectorAll('[data-domain]').forEach(el => el.textContent = DOMAIN);
 
   // ── CHAT ANIMATION ──
+  // ── FAQ ──
+  function toggleFaq(el) {
+    const item = el.parentElement;
+    const isOpen = item.classList.contains('open');
+    document.querySelectorAll('.faq-item').forEach(i => i.classList.remove('open'));
+    if (!isOpen) item.classList.add('open');
+  }
+
   // ── HERO CHAT ANIMATION (Barbería WA) ──
   const hmIds = ['hm1','hm2','hm3','hm4','hm5','hm6'];
   const hmDelays = [700, 2100, 3700, 5400, 6800, 8100];
