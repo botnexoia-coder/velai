@@ -232,32 +232,78 @@
       position: relative; z-index: 2;
     }
     .bb-screen { padding: 0 0 1rem; }
+    /* WhatsApp style */
+    .bb-screen { padding: 0; }
+    .bb-wa-status {
+      background: #1f2c34; padding: 4px 10px;
+      display: flex; align-items: center; justify-content: space-between;
+      font-size: .52rem; color: #8696a0;
+    }
     .bb-chat-header {
-      display: flex; align-items: center; gap: 7px;
-      padding: 8px 12px; background: #111118;
-      border-bottom: 1px solid rgba(255,107,26,0.1);
+      display: flex; align-items: center; gap: 8px;
+      padding: 8px 10px; background: #202c33;
     }
     .bb-chat-ico {
-      width: 24px; height: 24px; border-radius: 7px;
+      width: 28px; height: 28px; border-radius: 50%;
       background: var(--orange); display: flex; align-items: center; justify-content: center;
-      flex-shrink: 0;
+      flex-shrink: 0; font-size: .7rem; font-weight: 700; color: #fff;
     }
-    .bb-msgs { padding: .8rem .8rem 0; display: flex; flex-direction: column; gap: 7px; }
+    .bb-wa-name { font-size: .72rem; font-weight: 600; color: #e9edef; }
+    .bb-wa-status-txt { font-size: .58rem; color: #8696a0; }
+    .bb-wa-icons { display: flex; gap: 12px; margin-left: auto; }
+    .bb-wa-icon { font-size: .75rem; color: #8696a0; }
+    .bb-msgs {
+      padding: .6rem .7rem .7rem;
+      display: flex; flex-direction: column; gap: 5px;
+      background: #0d1117;
+      background-image: url("data:image/svg+xml,%3Csvg width='60' height='60' viewBox='0 0 60 60' xmlns='http://www.w3.org/2000/svg'%3E%3Cg fill='none' fill-rule='evenodd'%3E%3Cg fill='%23ffffff' fill-opacity='0.02'%3E%3Cpath d='M36 34v-4h-2v4h-4v2h4v4h2v-4h4v-2h-4zm0-30V0h-2v4h-4v2h4v4h2V6h4V4h-4zM6 34v-4H4v4H0v2h4v4h2v-4h4v-2H6zM6 4V0H4v4H0v2h4v4h2V6h4V4H6z'/%3E%3C/g%3E%3C/g%3E%3C/svg%3E");
+      min-height: 160px;
+    }
+    .bb-date-chip {
+      text-align: center; margin: 4px 0;
+    }
+    .bb-date-chip span {
+      background: #182229; color: #8696a0;
+      font-size: .52rem; padding: 3px 8px; border-radius: 6px;
+    }
     .bb-msg-v {
-      background: #1c1c28; border-radius: 10px 10px 10px 3px;
-      padding: 7px 10px; font-size: .62rem; color: var(--white);
-      line-height: 1.5; max-width: 88%;
+      background: #202c33; border-radius: 0px 8px 8px 8px;
+      padding: 6px 8px 4px; font-size: .62rem; color: #e9edef;
+      line-height: 1.5; max-width: 88%; position: relative;
+    }
+    .bb-msg-v::before {
+      content: ''; position: absolute; left: -6px; top: 0;
+      border: 6px solid transparent; border-right-color: #202c33; border-top-color: #202c33;
     }
     .bb-msg-u {
-      background: var(--orange); border-radius: 10px 10px 3px 10px;
-      padding: 7px 10px; font-size: .62rem; color: #fff;
-      line-height: 1.5; max-width: 80%; align-self: flex-end;
+      background: #005c4b; border-radius: 8px 0px 8px 8px;
+      padding: 6px 8px 4px; font-size: .62rem; color: #e9edef;
+      line-height: 1.5; max-width: 80%; align-self: flex-end; position: relative;
     }
+    .bb-msg-u::before {
+      content: ''; position: absolute; right: -6px; top: 0;
+      border: 6px solid transparent; border-left-color: #005c4b; border-top-color: #005c4b;
+    }
+    .bb-msg-time { font-size: .5rem; color: #8696a0; text-align: right; margin-top: 2px; }
+    .bb-msg-time-v { font-size: .5rem; color: #8696a0; text-align: right; margin-top: 2px; }
+    .bb-tick { color: #53bdeb; font-size: .6rem; }
     .bb-action-mini {
-      font-size: .58rem; color: var(--orange2);
-      padding: 5px 8px; background: rgba(255,107,26,0.08);
-      border-radius: 7px; border: 1px solid rgba(255,107,26,0.18);
-      margin-top: 2px;
+      font-size: .56rem; color: #8696a0; text-align: center;
+      padding: 4px 8px; background: rgba(0,0,0,0.3);
+      border-radius: 6px; margin-top: 4px;
+    }
+    .bb-wa-bar {
+      background: #202c33; padding: 6px 8px;
+      display: flex; align-items: center; gap: 6px;
+    }
+    .bb-wa-input {
+      flex: 1; background: #2a3942; border-radius: 20px;
+      padding: 5px 10px; font-size: .58rem; color: #8696a0;
+    }
+    .bb-wa-send {
+      width: 26px; height: 26px; border-radius: 50%;
+      background: #00a884; display: flex; align-items: center; justify-content: center;
+      font-size: .65rem;
     }
     .bb-phone-glow {
       position: absolute; bottom: -30px; left: 50%; transform: translateX(-50%);
@@ -630,22 +676,48 @@
           <div class="bb-phone-inner">
             <div class="bb-notch"></div>
             <div class="bb-screen">
+              <div class="bb-wa-status">
+                <span>9:41</span>
+                <span>▋▋▋ WiFi ●</span>
+              </div>
               <div class="bb-chat-header">
-                <div class="bb-chat-ico">
-                  <svg viewBox="0 0 20 20" fill="none" width="14" height="14"><circle cx="10" cy="10" r="3" fill="white" opacity=".9"/><path d="M10 2.5v3" stroke="white" stroke-width="1.5" stroke-linecap="round" opacity=".5"/><path d="M10 14.5v3" stroke="white" stroke-width="1.5" stroke-linecap="round" opacity=".5"/><path d="M2.5 10h3" stroke="white" stroke-width="1.5" stroke-linecap="round" opacity=".5"/><path d="M14.5 10h3" stroke="white" stroke-width="1.5" stroke-linecap="round" opacity=".5"/></svg>
-                </div>
+                <div class="bb-chat-ico">✂️</div>
                 <div>
-                  <div style="font-size:.72rem;font-weight:700;color:#fff;">Vai</div>
-                  <div style="font-size:.6rem;color:#0E9F6E;display:flex;align-items:center;gap:3px;"><span style="width:4px;height:4px;border-radius:50%;background:#0E9F6E;display:inline-block;"></span>En línea</div>
+                  <div class="bb-wa-name">Barbería Carlos</div>
+                  <div class="bb-wa-status-txt">en línea</div>
+                </div>
+                <div class="bb-wa-icons">
+                  <span class="bb-wa-icon">📹</span>
+                  <span class="bb-wa-icon">📞</span>
                 </div>
               </div>
               <div class="bb-msgs">
-                <div class="bb-msg-v">¡Hola! Soy Vai, de Barbería Carlos ✂️ ¿Te pongo cita?</div>
-                <div class="bb-msg-u">Sí, para mañana</div>
-                <div class="bb-msg-v">Mañana Carlos está completo 😅 ¿Te va bien el martes? Tengo las 11:00 o las 18:30</div>
-                <div class="bb-msg-u">Las 18:30 perfecto</div>
-                <div class="bb-msg-v">✅ Listo! Martes a las 18:30 con Carlos. ¡Hasta entonces!</div>
-                <div class="bb-action-mini">⚡ Cita agendada · Carlos notificado</div>
+                <div class="bb-date-chip"><span>Hoy</span></div>
+                <div class="bb-msg-v">
+                  ¡Hola! Soy Vai, asistente de BarberShop Carlos ✂️ ¿Te agendo una cita?
+                  <div class="bb-msg-time-v">21:03</div>
+                </div>
+                <div class="bb-msg-u">
+                  Sí, para mañana
+                  <div class="bb-msg-time">21:04 <span class="bb-tick">✓✓</span></div>
+                </div>
+                <div class="bb-msg-v">
+                  Mañana está completo 😅 ¿El martes? Tengo 11:00 o 18:30
+                  <div class="bb-msg-time-v">21:04</div>
+                </div>
+                <div class="bb-msg-u">
+                  Las 18:30 perfecto
+                  <div class="bb-msg-time">21:05 <span class="bb-tick">✓✓</span></div>
+                </div>
+                <div class="bb-msg-v">
+                  ✅ Listo! Martes 18:30 con Carlos. ¡Hasta entonces!
+                  <div class="bb-msg-time-v">21:05</div>
+                </div>
+                <div class="bb-action-mini">🔒 Mensajes cifrados de extremo a extremo</div>
+              </div>
+              <div class="bb-wa-bar">
+                <div class="bb-wa-input">Escribe un mensaje</div>
+                <div class="bb-wa-send">🎤</div>
               </div>
             </div>
           </div>
