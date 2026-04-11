@@ -30,6 +30,19 @@
     html { scroll-behavior: smooth; }
     body { font-family: var(--font-b); background: var(--bg); color: var(--white); overflow-x: hidden; line-height: 1.6; }
 
+
+    body::before {
+      content: '';
+      position: fixed; inset: 0; z-index: 0;
+      background-image:
+        linear-gradient(rgba(255,107,26,0.04) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(255,107,26,0.04) 1px, transparent 1px);
+      background-size: 56px 56px;
+      pointer-events: none;
+      mask-image: radial-gradient(ellipse 80% 80% at 50% 50%, black 40%, transparent 100%);
+      -webkit-mask-image: radial-gradient(ellipse 80% 80% at 50% 50%, black 40%, transparent 100%);
+    }
+    nav, section, footer, .billboard-section, .problem-section, .industries-section, .pricing-section { position: relative; z-index: 1; }
     /* ── NAV ── */
     nav {
       position: fixed; top: 0; width: 100%; z-index: 100;
@@ -558,6 +571,80 @@
       .hero-stats { gap:1.5rem; }
       .cta-btns { flex-direction:column; align-items:center; }
     }
+
+    /* ── WHATSAPP STYLE CHATS ── */
+    .wa-wrap {
+      border-radius: 16px; overflow: hidden;
+      box-shadow: 0 20px 50px rgba(0,0,0,0.5);
+      font-family: -apple-system, 'Segoe UI', sans-serif;
+    }
+    .wa-status-bar {
+      background: #1f2c34; padding: 4px 12px;
+      display: flex; align-items: center; justify-content: space-between;
+      font-size: .6rem; color: #8696a0;
+    }
+    .wa-header {
+      background: #202c33;
+      display: flex; align-items: center; gap: 10px;
+      padding: 8px 12px;
+    }
+    .wa-avatar {
+      width: 36px; height: 36px; border-radius: 50%;
+      background: var(--orange);
+      display: flex; align-items: center; justify-content: center;
+      font-size: .8rem; font-weight: 700; color: #fff; flex-shrink: 0;
+    }
+    .wa-contact-name { font-size: .82rem; font-weight: 600; color: #e9edef; }
+    .wa-contact-status { font-size: .65rem; color: #8696a0; }
+    .wa-icons { display:flex; gap:18px; margin-left:auto; font-size:.85rem; color:#8696a0; }
+    .wa-body {
+      background: #0d1117;
+      background-image: url("data:image/svg+xml,%3Csvg width='60' height='60' viewBox='0 0 60 60' xmlns='http://www.w3.org/2000/svg'%3E%3Cg fill='none' fill-rule='evenodd'%3E%3Cg fill='%23ffffff' fill-opacity='0.015'%3E%3Cpath d='M36 34v-4h-2v4h-4v2h4v4h2v-4h4v-2h-4zm0-30V0h-2v4h-4v2h4v4h2V6h4V4h-4zM6 34v-4H4v4H0v2h4v4h2v-4h4v-2H6zM6 4V0H4v4H0v2h4v4h2V6h4V4H6z'/%3E%3C/g%3E%3C/g%3E%3C/svg%3E");
+      padding: .8rem;
+      display: flex; flex-direction: column; gap: 6px;
+      min-height: 260px;
+    }
+    .wa-date { text-align:center; margin: 4px 0; }
+    .wa-date span { background:#182229; color:#8696a0; font-size:.6rem; padding:3px 10px; border-radius:6px; }
+    .wa-msg-v {
+      background: #202c33; border-radius: 0 8px 8px 8px;
+      padding: 7px 9px 5px; font-size: .72rem; color: #e9edef;
+      line-height: 1.5; max-width: 86%; position: relative;
+    }
+    .wa-msg-v::before {
+      content:''; position:absolute; left:-6px; top:0;
+      border:6px solid transparent;
+      border-right-color:#202c33; border-top-color:#202c33;
+    }
+    .wa-msg-u {
+      background: #005c4b; border-radius: 8px 0 8px 8px;
+      padding: 7px 9px 5px; font-size: .72rem; color: #e9edef;
+      line-height: 1.5; max-width: 82%; align-self: flex-end; position: relative;
+    }
+    .wa-msg-u::before {
+      content:''; position:absolute; right:-6px; top:0;
+      border:6px solid transparent;
+      border-left-color:#005c4b; border-top-color:#005c4b;
+    }
+    .wa-time { font-size:.56rem; color:#8696a0; text-align:right; margin-top:2px; }
+    .wa-tick { color:#53bdeb; }
+    .wa-action {
+      font-size:.62rem; color:#8696a0; text-align:center;
+      padding:4px 10px; background:rgba(0,0,0,0.35); border-radius:7px;
+      margin-top:4px; align-self:center;
+    }
+    .wa-footer {
+      background:#202c33; padding:7px 10px;
+      display:flex; align-items:center; gap:8px;
+    }
+    .wa-input {
+      flex:1; background:#2a3942; border-radius:20px;
+      padding:6px 12px; font-size:.68rem; color:#8696a0;
+    }
+    .wa-send {
+      width:32px; height:32px; border-radius:50%;
+      background:#00a884; display:flex; align-items:center; justify-content:center; font-size:.75rem;
+    }
   </style>
 </head>
 <body>
@@ -623,115 +710,67 @@
     </div>
 
     <!-- Chat preview animado -->
-    <div class="chat-preview fade-up" style="animation-delay:.2s">
-      <div class="chat-header">
-        <div class="chat-avatar">
-          <svg viewBox="0 0 20 20" fill="none">
-            <circle cx="10" cy="10" r="3.2" fill="white" opacity=".9"/>
-            <path d="M10 2.5v3" stroke="white" stroke-width="1.5" stroke-linecap="round" opacity=".55"/>
-            <path d="M10 14.5v3" stroke="white" stroke-width="1.5" stroke-linecap="round" opacity=".55"/>
-            <path d="M2.5 10h3" stroke="white" stroke-width="1.5" stroke-linecap="round" opacity=".55"/>
-            <path d="M14.5 10h3" stroke="white" stroke-width="1.5" stroke-linecap="round" opacity=".55"/>
-          </svg>
+    <!-- Hero WA Chat — Barbería -->
+    <div class="fade-up" style="transition-delay:.15s;">
+      <div style="border-radius:22px;overflow:hidden;box-shadow:0 40px 100px rgba(0,0,0,0.7),0 0 0 0.5px rgba(255,107,26,0.18);font-family:-apple-system,Helvetica,sans-serif;max-width:340px;margin-left:auto;">
+        <!-- Status bar -->
+        <div style="background:#1f2c34;padding:5px 14px;display:flex;justify-content:space-between;align-items:center;">
+          <span style="font-size:.58rem;color:#8696a0;font-weight:600;">9:41</span>
+          <span style="font-size:.58rem;color:#8696a0;">▋▋▋ WiFi ●</span>
         </div>
-        <div class="chat-header-info">
-          <div class="chat-name">Vai · Restaurante La Brasa</div>
-          <div class="chat-live"><div class="live-dot"></div>En línea ahora</div>
-        </div>
-      </div>
-      <div class="chat-body" id="chatBody">
-        <div class="msg-vai"><div class="bubble-vai" id="m1">¡Hola! Soy Vai, el asistente de La Brasa. ¿Te ayudo con una reserva, la carta o cualquier duda? 👋</div></div>
-        <div class="msg-user"><div class="bubble-user" id="m2">Quiero reservar para 4 el sábado a las 21h</div></div>
-        <div class="msg-vai"><div class="bubble-vai" id="m3">Tengo disponible el sábado 12 a las 21:00 para 4 personas. ¿A nombre de quién y un teléfono de contacto?</div></div>
-        <div class="msg-user"><div class="bubble-user" id="m4">A nombre de Carlos, 612 345 678</div></div>
-        <div class="msg-vai"><div class="bubble-vai" id="m5">¡Perfecto Carlos! Reserva confirmada para el sábado 12 a las 21:00. Te enviamos recordatorio el viernes. ¡Hasta pronto! 🎉</div></div>
-        <div class="action-tag" id="m6">
-          <div class="action-dot"></div>
-          Reserva registrada · Equipo notificado · Recordatorio programado
-        </div>
-      </div>
-    </div>
-  </div>
-</section>
-
-<!-- BILLBOARD -->
-<section class="billboard-section">
-  <div class="s-inner">
-    <div class="billboard-card fade-up">
-      <div class="bb-left">
-        <div class="bb-eyebrow">
-          <div class="badge-dot"></div>
-          Vai — Asistente IA para tu negocio
-        </div>
-        <h2 class="bb-title">¿Tu negocio pierde<br>clientes <span>mientras duermes?</span></h2>
-        <p class="bb-sub">Vai responde, vende, reserva y gestiona todo por ti. En WhatsApp, web y redes. Sin que toques nada.</p>
-        <div class="bb-points">
-          <div class="bb-point"><span class="bb-check">✓</span> Atención al cliente 24/7 — incluso a las 3am</div>
-          <div class="bb-point"><span class="bb-check">✓</span> Cierra ventas y reservas automáticamente</div>
-          <div class="bb-point"><span class="bb-check">✓</span> Notifica a tu equipo en tiempo real</div>
-          <div class="bb-point"><span class="bb-check">✓</span> Se adapta a cualquier tipo de negocio</div>
-        </div>
-        <div class="bb-btns">
-          <a href="#contacto" class="btn-primary">Quiero Vai en mi negocio →</a>
-          <a href="#como-funciona" class="btn-secondary">Ver cómo funciona</a>
-        </div>
-      </div>
-      <div class="bb-right">
-        <div class="bb-phone">
-          <div class="bb-phone-inner">
-            <div class="bb-notch"></div>
-            <div class="bb-screen">
-              <div class="bb-wa-status">
-                <span>9:41</span>
-                <span>▋▋▋ WiFi ●</span>
-              </div>
-              <div class="bb-chat-header">
-                <div class="bb-chat-ico">✂️</div>
-                <div>
-                  <div class="bb-wa-name">Latin Barber Shop</div>
-                  <div class="bb-wa-status-txt">en línea</div>
-                </div>
-                <div class="bb-wa-icons">
-                  <span class="bb-wa-icon">📹</span>
-                  <span class="bb-wa-icon">📞</span>
-                </div>
-              </div>
-              <div class="bb-msgs">
-                <div class="bb-date-chip"><span>Hoy</span></div>
-                <div class="bb-msg-v">
-                  ¡Hola! Soy Vai, asistente de Latin Barber Shop ✂️ ¿Te agendo una cita?
-                  <div class="bb-msg-time-v">21:03</div>
-                </div>
-                <div class="bb-msg-u">
-                  Sí, para mañana
-                  <div class="bb-msg-time">21:04 <span class="bb-tick">✓✓</span></div>
-                </div>
-                <div class="bb-msg-v">
-                  Mañana está completo 😅 ¿El martes? Tengo 11:00 o 18:30
-                  <div class="bb-msg-time-v">21:04</div>
-                </div>
-                <div class="bb-msg-u">
-                  Las 18:30 perfecto
-                  <div class="bb-msg-time">21:05 <span class="bb-tick">✓✓</span></div>
-                </div>
-                <div class="bb-msg-v">
-                  ✅ Listo! Martes 18:30 con Carlos. ¡Hasta entonces!
-                  <div class="bb-msg-time-v">21:05</div>
-                </div>
-                <div class="bb-action-mini">🔒 Mensajes cifrados de extremo a extremo</div>
-              </div>
-              <div class="bb-wa-bar">
-                <div class="bb-wa-input">Escribe un mensaje</div>
-                <div class="bb-wa-send">🎤</div>
-              </div>
-            </div>
+        <!-- Header -->
+        <div style="background:#202c33;display:flex;align-items:center;gap:10px;padding:10px 14px;">
+          <div style="width:38px;height:38px;border-radius:50%;background:var(--orange);display:flex;align-items:center;justify-content:center;font-size:.95rem;flex-shrink:0;box-shadow:0 0 12px rgba(255,107,26,0.4);">✂️</div>
+          <div style="flex:1;">
+            <div style="font-size:.82rem;font-weight:600;color:#e9edef;">Vai · Latin Barber Shop</div>
+            <div style="font-size:.62rem;color:#25d366;">● en línea</div>
           </div>
-          <div class="bb-phone-glow"></div>
+          <div style="display:flex;gap:18px;color:#8696a0;font-size:.9rem;"><span>📹</span><span>📞</span><span style="font-weight:700;">⋮</span></div>
         </div>
-        <div class="bb-stats-row">
-          <div class="bb-stat-inline"><div class="bb-stat-num">24/7</div><div class="bb-stat-lbl">Siempre activo</div></div>
-          <div class="bb-stat-inline"><div class="bb-stat-num">8 seg</div><div class="bb-stat-lbl">Respuesta</div></div>
-          <div class="bb-stat-inline"><div class="bb-stat-num">+40%</div><div class="bb-stat-lbl">Más ventas</div></div>
+        <!-- Messages -->
+        <div style="background:#0d1117;background-image:url('data:image/svg+xml,%3Csvg%20width%3D%2260%22%20height%3D%2260%22%20viewBox%3D%220%200%2060%2060%22%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%3E%3Cg%20fill%3D%22none%22%20fill-rule%3D%22evenodd%22%3E%3Cg%20fill%3D%22%23ffffff%22%20fill-opacity%3D%220.015%22%3E%3Cpath%20d%3D%22M36%2034v-4h-2v4h-4v2h4v4h2v-4h4v-2h-4zm0-30V0h-2v4h-4v2h4v4h2V6h4V4h-4zM6%2034v-4H4v4H0v2h4v4h2v-4h4v-2H6zM6%204V0H4v4H0v2h4v4h2V6h4V4H6z%22%2F%3E%3C%2Fg%3E%3C%2Fg%3E%3C%2Fsvg%3E');padding:.9rem;display:flex;flex-direction:column;gap:7px;min-height:310px;">
+          <div style="text-align:center;margin:2px 0 6px;"><span style="background:#182229;color:#8696a0;font-size:.58rem;padding:3px 10px;border-radius:6px;">Hoy</span></div>
+
+          <div id="hm1" style="background:#202c33;border-radius:0 8px 8px 8px;padding:8px 10px 5px;font-size:.71rem;color:#e9edef;line-height:1.55;max-width:90%;position:relative;opacity:0;transform:translateY(6px);transition:opacity .45s ease,transform .45s ease;">
+            <div style="position:absolute;left:-6px;top:0;border:6px solid transparent;border-right-color:#202c33;border-top-color:#202c33;"></div>
+            ¡Hola! Soy Vai ✂️ ¿Te agendo una cita con Carlos?
+            <div style="font-size:.53rem;color:#8696a0;text-align:right;margin-top:3px;">21:03</div>
+          </div>
+
+          <div id="hm2" style="background:#005c4b;border-radius:8px 0 8px 8px;padding:8px 10px 5px;font-size:.71rem;color:#e9edef;line-height:1.55;max-width:78%;align-self:flex-end;position:relative;opacity:0;transform:translateY(6px);transition:opacity .45s ease,transform .45s ease;">
+            <div style="position:absolute;right:-6px;top:0;border:6px solid transparent;border-left-color:#005c4b;border-top-color:#005c4b;"></div>
+            Sí, ¿para cuándo hay?
+            <div style="font-size:.53rem;color:#8696a0;text-align:right;margin-top:3px;">21:04 <span style="color:#53bdeb;">✓✓</span></div>
+          </div>
+
+          <div id="hm3" style="background:#202c33;border-radius:0 8px 8px 8px;padding:8px 10px 5px;font-size:.71rem;color:#e9edef;line-height:1.55;max-width:90%;position:relative;opacity:0;transform:translateY(6px);transition:opacity .45s ease,transform .45s ease;">
+            <div style="position:absolute;left:-6px;top:0;border:6px solid transparent;border-right-color:#202c33;border-top-color:#202c33;"></div>
+            Carlos tiene disponible el <strong style="color:#e9edef;">martes</strong> 👇<br>🕚 <strong style="color:#e9edef;">11:00</strong> &nbsp;·&nbsp; 🕡 <strong style="color:#e9edef;">18:30</strong><br>¿Cuál te viene mejor?
+            <div style="font-size:.53rem;color:#8696a0;text-align:right;margin-top:3px;">21:04</div>
+          </div>
+
+          <div id="hm4" style="background:#005c4b;border-radius:8px 0 8px 8px;padding:8px 10px 5px;font-size:.71rem;color:#e9edef;line-height:1.55;max-width:68%;align-self:flex-end;position:relative;opacity:0;transform:translateY(6px);transition:opacity .45s ease,transform .45s ease;">
+            <div style="position:absolute;right:-6px;top:0;border:6px solid transparent;border-left-color:#005c4b;border-top-color:#005c4b;"></div>
+            Las 18:30 🙌
+            <div style="font-size:.53rem;color:#8696a0;text-align:right;margin-top:3px;">21:05 <span style="color:#53bdeb;">✓✓</span></div>
+          </div>
+
+          <div id="hm5" style="background:#202c33;border-radius:0 8px 8px 8px;padding:8px 10px 5px;font-size:.71rem;color:#e9edef;line-height:1.55;max-width:90%;position:relative;opacity:0;transform:translateY(6px);transition:opacity .45s ease,transform .45s ease;">
+            <div style="position:absolute;left:-6px;top:0;border:6px solid transparent;border-right-color:#202c33;border-top-color:#202c33;"></div>
+            ✅ ¡Listo! <strong style="color:#e9edef;">Martes 18:30 con Carlos.</strong><br>Te mando recordatorio el día antes. ¡Hasta entonces! 💈
+            <div style="font-size:.53rem;color:#8696a0;text-align:right;margin-top:3px;">21:05</div>
+          </div>
+
+          <div id="hm6" style="font-size:.58rem;color:#8696a0;text-align:center;padding:4px 12px;background:rgba(0,0,0,0.38);border-radius:8px;align-self:center;margin-top:2px;opacity:0;transition:opacity .45s ease;">
+            🔒 Cita registrada · Carlos notificado · Recordatorio programado
+          </div>
+        </div>
+        <!-- Input -->
+        <div style="background:#202c33;padding:8px 10px;display:flex;align-items:center;gap:8px;">
+          <span style="color:#8696a0;font-size:.95rem;">😊</span>
+          <div style="flex:1;background:#2a3942;border-radius:20px;padding:7px 14px;font-size:.66rem;color:#8696a0;">Escribe un mensaje</div>
+          <span style="color:#8696a0;font-size:.9rem;">📎</span>
+          <div style="width:34px;height:34px;border-radius:50%;background:#00a884;display:flex;align-items:center;justify-content:center;font-size:.8rem;">🎤</div>
         </div>
       </div>
     </div>
@@ -741,7 +780,7 @@
 <!-- PROBLEMA -->
 <section class="problem-section">
   <div class="s-inner">
-    <div class="s-label fade-up">// El problema</div>
+    <div class="s-label fade-up">El problema</div>
     <h2 class="s-title fade-up">Tu negocio pierde dinero cada día</h2>
     <p class="s-sub fade-up">Cada mensaje sin respuesta a las 11pm es una venta perdida. Para siempre.</p>
     <div class="problem-grid">
@@ -767,7 +806,7 @@
 <!-- CÓMO FUNCIONA -->
 <section id="como-funciona">
   <div class="s-inner">
-    <div class="s-label fade-up">// Cómo funciona</div>
+    <div class="s-label fade-up">Cómo funciona</div>
     <h2 class="s-title fade-up">El ciclo completo, automatizado</h2>
     <p class="s-sub fade-up">Vai no solo responde — gestiona todo el flujo de principio a fin.</p>
     <div class="flow-grid">
@@ -803,15 +842,15 @@
 <!-- INDUSTRIAS -->
 <section id="industrias" class="industries-section">
   <div class="s-inner">
-    <div class="s-label fade-up">// Industrias</div>
+    <div class="s-label fade-up">Industrias</div>
     <h2 class="s-title fade-up">Se adapta a tu negocio</h2>
     <p class="s-sub fade-up">No es una solución genérica. Vai aprende tu negocio, tu tono y tus procesos.</p>
 
     <div class="industry-tabs fade-up">
-      <button class="tab-btn active" onclick="showIndustry('restaurante', this)">🍽️ Restaurante</button>
-      <button class="tab-btn" onclick="showIndustry('clinica', this)">🏥 Clínica</button>
-      <button class="tab-btn" onclick="showIndustry('tienda', this)">🛍️ Tienda</button>
-      <button class="tab-btn" onclick="showIndustry('inmobiliaria', this)">🏠 Inmobiliaria</button>
+      <button class="tab-btn active" onclick="showIndustry('restaurante', this)">Restaurante</button>
+      <button class="tab-btn" onclick="showIndustry('clinica', this)">Clínica</button>
+      <button class="tab-btn" onclick="showIndustry('tienda', this)">Tienda</button>
+      <button class="tab-btn" onclick="showIndustry('inmobiliaria', this)">Inmobiliaria</button>
     </div>
 
     <!-- Restaurante -->
@@ -935,7 +974,7 @@
 <!-- VAI -->
 <section id="vai" class="vai-section">
   <div class="s-inner">
-    <div class="s-label fade-up">// El asistente</div>
+    <div class="s-label fade-up">El asistente</div>
     <div class="fade-up">
       <div class="vai-avatar" style="margin:0 auto 1.5rem;">
         <div class="vai-glow"></div>
@@ -954,32 +993,32 @@
     </div>
     <div class="vai-features-grid">
       <div class="vai-feat fade-up">
-        <div class="vai-feat-icon">💬</div>
+        <div style="font-size:.68rem;color:var(--orange);font-weight:700;letter-spacing:.1em;text-transform:uppercase;margin-bottom:.8rem;">01 — Canales</div>
         <h4>Multicanal</h4>
         <p>WhatsApp, web, Instagram, Facebook Messenger. Vai está en todos los canales donde están tus clientes.</p>
       </div>
       <div class="vai-feat fade-up">
-        <div class="vai-feat-icon">⚡</div>
+        <div style="font-size:.68rem;color:var(--orange);font-weight:700;letter-spacing:.1em;text-transform:uppercase;margin-bottom:.8rem;">02 — Velocidad</div>
         <h4>Respuesta en 8 segundos</h4>
         <p>Vai responde antes de que el cliente se vaya. Sin tiempos de espera, sin colas, sin demoras.</p>
       </div>
       <div class="vai-feat fade-up">
-        <div class="vai-feat-icon">🔗</div>
+        <div style="font-size:.68rem;color:var(--orange);font-weight:700;letter-spacing:.1em;text-transform:uppercase;margin-bottom:.8rem;">03 — Equipo</div>
         <h4>Integrado con tu equipo</h4>
         <p>Notifica a despachadores, vendedores o quién corresponda. Todos informados en tiempo real.</p>
       </div>
       <div class="vai-feat fade-up">
-        <div class="vai-feat-icon">🧠</div>
+        <div style="font-size:.68rem;color:var(--orange);font-weight:700;letter-spacing:.1em;text-transform:uppercase;margin-bottom:.8rem;">04 — IA</div>
         <h4>Aprende tu negocio</h4>
         <p>Vai se entrena con tu catálogo, precios, horarios y procesos. Habla como tú, no como un robot.</p>
       </div>
       <div class="vai-feat fade-up">
-        <div class="vai-feat-icon">📊</div>
+        <div style="font-size:.68rem;color:var(--orange);font-weight:700;letter-spacing:.1em;text-transform:uppercase;margin-bottom:.8rem;">05 — Control</div>
         <h4>Panel unificado</h4>
         <p>Todas las conversaciones, ventas y métricas en un solo lugar. Siempre sabes qué está pasando.</p>
       </div>
       <div class="vai-feat fade-up">
-        <div class="vai-feat-icon">🎯</div>
+        <div style="font-size:.68rem;color:var(--orange);font-weight:700;letter-spacing:.1em;text-transform:uppercase;margin-bottom:.8rem;">06 — Sector</div>
         <h4>100% personalizado</h4>
         <p>No es una solución genérica. Vai se adapta a tu sector, tu tono y tus flujos específicos.</p>
       </div>
@@ -990,14 +1029,14 @@
 <!-- PRICING -->
 <section id="precios" class="pricing-section">
   <div class="s-inner">
-    <div class="s-label fade-up">// Precios</div>
+    <div class="s-label fade-up">Precios</div>
     <h2 class="s-title fade-up">Claro, sin sorpresas</h2>
     <p class="s-sub fade-up">Prueba 14 días gratis, sin tarjeta de crédito. Cancela cuando quieras.</p>
     <div class="pricing-grid">
       <div class="price-card fade-up">
         <div class="price-name">Básico</div>
         <div class="price-amount">€99<span>/mes</span></div>
-        <div class="price-desc">Para negocios que quieren empezar a automatizar su atención al cliente.</div>
+        <div style="font-size:.78rem;color:var(--orange2);margin-bottom:.5rem;">Ahorra ~40h/mes de gestión manual</div><div class="price-desc">Para negocios que quieren empezar a automatizar su atención al cliente.</div>
         <ul class="price-features">
           <li>1 canal (WhatsApp o web)</li>
           <li>Hasta 500 conversaciones/mes</li>
@@ -1010,7 +1049,7 @@
       <div class="price-card featured fade-up">
         <div class="price-name">Profesional</div>
         <div class="price-amount">€249<span>/mes</span></div>
-        <div class="price-desc">Para negocios que quieren el ecosistema completo de gestión con IA.</div>
+        <div style="font-size:.78rem;color:var(--orange2);margin-bottom:.5rem;">Equivale a 1/10 del coste de un empleado</div><div class="price-desc">Para negocios que quieren el ecosistema completo de gestión con IA.</div>
         <ul class="price-features">
           <li>Todos los canales incluidos</li>
           <li>Conversaciones ilimitadas</li>
@@ -1043,15 +1082,15 @@
 <section id="contacto" class="cta-section">
   <div class="s-inner">
     <div class="cta-glow"></div>
-    <div class="s-label fade-up" style="justify-content:center;display:flex;">// Empieza hoy</div>
+    <div class="s-label fade-up" style="justify-content:center;display:flex;">Empieza hoy</div>
     <h2 class="fade-up">
       Mientras lees esto, tu competencia<br>
       pierde clientes a las <span>2am.</span> Tú no.
     </h2>
     <p class="fade-up">Agendemos una demo de 30 minutos y te mostramos Vai en acción con tu negocio real.</p>
     <div class="cta-btns fade-up">
-      <a href="https://wa.me/34655433803" class="btn-primary" target="_blank">WhatsApp directo →</a>
-      <a href="mailto:hola@hirevai.com" class="btn-secondary">Escribirnos →</a>
+      <a href="https://wa.me/34655433803" data-wa class="btn-primary" target="_blank">WhatsApp directo →</a>
+      <a href="mailto:hola@velai.ai" data-email class="btn-secondary">Escribirnos →</a>
     </div>
   </div>
 </section>
@@ -1083,10 +1122,10 @@
     </div>
     <div class="footer-col">
       <h4>Contacto</h4>
-      <a href="mailto:hola@hirevai.com">hola@hirevai.com</a>
-      <a href="https://wa.me/34655433803" target="_blank">WhatsApp</a>
+      <a href="mailto:hola@velai.ai" data-email>hola@velai.ai</a>
+      <a href="https://wa.me/34655433803" data-wa target="_blank">WhatsApp</a>
       <a href="#">LinkedIn</a>
-      <a href="#">hirevai.com</a>
+      <a href="#">velai.ai</a>
     </div>
   </div>
   <div class="footer-bottom">
@@ -1096,32 +1135,35 @@
 </footer>
 
 <script>
-  // ── CHAT ANIMATION ──
-  const msgs = ['m1','m2','m3','m4','m5','m6'];
-  const delays = [600, 1800, 3200, 4600, 5800, 7000];
-  msgs.forEach((id, i) => {
-    setTimeout(() => {
-      const el = document.getElementById(id);
-      if (el) el.classList.add('visible');
-    }, delays[i]);
-  });
+  // ── CONFIGURACION ──
+  const DOMAIN = 'velai.ai';
+  const WHATSAPP = '34655433803';
+  const EMAIL = 'hola@' + DOMAIN;
+  // Actualiza todos los enlaces dinamicamente
+  document.querySelectorAll('[data-wa]').forEach(el => el.href = 'https://wa.me/' + WHATSAPP);
+  document.querySelectorAll('[data-email]').forEach(el => { el.href = 'mailto:' + EMAIL; el.textContent = EMAIL; });
+  document.querySelectorAll('[data-domain]').forEach(el => el.textContent = DOMAIN);
 
-  // Loop chat animation
-  function restartChat() {
-    msgs.forEach(id => {
+  // ── CHAT ANIMATION ──
+  // ── HERO CHAT ANIMATION (Barbería WA) ──
+  const hmIds = ['hm1','hm2','hm3','hm4','hm5','hm6'];
+  const hmDelays = [700, 2100, 3700, 5400, 6800, 8100];
+  function animateHeroChat() {
+    hmIds.forEach(id => {
       const el = document.getElementById(id);
-      if (el) el.classList.remove('visible');
+      if (el) { el.style.opacity = '0'; el.style.transform = 'translateY(6px)'; }
     });
     setTimeout(() => {
-      msgs.forEach((id, i) => {
+      hmIds.forEach((id, i) => {
         setTimeout(() => {
           const el = document.getElementById(id);
-          if (el) el.classList.add('visible');
-        }, delays[i]);
+          if (el) { el.style.opacity = '1'; el.style.transform = 'translateY(0)'; }
+        }, hmDelays[i]);
       });
-    }, 500);
+    }, 300);
   }
-  setInterval(restartChat, 10000);
+  animateHeroChat();
+  setInterval(animateHeroChat, 11500);
 
   // ── SCROLL ANIMATIONS ──
   const observer = new IntersectionObserver((entries) => {
