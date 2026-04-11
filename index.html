@@ -221,14 +221,14 @@
     .bb-right { position: relative; display: flex; justify-content: center; align-items: center; padding: 2rem 0; }
     .bb-phone { position: relative; z-index: 1; }
     .bb-phone-inner {
-      width: 200px; background: #0a0a0f;
-      border-radius: 36px; border: 6px solid #1a1a2a;
-      box-shadow: 0 30px 80px rgba(0,0,0,0.6), 0 0 0 1px rgba(255,107,26,0.15);
+      width: 175px; background: #0a0a0f;
+      border-radius: 44px; border: 8px solid #1a1a2a;
+      box-shadow: 0 40px 100px rgba(0,0,0,0.7), 0 0 0 1px rgba(255,107,26,0.15), 0 0 0 2px #111;
       overflow: hidden; position: relative;
     }
     .bb-notch {
-      width: 60px; height: 18px; background: #0a0a0f;
-      border-radius: 0 0 12px 12px; margin: 0 auto;
+      width: 52px; height: 20px; background: #0a0a0f;
+      border-radius: 0 0 14px 14px; margin: 0 auto;
       position: relative; z-index: 2;
     }
     .bb-screen { padding: 0 0 1rem; }
@@ -328,7 +328,7 @@
     @media(max-width:900px) {
       .billboard-card { grid-template-columns: 1fr; padding: 2rem; gap: 2.5rem; }
       .bb-right { display: flex; justify-content: center; padding: 1rem 0 0; }
-      .bb-phone-inner { width: 180px; }
+      .bb-phone-inner { width: 160px; border-radius: 36px; }
       .bb-floating-stat { display: none; }
       .bb-stat1, .bb-stat2, .bb-stat3 { display: none; }
     }
