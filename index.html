@@ -280,8 +280,11 @@
     .bb-stat-lbl { font-size: .62rem; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; }
 
     @media(max-width:900px) {
-      .billboard-card { grid-template-columns: 1fr; padding: 2rem; gap: 2rem; }
-      .bb-right { display: none; }
+      .billboard-card { grid-template-columns: 1fr; padding: 2rem; gap: 2.5rem; }
+      .bb-right { display: flex; justify-content: center; padding: 1rem 0 0; }
+      .bb-phone-inner { width: 180px; }
+      .bb-floating-stat { display: none; }
+      .bb-stat1, .bb-stat2, .bb-stat3 { display: none; }
     }
 
     /* ── PROBLEM ── */
