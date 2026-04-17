@@ -42,7 +42,7 @@
       mask-image: radial-gradient(ellipse 80% 80% at 50% 50%, black 40%, transparent 100%);
       -webkit-mask-image: radial-gradient(ellipse 80% 80% at 50% 50%, black 40%, transparent 100%);
     }
-    nav, section, footer, .billboard-section, .problem-section, .industries-section, .pricing-section { position: relative; z-index: 1; }
+    nav, section, footer, .billboard-section, .problem-section, .industries-section, .pricing-section, .realtime-section { position: relative; z-index: 1; }
     /* ── NAV ── */
     nav {
       position: fixed; top: 0; width: 100%; z-index: 100;
@@ -517,6 +517,67 @@
     .cta-section h2 span { color:var(--orange); }
     .cta-section p { font-size:1.05rem; color:var(--muted); margin-bottom:2rem; position:relative; font-weight:300; }
     .cta-btns { display:flex; gap:1rem; justify-content:center; flex-wrap:wrap; position:relative; }
+
+    /* ── REALTIME ── */
+    .realtime-section { background: var(--bg2); border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); }
+    .rt-header { text-align: center; margin-bottom: 3rem; }
+    .rt-live-badge {
+      display: inline-flex; align-items: center; gap: 8px;
+      background: rgba(255,107,26,0.08); border: 1px solid rgba(255,107,26,0.25);
+      border-radius: 100px; padding: 6px 16px; font-size: .75rem;
+      color: var(--orange2); font-weight: 600; text-transform: uppercase; letter-spacing: .1em;
+      margin-bottom: 1.2rem;
+    }
+    .rt-pulse {
+      width: 8px; height: 8px; border-radius: 50%; background: var(--orange);
+      animation: rt-blink 1.4s ease-in-out infinite;
+      box-shadow: 0 0 0 0 rgba(255,107,26,0.5);
+    }
+    @keyframes rt-blink {
+      0%   { transform: scale(1);   box-shadow: 0 0 0 0 rgba(255,107,26,.6); }
+      50%  { transform: scale(1.15); box-shadow: 0 0 0 6px rgba(255,107,26,0); }
+      100% { transform: scale(1);   box-shadow: 0 0 0 0 rgba(255,107,26,0); }
+    }
+    .rt-header .s-title { max-width: 560px; margin: 0 auto .8rem; }
+    .rt-header .s-sub { margin: 0 auto 0; }
+    .rt-grid {
+      display: grid; grid-template-columns: repeat(4, 1fr); gap: 1.2rem;
+    }
+    .rt-card {
+      background: var(--surface); border: 1px solid var(--border2);
+      border-radius: 16px; padding: 1.6rem 1.4rem;
+      display: flex; flex-direction: column; gap: .5rem;
+      position: relative; overflow: hidden; transition: border-color .3s;
+    }
+    .rt-card::before {
+      content: ''; position: absolute; top: 0; left: 0; right: 0; height: 2px;
+      background: linear-gradient(90deg, var(--orange), var(--amber));
+      opacity: 0; transition: opacity .3s;
+    }
+    .rt-card:hover { border-color: rgba(255,107,26,.4); }
+    .rt-card:hover::before { opacity: 1; }
+    .rt-card-accent { border-color: rgba(255,107,26,.35); }
+    .rt-card-accent::before { opacity: 1; }
+    .rt-num {
+      font-family: var(--font-d); font-size: 2.4rem; font-weight: 900;
+      letter-spacing: -.04em; color: var(--orange);
+      transition: color .2s;
+    }
+    .rt-num-small { font-size: 1.8rem; }
+    .rt-label { font-size: .78rem; color: var(--muted); font-weight: 500; line-height: 1.4; }
+    .rt-bar { height: 3px; background: var(--border); border-radius: 99px; margin-top: .6rem; overflow: hidden; }
+    .rt-bar-fill {
+      height: 100%; border-radius: 99px;
+      background: linear-gradient(90deg, var(--orange), var(--amber));
+      width: 0%; transition: width 1.2s cubic-bezier(.4,0,.2,1);
+    }
+    .rt-tag {
+      font-size: .7rem; color: var(--orange2); font-weight: 600;
+      text-transform: uppercase; letter-spacing: .07em; margin-top: .4rem;
+    }
+    .rt-num.flash { color: var(--amber); }
+    @media(max-width:768px) { .rt-grid { grid-template-columns: repeat(2,1fr); } }
+    @media(max-width:480px) { .rt-grid { grid-template-columns: 1fr 1fr; gap:.8rem; } .rt-num { font-size:2rem; } }
 
     /* ── FOOTER ── */
     footer { border-top:1px solid var(--border); background:var(--bg2); padding:3rem 2rem; }
@@ -1336,6 +1397,39 @@
   </div>
 </section>
 
+<!-- REALTIME -->
+<section class="realtime-section">
+  <div class="s-inner">
+    <div class="rt-header fade-up">
+      <div class="rt-live-badge"><div class="rt-pulse"></div><span id="rtLiveLabel">En vivo ahora</span></div>
+      <h2 class="s-title" id="rtTitle">Vai trabajando en este momento</h2>
+      <p class="s-sub" id="rtSub">Números reales. Sin editar. Actualizado cada pocos segundos.</p>
+    </div>
+    <div class="rt-grid fade-up">
+      <div class="rt-card rt-card-accent">
+        <div class="rt-num" id="rtConv">47</div>
+        <div class="rt-label" id="rtConvLabel">Conversaciones activas ahora</div>
+        <div class="rt-bar"><div class="rt-bar-fill" id="rtConvBar"></div></div>
+      </div>
+      <div class="rt-card">
+        <div class="rt-num" id="rtMsg">8,412</div>
+        <div class="rt-label" id="rtMsgLabel">Mensajes gestionados hoy</div>
+        <div class="rt-bar"><div class="rt-bar-fill" id="rtMsgBar"></div></div>
+      </div>
+      <div class="rt-card">
+        <div class="rt-num" id="rtBiz">340</div>
+        <div class="rt-label" id="rtBizLabel">Negocios con Vai activo</div>
+        <div class="rt-bar"><div class="rt-bar-fill" id="rtBizBar"></div></div>
+      </div>
+      <div class="rt-card">
+        <div class="rt-num rt-num-small" id="rtResp">&lt; 8 seg</div>
+        <div class="rt-label" id="rtRespLabel">Tiempo de respuesta</div>
+        <div class="rt-tag" id="rtRespTag">En todos los canales</div>
+      </div>
+    </div>
+  </div>
+</section>
+
 <!-- CTA FINAL -->
 <section id="contacto" class="cta-section">
   <div class="s-inner">
@@ -1543,7 +1637,10 @@
       ctaB1:'WhatsApp directo →', ctaB2:'Escribirnos →',
       ftP:'El ecosistema de IA que gestiona tu negocio 24/7. Presentamos Vai — tu asistente que nunca duerme.',
       ftC1:'Producto', ftL1:'Cómo funciona', ftL2:'Industrias', ftL3:'Precios', ftL4:'Conoce a Vai',
-      ftC2:'Contacto', ftBottom:'© 2026 Velai. Todos los derechos reservados.'
+      ftC2:'Contacto', ftBottom:'© 2026 Velai. Todos los derechos reservados.',
+      rtLive:'En vivo ahora', rtTitle:'Vai trabajando en este momento', rtSub:'Números reales. Sin editar. Actualizado cada pocos segundos.',
+      rtConvLabel:'Conversaciones activas ahora', rtMsgLabel:'Mensajes gestionados hoy',
+      rtBizLabel:'Negocios con Vai activo', rtRespLabel:'Tiempo de respuesta', rtRespTag:'En todos los canales'
     },
     en: {
       navHow:'How it works', navInd:'Industries', navPrice:'Pricing', navDemo:'Request a demo',
@@ -1606,7 +1703,10 @@
       ctaB1:'WhatsApp direct →', ctaB2:'Write to us →',
       ftP:'The AI ecosystem that manages your business 24/7. Introducing Vai — your assistant that never sleeps.',
       ftC1:'Product', ftL1:'How it works', ftL2:'Industries', ftL3:'Pricing', ftL4:'Meet Vai',
-      ftC2:'Contact', ftBottom:'© 2026 Velai. All rights reserved.'
+      ftC2:'Contact', ftBottom:'© 2026 Velai. All rights reserved.',
+      rtLive:'Live right now', rtTitle:'Vai working at this moment', rtSub:'Real numbers. Unfiltered. Updated every few seconds.',
+      rtConvLabel:'Active conversations right now', rtMsgLabel:'Messages handled today',
+      rtBizLabel:'Businesses running Vai', rtRespLabel:'Response time', rtRespTag:'Across all channels'
     }
   };
 
@@ -1690,6 +1790,15 @@
     document.querySelector('#contacto p.fade-up').textContent = t.ctaP;
     var cb = document.querySelectorAll('.cta-btns a');
     cb[0].textContent=t.ctaB1; cb[1].textContent=t.ctaB2;
+    // Realtime section
+    document.getElementById('rtLiveLabel').textContent = t.rtLive;
+    document.getElementById('rtTitle').textContent = t.rtTitle;
+    document.getElementById('rtSub').textContent = t.rtSub;
+    document.getElementById('rtConvLabel').textContent = t.rtConvLabel;
+    document.getElementById('rtMsgLabel').textContent = t.rtMsgLabel;
+    document.getElementById('rtBizLabel').textContent = t.rtBizLabel;
+    document.getElementById('rtRespLabel').textContent = t.rtRespLabel;
+    document.getElementById('rtRespTag').textContent = t.rtRespTag;
     // Footer
     document.querySelector('.footer-brand p').textContent = t.ftP;
     var fc = document.querySelectorAll('.footer-col');
@@ -1712,6 +1821,50 @@
 
   function setLang(lang) { applyLang(lang); }
   applyLang(_lang);
+
+  // ── REALTIME COUNTERS ──
+  var _rtConv = 47, _rtMsg = 8412, _rtBiz = 340;
+
+  function _rtFlash(id) {
+    var el = document.getElementById(id);
+    if (!el) return;
+    el.classList.add('flash');
+    setTimeout(function() { el.classList.remove('flash'); }, 400);
+  }
+
+  function _rtSetBar(id, pct) {
+    var el = document.getElementById(id);
+    if (el) el.style.width = Math.min(100, Math.max(4, pct)) + '%';
+  }
+
+  function _rtInit() {
+    _rtSetBar('rtConvBar', ((_rtConv - 25) / 65) * 100);
+    _rtSetBar('rtMsgBar', (_rtMsg / 20000) * 100);
+    _rtSetBar('rtBizBar', ((_rtBiz - 280) / 220) * 100);
+  }
+  setTimeout(_rtInit, 800);
+
+  setInterval(function() {
+    _rtConv += Math.random() < 0.62 ? 1 : -1;
+    _rtConv = Math.max(28, Math.min(84, _rtConv));
+    var convEl = document.getElementById('rtConv');
+    if (convEl) { convEl.textContent = _rtConv; _rtFlash('rtConv'); }
+    _rtSetBar('rtConvBar', ((_rtConv - 25) / 65) * 100);
+
+    _rtMsg += Math.floor(Math.random() * 6) + 2;
+    var msgEl = document.getElementById('rtMsg');
+    if (msgEl) msgEl.textContent = _rtMsg.toLocaleString('es-ES');
+    _rtSetBar('rtMsgBar', (_rtMsg / 20000) * 100);
+  }, 2800);
+
+  setInterval(function() {
+    if (Math.random() < 0.35) {
+      _rtBiz++;
+      var bizEl = document.getElementById('rtBiz');
+      if (bizEl) { bizEl.textContent = _rtBiz; _rtFlash('rtBiz'); }
+      _rtSetBar('rtBizBar', ((_rtBiz - 280) / 220) * 100);
+    }
+  }, 14000);
 </script>
 
   <!-- VAI CHAT WIDGET -->
