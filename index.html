@@ -75,6 +75,16 @@
     }
     .nav-cta:hover { background: var(--orange2); transform: translateY(-1px); }
     .hamburger { display:none; background:none; border:none; color:var(--white); font-size:1.4rem; cursor:pointer; }
+    .nav-links.open {
+      display: flex; flex-direction: column; gap: 0;
+      position: absolute; top: 68px; left: 0; right: 0;
+      background: rgba(9,7,10,0.97); backdrop-filter: blur(20px);
+      border-bottom: 1px solid var(--border2);
+      padding: .8rem 2rem 1.2rem;
+    }
+    body.light .nav-links.open { background: rgba(245,240,236,0.97); }
+    .nav-links.open li a { padding: .7rem 0; font-size: .95rem; display: block; border-bottom: 1px solid var(--border); }
+    .nav-links.open li:last-child a { border-bottom: none; }
 
     /* ── HERO ── */
     .hero {
@@ -751,7 +761,7 @@
         <button class="lang-btn" id="btnEn" onclick="setLang('en')">EN</button>
       </div>
     </div>
-    <button class="hamburger">☰</button>
+    <button class="hamburger" id="hamburger" onclick="toggleMenu()">☰</button>
   </div>
 </nav>
 
@@ -1436,6 +1446,21 @@
     document.getElementById('ind-' + id).classList.add('active');
     btn.classList.add('active');
   }
+
+  // ── HAMBURGER MENU ──
+  function toggleMenu() {
+    var links = document.querySelector('.nav-links');
+    var btn = document.getElementById('hamburger');
+    var open = links.classList.toggle('open');
+    btn.textContent = open ? '✕' : '☰';
+  }
+  // Cierra el menú al hacer click en un enlace
+  document.querySelectorAll('.nav-links a').forEach(function(a) {
+    a.addEventListener('click', function() {
+      document.querySelector('.nav-links').classList.remove('open');
+      document.getElementById('hamburger').textContent = '☰';
+    });
+  });
 
   // ── NAV SCROLL ──
   window.addEventListener('scroll', () => {
