@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Velai — Tu negocio funciona aunque tú estés durmiendo.</title>
-  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg viewBox='0 0 20 20' fill='none' xmlns='http://www.w3.org/2000/svg'><rect width='20' height='20' rx='5' fill='%23FF6B1A'/><circle cx='10' cy='10' r='3.5' fill='white' opacity='.95'/><path d='M10 2.5v3' stroke='white' stroke-width='1.6' stroke-linecap='round' opacity='.5'/><path d='M10 14.5v3' stroke='white' stroke-width='1.6' stroke-linecap='round' opacity='.5'/><path d='M2.5 10h3' stroke='white' stroke-width='1.6' stroke-linecap='round' opacity='.5'/><path d='M14.5 10h3' stroke='white' stroke-width='1.6' stroke-linecap='round' opacity='.5'/></svg>"> content="Vai es el asistente IA que atiende, vende y gestiona tu negocio 24/7 en WhatsApp, web y redes sociales. Sin que toques nada.">
+  <meta name="description" content="Vai es el asistente IA que atiende, vende y gestiona tu negocio 24/7 en WhatsApp, web y redes sociales. Sin que toques nada.">
   <link rel="preconnect" href="https://api.fontshare.com">
   <link href="https://api.fontshare.com/v2/css?f[]=cabinet-grotesk@400,500,700,800,900&f[]=satoshi@300,400,500&display=swap" rel="stylesheet">
 
@@ -672,6 +672,47 @@
       width:32px; height:32px; border-radius:50%;
       background:#00a884; display:flex; align-items:center; justify-content:center; font-size:.75rem;
     }
+
+    /* ── LIGHT MODE ── */
+    body.light {
+      --bg:      #F5F0EC;
+      --bg2:     #EDE7E1;
+      --surface: #E3DBD4;
+      --border:  rgba(160,70,15,0.13);
+      --border2: rgba(160,70,15,0.22);
+      --white:   #1A0D05;
+      --muted:   rgba(26,13,5,0.52);
+      --muted2:  rgba(26,13,5,0.32);
+    }
+    body.light nav { background: rgba(245,240,236,0.92); }
+    body.light body::before { opacity: .6; }
+
+    /* "Most popular" in English */
+    body.lang-en .price-card.featured::before { content: 'Most popular'; }
+
+    /* ── NAV TOGGLES ── */
+    .nav-toggles { display:flex; align-items:center; gap:.45rem; }
+    .theme-toggle {
+      width:32px; height:32px; border-radius:8px;
+      background:transparent; border:1px solid var(--border2);
+      color:var(--white); font-size:.9rem; cursor:pointer;
+      display:flex; align-items:center; justify-content:center;
+      transition:all .2s; flex-shrink:0;
+    }
+    .theme-toggle:hover { background:var(--surface); }
+    .lang-toggle {
+      display:flex; align-items:center;
+      border:1px solid var(--border2); border-radius:8px; overflow:hidden;
+    }
+    .lang-btn {
+      background:transparent; border:none; color:var(--muted);
+      font-family:var(--font-b); font-size:.72rem; font-weight:700;
+      padding:.36rem .6rem; cursor:pointer; transition:all .2s;
+      letter-spacing:.05em; line-height:1;
+    }
+    .lang-btn.active { background:var(--orange); color:#fff; }
+    .lang-sep { color:var(--border2); font-size:.85rem; line-height:1; pointer-events:none; user-select:none; }
+    @media(max-width:600px) { .nav-cta { display:none; } }
   </style>
 </head>
 <body>
@@ -702,6 +743,14 @@
       <li><a href="#vai">Vai</a></li>
     </ul>
     <a href="#contacto" class="nav-cta">Solicitar demo</a>
+    <div class="nav-toggles">
+      <button class="theme-toggle" id="themeToggle" onclick="toggleTheme()" title="Cambiar tema">☀️</button>
+      <div class="lang-toggle">
+        <button class="lang-btn active" id="btnEs" onclick="setLang('es')">ES</button>
+        <span class="lang-sep">|</span>
+        <button class="lang-btn" id="btnEn" onclick="setLang('en')">EN</button>
+      </div>
+    </div>
     <button class="hamburger">☰</button>
   </div>
 </nav>
@@ -1393,6 +1442,251 @@
     const nav = document.querySelector('nav');
     nav.style.borderBottomColor = window.scrollY > 20 ? 'rgba(255,107,26,0.2)' : 'rgba(255,107,26,0.12)';
   });
+
+  // ── THEME TOGGLE ──
+  function toggleTheme() {
+    const light = document.body.classList.toggle('light');
+    document.getElementById('themeToggle').textContent = light ? '🌙' : '☀️';
+    localStorage.setItem('velai-theme', light ? 'light' : 'dark');
+  }
+  if (localStorage.getItem('velai-theme') === 'light') {
+    document.body.classList.add('light');
+    document.getElementById('themeToggle').textContent = '🌙';
+  }
+
+  // ── LANG TOGGLE ──
+  var _lang = localStorage.getItem('velai-lang') || 'es';
+  var T = {
+    es: {
+      navHow:'Cómo funciona', navInd:'Industrias', navPrice:'Precios', navDemo:'Solicitar demo',
+      heroBadge:'Presentamos Vai — tu asistente IA',
+      heroH1:'Tu negocio funciona<br>aunque tú <span class="fire">estés durmiendo.</span>',
+      heroP:'Vai atiende, vende y gestiona tus clientes en WhatsApp, web y redes sociales — las 24 horas, sin excepciones, sin que toques nada.',
+      heroBtn1:'Ver demo en vivo →', heroBtn2:'Cómo funciona',
+      heroS1:'Sin interrupciones', heroS2:'Ventas fuera de horario', heroS3:'Tiempo de respuesta', heroS4:'Tareas repetitivas',
+      probLabel:'El problema', probTitle:'Tu negocio pierde dinero cada día', probSub:'Cada mensaje sin respuesta a las 11pm es una venta perdida. Para siempre.',
+      prob1H:'Clientes que no vuelven', prob1P:'De los clientes que no reciben respuesta en menos de 1 hora compran en la competencia. Sin excepción.',
+      prob2H:'Sin cobertura cada día', prob2P:'Tu negocio duerme 8 horas. Tu competencia con IA, no. Cada noche pierdes oportunidades que no se recuperan.',
+      prob3H:'Productividad del equipo', prob3P:'Tu equipo responde las mismas preguntas una y otra vez. Tiempo que podrían usar en lo que realmente importa.',
+      howLabel:'Cómo funciona', howTitle:'El ciclo completo, automatizado', howSub:'Vai no solo responde — gestiona todo el flujo de principio a fin.',
+      s1H:'Atención', s1P:'Vai recibe el mensaje en WhatsApp, web o redes al instante. 24/7.',
+      s2H:'Comprensión', s2P:'Entiende qué necesita el cliente: comprar, reservar, consultar o reclamar.',
+      s3H:'Ejecución', s3P:'Procesa la venta, confirma la reserva o toma el pedido. Sin fricción.',
+      s4H:'Notificación', s4P:'Avisa automáticamente al equipo correcto: cocina, vendedor, despachador.',
+      s5H:'Seguimiento', s5P:'Envía confirmaciones, recordatorios y seguimiento post-venta solo.',
+      indLabel:'Industrias', indTitle:'Se adapta a tu negocio', indSub:'No es una solución genérica. Vai aprende tu negocio, tu tono y tus procesos.',
+      tab1:'Restaurante', tab2:'Clínica', tab3:'Tienda', tab4:'Inmobiliaria',
+      r1H:'Restaurantes & bares', r1P:'Vai gestiona reservas, pedidos para llevar y consultas de carta en tiempo real. Tu equipo solo se ocupa de cocinar y atender en sala.',
+      r1F:['Reservas automáticas con confirmación instantánea','Gestión de pedidos para llevar y delivery','Carta digital interactiva con alérgenos','Recordatorios automáticos día antes','Notificación directa a cocina y sala'],
+      r2H:'Clínicas & consultorios', r2P:'Vai gestiona citas, recordatorios y consultas básicas. Tu recepcionista se libera de llamadas rutinarias.',
+      r2F:['Agenda de citas en tiempo real','Recordatorios automáticos de citas','Triaje básico de urgencias','Información sobre servicios y precios','Seguimiento post-consulta'],
+      r3H:'Tiendas & e-commerce', r3P:'Vai convierte consultas en ventas, gestiona pedidos y hace seguimiento de envíos. Tu tienda vende mientras duermes.',
+      r3F:['Catálogo de productos interactivo','Procesamiento de pedidos y pagos','Seguimiento de envíos en tiempo real','Gestión de devoluciones y reclamaciones','Recomendaciones personalizadas'],
+      r4H:'Inmobiliarias & agencias', r4P:'Vai cualifica leads, agenda visitas y envía fichas automáticamente. Tu agente solo atiende a quien está listo para comprar.',
+      r4F:['Cualificación automática de leads','Envío de fichas y fotografías','Agendado de visitas en tiempo real','Seguimiento de interesados','Alertas de nuevas propiedades'],
+      vaiLabel:'El asistente', vaiRole:'Asistente IA de Velai', vaiLive:'Activo ahora · 24/7',
+      v1n:'01 — Canales', v1h:'Multicanal', v1p:'WhatsApp, web, Instagram, Facebook Messenger. Vai está en todos los canales donde están tus clientes.',
+      v2n:'02 — Velocidad', v2h:'Respuesta en 8 segundos', v2p:'Vai responde antes de que el cliente se vaya. Sin tiempos de espera, sin colas, sin demoras.',
+      v3n:'03 — Equipo', v3h:'Integrado con tu equipo', v3p:'Notifica a despachadores, vendedores o quién corresponda. Todos informados en tiempo real.',
+      v4n:'04 — IA', v4h:'Aprende tu negocio', v4p:'Vai se entrena con tu catálogo, precios, horarios y procesos. Habla como tú, no como un robot.',
+      v5n:'05 — Control', v5h:'Panel unificado', v5p:'Todas las conversaciones, ventas y métricas en un solo lugar. Siempre sabes qué está pasando.',
+      v6n:'06 — Sector', v6h:'100% personalizado', v6p:'No es una solución genérica. Vai se adapta a tu sector, tu tono y tus flujos específicos.',
+      pricLabel:'Precios', pricTitle:'Claro desde el primer día', pricSub:'Dos pagos, cero sorpresas — un setup único para configurar Vai en tu negocio, y una mensualidad para mantenerlo funcionando 24/7.',
+      pf1:'Eliges tu plan', pf2:'Setup único', pf2v:'Pago único', pf3:'Vai activo en 48h', pf4:'Mensualidad', pf4v:'Desde el mes 1',
+      p1n:'Esencial', p1d:'Para negocios que quieren dejar de perder clientes fuera de horario.',
+      p1f:['1 canal — WhatsApp o web','Hasta 300 conversaciones/mes','Respuestas automáticas 24/7','Panel de control básico','Soporte por email'],
+      p1b:'Solicitar demo',
+      p2n:'Profesional', p2d:'El ecosistema completo. Vai gestiona, vende, reserva y notifica a tu equipo.',
+      p2f:['Todos los canales — WA, web, redes','Conversaciones ilimitadas','Gestión completa de operaciones','Notificaciones al equipo en tiempo real','Panel unificado + métricas','Soporte prioritario 24/7'],
+      p2b:'Solicitar demo',
+      p3n:'Empresa', p3d:'Para cadenas, franquicias y negocios con múltiples locales o flujos complejos.',
+      p3f:['Todo lo de Profesional','Múltiples locales y sucursales','IA entrenada completamente a medida','API propia y webhooks','SLA garantizado','Account manager dedicado'],
+      p3b:'Hablar con ventas',
+      setupHTML:'<strong>¿Qué incluye el setup?</strong> La configuración completa de Vai para tu negocio — entrenamiento con tu catálogo, precios, horarios y flujos, integración con WhatsApp Business y puesta en marcha. En menos de 48 horas Vai está activo y trabajando. <strong>Sin permanencia mínima. Sin costes ocultos.</strong>',
+      faqLabel:'Preguntas frecuentes', faqTitle:'Todo lo que te estás preguntando', faqSub:'Sin letra pequeña. Sin tecnicismos. Las dudas reales de los dueños de negocio.',
+      fqs:['¿Cuánto tarda en estar funcionando en mi negocio?','¿Qué pasa si Vai se equivoca con un cliente?','¿Puedo desactivarlo o pausarlo cuando quiera?','¿Vai reemplaza a mis empleados?','¿Funciona con mi WhatsApp Business actual?','¿Mis clientes sabrán que hablan con una IA?','¿Qué pasa con mis datos y los de mis clientes?'],
+      fas:['En la mayoría de negocios, <strong>Vai está activo en menos de 48 horas.</strong> Nosotros nos encargamos de toda la configuración — tú solo nos cuentas cómo funciona tu negocio, tus precios, horarios y procesos. El resto lo hacemos nosotros.<br><span class="faq-tag">Sin instalaciones · Sin técnicos · Sin complicaciones</span>',
+           'Vai está entrenado específicamente para tu negocio, lo que minimiza los errores. Pero si algo sale mal, <strong>tú siempre puedes intervenir</strong> desde el panel de control. Además, Vai sabe cuándo una situación supera su capacidad y avisa a una persona de tu equipo al instante.',
+           'Sí, tienes control total. Puedes <strong>pausar Vai en cualquier momento</strong>, activarlo solo en ciertos horarios, o hacer que transfiera conversaciones a una persona de tu equipo con un clic. Tú mandas siempre.',
+           'No. Vai <strong>libera a tu equipo de las tareas repetitivas</strong> — responder siempre lo mismo, gestionar citas a mano, confirmar pedidos. Tu equipo se enfoca en lo que solo las personas pueden hacer: atender en persona, crear relaciones, resolver situaciones complejas.',
+           'Sí. Vai se integra con la <strong>API oficial de WhatsApp Business</strong> — el mismo número que ya tienes, sin cambiar nada. También funciona en tu web, Instagram Direct y Facebook Messenger de forma simultánea.',
+           'Vai habla con el tono y el estilo de tu negocio — no suena a robot. La <strong>transparencia es tu decisión:</strong> puedes presentarlo como "Vai, nuestro asistente" sin más. La mayoría de clientes valoran la rapidez y la disponibilidad 24/7 por encima de cualquier otra cosa.',
+           'Toda la información se almacena de forma segura y cumpliendo el <strong>RGPD europeo.</strong> Tus datos son tuyos — nunca los compartimos ni los usamos para entrenar modelos de terceros.'],
+      ctaLabel:'Empieza hoy',
+      ctaH2:'Mientras lees esto, tu competencia<br>pierde clientes a las <span>2am.</span> Tú no.',
+      ctaP:'Agendemos una demo de 30 minutos y te mostramos Vai en acción con tu negocio real.',
+      ctaB1:'WhatsApp directo →', ctaB2:'Escribirnos →',
+      ftP:'El ecosistema de IA que gestiona tu negocio 24/7. Presentamos Vai — tu asistente que nunca duerme.',
+      ftC1:'Producto', ftL1:'Cómo funciona', ftL2:'Industrias', ftL3:'Precios', ftL4:'Conoce a Vai',
+      ftC2:'Contacto', ftBottom:'© 2026 Velai. Todos los derechos reservados.'
+    },
+    en: {
+      navHow:'How it works', navInd:'Industries', navPrice:'Pricing', navDemo:'Request a demo',
+      heroBadge:'Introducing Vai — your AI assistant',
+      heroH1:'Your business runs<br>even while you <span class="fire">sleep.</span>',
+      heroP:'Vai handles, sells, and manages your customers on WhatsApp, web, and social media — 24 hours a day, no exceptions, no manual work.',
+      heroBtn1:'See live demo →', heroBtn2:'How it works',
+      heroS1:'No interruptions', heroS2:'After-hours sales', heroS3:'Response time', heroS4:'Repetitive tasks',
+      probLabel:'The problem', probTitle:'Your business loses money every day', probSub:'Every unanswered message at 11pm is a lost sale. Forever.',
+      prob1H:"Customers who don't return", prob1P:"Customers who don't get a reply within 1 hour buy from the competition. Without exception.",
+      prob2H:'No coverage every day', prob2P:"Your business sleeps 8 hours. Your AI-powered competition doesn't. Every night you lose opportunities that never come back.",
+      prob3H:'Team productivity', prob3P:'Your team answers the same questions over and over. Time they could spend on what really matters.',
+      howLabel:'How it works', howTitle:'The complete cycle, automated', howSub:"Vai doesn't just reply — it manages the entire flow from start to finish.",
+      s1H:'Attention', s1P:'Vai receives messages on WhatsApp, web, or social media instantly. 24/7.',
+      s2H:'Understanding', s2P:'It understands what the customer needs: buy, book, inquire, or complain.',
+      s3H:'Execution', s3P:'Processes the sale, confirms the booking, or takes the order. Frictionless.',
+      s4H:'Notification', s4P:'Automatically alerts the right team: kitchen, sales, dispatch.',
+      s5H:'Follow-up', s5P:'Sends confirmations, reminders, and post-sale follow-ups automatically.',
+      indLabel:'Industries', indTitle:'Adapts to your business', indSub:'Not a generic solution. Vai learns your business, your tone, and your processes.',
+      tab1:'Restaurant', tab2:'Clinic', tab3:'Store', tab4:'Real Estate',
+      r1H:'Restaurants & bars', r1P:'Vai manages reservations, takeout orders, and menu queries in real time. Your team focuses on cooking and table service.',
+      r1F:['Automatic reservations with instant confirmation','Takeout and delivery order management','Interactive digital menu with allergens','Automatic day-before reminders','Direct notifications to kitchen and front of house'],
+      r2H:'Clinics & practices', r2P:'Vai manages appointments, reminders, and basic queries. Your receptionist is free from routine calls.',
+      r2F:['Real-time appointment booking','Automatic appointment reminders','Basic urgency triage','Information on services and pricing','Post-consultation follow-up'],
+      r3H:'Stores & e-commerce', r3P:'Vai turns inquiries into sales, manages orders, and tracks shipments. Your store sells while you sleep.',
+      r3F:['Interactive product catalog','Order and payment processing','Real-time shipment tracking','Returns and complaint management','Personalized recommendations'],
+      r4H:'Real estate & agencies', r4P:'Vai qualifies leads, schedules viewings, and sends property sheets automatically. Your agent only meets buyers ready to close.',
+      r4F:['Automatic lead qualification','Sending property sheets and photos','Real-time viewing scheduling','Prospect follow-up','New property alerts'],
+      vaiLabel:'The assistant', vaiRole:"Velai's AI assistant", vaiLive:'Active now · 24/7',
+      v1n:'01 — Channels', v1h:'Multichannel', v1p:'WhatsApp, web, Instagram, Facebook Messenger. Vai is on every channel where your customers are.',
+      v2n:'02 — Speed', v2h:'8-second response', v2p:"Vai replies before the customer leaves. No wait times, no queues, no delays.",
+      v3n:'03 — Team', v3h:'Integrated with your team', v3p:'Notifies dispatchers, salespeople, or whoever is needed. Everyone informed in real time.',
+      v4n:'04 — AI', v4h:'Learns your business', v4p:"Vai trains on your catalog, prices, hours, and processes. It talks like you, not like a robot.",
+      v5n:'05 — Control', v5h:'Unified dashboard', v5p:"All conversations, sales, and metrics in one place. You always know what's happening.",
+      v6n:'06 — Industry', v6h:'100% customized', v6p:'Not a generic solution. Vai adapts to your industry, tone, and specific workflows.',
+      pricLabel:'Pricing', pricTitle:'Clear from day one', pricSub:'Two payments, zero surprises — a one-time setup to configure Vai for your business, and a monthly fee to keep it running 24/7.',
+      pf1:'Choose your plan', pf2:'One-time setup', pf2v:'One-time payment', pf3:'Vai active in 48h', pf4:'Monthly fee', pf4v:'From month 1',
+      p1n:'Essential', p1d:'For businesses that want to stop losing customers outside business hours.',
+      p1f:['1 channel — WhatsApp or web','Up to 300 conversations/month','Automated replies 24/7','Basic control panel','Email support'],
+      p1b:'Request demo',
+      p2n:'Professional', p2d:'The complete ecosystem. Vai manages, sells, books, and notifies your team.',
+      p2f:['All channels — WA, web, social','Unlimited conversations','Full operations management','Real-time team notifications','Unified panel + metrics','Priority 24/7 support'],
+      p2b:'Request demo',
+      p3n:'Enterprise', p3d:'For chains, franchises, and businesses with multiple locations or complex flows.',
+      p3f:['Everything in Professional','Multiple locations and branches','Fully custom-trained AI','Custom API and webhooks','Guaranteed SLA','Dedicated account manager'],
+      p3b:'Talk to sales',
+      setupHTML:'<strong>What does the setup include?</strong> The complete configuration of Vai for your business — training with your catalog, prices, hours, and workflows, WhatsApp Business integration, and launch. In less than 48 hours Vai is active and working. <strong>No minimum commitment. No hidden costs.</strong>',
+      faqLabel:'FAQ', faqTitle:"Everything you're wondering about", faqSub:'No fine print. No jargon. The real questions from business owners.',
+      fqs:['How long does it take to go live in my business?','What happens if Vai makes a mistake with a customer?','Can I deactivate or pause it whenever I want?','Does Vai replace my employees?','Does it work with my current WhatsApp Business?','Will my customers know they\'re talking to an AI?','What happens with my data and my customers\' data?'],
+      fas:['In most businesses, <strong>Vai is live in under 48 hours.</strong> We handle the entire setup — you just tell us how your business works, your prices, hours, and processes. We do the rest.<br><span class="faq-tag">No installs · No technicians · No hassle</span>',
+           'Vai is trained specifically for your business, which minimizes errors. But if something goes wrong, <strong>you can always step in</strong> from the control panel. Vai also knows when a situation exceeds its capabilities and instantly alerts a team member.',
+           'Yes, you have full control. You can <strong>pause Vai at any time</strong>, activate it only during certain hours, or have it transfer conversations to a team member with one click. You\'re always in charge.',
+           'No. Vai <strong>frees your team from repetitive tasks</strong> — answering the same questions, managing appointments manually, confirming orders. Your team focuses on what only people can do: in-person service, building relationships, solving complex situations.',
+           'Yes. Vai integrates with the <strong>official WhatsApp Business API</strong> — the same number you already have, no changes needed. It also works on your website, Instagram Direct, and Facebook Messenger simultaneously.',
+           "Vai speaks in your business's tone and style — it doesn't sound like a robot. <strong>Transparency is your choice:</strong> you can introduce it as \"Vai, our assistant\" and leave it at that. Most customers value speed and 24/7 availability above everything else.",
+           'All information is stored securely and in compliance with the <strong>European GDPR.</strong> Your data is yours — we never share it or use it to train third-party models.'],
+      ctaLabel:'Start today',
+      ctaH2:'While you read this, your competition<br>loses customers at <span>2am.</span> Not you.',
+      ctaP:"Let's schedule a 30-minute demo and show you Vai in action with your real business.",
+      ctaB1:'WhatsApp direct →', ctaB2:'Write to us →',
+      ftP:'The AI ecosystem that manages your business 24/7. Introducing Vai — your assistant that never sleeps.',
+      ftC1:'Product', ftL1:'How it works', ftL2:'Industries', ftL3:'Pricing', ftL4:'Meet Vai',
+      ftC2:'Contact', ftBottom:'© 2026 Velai. All rights reserved.'
+    }
+  };
+
+  function applyLang(lang) {
+    var t = T[lang];
+    // Nav
+    document.querySelector('nav a[href="#como-funciona"]').textContent = t.navHow;
+    document.querySelector('nav a[href="#industrias"]').textContent = t.navInd;
+    document.querySelector('nav a[href="#precios"]').textContent = t.navPrice;
+    document.querySelector('nav .nav-cta').textContent = t.navDemo;
+    // Hero
+    document.querySelector('.hero-badge').innerHTML = '<div class="badge-dot"></div>' + t.heroBadge;
+    document.querySelector('.hero h1').innerHTML = t.heroH1;
+    document.querySelector('.hero p').textContent = t.heroP;
+    var hbtns = document.querySelectorAll('.hero-btns a');
+    hbtns[0].textContent = t.heroBtn1; hbtns[1].textContent = t.heroBtn2;
+    var sl = document.querySelectorAll('.hero .stat-label');
+    sl[0].textContent = t.heroS1; sl[1].textContent = t.heroS2; sl[2].textContent = t.heroS3; sl[3].textContent = t.heroS4;
+    // Problem
+    document.querySelector('.problem-section .s-label').textContent = t.probLabel;
+    document.querySelector('.problem-section .s-title').textContent = t.probTitle;
+    document.querySelector('.problem-section .s-sub').textContent = t.probSub;
+    var pc = document.querySelectorAll('.problem-card');
+    pc[0].querySelector('h3').textContent = t.prob1H; pc[0].querySelector('p').textContent = t.prob1P;
+    pc[1].querySelector('h3').textContent = t.prob2H; pc[1].querySelector('p').textContent = t.prob2P;
+    pc[2].querySelector('h3').textContent = t.prob3H; pc[2].querySelector('p').textContent = t.prob3P;
+    // How it works
+    document.querySelector('#como-funciona .s-label').textContent = t.howLabel;
+    document.querySelector('#como-funciona .s-title').textContent = t.howTitle;
+    document.querySelector('#como-funciona .s-sub').textContent = t.howSub;
+    var fs = document.querySelectorAll('.flow-step');
+    [[t.s1H,t.s1P],[t.s2H,t.s2P],[t.s3H,t.s3P],[t.s4H,t.s4P],[t.s5H,t.s5P]].forEach(function(s,i){ fs[i].querySelector('h4').textContent=s[0]; fs[i].querySelector('p').textContent=s[1]; });
+    // Industries
+    document.querySelector('#industrias .s-label').textContent = t.indLabel;
+    document.querySelector('#industrias .s-title').textContent = t.indTitle;
+    document.querySelector('#industrias .s-sub').textContent = t.indSub;
+    var tabs = document.querySelectorAll('.tab-btn');
+    tabs[0].textContent=t.tab1; tabs[1].textContent=t.tab2; tabs[2].textContent=t.tab3; tabs[3].textContent=t.tab4;
+    [['#ind-restaurante',t.r1H,t.r1P,t.r1F],['#ind-clinica',t.r2H,t.r2P,t.r2F],['#ind-tienda',t.r3H,t.r3P,t.r3F],['#ind-inmobiliaria',t.r4H,t.r4P,t.r4F]].forEach(function(r){
+      document.querySelector(r[0]+' .industry-info h3').textContent=r[1];
+      document.querySelector(r[0]+' .industry-info p').textContent=r[2];
+      document.querySelectorAll(r[0]+' .industry-features li').forEach(function(li,i){ li.innerHTML='<div class="feat-dot"></div>'+r[3][i]; });
+    });
+    // Vai
+    document.querySelector('#vai .s-label').textContent = t.vaiLabel;
+    document.querySelector('.vai-role').textContent = t.vaiRole;
+    document.querySelector('.vai-live').innerHTML = '<div class="live-dot"></div>' + t.vaiLive;
+    var vf = document.querySelectorAll('.vai-feat');
+    [[t.v1n,t.v1h,t.v1p],[t.v2n,t.v2h,t.v2p],[t.v3n,t.v3h,t.v3p],[t.v4n,t.v4h,t.v4p],[t.v5n,t.v5h,t.v5p],[t.v6n,t.v6h,t.v6p]].forEach(function(v,i){
+      vf[i].querySelector('div').textContent=v[0]; vf[i].querySelector('h4').textContent=v[1]; vf[i].querySelector('p').textContent=v[2];
+    });
+    // Pricing
+    document.querySelector('#precios .s-label').textContent = t.pricLabel;
+    document.querySelector('#precios .s-title').textContent = t.pricTitle;
+    document.querySelector('#precios .s-sub').textContent = t.pricSub;
+    var pfs = document.querySelectorAll('.pflow-step');
+    pfs[0].querySelector('.pflow-lbl').textContent=t.pf1;
+    pfs[1].querySelector('.pflow-lbl').textContent=t.pf2; pfs[1].querySelector('.pflow-val').textContent=t.pf2v;
+    pfs[2].querySelector('.pflow-lbl').textContent=t.pf3;
+    pfs[3].querySelector('.pflow-lbl').textContent=t.pf4; pfs[3].querySelector('.pflow-val').textContent=t.pf4v;
+    var cards = document.querySelectorAll('.price-card');
+    [[t.p1n,t.p1d,t.p1f,t.p1b],[t.p2n,t.p2d,t.p2f,t.p2b],[t.p3n,t.p3d,t.p3f,t.p3b]].forEach(function(p,i){
+      cards[i].querySelector('.price-name').textContent=p[0];
+      cards[i].querySelector('.price-desc').textContent=p[1];
+      cards[i].querySelectorAll('.price-features li').forEach(function(li,j){ if(p[2][j]) li.textContent=p[2][j]; });
+      cards[i].querySelector('.price-btn').textContent=p[3];
+    });
+    document.querySelector('.setup-note-text').innerHTML = t.setupHTML;
+    // FAQ
+    document.querySelector('.faq-section .s-label').textContent = t.faqLabel;
+    document.querySelector('.faq-section .s-title').textContent = t.faqTitle;
+    document.querySelector('.faq-section .s-sub').textContent = t.faqSub;
+    document.querySelectorAll('.faq-item').forEach(function(item,i){
+      var q = item.querySelector('.faq-q'), icon = q.querySelector('.faq-icon');
+      q.textContent = t.fqs[i]; q.appendChild(icon);
+      item.querySelector('.faq-a').innerHTML = t.fas[i];
+    });
+    // CTA
+    document.querySelector('#contacto .s-label').textContent = t.ctaLabel;
+    document.querySelector('#contacto h2').innerHTML = t.ctaH2;
+    document.querySelector('#contacto p.fade-up').textContent = t.ctaP;
+    var cb = document.querySelectorAll('.cta-btns a');
+    cb[0].textContent=t.ctaB1; cb[1].textContent=t.ctaB2;
+    // Footer
+    document.querySelector('.footer-brand p').textContent = t.ftP;
+    var fc = document.querySelectorAll('.footer-col');
+    fc[0].querySelector('h4').textContent=t.ftC1;
+    var fl = fc[0].querySelectorAll('a');
+    fl[0].textContent=t.ftL1; fl[1].textContent=t.ftL2; fl[2].textContent=t.ftL3; fl[3].textContent=t.ftL4;
+    fc[1].querySelector('h4').textContent=t.ftC2;
+    document.querySelector('.footer-bottom span').textContent = t.ftBottom;
+    // Widget placeholder
+    var inp = document.getElementById('vaiInput');
+    if (inp) inp.placeholder = lang==='en' ? 'Write a message...' : 'Escribe un mensaje...';
+    // Lang buttons + body class
+    document.getElementById('btnEs').classList.toggle('active', lang==='es');
+    document.getElementById('btnEn').classList.toggle('active', lang==='en');
+    document.body.classList.toggle('lang-en', lang==='en');
+    document.documentElement.lang = lang;
+    _lang = lang;
+    localStorage.setItem('velai-lang', lang);
+  }
+
+  function setLang(lang) { applyLang(lang); }
+  applyLang(_lang);
 </script>
 
   <!-- VAI CHAT WIDGET -->
@@ -1423,7 +1717,7 @@
     ">
       <!-- Header -->
       <div style="background:#075e54;padding:12px 16px;display:flex;align-items:center;gap:10px;flex-shrink:0;">
-        <div style="width:38px;height:38px;border-radius:50%;background:#FF6B1A;display:flex;align-items:center;justify-content:center;flex-shrink:0;"><svg viewBox="0 0 20 20" fill="none" width="20" height="20"><circle cx="10" cy="10" r="3.5" fill="white" opacity=".95"/><path d="M10 2.5v3" stroke="white" stroke-width="1.6" stroke-linecap="round" opacity=".5"/><path d="M10 14.5v3" stroke="white" stroke-width="1.6" stroke-linecap="round" opacity=".5"/><path d="M2.5 10h3" stroke="white" stroke-width="1.6" stroke-linecap="round" opacity=".5"/><path d="M14.5 10h3" stroke="white" stroke-width="1.6" stroke-linecap="round" opacity=".5"/></svg></div>
+        <div style="width:38px;height:38px;border-radius:50%;background:#FF6B1A;display:flex;align-items:center;justify-content:center;font-size:18px;flex-shrink:0;">✂️</div>
         <div style="flex:1;">
           <div style="color:#fff;font-size:14px;font-weight:600;">Vai · Velai</div>
           <div style="color:rgba(255,255,255,.75);font-size:12px;display:flex;align-items:center;gap:4px;">
@@ -1477,7 +1771,7 @@
 
   <script>
     // ── CONFIGURACION VAI ──
-    const VAI_WORKER_URL = 'https://vai-worker.botnexo-ia.workers.dev';
+    const VAI_WORKER_URL = 'https://vai-worker.TU-SUBDOMINIO.workers.dev';
 
     var vaiOpen = false;
     var vaiHistory = [];
