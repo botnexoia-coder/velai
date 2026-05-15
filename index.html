@@ -30,6 +30,19 @@
     html { scroll-behavior: smooth; }
     body { font-family: var(--font-b); background: var(--bg); color: var(--white); overflow-x: hidden; line-height: 1.6; }
 
+
+    body::before {
+      content: '';
+      position: fixed; inset: 0; z-index: 0;
+      background-image:
+        linear-gradient(rgba(255,107,26,0.04) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(255,107,26,0.04) 1px, transparent 1px);
+      background-size: 56px 56px;
+      pointer-events: none;
+      mask-image: radial-gradient(ellipse 80% 80% at 50% 50%, black 40%, transparent 100%);
+      -webkit-mask-image: radial-gradient(ellipse 80% 80% at 50% 50%, black 40%, transparent 100%);
+    }
+    nav, section, footer, .billboard-section, .problem-section, .industries-section, .pricing-section, .realtime-section { position: relative; z-index: 1; }
     /* ── NAV ── */
     nav {
       position: fixed; top: 0; width: 100%; z-index: 100;
@@ -62,6 +75,16 @@
     }
     .nav-cta:hover { background: var(--orange2); transform: translateY(-1px); }
     .hamburger { display:none; background:none; border:none; color:var(--white); font-size:1.4rem; cursor:pointer; }
+    .nav-links.open {
+      display: flex; flex-direction: column; gap: 0;
+      position: absolute; top: 68px; left: 0; right: 0;
+      background: rgba(9,7,10,0.97); backdrop-filter: blur(20px);
+      border-bottom: 1px solid var(--border2);
+      padding: .8rem 2rem 1.2rem;
+    }
+    body.light .nav-links.open { background: rgba(245,240,236,0.97); }
+    .nav-links.open li a { padding: .7rem 0; font-size: .95rem; display: block; border-bottom: 1px solid var(--border); }
+    .nav-links.open li:last-child a { border-bottom: none; }
 
     /* ── HERO ── */
     .hero {
@@ -395,35 +418,9 @@
     .industry-features { list-style: none; display: flex; flex-direction: column; gap: .7rem; }
     .industry-features li { display: flex; align-items: center; gap: .6rem; font-size: .88rem; color: var(--muted); }
     .feat-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--orange); flex-shrink: 0; }
-    .industry-chat {
-      background: var(--surface); border: 1px solid var(--border2);
-      border-radius: 16px; overflow: hidden;
-    }
-    .ind-chat-header {
-      display: flex; align-items: center; gap: 8px;
-      padding: 12px 16px; background: var(--bg2);
-      border-bottom: 1px solid var(--border);
-    }
-    .ind-chat-ico { width: 28px; height: 28px; border-radius: 8px; background: var(--orange); display:flex; align-items:center; justify-content:center; }
-    .ind-chat-ico svg { width:15px; height:15px; }
-    .ind-chat-name { font-family: var(--font-d); font-size: .82rem; font-weight: 700; }
-    .ind-chat-status { font-size: .68rem; color: var(--orange2); display:flex; align-items:center; gap:3px; }
-    .ind-chat-body { padding: 1rem; display:flex; flex-direction:column; gap:8px; }
-    .ind-bv {
-      background: var(--bg2); border: 1px solid var(--border);
-      border-radius: 12px 12px 12px 3px;
-      padding: 9px 13px; font-size: .78rem; color: var(--white); line-height: 1.5; max-width: 85%;
-    }
-    .ind-bu {
-      background: var(--orange); border-radius: 12px 12px 3px 12px;
-      padding: 9px 13px; font-size: .78rem; color: #fff; line-height: 1.5; max-width: 85%; align-self: flex-end;
-    }
-    .ind-action {
-      display:flex; align-items:center; gap:5px; margin-top:4px;
-      padding: 7px 11px; background: rgba(255,107,26,0.07);
-      border-radius: 9px; border: 1px solid rgba(255,107,26,0.18);
-      font-size: .7rem; color: var(--orange2);
-    }
+    /* industry wa overrides */
+    .industry-content .wa-wrap { border-radius: 14px; }
+    .industry-content .wa-body { min-height: 210px; }
 
     /* ── VAI SECTION ── */
     .vai-section { text-align: center; }
@@ -521,6 +518,67 @@
     .cta-section p { font-size:1.05rem; color:var(--muted); margin-bottom:2rem; position:relative; font-weight:300; }
     .cta-btns { display:flex; gap:1rem; justify-content:center; flex-wrap:wrap; position:relative; }
 
+    /* ── REALTIME ── */
+    .realtime-section { background: var(--bg2); border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); }
+    .rt-header { text-align: center; margin-bottom: 3rem; }
+    .rt-live-badge {
+      display: inline-flex; align-items: center; gap: 8px;
+      background: rgba(255,107,26,0.08); border: 1px solid rgba(255,107,26,0.25);
+      border-radius: 100px; padding: 6px 16px; font-size: .75rem;
+      color: var(--orange2); font-weight: 600; text-transform: uppercase; letter-spacing: .1em;
+      margin-bottom: 1.2rem;
+    }
+    .rt-pulse {
+      width: 8px; height: 8px; border-radius: 50%; background: var(--orange);
+      animation: rt-blink 1.4s ease-in-out infinite;
+      box-shadow: 0 0 0 0 rgba(255,107,26,0.5);
+    }
+    @keyframes rt-blink {
+      0%   { transform: scale(1);   box-shadow: 0 0 0 0 rgba(255,107,26,.6); }
+      50%  { transform: scale(1.15); box-shadow: 0 0 0 6px rgba(255,107,26,0); }
+      100% { transform: scale(1);   box-shadow: 0 0 0 0 rgba(255,107,26,0); }
+    }
+    .rt-header .s-title { max-width: 560px; margin: 0 auto .8rem; }
+    .rt-header .s-sub { margin: 0 auto 0; }
+    .rt-grid {
+      display: grid; grid-template-columns: repeat(4, 1fr); gap: 1.2rem;
+    }
+    .rt-card {
+      background: var(--surface); border: 1px solid var(--border2);
+      border-radius: 16px; padding: 1.6rem 1.4rem;
+      display: flex; flex-direction: column; gap: .5rem;
+      position: relative; overflow: hidden; transition: border-color .3s;
+    }
+    .rt-card::before {
+      content: ''; position: absolute; top: 0; left: 0; right: 0; height: 2px;
+      background: linear-gradient(90deg, var(--orange), var(--amber));
+      opacity: 0; transition: opacity .3s;
+    }
+    .rt-card:hover { border-color: rgba(255,107,26,.4); }
+    .rt-card:hover::before { opacity: 1; }
+    .rt-card-accent { border-color: rgba(255,107,26,.35); }
+    .rt-card-accent::before { opacity: 1; }
+    .rt-num {
+      font-family: var(--font-d); font-size: 2.4rem; font-weight: 900;
+      letter-spacing: -.04em; color: var(--orange);
+      transition: color .2s;
+    }
+    .rt-num-small { font-size: 1.8rem; }
+    .rt-label { font-size: .78rem; color: var(--muted); font-weight: 500; line-height: 1.4; }
+    .rt-bar { height: 3px; background: var(--border); border-radius: 99px; margin-top: .6rem; overflow: hidden; }
+    .rt-bar-fill {
+      height: 100%; border-radius: 99px;
+      background: linear-gradient(90deg, var(--orange), var(--amber));
+      width: 0%; transition: width 1.2s cubic-bezier(.4,0,.2,1);
+    }
+    .rt-tag {
+      font-size: .7rem; color: var(--orange2); font-weight: 600;
+      text-transform: uppercase; letter-spacing: .07em; margin-top: .4rem;
+    }
+    .rt-num.flash { color: var(--amber); }
+    @media(max-width:768px) { .rt-grid { grid-template-columns: repeat(2,1fr); } }
+    @media(max-width:480px) { .rt-grid { grid-template-columns: 1fr 1fr; gap:.8rem; } .rt-num { font-size:2rem; } }
+
     /* ── FOOTER ── */
     footer { border-top:1px solid var(--border); background:var(--bg2); padding:3rem 2rem; }
     .footer-inner { max-width:1160px; margin:0 auto; display:grid; grid-template-columns:1.5fr 1fr 1fr; gap:3rem; }
@@ -533,6 +591,59 @@
       border-top:1px solid var(--border);
       display:flex; justify-content:space-between; align-items:center;
       font-size:.78rem; color:var(--muted2); flex-wrap:wrap; gap:.5rem;
+    }
+
+    /* ── PRICING NEW ── */
+    .pricing-flow { display:flex; align-items:center; gap:0; margin-bottom:2.5rem; flex-wrap:wrap; gap:.5rem; }
+    .pflow-step { text-align:center; flex:1; min-width:80px; }
+    .pflow-num { width:40px; height:40px; border-radius:50%; background:rgba(255,107,26,0.1); border:0.5px solid var(--border2); display:flex; align-items:center; justify-content:center; font-family:var(--font-d); font-size:13px; font-weight:700; color:var(--orange); margin:0 auto 6px; }
+    .pflow-lbl { font-size:.7rem; color:var(--muted); }
+    .pflow-val { font-family:var(--font-d); font-size:.75rem; font-weight:700; color:var(--white); margin-top:2px; }
+    .pflow-arrow { color:var(--orange); font-size:14px; opacity:.35; flex-shrink:0; }
+    .price-two { margin-bottom:1rem; }
+    .price-row-two { display:flex; align-items:baseline; gap:8px; padding:8px 0; }
+    .price-type-lbl { font-size:.65rem; color:var(--muted); text-transform:uppercase; letter-spacing:.08em; width:60px; flex-shrink:0; }
+    .price-amount-new { font-family:var(--font-d); font-size:1.4rem; font-weight:900; color:var(--orange); letter-spacing:-.03em; }
+    .price-amount-new.small { font-size:1.1rem; }
+    .price-once { font-size:.68rem; color:var(--muted); }
+    .price-divider-thin { height:0.5px; background:var(--border); }
+    .setup-note { display:flex; gap:12px; align-items:flex-start; margin-top:1.5rem; background:rgba(255,107,26,0.04); border:0.5px solid rgba(255,107,26,0.18); border-radius:14px; padding:1.1rem 1.3rem; }
+    .setup-note-icon { font-size:15px; flex-shrink:0; margin-top:1px; }
+    .setup-note-text { font-size:.82rem; color:var(--muted); line-height:1.75; }
+    .setup-note-text strong { color:var(--white); font-weight:500; }
+
+    /* ── FAQ ── */
+    .faq-section { border-top: 0.5px solid var(--border); }
+    .faq-list { max-width: 760px; }
+    .faq-item { border-bottom: 0.5px solid var(--border); overflow: hidden; }
+    .faq-item:first-child { border-top: 0.5px solid var(--border); }
+    .faq-q {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 1.2rem 0; cursor: pointer; gap: 1.5rem;
+      font-family: var(--font-d); font-size: 1rem; font-weight: 700;
+      color: var(--white); transition: color .2s; user-select: none;
+    }
+    .faq-q:hover { color: var(--orange2); }
+    .faq-icon {
+      width: 24px; height: 24px; border-radius: 50%;
+      border: 0.5px solid var(--border2); flex-shrink: 0;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 16px; font-weight: 300; color: var(--orange);
+      transition: all .3s;
+    }
+    .faq-item.open .faq-icon { background: rgba(255,107,26,0.1); transform: rotate(45deg); }
+    .faq-a {
+      font-size: .9rem; color: var(--muted); line-height: 1.8;
+      font-weight: 300; max-height: 0; overflow: hidden;
+      transition: max-height .4s ease, padding .4s ease;
+    }
+    .faq-a strong { color: var(--white); font-weight: 500; }
+    .faq-item.open .faq-a { max-height: 220px; padding-bottom: 1.2rem; }
+    .faq-tag {
+      display: inline-block; margin-top: 8px;
+      background: rgba(255,107,26,0.08); border: 0.5px solid rgba(255,107,26,0.22);
+      border-radius: 100px; padding: 3px 12px;
+      font-size: .75rem; color: var(--orange2);
     }
 
     /* ── ANIMATIONS ── */
@@ -558,6 +669,121 @@
       .hero-stats { gap:1.5rem; }
       .cta-btns { flex-direction:column; align-items:center; }
     }
+
+    /* ── WHATSAPP STYLE CHATS ── */
+    .wa-wrap {
+      border-radius: 16px; overflow: hidden;
+      box-shadow: 0 20px 50px rgba(0,0,0,0.5);
+      font-family: -apple-system, 'Segoe UI', sans-serif;
+    }
+    .wa-status-bar {
+      background: #1f2c34; padding: 4px 12px;
+      display: flex; align-items: center; justify-content: space-between;
+      font-size: .6rem; color: #8696a0;
+    }
+    .wa-header {
+      background: #202c33;
+      display: flex; align-items: center; gap: 10px;
+      padding: 8px 12px;
+    }
+    .wa-avatar {
+      width: 36px; height: 36px; border-radius: 50%;
+      background: var(--orange);
+      display: flex; align-items: center; justify-content: center;
+      font-size: .8rem; font-weight: 700; color: #fff; flex-shrink: 0;
+    }
+    .wa-contact-name { font-size: .82rem; font-weight: 600; color: #e9edef; }
+    .wa-contact-status { font-size: .65rem; color: #8696a0; }
+    .wa-icons { display:flex; gap:18px; margin-left:auto; font-size:.85rem; color:#8696a0; }
+    .wa-body {
+      background: #0d1117;
+      background-image: url("data:image/svg+xml,%3Csvg width='60' height='60' viewBox='0 0 60 60' xmlns='http://www.w3.org/2000/svg'%3E%3Cg fill='none' fill-rule='evenodd'%3E%3Cg fill='%23ffffff' fill-opacity='0.015'%3E%3Cpath d='M36 34v-4h-2v4h-4v2h4v4h2v-4h4v-2h-4zm0-30V0h-2v4h-4v2h4v4h2V6h4V4h-4zM6 34v-4H4v4H0v2h4v4h2v-4h4v-2H6zM6 4V0H4v4H0v2h4v4h2V6h4V4H6z'/%3E%3C/g%3E%3C/g%3E%3C/svg%3E");
+      padding: .8rem;
+      display: flex; flex-direction: column; gap: 6px;
+      min-height: 260px;
+    }
+    .wa-date { text-align:center; margin: 4px 0; }
+    .wa-date span { background:#182229; color:#8696a0; font-size:.6rem; padding:3px 10px; border-radius:6px; }
+    .wa-msg-v {
+      background: #202c33; border-radius: 0 8px 8px 8px;
+      padding: 7px 9px 5px; font-size: .72rem; color: #e9edef;
+      line-height: 1.5; max-width: 86%; position: relative;
+    }
+    .wa-msg-v::before {
+      content:''; position:absolute; left:-6px; top:0;
+      border:6px solid transparent;
+      border-right-color:#202c33; border-top-color:#202c33;
+    }
+    .wa-msg-u {
+      background: #005c4b; border-radius: 8px 0 8px 8px;
+      padding: 7px 9px 5px; font-size: .72rem; color: #e9edef;
+      line-height: 1.5; max-width: 82%; align-self: flex-end; position: relative;
+    }
+    .wa-msg-u::before {
+      content:''; position:absolute; right:-6px; top:0;
+      border:6px solid transparent;
+      border-left-color:#005c4b; border-top-color:#005c4b;
+    }
+    .wa-time { font-size:.56rem; color:#8696a0; text-align:right; margin-top:2px; }
+    .wa-tick { color:#53bdeb; }
+    .wa-action {
+      font-size:.62rem; color:#8696a0; text-align:center;
+      padding:4px 10px; background:rgba(0,0,0,0.35); border-radius:7px;
+      margin-top:4px; align-self:center;
+    }
+    .wa-footer {
+      background:#202c33; padding:7px 10px;
+      display:flex; align-items:center; gap:8px;
+    }
+    .wa-input {
+      flex:1; background:#2a3942; border-radius:20px;
+      padding:6px 12px; font-size:.68rem; color:#8696a0;
+    }
+    .wa-send {
+      width:32px; height:32px; border-radius:50%;
+      background:#00a884; display:flex; align-items:center; justify-content:center; font-size:.75rem;
+    }
+
+    /* ── LIGHT MODE ── */
+    body.light {
+      --bg:      #F5F0EC;
+      --bg2:     #EDE7E1;
+      --surface: #E3DBD4;
+      --border:  rgba(160,70,15,0.13);
+      --border2: rgba(160,70,15,0.22);
+      --white:   #1A0D05;
+      --muted:   rgba(26,13,5,0.52);
+      --muted2:  rgba(26,13,5,0.32);
+    }
+    body.light nav { background: rgba(245,240,236,0.92); }
+    body.light body::before { opacity: .6; }
+
+    /* "Most popular" in English */
+    body.lang-en .price-card.featured::before { content: 'Most popular'; }
+
+    /* ── NAV TOGGLES ── */
+    .nav-toggles { display:flex; align-items:center; gap:.45rem; }
+    .theme-toggle {
+      width:32px; height:32px; border-radius:8px;
+      background:transparent; border:1px solid var(--border2);
+      color:var(--white); font-size:.9rem; cursor:pointer;
+      display:flex; align-items:center; justify-content:center;
+      transition:all .2s; flex-shrink:0;
+    }
+    .theme-toggle:hover { background:var(--surface); }
+    .lang-toggle {
+      display:flex; align-items:center;
+      border:1px solid var(--border2); border-radius:8px; overflow:hidden;
+    }
+    .lang-btn {
+      background:transparent; border:none; color:var(--muted);
+      font-family:var(--font-b); font-size:.72rem; font-weight:700;
+      padding:.36rem .6rem; cursor:pointer; transition:all .2s;
+      letter-spacing:.05em; line-height:1;
+    }
+    .lang-btn.active { background:var(--orange); color:#fff; }
+    .lang-sep { color:var(--border2); font-size:.85rem; line-height:1; pointer-events:none; user-select:none; }
+    @media(max-width:600px) { .nav-cta { display:none; } }
   </style>
 </head>
 <body>
@@ -588,7 +814,15 @@
       <li><a href="#vai">Vai</a></li>
     </ul>
     <a href="#contacto" class="nav-cta">Solicitar demo</a>
-    <button class="hamburger">☰</button>
+    <div class="nav-toggles">
+      <button class="theme-toggle" id="themeToggle" onclick="toggleTheme()" title="Cambiar tema">☀️</button>
+      <div class="lang-toggle">
+        <button class="lang-btn active" id="btnEs" onclick="setLang('es')">ES</button>
+        <span class="lang-sep">|</span>
+        <button class="lang-btn" id="btnEn" onclick="setLang('en')">EN</button>
+      </div>
+    </div>
+    <button class="hamburger" id="hamburger" onclick="toggleMenu()">☰</button>
   </div>
 </nav>
 
@@ -623,115 +857,67 @@
     </div>
 
     <!-- Chat preview animado -->
-    <div class="chat-preview fade-up" style="animation-delay:.2s">
-      <div class="chat-header">
-        <div class="chat-avatar">
-          <svg viewBox="0 0 20 20" fill="none">
-            <circle cx="10" cy="10" r="3.2" fill="white" opacity=".9"/>
-            <path d="M10 2.5v3" stroke="white" stroke-width="1.5" stroke-linecap="round" opacity=".55"/>
-            <path d="M10 14.5v3" stroke="white" stroke-width="1.5" stroke-linecap="round" opacity=".55"/>
-            <path d="M2.5 10h3" stroke="white" stroke-width="1.5" stroke-linecap="round" opacity=".55"/>
-            <path d="M14.5 10h3" stroke="white" stroke-width="1.5" stroke-linecap="round" opacity=".55"/>
-          </svg>
+    <!-- Hero WA Chat — Barbería -->
+    <div class="fade-up" style="transition-delay:.15s;">
+      <div style="border-radius:22px;overflow:hidden;box-shadow:0 40px 100px rgba(0,0,0,0.7),0 0 0 0.5px rgba(255,107,26,0.18);font-family:-apple-system,Helvetica,sans-serif;max-width:340px;margin-left:auto;">
+        <!-- Status bar -->
+        <div style="background:#1f2c34;padding:5px 14px;display:flex;justify-content:space-between;align-items:center;">
+          <span style="font-size:.58rem;color:#8696a0;font-weight:600;">9:41</span>
+          <span style="font-size:.58rem;color:#8696a0;">▋▋▋ WiFi ●</span>
         </div>
-        <div class="chat-header-info">
-          <div class="chat-name">Vai · Restaurante La Brasa</div>
-          <div class="chat-live"><div class="live-dot"></div>En línea ahora</div>
-        </div>
-      </div>
-      <div class="chat-body" id="chatBody">
-        <div class="msg-vai"><div class="bubble-vai" id="m1">¡Hola! Soy Vai, el asistente de La Brasa. ¿Te ayudo con una reserva, la carta o cualquier duda? 👋</div></div>
-        <div class="msg-user"><div class="bubble-user" id="m2">Quiero reservar para 4 el sábado a las 21h</div></div>
-        <div class="msg-vai"><div class="bubble-vai" id="m3">Tengo disponible el sábado 12 a las 21:00 para 4 personas. ¿A nombre de quién y un teléfono de contacto?</div></div>
-        <div class="msg-user"><div class="bubble-user" id="m4">A nombre de Carlos, 612 345 678</div></div>
-        <div class="msg-vai"><div class="bubble-vai" id="m5">¡Perfecto Carlos! Reserva confirmada para el sábado 12 a las 21:00. Te enviamos recordatorio el viernes. ¡Hasta pronto! 🎉</div></div>
-        <div class="action-tag" id="m6">
-          <div class="action-dot"></div>
-          Reserva registrada · Equipo notificado · Recordatorio programado
-        </div>
-      </div>
-    </div>
-  </div>
-</section>
-
-<!-- BILLBOARD -->
-<section class="billboard-section">
-  <div class="s-inner">
-    <div class="billboard-card fade-up">
-      <div class="bb-left">
-        <div class="bb-eyebrow">
-          <div class="badge-dot"></div>
-          Vai — Asistente IA para tu negocio
-        </div>
-        <h2 class="bb-title">¿Tu negocio pierde<br>clientes <span>mientras duermes?</span></h2>
-        <p class="bb-sub">Vai responde, vende, reserva y gestiona todo por ti. En WhatsApp, web y redes. Sin que toques nada.</p>
-        <div class="bb-points">
-          <div class="bb-point"><span class="bb-check">✓</span> Atención al cliente 24/7 — incluso a las 3am</div>
-          <div class="bb-point"><span class="bb-check">✓</span> Cierra ventas y reservas automáticamente</div>
-          <div class="bb-point"><span class="bb-check">✓</span> Notifica a tu equipo en tiempo real</div>
-          <div class="bb-point"><span class="bb-check">✓</span> Se adapta a cualquier tipo de negocio</div>
-        </div>
-        <div class="bb-btns">
-          <a href="#contacto" class="btn-primary">Quiero Vai en mi negocio →</a>
-          <a href="#como-funciona" class="btn-secondary">Ver cómo funciona</a>
-        </div>
-      </div>
-      <div class="bb-right">
-        <div class="bb-phone">
-          <div class="bb-phone-inner">
-            <div class="bb-notch"></div>
-            <div class="bb-screen">
-              <div class="bb-wa-status">
-                <span>9:41</span>
-                <span>▋▋▋ WiFi ●</span>
-              </div>
-              <div class="bb-chat-header">
-                <div class="bb-chat-ico">✂️</div>
-                <div>
-                  <div class="bb-wa-name">Latin Barber Shop</div>
-                  <div class="bb-wa-status-txt">en línea</div>
-                </div>
-                <div class="bb-wa-icons">
-                  <span class="bb-wa-icon">📹</span>
-                  <span class="bb-wa-icon">📞</span>
-                </div>
-              </div>
-              <div class="bb-msgs">
-                <div class="bb-date-chip"><span>Hoy</span></div>
-                <div class="bb-msg-v">
-                  ¡Hola! Soy Vai, asistente de Latin Barber Shop ✂️ ¿Te agendo una cita?
-                  <div class="bb-msg-time-v">21:03</div>
-                </div>
-                <div class="bb-msg-u">
-                  Sí, para mañana
-                  <div class="bb-msg-time">21:04 <span class="bb-tick">✓✓</span></div>
-                </div>
-                <div class="bb-msg-v">
-                  Mañana está completo 😅 ¿El martes? Tengo 11:00 o 18:30
-                  <div class="bb-msg-time-v">21:04</div>
-                </div>
-                <div class="bb-msg-u">
-                  Las 18:30 perfecto
-                  <div class="bb-msg-time">21:05 <span class="bb-tick">✓✓</span></div>
-                </div>
-                <div class="bb-msg-v">
-                  ✅ Listo! Martes 18:30 con Carlos. ¡Hasta entonces!
-                  <div class="bb-msg-time-v">21:05</div>
-                </div>
-                <div class="bb-action-mini">🔒 Mensajes cifrados de extremo a extremo</div>
-              </div>
-              <div class="bb-wa-bar">
-                <div class="bb-wa-input">Escribe un mensaje</div>
-                <div class="bb-wa-send">🎤</div>
-              </div>
-            </div>
+        <!-- Header -->
+        <div style="background:#202c33;display:flex;align-items:center;gap:10px;padding:10px 14px;">
+          <div style="width:38px;height:38px;border-radius:50%;background:var(--orange);display:flex;align-items:center;justify-content:center;font-size:.95rem;flex-shrink:0;box-shadow:0 0 12px rgba(255,107,26,0.4);">✂️</div>
+          <div style="flex:1;">
+            <div style="font-size:.82rem;font-weight:600;color:#e9edef;">Vai · Latin Barber Shop</div>
+            <div style="font-size:.62rem;color:#25d366;">● en línea</div>
           </div>
-          <div class="bb-phone-glow"></div>
+          <div style="display:flex;gap:18px;color:#8696a0;font-size:.9rem;"><span>📹</span><span>📞</span><span style="font-weight:700;">⋮</span></div>
         </div>
-        <div class="bb-stats-row">
-          <div class="bb-stat-inline"><div class="bb-stat-num">24/7</div><div class="bb-stat-lbl">Siempre activo</div></div>
-          <div class="bb-stat-inline"><div class="bb-stat-num">8 seg</div><div class="bb-stat-lbl">Respuesta</div></div>
-          <div class="bb-stat-inline"><div class="bb-stat-num">+40%</div><div class="bb-stat-lbl">Más ventas</div></div>
+        <!-- Messages -->
+        <div style="background:#0d1117;background-image:url('data:image/svg+xml,%3Csvg%20width%3D%2260%22%20height%3D%2260%22%20viewBox%3D%220%200%2060%2060%22%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%3E%3Cg%20fill%3D%22none%22%20fill-rule%3D%22evenodd%22%3E%3Cg%20fill%3D%22%23ffffff%22%20fill-opacity%3D%220.015%22%3E%3Cpath%20d%3D%22M36%2034v-4h-2v4h-4v2h4v4h2v-4h4v-2h-4zm0-30V0h-2v4h-4v2h4v4h2V6h4V4h-4zM6%2034v-4H4v4H0v2h4v4h2v-4h4v-2H6zM6%204V0H4v4H0v2h4v4h2V6h4V4H6z%22%2F%3E%3C%2Fg%3E%3C%2Fg%3E%3C%2Fsvg%3E');padding:.9rem;display:flex;flex-direction:column;gap:7px;min-height:310px;">
+          <div style="text-align:center;margin:2px 0 6px;"><span style="background:#182229;color:#8696a0;font-size:.58rem;padding:3px 10px;border-radius:6px;">Hoy</span></div>
+
+          <div id="hm1" style="background:#202c33;border-radius:0 8px 8px 8px;padding:8px 10px 5px;font-size:.71rem;color:#e9edef;line-height:1.55;max-width:90%;position:relative;opacity:0;transform:translateY(6px);transition:opacity .45s ease,transform .45s ease;">
+            <div style="position:absolute;left:-6px;top:0;border:6px solid transparent;border-right-color:#202c33;border-top-color:#202c33;"></div>
+            ¡Hola! Soy Vai ✂️ ¿Te agendo una cita con Carlos?
+            <div style="font-size:.53rem;color:#8696a0;text-align:right;margin-top:3px;">21:03</div>
+          </div>
+
+          <div id="hm2" style="background:#005c4b;border-radius:8px 0 8px 8px;padding:8px 10px 5px;font-size:.71rem;color:#e9edef;line-height:1.55;max-width:78%;align-self:flex-end;position:relative;opacity:0;transform:translateY(6px);transition:opacity .45s ease,transform .45s ease;">
+            <div style="position:absolute;right:-6px;top:0;border:6px solid transparent;border-left-color:#005c4b;border-top-color:#005c4b;"></div>
+            Sí, ¿para cuándo hay?
+            <div style="font-size:.53rem;color:#8696a0;text-align:right;margin-top:3px;">21:04 <span style="color:#53bdeb;">✓✓</span></div>
+          </div>
+
+          <div id="hm3" style="background:#202c33;border-radius:0 8px 8px 8px;padding:8px 10px 5px;font-size:.71rem;color:#e9edef;line-height:1.55;max-width:90%;position:relative;opacity:0;transform:translateY(6px);transition:opacity .45s ease,transform .45s ease;">
+            <div style="position:absolute;left:-6px;top:0;border:6px solid transparent;border-right-color:#202c33;border-top-color:#202c33;"></div>
+            Carlos tiene disponible el <strong style="color:#e9edef;">martes</strong> 👇<br>🕚 <strong style="color:#e9edef;">11:00</strong> &nbsp;·&nbsp; 🕡 <strong style="color:#e9edef;">18:30</strong><br>¿Cuál te viene mejor?
+            <div style="font-size:.53rem;color:#8696a0;text-align:right;margin-top:3px;">21:04</div>
+          </div>
+
+          <div id="hm4" style="background:#005c4b;border-radius:8px 0 8px 8px;padding:8px 10px 5px;font-size:.71rem;color:#e9edef;line-height:1.55;max-width:68%;align-self:flex-end;position:relative;opacity:0;transform:translateY(6px);transition:opacity .45s ease,transform .45s ease;">
+            <div style="position:absolute;right:-6px;top:0;border:6px solid transparent;border-left-color:#005c4b;border-top-color:#005c4b;"></div>
+            Las 18:30 🙌
+            <div style="font-size:.53rem;color:#8696a0;text-align:right;margin-top:3px;">21:05 <span style="color:#53bdeb;">✓✓</span></div>
+          </div>
+
+          <div id="hm5" style="background:#202c33;border-radius:0 8px 8px 8px;padding:8px 10px 5px;font-size:.71rem;color:#e9edef;line-height:1.55;max-width:90%;position:relative;opacity:0;transform:translateY(6px);transition:opacity .45s ease,transform .45s ease;">
+            <div style="position:absolute;left:-6px;top:0;border:6px solid transparent;border-right-color:#202c33;border-top-color:#202c33;"></div>
+            ✅ ¡Listo! <strong style="color:#e9edef;">Martes 18:30 con Carlos.</strong><br>Te mando recordatorio el día antes. ¡Hasta entonces! 💈
+            <div style="font-size:.53rem;color:#8696a0;text-align:right;margin-top:3px;">21:05</div>
+          </div>
+
+          <div id="hm6" style="font-size:.58rem;color:#8696a0;text-align:center;padding:4px 12px;background:rgba(0,0,0,0.38);border-radius:8px;align-self:center;margin-top:2px;opacity:0;transition:opacity .45s ease;">
+            🔒 Cita registrada · Carlos notificado · Recordatorio programado
+          </div>
+        </div>
+        <!-- Input -->
+        <div style="background:#202c33;padding:8px 10px;display:flex;align-items:center;gap:8px;">
+          <span style="color:#8696a0;font-size:.95rem;">😊</span>
+          <div style="flex:1;background:#2a3942;border-radius:20px;padding:7px 14px;font-size:.66rem;color:#8696a0;">Escribe un mensaje</div>
+          <span style="color:#8696a0;font-size:.9rem;">📎</span>
+          <div style="width:34px;height:34px;border-radius:50%;background:#00a884;display:flex;align-items:center;justify-content:center;font-size:.8rem;">🎤</div>
         </div>
       </div>
     </div>
@@ -741,7 +927,7 @@
 <!-- PROBLEMA -->
 <section class="problem-section">
   <div class="s-inner">
-    <div class="s-label fade-up">// El problema</div>
+    <div class="s-label fade-up">El problema</div>
     <h2 class="s-title fade-up">Tu negocio pierde dinero cada día</h2>
     <p class="s-sub fade-up">Cada mensaje sin respuesta a las 11pm es una venta perdida. Para siempre.</p>
     <div class="problem-grid">
@@ -767,7 +953,7 @@
 <!-- CÓMO FUNCIONA -->
 <section id="como-funciona">
   <div class="s-inner">
-    <div class="s-label fade-up">// Cómo funciona</div>
+    <div class="s-label fade-up">Cómo funciona</div>
     <h2 class="s-title fade-up">El ciclo completo, automatizado</h2>
     <p class="s-sub fade-up">Vai no solo responde — gestiona todo el flujo de principio a fin.</p>
     <div class="flow-grid">
@@ -803,15 +989,15 @@
 <!-- INDUSTRIAS -->
 <section id="industrias" class="industries-section">
   <div class="s-inner">
-    <div class="s-label fade-up">// Industrias</div>
+    <div class="s-label fade-up">Industrias</div>
     <h2 class="s-title fade-up">Se adapta a tu negocio</h2>
     <p class="s-sub fade-up">No es una solución genérica. Vai aprende tu negocio, tu tono y tus procesos.</p>
 
     <div class="industry-tabs fade-up">
-      <button class="tab-btn active" onclick="showIndustry('restaurante', this)">🍽️ Restaurante</button>
-      <button class="tab-btn" onclick="showIndustry('clinica', this)">🏥 Clínica</button>
-      <button class="tab-btn" onclick="showIndustry('tienda', this)">🛍️ Tienda</button>
-      <button class="tab-btn" onclick="showIndustry('inmobiliaria', this)">🏠 Inmobiliaria</button>
+      <button class="tab-btn active" onclick="showIndustry('restaurante', this)">Restaurante</button>
+      <button class="tab-btn" onclick="showIndustry('clinica', this)">Clínica</button>
+      <button class="tab-btn" onclick="showIndustry('tienda', this)">Tienda</button>
+      <button class="tab-btn" onclick="showIndustry('inmobiliaria', this)">Inmobiliaria</button>
     </div>
 
     <!-- Restaurante -->
@@ -827,19 +1013,23 @@
           <li><div class="feat-dot"></div>Notificación directa a cocina y sala</li>
         </ul>
       </div>
-      <div class="industry-chat">
-        <div class="ind-chat-header">
-          <div class="ind-chat-ico"><svg viewBox="0 0 20 20" fill="none"><circle cx="10" cy="10" r="3" fill="white" opacity=".9"/><path d="M10 2.5v3" stroke="white" stroke-width="1.5" stroke-linecap="round" opacity=".5"/><path d="M10 14.5v3" stroke="white" stroke-width="1.5" stroke-linecap="round" opacity=".5"/><path d="M2.5 10h3" stroke="white" stroke-width="1.5" stroke-linecap="round" opacity=".5"/><path d="M14.5 10h3" stroke="white" stroke-width="1.5" stroke-linecap="round" opacity=".5"/></svg></div>
-          <div><div class="ind-chat-name">Vai · La Trattoria</div><div class="ind-chat-status"><div class="live-dot"></div>En línea</div></div>
+      <div class="wa-wrap">
+        <div class="wa-status-bar"><span>21:30</span><span>▋▋▋ WiFi ●</span></div>
+        <div class="wa-header">
+          <div class="wa-avatar">🍷</div>
+          <div><div class="wa-contact-name">Vai · La Trattoria</div><div class="wa-contact-status">● en línea</div></div>
+          <div class="wa-icons"><span>📹</span><span>📞</span><span>⋮</span></div>
         </div>
-        <div class="ind-chat-body">
-          <div class="ind-bv">¡Hola! Soy Vai. ¿Te ayudo con una reserva o consultas la carta de hoy?</div>
-          <div class="ind-bu">Mesa para 2 esta noche a las 21:30</div>
-          <div class="ind-bv">Tengo disponible esta noche a las 21:30. ¿A nombre de quién confirmo la reserva?</div>
-          <div class="ind-bu">Ana García</div>
-          <div class="ind-bv">¡Confirmado, Ana! Mesa para 2 esta noche a las 21:30. Te esperamos 🍷</div>
-          <div class="ind-action"><div class="action-dot"></div>Reserva confirmada · Sala notificada</div>
+        <div class="wa-body">
+          <div class="wa-date"><span>Hoy</span></div>
+          <div class="wa-msg-v">¡Hola! Soy Vai 🍷 ¿Te ayudo con una reserva o consultas la carta?<div class="wa-time">21:30</div></div>
+          <div class="wa-msg-u">Mesa para 2 esta noche a las 21:30<div class="wa-time">21:31 <span class="wa-tick">✓✓</span></div></div>
+          <div class="wa-msg-v">Tengo disponible esta noche a las 21:30. ¿A nombre de quién confirmo?<div class="wa-time">21:31</div></div>
+          <div class="wa-msg-u">Ana García<div class="wa-time">21:31 <span class="wa-tick">✓✓</span></div></div>
+          <div class="wa-msg-v">✅ <strong>Mesa para 2 a las 21:30, Ana.</strong> ¡Te esperamos esta noche!<div class="wa-time">21:31</div></div>
+          <div class="wa-action">🔒 Reserva confirmada · Sala notificada</div>
         </div>
+        <div class="wa-footer"><div class="wa-input">Escribe un mensaje</div><div class="wa-send">🎤</div></div>
       </div>
     </div>
 
@@ -847,7 +1037,7 @@
     <div class="industry-content" id="ind-clinica">
       <div class="industry-info">
         <h3>Clínicas & consultorios</h3>
-        <p>Vai gestiona citas, recordatorios de medicación y consultas médicas básicas. Tu recepcionista se libera de llamadas rutinarias.</p>
+        <p>Vai gestiona citas, recordatorios y consultas básicas. Tu recepcionista se libera de llamadas rutinarias.</p>
         <ul class="industry-features">
           <li><div class="feat-dot"></div>Agenda de citas en tiempo real</li>
           <li><div class="feat-dot"></div>Recordatorios automáticos de citas</li>
@@ -856,19 +1046,23 @@
           <li><div class="feat-dot"></div>Seguimiento post-consulta</li>
         </ul>
       </div>
-      <div class="industry-chat">
-        <div class="ind-chat-header">
-          <div class="ind-chat-ico"><svg viewBox="0 0 20 20" fill="none"><circle cx="10" cy="10" r="3" fill="white" opacity=".9"/><path d="M10 2.5v3" stroke="white" stroke-width="1.5" stroke-linecap="round" opacity=".5"/><path d="M10 14.5v3" stroke="white" stroke-width="1.5" stroke-linecap="round" opacity=".5"/><path d="M2.5 10h3" stroke="white" stroke-width="1.5" stroke-linecap="round" opacity=".5"/><path d="M14.5 10h3" stroke="white" stroke-width="1.5" stroke-linecap="round" opacity=".5"/></svg></div>
-          <div><div class="ind-chat-name">Vai · Clínica Salud+</div><div class="ind-chat-status"><div class="live-dot"></div>En línea</div></div>
+      <div class="wa-wrap">
+        <div class="wa-status-bar"><span>10:02</span><span>▋▋▋ WiFi ●</span></div>
+        <div class="wa-header">
+          <div class="wa-avatar">🩺</div>
+          <div><div class="wa-contact-name">Vai · Clínica Salud+</div><div class="wa-contact-status">● en línea</div></div>
+          <div class="wa-icons"><span>📹</span><span>📞</span><span>⋮</span></div>
         </div>
-        <div class="ind-chat-body">
-          <div class="ind-bv">Hola, soy Vai de Clínica Salud+. ¿En qué puedo ayudarte hoy?</div>
-          <div class="ind-bu">Necesito cita con el Dr. Martín para esta semana</div>
-          <div class="ind-bv">El Dr. Martín tiene disponibilidad el miércoles 14 a las 10:00 o el viernes 16 a las 16:30. ¿Cuál prefieres?</div>
-          <div class="ind-bu">El miércoles perfecto</div>
-          <div class="ind-bv">Cita confirmada para el miércoles 14 a las 10:00. Recibirás recordatorio 24h antes. 🩺</div>
-          <div class="ind-action"><div class="action-dot"></div>Cita agendada · Dr. Martín notificado</div>
+        <div class="wa-body">
+          <div class="wa-date"><span>Hoy</span></div>
+          <div class="wa-msg-v">Hola, soy Vai 🩺 ¿En qué puedo ayudarte hoy?<div class="wa-time">10:02</div></div>
+          <div class="wa-msg-u">Necesito cita con el Dr. Martín esta semana<div class="wa-time">10:03 <span class="wa-tick">✓✓</span></div></div>
+          <div class="wa-msg-v">El Dr. Martín tiene disponible:<br>📅 <strong>Miércoles 14</strong> a las 10:00<br>📅 <strong>Viernes 16</strong> a las 16:30<br>¿Cuál prefieres?<div class="wa-time">10:03</div></div>
+          <div class="wa-msg-u">El miércoles perfecto 👍<div class="wa-time">10:04 <span class="wa-tick">✓✓</span></div></div>
+          <div class="wa-msg-v">✅ <strong>Cita confirmada, miércoles 14 a las 10:00.</strong> Recibirás recordatorio 24h antes.<div class="wa-time">10:04</div></div>
+          <div class="wa-action">🔒 Cita agendada · Dr. Martín notificado</div>
         </div>
+        <div class="wa-footer"><div class="wa-input">Escribe un mensaje</div><div class="wa-send">🎤</div></div>
       </div>
     </div>
 
@@ -885,19 +1079,23 @@
           <li><div class="feat-dot"></div>Recomendaciones personalizadas</li>
         </ul>
       </div>
-      <div class="industry-chat">
-        <div class="ind-chat-header">
-          <div class="ind-chat-ico"><svg viewBox="0 0 20 20" fill="none"><circle cx="10" cy="10" r="3" fill="white" opacity=".9"/><path d="M10 2.5v3" stroke="white" stroke-width="1.5" stroke-linecap="round" opacity=".5"/><path d="M10 14.5v3" stroke="white" stroke-width="1.5" stroke-linecap="round" opacity=".5"/><path d="M2.5 10h3" stroke="white" stroke-width="1.5" stroke-linecap="round" opacity=".5"/><path d="M14.5 10h3" stroke="white" stroke-width="1.5" stroke-linecap="round" opacity=".5"/></svg></div>
-          <div><div class="ind-chat-name">Vai · StyleShop</div><div class="ind-chat-status"><div class="live-dot"></div>En línea</div></div>
+      <div class="wa-wrap">
+        <div class="wa-status-bar"><span>23:14</span><span>▋▋▋ WiFi ●</span></div>
+        <div class="wa-header">
+          <div class="wa-avatar">👟</div>
+          <div><div class="wa-contact-name">Vai · StyleShop</div><div class="wa-contact-status">● en línea</div></div>
+          <div class="wa-icons"><span>📹</span><span>📞</span><span>⋮</span></div>
         </div>
-        <div class="ind-chat-body">
-          <div class="ind-bv">¡Hola! Soy Vai de StyleShop. ¿Qué estás buscando hoy?</div>
-          <div class="ind-bu">Zapatillas blancas talla 42, precio máximo 80€</div>
-          <div class="ind-bv">Tengo 3 opciones perfectas para ti entre 45€ y 79€. ¿Te las envío con fotos y tallas disponibles?</div>
-          <div class="ind-bu">Sí, la segunda me gusta, la quiero</div>
-          <div class="ind-bv">¡Perfecto! Te mando el enlace de pago seguro. Entrega en 24-48h 📦</div>
-          <div class="ind-action"><div class="action-dot"></div>Pedido creado · Almacén notificado</div>
+        <div class="wa-body">
+          <div class="wa-date"><span>Hoy</span></div>
+          <div class="wa-msg-v">¡Hola! Soy Vai 👟 ¿Qué estás buscando hoy?<div class="wa-time">23:14</div></div>
+          <div class="wa-msg-u">Zapatillas blancas talla 42, máximo 80€<div class="wa-time">23:14 <span class="wa-tick">✓✓</span></div></div>
+          <div class="wa-msg-v">Tengo 3 opciones perfectas entre 45€ y 79€. ¿Te las envío con fotos?<div class="wa-time">23:15</div></div>
+          <div class="wa-msg-u">Sí, la segunda me gusta, la quiero 🙌<div class="wa-time">23:15 <span class="wa-tick">✓✓</span></div></div>
+          <div class="wa-msg-v">✅ <strong>Pedido listo.</strong> Te mando el enlace de pago seguro. Entrega en 24-48h 📦<div class="wa-time">23:15</div></div>
+          <div class="wa-action">🔒 Pedido creado · Almacén notificado</div>
         </div>
+        <div class="wa-footer"><div class="wa-input">Escribe un mensaje</div><div class="wa-send">🎤</div></div>
       </div>
     </div>
 
@@ -905,7 +1103,7 @@
     <div class="industry-content" id="ind-inmobiliaria">
       <div class="industry-info">
         <h3>Inmobiliarias & agencias</h3>
-        <p>Vai cualifica leads, agenda visitas y envía fichas de inmuebles automáticamente. Tu agente solo atiende a quien ya está listo para comprar.</p>
+        <p>Vai cualifica leads, agenda visitas y envía fichas automáticamente. Tu agente solo atiende a quien está listo para comprar.</p>
         <ul class="industry-features">
           <li><div class="feat-dot"></div>Cualificación automática de leads</li>
           <li><div class="feat-dot"></div>Envío de fichas y fotografías</li>
@@ -914,19 +1112,23 @@
           <li><div class="feat-dot"></div>Alertas de nuevas propiedades</li>
         </ul>
       </div>
-      <div class="industry-chat">
-        <div class="ind-chat-header">
-          <div class="ind-chat-ico"><svg viewBox="0 0 20 20" fill="none"><circle cx="10" cy="10" r="3" fill="white" opacity=".9"/><path d="M10 2.5v3" stroke="white" stroke-width="1.5" stroke-linecap="round" opacity=".5"/><path d="M10 14.5v3" stroke="white" stroke-width="1.5" stroke-linecap="round" opacity=".5"/><path d="M2.5 10h3" stroke="white" stroke-width="1.5" stroke-linecap="round" opacity=".5"/><path d="M14.5 10h3" stroke="white" stroke-width="1.5" stroke-linecap="round" opacity=".5"/></svg></div>
-          <div><div class="ind-chat-name">Vai · Inmobiliaria Clave</div><div class="ind-chat-status"><div class="live-dot"></div>En línea</div></div>
+      <div class="wa-wrap">
+        <div class="wa-status-bar"><span>19:47</span><span>▋▋▋ WiFi ●</span></div>
+        <div class="wa-header">
+          <div class="wa-avatar">🏠</div>
+          <div><div class="wa-contact-name">Vai · Inmobiliaria Clave</div><div class="wa-contact-status">● en línea</div></div>
+          <div class="wa-icons"><span>📹</span><span>📞</span><span>⋮</span></div>
         </div>
-        <div class="ind-chat-body">
-          <div class="ind-bv">Hola, soy Vai de Inmobiliaria Clave. ¿Buscas comprar, alquilar o vender?</div>
-          <div class="ind-bu">Busco piso de alquiler en Sevilla, máximo 900€, 2 habitaciones</div>
-          <div class="ind-bv">Tengo 4 pisos que encajan perfectamente. ¿Quieres que te envíe las fichas con fotos ahora?</div>
-          <div class="ind-bu">Sí por favor, el tercero me interesa mucho</div>
-          <div class="ind-bv">¡Perfecto! Puedo agendarte visita para mañana o el jueves. ¿Qué día te viene mejor?</div>
-          <div class="ind-action"><div class="action-dot"></div>Lead cualificado · Agente asignado</div>
+        <div class="wa-body">
+          <div class="wa-date"><span>Hoy</span></div>
+          <div class="wa-msg-v">Hola, soy Vai 🏠 ¿Buscas comprar, alquilar o vender?<div class="wa-time">19:47</div></div>
+          <div class="wa-msg-u">Alquiler en Sevilla, máximo 900€, 2 habitaciones<div class="wa-time">19:48 <span class="wa-tick">✓✓</span></div></div>
+          <div class="wa-msg-v">Tengo 4 pisos perfectos. ¿Te envío las fichas con fotos ahora?<div class="wa-time">19:48</div></div>
+          <div class="wa-msg-u">Sí, el tercero me interesa mucho 👀<div class="wa-time">19:48 <span class="wa-tick">✓✓</span></div></div>
+          <div class="wa-msg-v">✅ Te agendo visita — ¿mañana o el jueves?<div class="wa-time">19:49</div></div>
+          <div class="wa-action">🔒 Lead cualificado · Agente asignado</div>
         </div>
+        <div class="wa-footer"><div class="wa-input">Escribe un mensaje</div><div class="wa-send">🎤</div></div>
       </div>
     </div>
   </div>
@@ -935,7 +1137,7 @@
 <!-- VAI -->
 <section id="vai" class="vai-section">
   <div class="s-inner">
-    <div class="s-label fade-up">// El asistente</div>
+    <div class="s-label fade-up">El asistente</div>
     <div class="fade-up">
       <div class="vai-avatar" style="margin:0 auto 1.5rem;">
         <div class="vai-glow"></div>
@@ -954,32 +1156,32 @@
     </div>
     <div class="vai-features-grid">
       <div class="vai-feat fade-up">
-        <div class="vai-feat-icon">💬</div>
+        <div style="font-size:.68rem;color:var(--orange);font-weight:700;letter-spacing:.1em;text-transform:uppercase;margin-bottom:.8rem;">01 — Canales</div>
         <h4>Multicanal</h4>
         <p>WhatsApp, web, Instagram, Facebook Messenger. Vai está en todos los canales donde están tus clientes.</p>
       </div>
       <div class="vai-feat fade-up">
-        <div class="vai-feat-icon">⚡</div>
+        <div style="font-size:.68rem;color:var(--orange);font-weight:700;letter-spacing:.1em;text-transform:uppercase;margin-bottom:.8rem;">02 — Velocidad</div>
         <h4>Respuesta en 8 segundos</h4>
         <p>Vai responde antes de que el cliente se vaya. Sin tiempos de espera, sin colas, sin demoras.</p>
       </div>
       <div class="vai-feat fade-up">
-        <div class="vai-feat-icon">🔗</div>
+        <div style="font-size:.68rem;color:var(--orange);font-weight:700;letter-spacing:.1em;text-transform:uppercase;margin-bottom:.8rem;">03 — Equipo</div>
         <h4>Integrado con tu equipo</h4>
         <p>Notifica a despachadores, vendedores o quién corresponda. Todos informados en tiempo real.</p>
       </div>
       <div class="vai-feat fade-up">
-        <div class="vai-feat-icon">🧠</div>
+        <div style="font-size:.68rem;color:var(--orange);font-weight:700;letter-spacing:.1em;text-transform:uppercase;margin-bottom:.8rem;">04 — IA</div>
         <h4>Aprende tu negocio</h4>
         <p>Vai se entrena con tu catálogo, precios, horarios y procesos. Habla como tú, no como un robot.</p>
       </div>
       <div class="vai-feat fade-up">
-        <div class="vai-feat-icon">📊</div>
+        <div style="font-size:.68rem;color:var(--orange);font-weight:700;letter-spacing:.1em;text-transform:uppercase;margin-bottom:.8rem;">05 — Control</div>
         <h4>Panel unificado</h4>
         <p>Todas las conversaciones, ventas y métricas en un solo lugar. Siempre sabes qué está pasando.</p>
       </div>
       <div class="vai-feat fade-up">
-        <div class="vai-feat-icon">🎯</div>
+        <div style="font-size:.68rem;color:var(--orange);font-weight:700;letter-spacing:.1em;text-transform:uppercase;margin-bottom:.8rem;">06 — Sector</div>
         <h4>100% personalizado</h4>
         <p>No es una solución genérica. Vai se adapta a tu sector, tu tono y tus flujos específicos.</p>
       </div>
@@ -990,50 +1192,239 @@
 <!-- PRICING -->
 <section id="precios" class="pricing-section">
   <div class="s-inner">
-    <div class="s-label fade-up">// Precios</div>
-    <h2 class="s-title fade-up">Claro, sin sorpresas</h2>
-    <p class="s-sub fade-up">Prueba 14 días gratis, sin tarjeta de crédito. Cancela cuando quieras.</p>
+    <div class="s-label fade-up">Precios</div>
+    <h2 class="s-title fade-up">Claro desde el primer día</h2>
+    <p class="s-sub fade-up">Dos pagos, cero sorpresas — un setup único para configurar Vai en tu negocio, y una mensualidad para mantenerlo funcionando 24/7.</p>
+
+    <!-- Flow -->
+    <div class="pricing-flow fade-up">
+      <div class="pflow-step">
+        <div class="pflow-num">1</div>
+        <div class="pflow-lbl">Eliges tu plan</div>
+      </div>
+      <div class="pflow-arrow">→</div>
+      <div class="pflow-step">
+        <div class="pflow-num">2</div>
+        <div class="pflow-lbl">Setup único</div>
+        <div class="pflow-val">Pago único</div>
+      </div>
+      <div class="pflow-arrow">→</div>
+      <div class="pflow-step">
+        <div class="pflow-num">3</div>
+        <div class="pflow-lbl">Vai activo en 48h</div>
+      </div>
+      <div class="pflow-arrow">→</div>
+      <div class="pflow-step">
+        <div class="pflow-num">4</div>
+        <div class="pflow-lbl">Mensualidad</div>
+        <div class="pflow-val">Desde el mes 1</div>
+      </div>
+    </div>
+
     <div class="pricing-grid">
+
       <div class="price-card fade-up">
-        <div class="price-name">Básico</div>
-        <div class="price-amount">€99<span>/mes</span></div>
-        <div class="price-desc">Para negocios que quieren empezar a automatizar su atención al cliente.</div>
+        <div class="price-name">Esencial</div>
+        <div class="price-two">
+          <div class="price-row-two">
+            <span class="price-type-lbl">Setup</span>
+            <span class="price-amount-new">€1.000</span>
+            <span class="price-once">pago único</span>
+          </div>
+          <div class="price-divider-thin"></div>
+          <div class="price-row-two">
+            <span class="price-type-lbl">Mensual</span>
+            <span class="price-amount-new small">€100</span>
+            <span class="price-once">/mes</span>
+          </div>
+        </div>
+        <div class="price-desc">Para negocios que quieren dejar de perder clientes fuera de horario.</div>
         <ul class="price-features">
-          <li>1 canal (WhatsApp o web)</li>
-          <li>Hasta 500 conversaciones/mes</li>
-          <li>Respuestas automatizadas 24/7</li>
+          <li>1 canal — WhatsApp o web</li>
+          <li>Hasta 300 conversaciones/mes</li>
+          <li>Respuestas automáticas 24/7</li>
           <li>Panel de control básico</li>
           <li>Soporte por email</li>
         </ul>
-        <a href="#contacto" class="price-btn outline">Empezar gratis</a>
+        <a href="#contacto" class="price-btn outline">Solicitar demo</a>
       </div>
-      <div class="price-card featured fade-up">
+
+      <div class="price-card featured fade-up" style="transition-delay:.1s">
         <div class="price-name">Profesional</div>
-        <div class="price-amount">€249<span>/mes</span></div>
-        <div class="price-desc">Para negocios que quieren el ecosistema completo de gestión con IA.</div>
+        <div class="price-two">
+          <div class="price-row-two">
+            <span class="price-type-lbl">Setup</span>
+            <span class="price-amount-new">€1.800</span>
+            <span class="price-once">pago único</span>
+          </div>
+          <div class="price-divider-thin"></div>
+          <div class="price-row-two">
+            <span class="price-type-lbl">Mensual</span>
+            <span class="price-amount-new small">€120</span>
+            <span class="price-once">/mes</span>
+          </div>
+        </div>
+        <div class="price-desc">El ecosistema completo. Vai gestiona, vende, reserva y notifica a tu equipo.</div>
         <ul class="price-features">
-          <li>Todos los canales incluidos</li>
+          <li>Todos los canales — WA, web, redes</li>
           <li>Conversaciones ilimitadas</li>
           <li>Gestión completa de operaciones</li>
-          <li>Notificaciones al equipo</li>
-          <li>Integraciones con tu CRM/POS</li>
+          <li>Notificaciones al equipo en tiempo real</li>
+          <li>Panel unificado + métricas</li>
           <li>Soporte prioritario 24/7</li>
         </ul>
         <a href="#contacto" class="price-btn solid">Solicitar demo</a>
       </div>
-      <div class="price-card fade-up">
+
+      <div class="price-card fade-up" style="transition-delay:.2s">
         <div class="price-name">Empresa</div>
-        <div class="price-amount">Custom</div>
-        <div class="price-desc">Para cadenas, franquicias y empresas con múltiples locales o flujos complejos.</div>
+        <div class="price-two">
+          <div class="price-row-two">
+            <span class="price-type-lbl">Setup</span>
+            <span class="price-amount-new" style="font-size:1rem;">A medida</span>
+          </div>
+          <div class="price-divider-thin"></div>
+          <div class="price-row-two">
+            <span class="price-type-lbl">Mensual</span>
+            <span class="price-amount-new small" style="font-size:.9rem;">A medida</span>
+          </div>
+        </div>
+        <div class="price-desc">Para cadenas, franquicias y negocios con múltiples locales o flujos complejos.</div>
         <ul class="price-features">
           <li>Todo lo de Profesional</li>
-          <li>Múltiples locales/sucursales</li>
-          <li>IA entrenada a medida</li>
+          <li>Múltiples locales y sucursales</li>
+          <li>IA entrenada completamente a medida</li>
           <li>API propia y webhooks</li>
           <li>SLA garantizado</li>
           <li>Account manager dedicado</li>
         </ul>
         <a href="#contacto" class="price-btn outline">Hablar con ventas</a>
+      </div>
+
+    </div>
+
+    <!-- Setup note -->
+    <div class="setup-note fade-up">
+      <div class="setup-note-icon">💡</div>
+      <div class="setup-note-text">
+        <strong>¿Qué incluye el setup?</strong> La configuración completa de Vai para tu negocio — entrenamiento con tu catálogo, precios, horarios y flujos, integración con WhatsApp Business y puesta en marcha. En menos de 48 horas Vai está activo y trabajando. <strong>Sin permanencia mínima. Sin costes ocultos.</strong>
+      </div>
+    </div>
+
+  </div>
+</section>
+
+<!-- FAQ -->
+<section class="faq-section">
+  <div class="s-inner">
+    <div class="s-label fade-up">Preguntas frecuentes</div>
+    <h2 class="s-title fade-up">Todo lo que te estás preguntando</h2>
+    <p class="s-sub fade-up">Sin letra pequeña. Sin tecnicismos. Las dudas reales de los dueños de negocio.</p>
+    <div class="faq-list fade-up">
+
+      <div class="faq-item open">
+        <div class="faq-q" onclick="toggleFaq(this)">
+          ¿Cuánto tarda en estar funcionando en mi negocio?
+          <div class="faq-icon">+</div>
+        </div>
+        <div class="faq-a">
+          En la mayoría de negocios, <strong>Vai está activo en menos de 48 horas.</strong> Nosotros nos encargamos de toda la configuración — tú solo nos cuentas cómo funciona tu negocio, tus precios, horarios y procesos. El resto lo hacemos nosotros.<br>
+          <span class="faq-tag">Sin instalaciones · Sin técnicos · Sin complicaciones</span>
+        </div>
+      </div>
+
+      <div class="faq-item">
+        <div class="faq-q" onclick="toggleFaq(this)">
+          ¿Qué pasa si Vai se equivoca con un cliente?
+          <div class="faq-icon">+</div>
+        </div>
+        <div class="faq-a">
+          Vai está entrenado específicamente para tu negocio, lo que minimiza los errores. Pero si algo sale mal, <strong>tú siempre puedes intervenir</strong> desde el panel de control. Además, Vai sabe cuándo una situación supera su capacidad y avisa a una persona de tu equipo al instante.
+        </div>
+      </div>
+
+      <div class="faq-item">
+        <div class="faq-q" onclick="toggleFaq(this)">
+          ¿Puedo desactivarlo o pausarlo cuando quiera?
+          <div class="faq-icon">+</div>
+        </div>
+        <div class="faq-a">
+          Sí, tienes control total. Puedes <strong>pausar Vai en cualquier momento</strong>, activarlo solo en ciertos horarios, o hacer que transfiera conversaciones a una persona de tu equipo con un clic. Tú mandas siempre.
+        </div>
+      </div>
+
+      <div class="faq-item">
+        <div class="faq-q" onclick="toggleFaq(this)">
+          ¿Vai reemplaza a mis empleados?
+          <div class="faq-icon">+</div>
+        </div>
+        <div class="faq-a">
+          No. Vai <strong>libera a tu equipo de las tareas repetitivas</strong> — responder siempre lo mismo, gestionar citas a mano, confirmar pedidos. Tu equipo se enfoca en lo que solo las personas pueden hacer: atender en persona, crear relaciones, resolver situaciones complejas.
+        </div>
+      </div>
+
+      <div class="faq-item">
+        <div class="faq-q" onclick="toggleFaq(this)">
+          ¿Funciona con mi WhatsApp Business actual?
+          <div class="faq-icon">+</div>
+        </div>
+        <div class="faq-a">
+          Sí. Vai se integra con la <strong>API oficial de WhatsApp Business</strong> — el mismo número que ya tienes, sin cambiar nada. También funciona en tu web, Instagram Direct y Facebook Messenger de forma simultánea.
+        </div>
+      </div>
+
+      <div class="faq-item">
+        <div class="faq-q" onclick="toggleFaq(this)">
+          ¿Mis clientes sabrán que hablan con una IA?
+          <div class="faq-icon">+</div>
+        </div>
+        <div class="faq-a">
+          Vai habla con el tono y el estilo de tu negocio — no suena a robot. La <strong>transparencia es tu decisión:</strong> puedes presentarlo como "Vai, nuestro asistente" sin más. La mayoría de clientes valoran la rapidez y la disponibilidad 24/7 por encima de cualquier otra cosa.
+        </div>
+      </div>
+
+      <div class="faq-item">
+        <div class="faq-q" onclick="toggleFaq(this)">
+          ¿Qué pasa con mis datos y los de mis clientes?
+          <div class="faq-icon">+</div>
+        </div>
+        <div class="faq-a">
+          Toda la información se almacena de forma segura y cumpliendo el <strong>RGPD europeo.</strong> Tus datos son tuyos — nunca los compartimos ni los usamos para entrenar modelos de terceros.
+        </div>
+      </div>
+
+    </div>
+  </div>
+</section>
+
+<!-- REALTIME -->
+<section class="realtime-section">
+  <div class="s-inner">
+    <div class="rt-header fade-up">
+      <div class="rt-live-badge"><div class="rt-pulse"></div><span id="rtLiveLabel">En vivo ahora</span></div>
+      <h2 class="s-title" id="rtTitle">Vai trabajando en este momento</h2>
+      <p class="s-sub" id="rtSub">Números reales. Sin editar. Actualizado cada pocos segundos.</p>
+    </div>
+    <div class="rt-grid fade-up">
+      <div class="rt-card rt-card-accent">
+        <div class="rt-num" id="rtConv">47</div>
+        <div class="rt-label" id="rtConvLabel">Conversaciones activas ahora</div>
+        <div class="rt-bar"><div class="rt-bar-fill" id="rtConvBar"></div></div>
+      </div>
+      <div class="rt-card">
+        <div class="rt-num" id="rtMsg">8,412</div>
+        <div class="rt-label" id="rtMsgLabel">Mensajes gestionados hoy</div>
+        <div class="rt-bar"><div class="rt-bar-fill" id="rtMsgBar"></div></div>
+      </div>
+      <div class="rt-card">
+        <div class="rt-num" id="rtBiz">340</div>
+        <div class="rt-label" id="rtBizLabel">Negocios con Vai activo</div>
+        <div class="rt-bar"><div class="rt-bar-fill" id="rtBizBar"></div></div>
+      </div>
+      <div class="rt-card">
+        <div class="rt-num rt-num-small" id="rtResp">&lt; 8 seg</div>
+        <div class="rt-label" id="rtRespLabel">Tiempo de respuesta</div>
+        <div class="rt-tag" id="rtRespTag">En todos los canales</div>
       </div>
     </div>
   </div>
@@ -1043,15 +1434,15 @@
 <section id="contacto" class="cta-section">
   <div class="s-inner">
     <div class="cta-glow"></div>
-    <div class="s-label fade-up" style="justify-content:center;display:flex;">// Empieza hoy</div>
+    <div class="s-label fade-up" style="justify-content:center;display:flex;">Empieza hoy</div>
     <h2 class="fade-up">
       Mientras lees esto, tu competencia<br>
       pierde clientes a las <span>2am.</span> Tú no.
     </h2>
     <p class="fade-up">Agendemos una demo de 30 minutos y te mostramos Vai en acción con tu negocio real.</p>
     <div class="cta-btns fade-up">
-      <a href="https://wa.me/34655433803" class="btn-primary" target="_blank">WhatsApp directo →</a>
-      <a href="mailto:hola@hirevai.com" class="btn-secondary">Escribirnos →</a>
+      <a href="https://wa.me/34655433803" data-wa class="btn-primary" target="_blank">WhatsApp directo →</a>
+      <a href="mailto:hola@velai.ai" data-email class="btn-secondary">Escribirnos →</a>
     </div>
   </div>
 </section>
@@ -1083,10 +1474,10 @@
     </div>
     <div class="footer-col">
       <h4>Contacto</h4>
-      <a href="mailto:hola@hirevai.com">hola@hirevai.com</a>
-      <a href="https://wa.me/34655433803" target="_blank">WhatsApp</a>
+      <a href="mailto:hola@velai.ai" data-email>hola@velai.ai</a>
+      <a href="https://wa.me/34655433803" data-wa target="_blank">WhatsApp</a>
       <a href="#">LinkedIn</a>
-      <a href="#">hirevai.com</a>
+      <a href="#">velai.ai</a>
     </div>
   </div>
   <div class="footer-bottom">
@@ -1096,32 +1487,43 @@
 </footer>
 
 <script>
-  // ── CHAT ANIMATION ──
-  const msgs = ['m1','m2','m3','m4','m5','m6'];
-  const delays = [600, 1800, 3200, 4600, 5800, 7000];
-  msgs.forEach((id, i) => {
-    setTimeout(() => {
-      const el = document.getElementById(id);
-      if (el) el.classList.add('visible');
-    }, delays[i]);
-  });
+  // ── CONFIGURACION ──
+  const DOMAIN = 'velai.ai';
+  const WHATSAPP = '34655433803';
+  const EMAIL = 'hola@' + DOMAIN;
+  // Actualiza todos los enlaces dinamicamente
+  document.querySelectorAll('[data-wa]').forEach(el => el.href = 'https://wa.me/' + WHATSAPP);
+  document.querySelectorAll('[data-email]').forEach(el => { el.href = 'mailto:' + EMAIL; el.textContent = EMAIL; });
+  document.querySelectorAll('[data-domain]').forEach(el => el.textContent = DOMAIN);
 
-  // Loop chat animation
-  function restartChat() {
-    msgs.forEach(id => {
+  // ── CHAT ANIMATION ──
+  // ── FAQ ──
+  function toggleFaq(el) {
+    const item = el.parentElement;
+    const isOpen = item.classList.contains('open');
+    document.querySelectorAll('.faq-item').forEach(i => i.classList.remove('open'));
+    if (!isOpen) item.classList.add('open');
+  }
+
+  // ── HERO CHAT ANIMATION (Barbería WA) ──
+  const hmIds = ['hm1','hm2','hm3','hm4','hm5','hm6'];
+  const hmDelays = [700, 2100, 3700, 5400, 6800, 8100];
+  function animateHeroChat() {
+    hmIds.forEach(id => {
       const el = document.getElementById(id);
-      if (el) el.classList.remove('visible');
+      if (el) { el.style.opacity = '0'; el.style.transform = 'translateY(6px)'; }
     });
     setTimeout(() => {
-      msgs.forEach((id, i) => {
+      hmIds.forEach((id, i) => {
         setTimeout(() => {
           const el = document.getElementById(id);
-          if (el) el.classList.add('visible');
-        }, delays[i]);
+          if (el) { el.style.opacity = '1'; el.style.transform = 'translateY(0)'; }
+        }, hmDelays[i]);
       });
-    }, 500);
+    }, 300);
   }
-  setInterval(restartChat, 10000);
+  animateHeroChat();
+  setInterval(animateHeroChat, 11500);
 
   // ── SCROLL ANIMATIONS ──
   const observer = new IntersectionObserver((entries) => {
@@ -1139,11 +1541,490 @@
     btn.classList.add('active');
   }
 
+  // ── HAMBURGER MENU ──
+  function toggleMenu() {
+    var links = document.querySelector('.nav-links');
+    var btn = document.getElementById('hamburger');
+    var open = links.classList.toggle('open');
+    btn.textContent = open ? '✕' : '☰';
+  }
+  // Cierra el menú al hacer click en un enlace
+  document.querySelectorAll('.nav-links a').forEach(function(a) {
+    a.addEventListener('click', function() {
+      document.querySelector('.nav-links').classList.remove('open');
+      document.getElementById('hamburger').textContent = '☰';
+    });
+  });
+
   // ── NAV SCROLL ──
   window.addEventListener('scroll', () => {
     const nav = document.querySelector('nav');
     nav.style.borderBottomColor = window.scrollY > 20 ? 'rgba(255,107,26,0.2)' : 'rgba(255,107,26,0.12)';
   });
+
+  // ── THEME TOGGLE ──
+  function toggleTheme() {
+    const light = document.body.classList.toggle('light');
+    document.getElementById('themeToggle').textContent = light ? '🌙' : '☀️';
+    localStorage.setItem('velai-theme', light ? 'light' : 'dark');
+  }
+  if (localStorage.getItem('velai-theme') === 'light') {
+    document.body.classList.add('light');
+    document.getElementById('themeToggle').textContent = '🌙';
+  }
+
+  // ── LANG TOGGLE ──
+  var _lang = localStorage.getItem('velai-lang') || 'es';
+  var T = {
+    es: {
+      navHow:'Cómo funciona', navInd:'Industrias', navPrice:'Precios', navDemo:'Solicitar demo',
+      heroBadge:'Presentamos Vai — tu asistente IA',
+      heroH1:'Tu negocio funciona<br>aunque tú <span class="fire">estés durmiendo.</span>',
+      heroP:'Vai atiende, vende y gestiona tus clientes en WhatsApp, web y redes sociales — las 24 horas, sin excepciones, sin que toques nada.',
+      heroBtn1:'Ver demo en vivo →', heroBtn2:'Cómo funciona',
+      heroS1:'Sin interrupciones', heroS2:'Ventas fuera de horario', heroS3:'Tiempo de respuesta', heroS4:'Tareas repetitivas',
+      probLabel:'El problema', probTitle:'Tu negocio pierde dinero cada día', probSub:'Cada mensaje sin respuesta a las 11pm es una venta perdida. Para siempre.',
+      prob1H:'Clientes que no vuelven', prob1P:'De los clientes que no reciben respuesta en menos de 1 hora compran en la competencia. Sin excepción.',
+      prob2H:'Sin cobertura cada día', prob2P:'Tu negocio duerme 8 horas. Tu competencia con IA, no. Cada noche pierdes oportunidades que no se recuperan.',
+      prob3H:'Productividad del equipo', prob3P:'Tu equipo responde las mismas preguntas una y otra vez. Tiempo que podrían usar en lo que realmente importa.',
+      howLabel:'Cómo funciona', howTitle:'El ciclo completo, automatizado', howSub:'Vai no solo responde — gestiona todo el flujo de principio a fin.',
+      s1H:'Atención', s1P:'Vai recibe el mensaje en WhatsApp, web o redes al instante. 24/7.',
+      s2H:'Comprensión', s2P:'Entiende qué necesita el cliente: comprar, reservar, consultar o reclamar.',
+      s3H:'Ejecución', s3P:'Procesa la venta, confirma la reserva o toma el pedido. Sin fricción.',
+      s4H:'Notificación', s4P:'Avisa automáticamente al equipo correcto: cocina, vendedor, despachador.',
+      s5H:'Seguimiento', s5P:'Envía confirmaciones, recordatorios y seguimiento post-venta solo.',
+      indLabel:'Industrias', indTitle:'Se adapta a tu negocio', indSub:'No es una solución genérica. Vai aprende tu negocio, tu tono y tus procesos.',
+      tab1:'Restaurante', tab2:'Clínica', tab3:'Tienda', tab4:'Inmobiliaria',
+      r1H:'Restaurantes & bares', r1P:'Vai gestiona reservas, pedidos para llevar y consultas de carta en tiempo real. Tu equipo solo se ocupa de cocinar y atender en sala.',
+      r1F:['Reservas automáticas con confirmación instantánea','Gestión de pedidos para llevar y delivery','Carta digital interactiva con alérgenos','Recordatorios automáticos día antes','Notificación directa a cocina y sala'],
+      r2H:'Clínicas & consultorios', r2P:'Vai gestiona citas, recordatorios y consultas básicas. Tu recepcionista se libera de llamadas rutinarias.',
+      r2F:['Agenda de citas en tiempo real','Recordatorios automáticos de citas','Triaje básico de urgencias','Información sobre servicios y precios','Seguimiento post-consulta'],
+      r3H:'Tiendas & e-commerce', r3P:'Vai convierte consultas en ventas, gestiona pedidos y hace seguimiento de envíos. Tu tienda vende mientras duermes.',
+      r3F:['Catálogo de productos interactivo','Procesamiento de pedidos y pagos','Seguimiento de envíos en tiempo real','Gestión de devoluciones y reclamaciones','Recomendaciones personalizadas'],
+      r4H:'Inmobiliarias & agencias', r4P:'Vai cualifica leads, agenda visitas y envía fichas automáticamente. Tu agente solo atiende a quien está listo para comprar.',
+      r4F:['Cualificación automática de leads','Envío de fichas y fotografías','Agendado de visitas en tiempo real','Seguimiento de interesados','Alertas de nuevas propiedades'],
+      vaiLabel:'El asistente', vaiRole:'Asistente IA de Velai', vaiLive:'Activo ahora · 24/7',
+      v1n:'01 — Canales', v1h:'Multicanal', v1p:'WhatsApp, web, Instagram, Facebook Messenger. Vai está en todos los canales donde están tus clientes.',
+      v2n:'02 — Velocidad', v2h:'Respuesta en 8 segundos', v2p:'Vai responde antes de que el cliente se vaya. Sin tiempos de espera, sin colas, sin demoras.',
+      v3n:'03 — Equipo', v3h:'Integrado con tu equipo', v3p:'Notifica a despachadores, vendedores o quién corresponda. Todos informados en tiempo real.',
+      v4n:'04 — IA', v4h:'Aprende tu negocio', v4p:'Vai se entrena con tu catálogo, precios, horarios y procesos. Habla como tú, no como un robot.',
+      v5n:'05 — Control', v5h:'Panel unificado', v5p:'Todas las conversaciones, ventas y métricas en un solo lugar. Siempre sabes qué está pasando.',
+      v6n:'06 — Sector', v6h:'100% personalizado', v6p:'No es una solución genérica. Vai se adapta a tu sector, tu tono y tus flujos específicos.',
+      pricLabel:'Precios', pricTitle:'Claro desde el primer día', pricSub:'Dos pagos, cero sorpresas — un setup único para configurar Vai en tu negocio, y una mensualidad para mantenerlo funcionando 24/7.',
+      pf1:'Eliges tu plan', pf2:'Setup único', pf2v:'Pago único', pf3:'Vai activo en 48h', pf4:'Mensualidad', pf4v:'Desde el mes 1',
+      p1n:'Esencial', p1d:'Para negocios que quieren dejar de perder clientes fuera de horario.',
+      p1f:['1 canal — WhatsApp o web','Hasta 300 conversaciones/mes','Respuestas automáticas 24/7','Panel de control básico','Soporte por email'],
+      p1b:'Solicitar demo',
+      p2n:'Profesional', p2d:'El ecosistema completo. Vai gestiona, vende, reserva y notifica a tu equipo.',
+      p2f:['Todos los canales — WA, web, redes','Conversaciones ilimitadas','Gestión completa de operaciones','Notificaciones al equipo en tiempo real','Panel unificado + métricas','Soporte prioritario 24/7'],
+      p2b:'Solicitar demo',
+      p3n:'Empresa', p3d:'Para cadenas, franquicias y negocios con múltiples locales o flujos complejos.',
+      p3f:['Todo lo de Profesional','Múltiples locales y sucursales','IA entrenada completamente a medida','API propia y webhooks','SLA garantizado','Account manager dedicado'],
+      p3b:'Hablar con ventas',
+      setupHTML:'<strong>¿Qué incluye el setup?</strong> La configuración completa de Vai para tu negocio — entrenamiento con tu catálogo, precios, horarios y flujos, integración con WhatsApp Business y puesta en marcha. En menos de 48 horas Vai está activo y trabajando. <strong>Sin permanencia mínima. Sin costes ocultos.</strong>',
+      faqLabel:'Preguntas frecuentes', faqTitle:'Todo lo que te estás preguntando', faqSub:'Sin letra pequeña. Sin tecnicismos. Las dudas reales de los dueños de negocio.',
+      fqs:['¿Cuánto tarda en estar funcionando en mi negocio?','¿Qué pasa si Vai se equivoca con un cliente?','¿Puedo desactivarlo o pausarlo cuando quiera?','¿Vai reemplaza a mis empleados?','¿Funciona con mi WhatsApp Business actual?','¿Mis clientes sabrán que hablan con una IA?','¿Qué pasa con mis datos y los de mis clientes?'],
+      fas:['En la mayoría de negocios, <strong>Vai está activo en menos de 48 horas.</strong> Nosotros nos encargamos de toda la configuración — tú solo nos cuentas cómo funciona tu negocio, tus precios, horarios y procesos. El resto lo hacemos nosotros.<br><span class="faq-tag">Sin instalaciones · Sin técnicos · Sin complicaciones</span>',
+           'Vai está entrenado específicamente para tu negocio, lo que minimiza los errores. Pero si algo sale mal, <strong>tú siempre puedes intervenir</strong> desde el panel de control. Además, Vai sabe cuándo una situación supera su capacidad y avisa a una persona de tu equipo al instante.',
+           'Sí, tienes control total. Puedes <strong>pausar Vai en cualquier momento</strong>, activarlo solo en ciertos horarios, o hacer que transfiera conversaciones a una persona de tu equipo con un clic. Tú mandas siempre.',
+           'No. Vai <strong>libera a tu equipo de las tareas repetitivas</strong> — responder siempre lo mismo, gestionar citas a mano, confirmar pedidos. Tu equipo se enfoca en lo que solo las personas pueden hacer: atender en persona, crear relaciones, resolver situaciones complejas.',
+           'Sí. Vai se integra con la <strong>API oficial de WhatsApp Business</strong> — el mismo número que ya tienes, sin cambiar nada. También funciona en tu web, Instagram Direct y Facebook Messenger de forma simultánea.',
+           'Vai habla con el tono y el estilo de tu negocio — no suena a robot. La <strong>transparencia es tu decisión:</strong> puedes presentarlo como "Vai, nuestro asistente" sin más. La mayoría de clientes valoran la rapidez y la disponibilidad 24/7 por encima de cualquier otra cosa.',
+           'Toda la información se almacena de forma segura y cumpliendo el <strong>RGPD europeo.</strong> Tus datos son tuyos — nunca los compartimos ni los usamos para entrenar modelos de terceros.'],
+      ctaLabel:'Empieza hoy',
+      ctaH2:'Mientras lees esto, tu competencia<br>pierde clientes a las <span>2am.</span> Tú no.',
+      ctaP:'Agendemos una demo de 30 minutos y te mostramos Vai en acción con tu negocio real.',
+      ctaB1:'WhatsApp directo →', ctaB2:'Escribirnos →',
+      ftP:'El ecosistema de IA que gestiona tu negocio 24/7. Presentamos Vai — tu asistente que nunca duerme.',
+      ftC1:'Producto', ftL1:'Cómo funciona', ftL2:'Industrias', ftL3:'Precios', ftL4:'Conoce a Vai',
+      ftC2:'Contacto', ftBottom:'© 2026 Velai. Todos los derechos reservados.',
+      rtLive:'En vivo ahora', rtTitle:'Vai trabajando en este momento', rtSub:'Números reales. Sin editar. Actualizado cada pocos segundos.',
+      rtConvLabel:'Conversaciones activas ahora', rtMsgLabel:'Mensajes gestionados hoy',
+      rtBizLabel:'Negocios con Vai activo', rtRespLabel:'Tiempo de respuesta', rtRespTag:'En todos los canales'
+    },
+    en: {
+      navHow:'How it works', navInd:'Industries', navPrice:'Pricing', navDemo:'Request a demo',
+      heroBadge:'Introducing Vai — your AI assistant',
+      heroH1:'Your business runs<br>even while you <span class="fire">sleep.</span>',
+      heroP:'Vai handles, sells, and manages your customers on WhatsApp, web, and social media — 24 hours a day, no exceptions, no manual work.',
+      heroBtn1:'See live demo →', heroBtn2:'How it works',
+      heroS1:'No interruptions', heroS2:'After-hours sales', heroS3:'Response time', heroS4:'Repetitive tasks',
+      probLabel:'The problem', probTitle:'Your business loses money every day', probSub:'Every unanswered message at 11pm is a lost sale. Forever.',
+      prob1H:"Customers who don't return", prob1P:"Customers who don't get a reply within 1 hour buy from the competition. Without exception.",
+      prob2H:'No coverage every day', prob2P:"Your business sleeps 8 hours. Your AI-powered competition doesn't. Every night you lose opportunities that never come back.",
+      prob3H:'Team productivity', prob3P:'Your team answers the same questions over and over. Time they could spend on what really matters.',
+      howLabel:'How it works', howTitle:'The complete cycle, automated', howSub:"Vai doesn't just reply — it manages the entire flow from start to finish.",
+      s1H:'Attention', s1P:'Vai receives messages on WhatsApp, web, or social media instantly. 24/7.',
+      s2H:'Understanding', s2P:'It understands what the customer needs: buy, book, inquire, or complain.',
+      s3H:'Execution', s3P:'Processes the sale, confirms the booking, or takes the order. Frictionless.',
+      s4H:'Notification', s4P:'Automatically alerts the right team: kitchen, sales, dispatch.',
+      s5H:'Follow-up', s5P:'Sends confirmations, reminders, and post-sale follow-ups automatically.',
+      indLabel:'Industries', indTitle:'Adapts to your business', indSub:'Not a generic solution. Vai learns your business, your tone, and your processes.',
+      tab1:'Restaurant', tab2:'Clinic', tab3:'Store', tab4:'Real Estate',
+      r1H:'Restaurants & bars', r1P:'Vai manages reservations, takeout orders, and menu queries in real time. Your team focuses on cooking and table service.',
+      r1F:['Automatic reservations with instant confirmation','Takeout and delivery order management','Interactive digital menu with allergens','Automatic day-before reminders','Direct notifications to kitchen and front of house'],
+      r2H:'Clinics & practices', r2P:'Vai manages appointments, reminders, and basic queries. Your receptionist is free from routine calls.',
+      r2F:['Real-time appointment booking','Automatic appointment reminders','Basic urgency triage','Information on services and pricing','Post-consultation follow-up'],
+      r3H:'Stores & e-commerce', r3P:'Vai turns inquiries into sales, manages orders, and tracks shipments. Your store sells while you sleep.',
+      r3F:['Interactive product catalog','Order and payment processing','Real-time shipment tracking','Returns and complaint management','Personalized recommendations'],
+      r4H:'Real estate & agencies', r4P:'Vai qualifies leads, schedules viewings, and sends property sheets automatically. Your agent only meets buyers ready to close.',
+      r4F:['Automatic lead qualification','Sending property sheets and photos','Real-time viewing scheduling','Prospect follow-up','New property alerts'],
+      vaiLabel:'The assistant', vaiRole:"Velai's AI assistant", vaiLive:'Active now · 24/7',
+      v1n:'01 — Channels', v1h:'Multichannel', v1p:'WhatsApp, web, Instagram, Facebook Messenger. Vai is on every channel where your customers are.',
+      v2n:'02 — Speed', v2h:'8-second response', v2p:"Vai replies before the customer leaves. No wait times, no queues, no delays.",
+      v3n:'03 — Team', v3h:'Integrated with your team', v3p:'Notifies dispatchers, salespeople, or whoever is needed. Everyone informed in real time.',
+      v4n:'04 — AI', v4h:'Learns your business', v4p:"Vai trains on your catalog, prices, hours, and processes. It talks like you, not like a robot.",
+      v5n:'05 — Control', v5h:'Unified dashboard', v5p:"All conversations, sales, and metrics in one place. You always know what's happening.",
+      v6n:'06 — Industry', v6h:'100% customized', v6p:'Not a generic solution. Vai adapts to your industry, tone, and specific workflows.',
+      pricLabel:'Pricing', pricTitle:'Clear from day one', pricSub:'Two payments, zero surprises — a one-time setup to configure Vai for your business, and a monthly fee to keep it running 24/7.',
+      pf1:'Choose your plan', pf2:'One-time setup', pf2v:'One-time payment', pf3:'Vai active in 48h', pf4:'Monthly fee', pf4v:'From month 1',
+      p1n:'Essential', p1d:'For businesses that want to stop losing customers outside business hours.',
+      p1f:['1 channel — WhatsApp or web','Up to 300 conversations/month','Automated replies 24/7','Basic control panel','Email support'],
+      p1b:'Request demo',
+      p2n:'Professional', p2d:'The complete ecosystem. Vai manages, sells, books, and notifies your team.',
+      p2f:['All channels — WA, web, social','Unlimited conversations','Full operations management','Real-time team notifications','Unified panel + metrics','Priority 24/7 support'],
+      p2b:'Request demo',
+      p3n:'Enterprise', p3d:'For chains, franchises, and businesses with multiple locations or complex flows.',
+      p3f:['Everything in Professional','Multiple locations and branches','Fully custom-trained AI','Custom API and webhooks','Guaranteed SLA','Dedicated account manager'],
+      p3b:'Talk to sales',
+      setupHTML:'<strong>What does the setup include?</strong> The complete configuration of Vai for your business — training with your catalog, prices, hours, and workflows, WhatsApp Business integration, and launch. In less than 48 hours Vai is active and working. <strong>No minimum commitment. No hidden costs.</strong>',
+      faqLabel:'FAQ', faqTitle:"Everything you're wondering about", faqSub:'No fine print. No jargon. The real questions from business owners.',
+      fqs:['How long does it take to go live in my business?','What happens if Vai makes a mistake with a customer?','Can I deactivate or pause it whenever I want?','Does Vai replace my employees?','Does it work with my current WhatsApp Business?','Will my customers know they\'re talking to an AI?','What happens with my data and my customers\' data?'],
+      fas:['In most businesses, <strong>Vai is live in under 48 hours.</strong> We handle the entire setup — you just tell us how your business works, your prices, hours, and processes. We do the rest.<br><span class="faq-tag">No installs · No technicians · No hassle</span>',
+           'Vai is trained specifically for your business, which minimizes errors. But if something goes wrong, <strong>you can always step in</strong> from the control panel. Vai also knows when a situation exceeds its capabilities and instantly alerts a team member.',
+           'Yes, you have full control. You can <strong>pause Vai at any time</strong>, activate it only during certain hours, or have it transfer conversations to a team member with one click. You\'re always in charge.',
+           'No. Vai <strong>frees your team from repetitive tasks</strong> — answering the same questions, managing appointments manually, confirming orders. Your team focuses on what only people can do: in-person service, building relationships, solving complex situations.',
+           'Yes. Vai integrates with the <strong>official WhatsApp Business API</strong> — the same number you already have, no changes needed. It also works on your website, Instagram Direct, and Facebook Messenger simultaneously.',
+           "Vai speaks in your business's tone and style — it doesn't sound like a robot. <strong>Transparency is your choice:</strong> you can introduce it as \"Vai, our assistant\" and leave it at that. Most customers value speed and 24/7 availability above everything else.",
+           'All information is stored securely and in compliance with the <strong>European GDPR.</strong> Your data is yours — we never share it or use it to train third-party models.'],
+      ctaLabel:'Start today',
+      ctaH2:'While you read this, your competition<br>loses customers at <span>2am.</span> Not you.',
+      ctaP:"Let's schedule a 30-minute demo and show you Vai in action with your real business.",
+      ctaB1:'WhatsApp direct →', ctaB2:'Write to us →',
+      ftP:'The AI ecosystem that manages your business 24/7. Introducing Vai — your assistant that never sleeps.',
+      ftC1:'Product', ftL1:'How it works', ftL2:'Industries', ftL3:'Pricing', ftL4:'Meet Vai',
+      ftC2:'Contact', ftBottom:'© 2026 Velai. All rights reserved.',
+      rtLive:'Live right now', rtTitle:'Vai working at this moment', rtSub:'Real numbers. Unfiltered. Updated every few seconds.',
+      rtConvLabel:'Active conversations right now', rtMsgLabel:'Messages handled today',
+      rtBizLabel:'Businesses running Vai', rtRespLabel:'Response time', rtRespTag:'Across all channels'
+    }
+  };
+
+  function applyLang(lang) {
+    var t = T[lang];
+    // Nav
+    document.querySelector('nav a[href="#como-funciona"]').textContent = t.navHow;
+    document.querySelector('nav a[href="#industrias"]').textContent = t.navInd;
+    document.querySelector('nav a[href="#precios"]').textContent = t.navPrice;
+    document.querySelector('nav .nav-cta').textContent = t.navDemo;
+    // Hero
+    document.querySelector('.hero-badge').innerHTML = '<div class="badge-dot"></div>' + t.heroBadge;
+    document.querySelector('.hero h1').innerHTML = t.heroH1;
+    document.querySelector('.hero p').textContent = t.heroP;
+    var hbtns = document.querySelectorAll('.hero-btns a');
+    hbtns[0].textContent = t.heroBtn1; hbtns[1].textContent = t.heroBtn2;
+    var sl = document.querySelectorAll('.hero .stat-label');
+    sl[0].textContent = t.heroS1; sl[1].textContent = t.heroS2; sl[2].textContent = t.heroS3; sl[3].textContent = t.heroS4;
+    // Problem
+    document.querySelector('.problem-section .s-label').textContent = t.probLabel;
+    document.querySelector('.problem-section .s-title').textContent = t.probTitle;
+    document.querySelector('.problem-section .s-sub').textContent = t.probSub;
+    var pc = document.querySelectorAll('.problem-card');
+    pc[0].querySelector('h3').textContent = t.prob1H; pc[0].querySelector('p').textContent = t.prob1P;
+    pc[1].querySelector('h3').textContent = t.prob2H; pc[1].querySelector('p').textContent = t.prob2P;
+    pc[2].querySelector('h3').textContent = t.prob3H; pc[2].querySelector('p').textContent = t.prob3P;
+    // How it works
+    document.querySelector('#como-funciona .s-label').textContent = t.howLabel;
+    document.querySelector('#como-funciona .s-title').textContent = t.howTitle;
+    document.querySelector('#como-funciona .s-sub').textContent = t.howSub;
+    var fs = document.querySelectorAll('.flow-step');
+    [[t.s1H,t.s1P],[t.s2H,t.s2P],[t.s3H,t.s3P],[t.s4H,t.s4P],[t.s5H,t.s5P]].forEach(function(s,i){ fs[i].querySelector('h4').textContent=s[0]; fs[i].querySelector('p').textContent=s[1]; });
+    // Industries
+    document.querySelector('#industrias .s-label').textContent = t.indLabel;
+    document.querySelector('#industrias .s-title').textContent = t.indTitle;
+    document.querySelector('#industrias .s-sub').textContent = t.indSub;
+    var tabs = document.querySelectorAll('.tab-btn');
+    tabs[0].textContent=t.tab1; tabs[1].textContent=t.tab2; tabs[2].textContent=t.tab3; tabs[3].textContent=t.tab4;
+    [['#ind-restaurante',t.r1H,t.r1P,t.r1F],['#ind-clinica',t.r2H,t.r2P,t.r2F],['#ind-tienda',t.r3H,t.r3P,t.r3F],['#ind-inmobiliaria',t.r4H,t.r4P,t.r4F]].forEach(function(r){
+      document.querySelector(r[0]+' .industry-info h3').textContent=r[1];
+      document.querySelector(r[0]+' .industry-info p').textContent=r[2];
+      document.querySelectorAll(r[0]+' .industry-features li').forEach(function(li,i){ li.innerHTML='<div class="feat-dot"></div>'+r[3][i]; });
+    });
+    // Vai
+    document.querySelector('#vai .s-label').textContent = t.vaiLabel;
+    document.querySelector('.vai-role').textContent = t.vaiRole;
+    document.querySelector('.vai-live').innerHTML = '<div class="live-dot"></div>' + t.vaiLive;
+    var vf = document.querySelectorAll('.vai-feat');
+    [[t.v1n,t.v1h,t.v1p],[t.v2n,t.v2h,t.v2p],[t.v3n,t.v3h,t.v3p],[t.v4n,t.v4h,t.v4p],[t.v5n,t.v5h,t.v5p],[t.v6n,t.v6h,t.v6p]].forEach(function(v,i){
+      vf[i].querySelector('div').textContent=v[0]; vf[i].querySelector('h4').textContent=v[1]; vf[i].querySelector('p').textContent=v[2];
+    });
+    // Pricing
+    document.querySelector('#precios .s-label').textContent = t.pricLabel;
+    document.querySelector('#precios .s-title').textContent = t.pricTitle;
+    document.querySelector('#precios .s-sub').textContent = t.pricSub;
+    var pfs = document.querySelectorAll('.pflow-step');
+    pfs[0].querySelector('.pflow-lbl').textContent=t.pf1;
+    pfs[1].querySelector('.pflow-lbl').textContent=t.pf2; pfs[1].querySelector('.pflow-val').textContent=t.pf2v;
+    pfs[2].querySelector('.pflow-lbl').textContent=t.pf3;
+    pfs[3].querySelector('.pflow-lbl').textContent=t.pf4; pfs[3].querySelector('.pflow-val').textContent=t.pf4v;
+    var cards = document.querySelectorAll('.price-card');
+    [[t.p1n,t.p1d,t.p1f,t.p1b],[t.p2n,t.p2d,t.p2f,t.p2b],[t.p3n,t.p3d,t.p3f,t.p3b]].forEach(function(p,i){
+      cards[i].querySelector('.price-name').textContent=p[0];
+      cards[i].querySelector('.price-desc').textContent=p[1];
+      cards[i].querySelectorAll('.price-features li').forEach(function(li,j){ if(p[2][j]) li.textContent=p[2][j]; });
+      cards[i].querySelector('.price-btn').textContent=p[3];
+    });
+    document.querySelector('.setup-note-text').innerHTML = t.setupHTML;
+    // FAQ
+    document.querySelector('.faq-section .s-label').textContent = t.faqLabel;
+    document.querySelector('.faq-section .s-title').textContent = t.faqTitle;
+    document.querySelector('.faq-section .s-sub').textContent = t.faqSub;
+    document.querySelectorAll('.faq-item').forEach(function(item,i){
+      var q = item.querySelector('.faq-q'), icon = q.querySelector('.faq-icon');
+      q.textContent = t.fqs[i]; q.appendChild(icon);
+      item.querySelector('.faq-a').innerHTML = t.fas[i];
+    });
+    // CTA
+    document.querySelector('#contacto .s-label').textContent = t.ctaLabel;
+    document.querySelector('#contacto h2').innerHTML = t.ctaH2;
+    document.querySelector('#contacto p.fade-up').textContent = t.ctaP;
+    var cb = document.querySelectorAll('.cta-btns a');
+    cb[0].textContent=t.ctaB1; cb[1].textContent=t.ctaB2;
+    // Realtime section
+    document.getElementById('rtLiveLabel').textContent = t.rtLive;
+    document.getElementById('rtTitle').textContent = t.rtTitle;
+    document.getElementById('rtSub').textContent = t.rtSub;
+    document.getElementById('rtConvLabel').textContent = t.rtConvLabel;
+    document.getElementById('rtMsgLabel').textContent = t.rtMsgLabel;
+    document.getElementById('rtBizLabel').textContent = t.rtBizLabel;
+    document.getElementById('rtRespLabel').textContent = t.rtRespLabel;
+    document.getElementById('rtRespTag').textContent = t.rtRespTag;
+    // Footer
+    document.querySelector('.footer-brand p').textContent = t.ftP;
+    var fc = document.querySelectorAll('.footer-col');
+    fc[0].querySelector('h4').textContent=t.ftC1;
+    var fl = fc[0].querySelectorAll('a');
+    fl[0].textContent=t.ftL1; fl[1].textContent=t.ftL2; fl[2].textContent=t.ftL3; fl[3].textContent=t.ftL4;
+    fc[1].querySelector('h4').textContent=t.ftC2;
+    document.querySelector('.footer-bottom span').textContent = t.ftBottom;
+    // Widget placeholder
+    var inp = document.getElementById('vaiInput');
+    if (inp) inp.placeholder = lang==='en' ? 'Write a message...' : 'Escribe un mensaje...';
+    // Lang buttons + body class
+    document.getElementById('btnEs').classList.toggle('active', lang==='es');
+    document.getElementById('btnEn').classList.toggle('active', lang==='en');
+    document.body.classList.toggle('lang-en', lang==='en');
+    document.documentElement.lang = lang;
+    _lang = lang;
+    localStorage.setItem('velai-lang', lang);
+  }
+
+  function setLang(lang) { applyLang(lang); }
+  applyLang(_lang);
+
+  // ── REALTIME COUNTERS ──
+  var _rtConv = 47, _rtMsg = 8412, _rtBiz = 340;
+
+  function _rtFlash(id) {
+    var el = document.getElementById(id);
+    if (!el) return;
+    el.classList.add('flash');
+    setTimeout(function() { el.classList.remove('flash'); }, 400);
+  }
+
+  function _rtSetBar(id, pct) {
+    var el = document.getElementById(id);
+    if (el) el.style.width = Math.min(100, Math.max(4, pct)) + '%';
+  }
+
+  function _rtInit() {
+    _rtSetBar('rtConvBar', ((_rtConv - 25) / 65) * 100);
+    _rtSetBar('rtMsgBar', (_rtMsg / 20000) * 100);
+    _rtSetBar('rtBizBar', ((_rtBiz - 280) / 220) * 100);
+  }
+  setTimeout(_rtInit, 800);
+
+  setInterval(function() {
+    _rtConv += Math.random() < 0.62 ? 1 : -1;
+    _rtConv = Math.max(28, Math.min(84, _rtConv));
+    var convEl = document.getElementById('rtConv');
+    if (convEl) { convEl.textContent = _rtConv; _rtFlash('rtConv'); }
+    _rtSetBar('rtConvBar', ((_rtConv - 25) / 65) * 100);
+
+    _rtMsg += Math.floor(Math.random() * 6) + 2;
+    var msgEl = document.getElementById('rtMsg');
+    if (msgEl) msgEl.textContent = _rtMsg.toLocaleString('es-ES');
+    _rtSetBar('rtMsgBar', (_rtMsg / 20000) * 100);
+  }, 2800);
+
+  setInterval(function() {
+    if (Math.random() < 0.35) {
+      _rtBiz++;
+      var bizEl = document.getElementById('rtBiz');
+      if (bizEl) { bizEl.textContent = _rtBiz; _rtFlash('rtBiz'); }
+      _rtSetBar('rtBizBar', ((_rtBiz - 280) / 220) * 100);
+    }
+  }, 14000);
 </script>
+
+  <!-- VAI CHAT WIDGET -->
+  <div id="vaiWidget" style="position:fixed;bottom:24px;right:24px;z-index:9999;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;">
+
+    <!-- Burbuja flotante -->
+    <div id="vaiBubble" onclick="toggleVai()" style="
+      width:60px;height:60px;border-radius:50%;background:#FF6B1A;
+      display:flex;align-items:center;justify-content:center;
+      cursor:pointer;box-shadow:0 4px 20px rgba(255,107,26,0.5);
+      transition:transform .2s;position:relative;
+    " onmouseover="this.style.transform='scale(1.1)'" onmouseout="this.style.transform='scale(1)'">
+      <svg id="vaiIconChat" width="28" height="28" viewBox="0 0 24 24" fill="white">
+        <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 14H9V8h2v8zm4 0h-2V8h2v8z"/>
+      </svg>
+      <svg id="vaiIconClose" width="24" height="24" viewBox="0 0 24 24" fill="white" style="display:none;">
+        <path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/>
+      </svg>
+      <div style="position:absolute;top:-2px;right:-2px;width:16px;height:16px;border-radius:50%;background:#25d366;border:2px solid white;animation:pulse 2s infinite;"></div>
+    </div>
+
+    <!-- Ventana del chat -->
+    <div id="vaiWindow" style="
+      display:none;position:absolute;bottom:72px;right:0;
+      width:340px;height:500px;border-radius:16px;overflow:hidden;
+      box-shadow:0 20px 60px rgba(0,0,0,0.3);
+      flex-direction:column;background:#fff;
+    ">
+      <!-- Header -->
+      <div style="background:#075e54;padding:12px 16px;display:flex;align-items:center;gap:10px;flex-shrink:0;">
+        <div style="width:38px;height:38px;border-radius:50%;background:#FF6B1A;display:flex;align-items:center;justify-content:center;font-size:18px;flex-shrink:0;">✂️</div>
+        <div style="flex:1;">
+          <div style="color:#fff;font-size:14px;font-weight:600;">Vai · Velai</div>
+          <div style="color:rgba(255,255,255,.75);font-size:12px;display:flex;align-items:center;gap:4px;">
+            <div style="width:6px;height:6px;border-radius:50%;background:#25d366;"></div>
+            En línea ahora
+          </div>
+        </div>
+        <div onclick="toggleVai()" style="color:rgba(255,255,255,.7);cursor:pointer;font-size:20px;line-height:1;">✕</div>
+      </div>
+
+      <!-- Mensajes -->
+      <div id="vaiMessages" style="
+        flex:1;overflow-y:auto;padding:12px;
+        background:#ece5dd;display:flex;flex-direction:column;gap:6px;
+        scroll-behavior:smooth;
+      "></div>
+
+      <!-- Typing -->
+      <div id="vaiTyping" style="display:none;padding:0 12px 6px;background:#ece5dd;">
+        <div style="background:#fff;border-radius:0 8px 8px 8px;padding:8px 12px;display:inline-flex;gap:4px;align-items:center;box-shadow:0 1px 2px rgba(0,0,0,.1);">
+          <div style="width:7px;height:7px;background:#8696a0;border-radius:50%;animation:td 1.2s infinite;"></div>
+          <div style="width:7px;height:7px;background:#8696a0;border-radius:50%;animation:td 1.2s .2s infinite;"></div>
+          <div style="width:7px;height:7px;background:#8696a0;border-radius:50%;animation:td 1.2s .4s infinite;"></div>
+        </div>
+      </div>
+
+      <!-- Input -->
+      <div style="background:#f0f2f5;padding:8px 10px;display:flex;align-items:center;gap:8px;flex-shrink:0;">
+        <div style="flex:1;background:#fff;border-radius:22px;display:flex;align-items:center;padding:8px 14px;">
+          <textarea id="vaiInput" placeholder="Escribe un mensaje..." rows="1" style="
+            flex:1;border:none;outline:none;font-size:14px;font-family:inherit;
+            color:#111;background:transparent;resize:none;max-height:80px;line-height:1.4;
+          " onkeydown="vaiKey(event)" oninput="vaiResize(this)"></textarea>
+        </div>
+        <button onclick="vaiSend()" style="
+          width:42px;height:42px;border-radius:50%;background:#00a884;
+          border:none;cursor:pointer;display:flex;align-items:center;justify-content:center;
+          flex-shrink:0;
+        ">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="white" style="margin-left:2px;">
+            <path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/>
+          </svg>
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <style>
+    @keyframes td { 0%,60%,100%{transform:translateY(0);opacity:.4} 30%{transform:translateY(-5px);opacity:1} }
+  </style>
+
+  <script>
+    // ── CONFIGURACION VAI ──
+    const VAI_WORKER_URL = 'https://vai-worker.botnexo-ia.workers.dev';
+
+    var vaiOpen = false;
+    var vaiHistory = [];
+    var vaiStarted = false;
+
+    function toggleVai() {
+      vaiOpen = !vaiOpen;
+      var win = document.getElementById('vaiWindow');
+      var iconChat = document.getElementById('vaiIconChat');
+      var iconClose = document.getElementById('vaiIconClose');
+      win.style.display = vaiOpen ? 'flex' : 'none';
+      win.style.flexDirection = 'column';
+      iconChat.style.display = vaiOpen ? 'none' : 'block';
+      iconClose.style.display = vaiOpen ? 'block' : 'none';
+      if (vaiOpen && !vaiStarted) {
+        vaiStarted = true;
+        setTimeout(() => vaiGreet(), 600);
+      }
+    }
+
+    function vaiGreet() {
+      vaiAddMsg('bot', '¡Hola! Soy Vai 👋 ¿Tienes un negocio que pierde clientes fuera de horario? Cuéntame y te explico cómo puedo ayudarte.');
+    }
+
+    function vaiAddMsg(role, text) {
+      var msgs = document.getElementById('vaiMessages');
+      var isBot = role === 'bot';
+      var div = document.createElement('div');
+      div.style.cssText = 'display:flex;' + (isBot ? 'justify-content:flex-start;' : 'justify-content:flex-end;');
+      var now = new Date();
+      var time = now.getHours() + ':' + (now.getMinutes()<10?'0':'') + now.getMinutes();
+      div.innerHTML = '<div style="max-width:80%;background:' + (isBot?'#fff':'#dcf8c6') + ';border-radius:' + (isBot?'0 8px 8px 8px':'8px 8px 0 8px') + ';padding:8px 10px 5px;box-shadow:0 1px 2px rgba(0,0,0,.1);">' +
+        '<div style="font-size:13.5px;color:#111;line-height:1.5;white-space:pre-wrap;word-break:break-word;">' + text.replace(/</g,'&lt;').replace(/>/g,'&gt;') + '</div>' +
+        '<div style="font-size:11px;color:#8696a0;text-align:right;margin-top:2px;">' + time + '</div>' +
+        '</div>';
+      msgs.appendChild(div);
+      msgs.scrollTop = msgs.scrollHeight;
+    }
+
+    function vaiKey(e) {
+      if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); vaiSend(); }
+    }
+
+    function vaiResize(el) {
+      el.style.height = 'auto';
+      el.style.height = Math.min(el.scrollHeight, 80) + 'px';
+    }
+
+    async function vaiSend() {
+      var input = document.getElementById('vaiInput');
+      var text = input.value.trim();
+      if (!text) return;
+      input.value = '';
+      input.style.height = 'auto';
+      vaiAddMsg('user', text);
+      vaiHistory.push({ role: 'user', content: text });
+      document.getElementById('vaiTyping').style.display = 'block';
+      var msgs = document.getElementById('vaiMessages');
+      msgs.scrollTop = msgs.scrollHeight;
+      try {
+        var res = await fetch(VAI_WORKER_URL, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ messages: vaiHistory })
+        });
+        var data = await res.json();
+        var reply = data.content && data.content[0] ? data.content[0].text : 'Ups, algo salió mal. Inténtalo de nuevo.';
+        vaiHistory.push({ role: 'assistant', content: reply });
+        document.getElementById('vaiTyping').style.display = 'none';
+        vaiAddMsg('bot', reply);
+      } catch(err) {
+        document.getElementById('vaiTyping').style.display = 'none';
+        vaiAddMsg('bot', 'Ups, algo salió mal. Inténtalo de nuevo en un momento.');
+      }
+    }
+  </script>
 </body>
 </html>
