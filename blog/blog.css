@@ -259,11 +259,15 @@ body.light .nav-links.open { background: rgba(245,240,236,0.97); }
   color: var(--white);
   display: inline-flex; align-items: center; justify-content: center;
   font-size: .92rem; font-weight: 700; cursor: pointer;
+  text-decoration: none; line-height: 1;
   transition: background .15s ease, border-color .15s ease, transform .15s ease;
 }
-.share-btn:hover {
+.share-btn:hover,
+.share-btn:focus-visible {
   background: var(--surface);
   border-color: var(--border2);
+  color: var(--white);
+  text-decoration: none;
   transform: translateY(-1px);
 }
 .share-btn svg { width: 16px; height: 16px; fill: currentColor; }
