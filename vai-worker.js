@@ -81,20 +81,26 @@ async function sendTelegram(token, text) {
 }
 
 async function sendWhatsApp(accountSid, authToken, text) {
-  var plainText = text.replace(/<[^>]+>/g, '').replace(/\n/g, '\n');
-  await Promise.all(WA_FOUNDERS.map(function(to) {
-    return fetch('https://api.twilio.com/2010-04-01/Accounts/' + accountSid + '/Messages.json', {
-      method: 'POST',
-      headers: {
-        'Authorization': 'Basic ' + btoa(accountSid + ':' + authToken),
-        'Content-Type': 'application/x-www-form-urlencoded'
-      },
-      body: new URLSearchParams({
-        From: 'whatsapp:+15706160059',
-        To: to,
-        Body: plainText
-      }).toString()
-    }).catch(function(){});
+  var plainText = text.replace(/<[^>]+>/g, '');
+  await Promise.all(WA_FOUNDERS.map(async function(to) {
+    try {
+      var r = await fetch('https://api.twilio.com/2010-04-01/Accounts/' + accountSid + '/Messages.json', {
+        method: 'POST',
+        headers: {
+          'Authorization': 'Basic ' + btoa(accountSid + ':' + authToken),
+          'Content-Type': 'application/x-www-form-urlencoded'
+        },
+        body: new URLSearchParams({
+          From: 'whatsapp:+15706160059',
+          To: to,
+          Body: plainText
+        }).toString()
+      });
+      var d = await r.json();
+      console.log('WA ' + to + ' status=' + r.status + ' sid=' + (d.sid||d.code||JSON.stringify(d).slice(0,100)));
+    } catch(e) {
+      console.log('WA error ' + to + ': ' + e.message);
+    }
   }));
 }
 
