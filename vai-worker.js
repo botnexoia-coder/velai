@@ -238,7 +238,7 @@ export default {
         });
       }
 
-      return new Response(JSON.stringify(data), {
+      return new Response(JSON.stringify({ reply }), {
         headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' },
       });
 
