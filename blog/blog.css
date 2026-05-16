@@ -245,6 +245,29 @@ body.light .nav-links.open { background: rgba(245,240,236,0.97); }
 .article-meta strong { color: var(--white); font-weight: 600; }
 .article-meta .sep { color: var(--muted2); }
 
+/* ══ SHARE BAR ══ */
+.share-bar {
+  display: flex; align-items: center; gap: 10px;
+  margin: 28px 0 8px;
+  font-size: .82rem; color: var(--muted);
+  letter-spacing: .02em;
+}
+.share-bar > span { font-weight: 600; color: var(--white); }
+.share-btn {
+  width: 36px; height: 36px; border-radius: 10px;
+  background: var(--bg2); border: 1px solid var(--border);
+  color: var(--white);
+  display: inline-flex; align-items: center; justify-content: center;
+  font-size: .92rem; font-weight: 700; cursor: pointer;
+  transition: background .15s ease, border-color .15s ease, transform .15s ease;
+}
+.share-btn:hover {
+  background: var(--surface);
+  border-color: var(--border2);
+  transform: translateY(-1px);
+}
+.share-btn svg { width: 16px; height: 16px; fill: currentColor; }
+
 .tldr {
   background: linear-gradient(180deg, rgba(255,107,26,0.06), rgba(255,107,26,0.02));
   border-left: 3px solid var(--orange);

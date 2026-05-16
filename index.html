@@ -577,7 +577,7 @@
       transition: all .3s;
     }
     .flow-step:hover .flow-num { background: rgba(255,107,26,0.1); border-color: var(--orange); box-shadow: 0 0 24px rgba(255,107,26,0.2); }
-    .flow-step h4 { font-family: var(--font-d); font-size: 0.9rem; font-weight: 700; margin-bottom: .4rem; }
+    .flow-step .step-title { font-family: var(--font-d); font-size: 0.9rem; font-weight: 700; margin-bottom: .4rem; color: var(--white); }
     .flow-step p { font-size: 0.78rem; color: var(--muted); line-height: 1.55; }
 
     /* ── INDUSTRIES ── */
@@ -649,7 +649,7 @@
     }
     .vai-feat:hover { border-color: rgba(255,107,26,.35); transform:translateY(-3px); }
     .vai-feat-icon { font-size:1.5rem; margin-bottom:.8rem; }
-    .vai-feat h4 { font-family:var(--font-d); font-size:.95rem; font-weight:700; margin-bottom:.4rem; }
+    .vai-feat .feat-title { font-family:var(--font-d); font-size:.95rem; font-weight:700; margin-bottom:.4rem; color: var(--white); }
     .vai-feat p { font-size:.82rem; color:var(--muted); line-height:1.6; }
 
     /* ── PRICING ── */
@@ -1139,27 +1139,27 @@
     <div class="flow-grid">
       <div class="flow-step fade-up">
         <div class="flow-num">01</div>
-        <h4>Atención</h4>
+        <div class="step-title">Atención</div>
         <p>Vai recibe el mensaje en WhatsApp, web o redes al instante. 24/7.</p>
       </div>
       <div class="flow-step fade-up">
         <div class="flow-num">02</div>
-        <h4>Comprensión</h4>
+        <div class="step-title">Comprensión</div>
         <p>Entiende qué necesita el cliente: comprar, reservar, consultar o reclamar.</p>
       </div>
       <div class="flow-step fade-up">
         <div class="flow-num">03</div>
-        <h4>Ejecución</h4>
+        <div class="step-title">Ejecución</div>
         <p>Procesa la venta, confirma la reserva o toma el pedido. Sin fricción.</p>
       </div>
       <div class="flow-step fade-up">
         <div class="flow-num">04</div>
-        <h4>Notificación</h4>
+        <div class="step-title">Notificación</div>
         <p>Avisa automáticamente al equipo correcto: cocina, vendedor, despachador.</p>
       </div>
       <div class="flow-step fade-up">
         <div class="flow-num">05</div>
-        <h4>Seguimiento</h4>
+        <div class="step-title">Seguimiento</div>
         <p>Envía confirmaciones, recordatorios y seguimiento post-venta solo.</p>
       </div>
     </div>
@@ -1337,32 +1337,32 @@
     <div class="vai-features-grid">
       <div class="vai-feat fade-up">
         <div style="font-size:.68rem;color:var(--orange);font-weight:700;letter-spacing:.1em;text-transform:uppercase;margin-bottom:.8rem;">01 — Canales</div>
-        <h4>Multicanal</h4>
+        <div class="feat-title">Multicanal</div>
         <p>WhatsApp, web, Instagram, Facebook Messenger. Vai está en todos los canales donde están tus clientes.</p>
       </div>
       <div class="vai-feat fade-up">
         <div style="font-size:.68rem;color:var(--orange);font-weight:700;letter-spacing:.1em;text-transform:uppercase;margin-bottom:.8rem;">02 — Velocidad</div>
-        <h4>Respuesta en 8 segundos</h4>
+        <div class="feat-title">Respuesta en 8 segundos</div>
         <p>Vai responde antes de que el cliente se vaya. Sin tiempos de espera, sin colas, sin demoras.</p>
       </div>
       <div class="vai-feat fade-up">
         <div style="font-size:.68rem;color:var(--orange);font-weight:700;letter-spacing:.1em;text-transform:uppercase;margin-bottom:.8rem;">03 — Equipo</div>
-        <h4>Integrado con tu equipo</h4>
+        <div class="feat-title">Integrado con tu equipo</div>
         <p>Notifica a despachadores, vendedores o quién corresponda. Todos informados en tiempo real.</p>
       </div>
       <div class="vai-feat fade-up">
         <div style="font-size:.68rem;color:var(--orange);font-weight:700;letter-spacing:.1em;text-transform:uppercase;margin-bottom:.8rem;">04 — IA</div>
-        <h4>Aprende tu negocio</h4>
+        <div class="feat-title">Aprende tu negocio</div>
         <p>Vai se entrena con tu catálogo, precios, horarios y procesos. Habla como tú, no como un robot.</p>
       </div>
       <div class="vai-feat fade-up">
         <div style="font-size:.68rem;color:var(--orange);font-weight:700;letter-spacing:.1em;text-transform:uppercase;margin-bottom:.8rem;">05 — Control</div>
-        <h4>Panel unificado</h4>
+        <div class="feat-title">Panel unificado</div>
         <p>Todas las conversaciones, ventas y métricas en un solo lugar. Siempre sabes qué está pasando.</p>
       </div>
       <div class="vai-feat fade-up">
         <div style="font-size:.68rem;color:var(--orange);font-weight:700;letter-spacing:.1em;text-transform:uppercase;margin-bottom:.8rem;">06 — Sector</div>
-        <h4>100% personalizado</h4>
+        <div class="feat-title">100% personalizado</div>
         <p>No es una solución genérica. Vai se adapta a tu sector, tu tono y tus flujos específicos.</p>
       </div>
     </div>
