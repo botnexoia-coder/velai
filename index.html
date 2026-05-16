@@ -2086,7 +2086,7 @@
           body: JSON.stringify({ messages: vaiHistory })
         });
         var data = await res.json();
-        var reply = data.content && data.content[0] ? data.content[0].text : 'Ups, algo salió mal. Inténtalo de nuevo.';
+        var reply = data.reply || (data.content && data.content[0] ? data.content[0].text : 'Ups, algo salió mal. Inténtalo de nuevo.');
         vaiHistory.push({ role: 'assistant', content: reply });
         document.getElementById('vaiTyping').style.display = 'none';
         vaiAddMsg('bot', reply);
