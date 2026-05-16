@@ -46,13 +46,13 @@ a:hover { color: var(--orange); }
 img { max-width: 100%; height: auto; display: block; }
 
 /* ══ NAV (idéntico al index.html) ══ */
-nav {
+nav.site-nav {
   position: fixed; top: 0; width: 100%; z-index: 100;
   background: rgba(9,7,10,0.82); backdrop-filter: blur(20px);
   border-bottom: 1px solid var(--border); padding: 0 2rem;
   transition: background .25s ease, border-bottom-color .2s ease;
 }
-body.light nav { background: rgba(245,240,236,0.92); }
+body.light nav.site-nav { background: rgba(245,240,236,0.92); }
 
 .nav-inner {
   max-width: 1160px; margin: 0 auto;

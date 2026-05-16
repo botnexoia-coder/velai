@@ -52,7 +52,7 @@ document.querySelectorAll('.nav-links a').forEach(function(a) {
 
 // ── NAV SCROLL ──
 window.addEventListener('scroll', function() {
-  var nav = document.querySelector('nav');
+  var nav = document.querySelector('nav.site-nav');
   if (!nav) return;
   nav.style.borderBottomColor = window.scrollY > 20
     ? 'rgba(255,107,26,0.2)'
