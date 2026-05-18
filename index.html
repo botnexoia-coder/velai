@@ -848,7 +848,13 @@
       transition: max-height .4s ease, padding .4s ease;
     }
     .faq-a strong { color: var(--white); font-weight: 500; }
-    .faq-item.open .faq-a { max-height: 220px; padding-bottom: 1.2rem; }
+    .faq-a a {
+      color: var(--orange2); text-decoration: none;
+      border-bottom: 1px solid rgba(255,140,64,0.35);
+      transition: color .18s ease, border-color .18s ease;
+    }
+    .faq-a a:hover { color: var(--orange); border-bottom-color: var(--orange); }
+    .faq-item.open .faq-a { max-height: 400px; padding-bottom: 1.2rem; }
     .faq-tag {
       display: inline-block; margin-top: 8px;
       background: rgba(255,107,26,0.08); border: 0.5px solid rgba(255,107,26,0.22);
