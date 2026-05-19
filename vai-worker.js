@@ -61,7 +61,7 @@ Campos:
 const TELEGRAM_CHAT_ID = '-5021568102';
 
 const WA_FOUNDERS = [
-  'whatsapp:+15706160059',
+  'whatsapp:+34655433803',
   'whatsapp:+34642650553',
   'whatsapp:+34602608940'
 ];
