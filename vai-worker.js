@@ -92,7 +92,7 @@ const WA_FOUNDERS = [
 
 async function sendTelegram(token, text) {
   try {
-    await fetch('https://api.telegram.org/bot' + token + '/sendMessage', {
+    var r = await fetch('https://api.telegram.org/bot' + token + '/sendMessage', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -101,7 +101,9 @@ async function sendTelegram(token, text) {
         parse_mode: 'HTML'
       })
     });
-  } catch(e) {}
+    var d = await r.json();
+    return { ok: !!d.ok, status: r.status, description: d.description || null };
+  } catch(e) { return { ok: false, error: e.message }; }
 }
 
 async function sendWhatsApp(accountSid, authToken, text) {
@@ -156,8 +158,18 @@ async function handleLead(request, env, cors) {
     }
     msg += '\n⚡ <b>Contactar hoy mismo</b>';
 
-    if (env.TELEGRAM_TOKEN) await sendTelegram(env.TELEGRAM_TOKEN, msg);
-    return new Response(JSON.stringify({ ok: true }), { headers: jsonHeaders });
+    var tg = env.TELEGRAM_TOKEN ? await sendTelegram(env.TELEGRAM_TOKEN, msg) : null;
+    var twilioOn = !!(env.TWILIO_ACCOUNT_SID && env.TWILIO_AUTH_TOKEN);
+    if (twilioOn) await sendWhatsApp(env.TWILIO_ACCOUNT_SID, env.TWILIO_AUTH_TOKEN, msg);
+    return new Response(JSON.stringify({
+      ok: true,
+      debug: {
+        telegram_token_set: !!env.TELEGRAM_TOKEN,
+        telegram_chat_id: TELEGRAM_CHAT_ID,
+        telegram_result: tg,
+        twilio_configured: twilioOn
+      }
+    }), { headers: jsonHeaders });
   } catch (err) {
     return new Response(JSON.stringify({ ok: false, error: err.message }), { status: 500, headers: jsonHeaders });
   }
