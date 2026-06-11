@@ -104,6 +104,41 @@ async function sendWhatsApp(accountSid, authToken, text) {
   }));
 }
 
+function escapeHtml(s) {
+  return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+// Lead de formulario/quiz del funnel (web). Notifica SOLO por Telegram
+// (canal centralizado) — nada va a WhatsApp de founders.
+async function handleLead(request, env, cors) {
+  var jsonHeaders = Object.assign({ 'Content-Type': 'application/json' }, cors);
+  try {
+    var body = await request.json();
+    var msg = '📨 <b>NUEVO LEAD — VELAI (' + escapeHtml(body.fuente || 'formulario') + ')</b>\n\n';
+    if (body.nombre)        msg += '👤 Nombre: ' + escapeHtml(body.nombre) + '\n';
+    if (body.whatsapp)      msg += '📱 WhatsApp: ' + escapeHtml(body.whatsapp) + '\n';
+    if (body.sector)        msg += '🏪 Sector: ' + escapeHtml(body.sector) + '\n';
+    if (body.mensajesDia)   msg += '💬 Mensajes/día: ' + escapeHtml(body.mensajesDia) + '\n';
+    if (body.canal)         msg += '📡 Canal: ' + escapeHtml(body.canal) + '\n';
+    if (body.quienResponde) msg += '🙋 Responde hoy: ' + escapeHtml(body.quienResponde) + '\n';
+    if (body.score != null) msg += '📈 Puntaje diagnóstico: ' + escapeHtml(body.score) + '/100\n';
+    if (body.nota)          msg += '📝 ' + escapeHtml(body.nota) + '\n';
+
+    var utm = body.utm || {};
+    var utmKeys = Object.keys(utm);
+    if (utmKeys.length) {
+      msg += '\n📊 <b>Atribución</b>\n';
+      utmKeys.forEach(function (k) { msg += '· ' + escapeHtml(k) + ': ' + escapeHtml(utm[k]) + '\n'; });
+    }
+    msg += '\n⚡ <b>Contactar hoy mismo</b>';
+
+    if (env.TELEGRAM_TOKEN) await sendTelegram(env.TELEGRAM_TOKEN, msg);
+    return new Response(JSON.stringify({ ok: true }), { headers: jsonHeaders });
+  } catch (err) {
+    return new Response(JSON.stringify({ ok: false, error: err.message }), { status: 500, headers: jsonHeaders });
+  }
+}
+
 async function summarizeLead(apiKey, messages) {
   var conversation = messages.map(function(m) {
     var role = m.role === 'user' ? 'Cliente' : 'Vai';
@@ -146,6 +181,11 @@ export default {
 
     if (request.method === 'OPTIONS') return new Response(null, { headers: cors });
     if (request.method !== 'POST') return new Response('Method not allowed', { status: 405 });
+
+    // Ruta del funnel: lead de formulario/quiz (notifica por Telegram)
+    if (new URL(request.url).pathname.replace(/\/$/, '') === '/lead') {
+      return await handleLead(request, env, cors);
+    }
 
     try {
       var messages = [];
