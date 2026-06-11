@@ -144,19 +144,24 @@
   };
 
   function wireEvents() {
-    // clic en cualquier enlace de WhatsApp
+    // clic en cualquier enlace de WhatsApp (idempotente: no re-vincula)
     document.querySelectorAll('a[href*="wa.me/"], a[data-wa]').forEach(function (a) {
+      if (a.__vw) return; a.__vw = 1;
       a.addEventListener('click', function () {
         window.velaiTrack('whatsapp_click', { location: a.getAttribute('data-loc') || 'cta' });
       });
     });
     // elementos marcados con data-conv="evento"
     document.querySelectorAll('[data-conv]').forEach(function (el) {
+      if (el.__vw) return; el.__vw = 1;
       el.addEventListener('click', function () {
         window.velaiTrack(el.getAttribute('data-conv'), {});
       });
     });
   }
+
+  // re-procesar enlaces/CTAs añadidos dinámicamente (quiz, formularios, etc.)
+  window.VELAI_decorate = function () { decorateWaLinks(); wireEvents(); };
 
   // ════ 2. BANNER DE CONSENTIMIENTO (bilingüe, self-hosted) ════
   var TXT = {
