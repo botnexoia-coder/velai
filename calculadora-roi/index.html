@@ -332,7 +332,7 @@
     <strong data-i18n="asTitle">Cómo se calcula (con los pies en la tierra):</strong>
     <ul>
       <li data-i18n="as1">Suponemos que Vai resuelve por sí solo el <strong>80%</strong> de los mensajes; el resto los escala a tu equipo.</li>
-      <li data-i18n="as2">De los mensajes que hoy se quedan sin atender fuera de horario, estimamos que un <strong>12%</strong> se habría convertido en venta o reserva.</li>
+      <li data-i18n="as2">De los mensajes que hoy se quedan sin atender fuera de horario, estimamos que un <strong>8%</strong> se habría convertido en venta o reserva.</li>
       <li data-i18n="as3">Cálculo sobre 30 días. Son estimaciones para orientarte, no una promesa de resultados — cada negocio es distinto.</li>
     </ul>
   </div>
@@ -359,7 +359,7 @@
 <script>
   // ── ASUNCIONES DEL CÁLCULO ──
   var AUTOMATION = 0.80;   // % de mensajes que Vai resuelve sin intervención
-  var CONVERSION = 0.12;   // % de mensajes fuera de horario que se habrían convertido en venta
+  var CONVERSION = 0.08;   // % de mensajes fuera de horario que se habrían convertido en venta
 
   // ── i18n ──
   var I18N = {
@@ -385,7 +385,7 @@
       pbP:'Plan Profesional · €1.800 setup + €120/mes',
       asTitle:'Cómo se calcula (con los pies en la tierra):',
       as1:'Suponemos que Vai resuelve por sí solo el <strong>80%</strong> de los mensajes; el resto los escala a tu equipo.',
-      as2:'De los mensajes que hoy se quedan sin atender fuera de horario, estimamos que un <strong>12%</strong> se habría convertido en venta o reserva.',
+      as2:'De los mensajes que hoy se quedan sin atender fuera de horario, estimamos que un <strong>8%</strong> se habría convertido en venta o reserva.',
       as3:'Cálculo sobre 30 días. Son estimaciones para orientarte, no una promesa de resultados — cada negocio es distinto.',
       share:'Compartir',
       ctaH:'Pide la demo personalizada con tus números',
@@ -396,6 +396,7 @@
       hoursUnit:'h/mes', salesUnit:'/mes',
       yearTpl:'≈ {v} al año',
       pbMonths:'se paga en {v}',
+      pbSameMonth:'se amortiza el mismo mes',
       month:'mes', months:'meses',
       pbNever:'Con estos números, el valor mensual no cubre la cuota — pero aun así recuperas {h} h/mes de tu equipo. Sube los mensajes/día o el ticket para ver el punto de equilibrio.',
       pbGood:'A partir de ahí, el plan se paga solo cada mes.',
@@ -423,7 +424,7 @@
       pbP:'Professional plan · €1,800 setup + €120/mo',
       asTitle:'How it is calculated (feet on the ground):',
       as1:'We assume Vai handles <strong>80%</strong> of messages on its own; the rest are escalated to your team.',
-      as2:'Of the messages left unanswered after hours, we estimate <strong>12%</strong> would have become a sale or booking.',
+      as2:'Of the messages left unanswered after hours, we estimate <strong>8%</strong> would have become a sale or booking.',
       as3:'Based on 30 days. These are estimates to guide you, not a promise of results — every business is different.',
       share:'Share',
       ctaH:'Get a personalized demo with your numbers',
@@ -433,6 +434,7 @@
       hoursUnit:'h/mo', salesUnit:'/mo',
       yearTpl:'≈ {v} per year',
       pbMonths:'pays off in {v}',
+      pbSameMonth:'pays off the same month',
       month:'month', months:'months',
       pbNever:'With these numbers the monthly value does not cover the fee — but you still recover {h} h/mo for your team. Raise messages/day or the ticket to find the break-even point.',
       pbGood:'After that, the plan pays for itself every month.',
@@ -505,6 +507,7 @@
     var net = totalValue - fee;
     if (net <= 0) { el.textContent = '—'; return; }
     var months = setup / net;
+    if (months < 0.1) { el.textContent = t('pbSameMonth'); return; }
     var rounded = months < 1 ? Math.round(months * 10) / 10 : Math.round(months);
     var unit = (rounded === 1) ? t('month') : t('months');
     el.textContent = t('pbMonths').replace('{v}', fmtNum(rounded, 1) + ' ' + unit);
