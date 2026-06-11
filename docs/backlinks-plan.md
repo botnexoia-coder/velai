@@ -275,10 +275,14 @@ Plataformas para distribuir nota de prensa:
 
 Crea recursos que **otros enlacen sin que se lo pidas**. Es la palanca con más ROI a largo plazo.
 
-### 6.1. Calculadora ROI (prioridad alta)
+### 6.1. Calculadora ROI (prioridad alta) — ✅ HECHO (2026-06-11)
 
-- [ ] URL: `hirevai.com/calculadora-roi/`
-- [ ] Inputs del usuario:
+> Publicada en `hirevai.com/calculadora-roi/`. Bilingüe ES/EN, cálculo en
+> vivo, enlazada desde nav de la home, nota de precios, nav del blog y post
+> de precios. En sitemap. Verificada en navegador.
+
+- [x] URL: `hirevai.com/calculadora-roi/`
+- [x] Inputs del usuario:
   - Mensajes/día que recibe en WhatsApp
   - Tiempo medio por mensaje (minutos)
   - Coste/hora del empleado que atiende
@@ -303,10 +307,10 @@ Crea recursos que **otros enlacen sin que se lo pidas**. Es la palanca con más 
 
 Lleva 2-4 meses pero **un buen informe puede generar 50+ backlinks** porque los medios citan datos exclusivos.
 
-### 6.3. Comparativas honestas
+### 6.3. Comparativas honestas — ✅ HECHO (2026-06-11)
 
-- [ ] Posts tipo "Velai vs ManyChat vs Tidio vs Intercom" en el blog. Sin trampa: pros/cons reales. Honestidad genera credibilidad y enlaces.
-- [ ] "Las 10 mejores herramientas de WhatsApp Business API para España 2026" — incluye a Velai en su justo lugar.
+- [x] Posts tipo "Velai vs ManyChat vs Tidio vs Intercom" en el blog. Sin trampa: pros/cons reales. Honestidad genera credibilidad y enlaces. → `/blog/comparativa-manychat-tidio-intercom/`
+- [x] "Las 10 mejores herramientas de WhatsApp Business API para España 2026" — incluye a Velai en su justo lugar. → `/blog/mejores-herramientas-whatsapp-business-api-espana/`
 
 ---
 
