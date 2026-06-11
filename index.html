@@ -1685,6 +1685,20 @@
   </div>
 </section>
 
+<!-- GEO: pregúntale a la IA sobre Velai -->
+<section class="geo-section" style="border-top:1px solid var(--border);">
+  <div class="s-inner" style="max-width:760px;margin:0 auto;padding:56px 2rem;text-align:center;">
+    <div class="s-label is-centered geo-label fade-up">Velai en la IA</div>
+    <h2 class="geo-title fade-up" style="font-family:var(--font-d);font-size:clamp(1.5rem,3.4vw,2.2rem);font-weight:800;letter-spacing:-.03em;margin:.5rem 0 .7rem;">¿Investigas proveedores con IA? Pregúntale por nosotros</h2>
+    <p class="geo-p fade-up" style="color:var(--muted);margin:0 auto 1.6rem;max-width:560px;">Abre tu asistente favorito y pídele que te resuma qué es Velai y si encaja con tu negocio. Sin filtros de marketing.</p>
+    <div class="fade-up" style="display:flex;gap:12px;justify-content:center;flex-wrap:wrap;">
+      <a class="btn-secondary" data-conv="geo_chatgpt" href="https://chatgpt.com/?q=Que%20es%20Velai%20hirevai.com%20y%20su%20asistente%20de%20IA%20Vai%20para%20WhatsApp%20en%20pymes" target="_blank" rel="noopener noreferrer">Preguntar a ChatGPT</a>
+      <a class="btn-secondary" data-conv="geo_perplexity" href="https://www.perplexity.ai/search?q=Que%20es%20Velai%20hirevai.com%20y%20su%20asistente%20de%20IA%20Vai%20para%20WhatsApp%20en%20pymes" target="_blank" rel="noopener noreferrer">Preguntar a Perplexity</a>
+      <a class="btn-secondary" data-conv="geo_claude" href="https://claude.ai/new?q=Que%20es%20Velai%20hirevai.com%20y%20su%20asistente%20de%20IA%20Vai%20para%20WhatsApp%20en%20pymes" target="_blank" rel="noopener noreferrer">Preguntar a Claude</a>
+    </div>
+  </div>
+</section>
+
 <!-- FOOTER -->
 <footer>
   <div class="footer-inner">
@@ -1891,6 +1905,7 @@
       ftP:'El ecosistema de IA que gestiona tu negocio 24/7. Presentamos Vai — tu asistente que nunca duerme.',
       ftC1:'Producto', ftL1:'Cómo funciona', ftL2:'Industrias', ftL3:'Precios', ftL4:'Conoce a Vai',
       ftC2:'Contacto', ftC3:'Por sector', ftC4:'Herramientas', ftBottom:'© 2026 Velai. Todos los derechos reservados.',
+      geoLabel:'Velai en la IA', geoTitle:'¿Investigas proveedores con IA? Pregúntale por nosotros', geoP:'Abre tu asistente favorito y pídele que te resuma qué es Velai y si encaja con tu negocio. Sin filtros de marketing.',
       rtLive:'En vivo ahora', rtTitle:'Vai trabajando en tiempo real ahora mismo', rtSub:'Números reales. Sin editar. Actualizado cada pocos segundos.',
       rtConvLabel:'Conversaciones activas ahora', rtMsgLabel:'Mensajes gestionados hoy',
       rtBizLabel:'Negocios con Vai activo', rtRespLabel:'Tiempo de respuesta', rtRespTag:'En todos los canales'
@@ -1957,6 +1972,7 @@
       ftP:'The AI ecosystem that manages your business 24/7. Introducing Vai — your assistant that never sleeps.',
       ftC1:'Product', ftL1:'How it works', ftL2:'Industries', ftL3:'Pricing', ftL4:'Meet Vai',
       ftC2:'Contact', ftC3:'By industry', ftC4:'Tools', ftBottom:'© 2026 Velai. All rights reserved.',
+      geoLabel:'Velai in AI', geoTitle:'Researching providers with AI? Ask it about us', geoP:'Open your favorite assistant and ask it to summarize what Velai is and whether it fits your business. No marketing filter.',
       rtLive:'Live right now', rtTitle:'Vai working in real time right now', rtSub:'Real numbers. Unfiltered. Updated every few seconds.',
       rtConvLabel:'Active conversations right now', rtMsgLabel:'Messages handled today',
       rtBizLabel:'Businesses running Vai', rtRespLabel:'Response time', rtRespTag:'Across all channels'
@@ -2106,6 +2122,9 @@
     if (fc[1]) subText(fc[1], 'h4', t.ftC2);
     if (fc[2]) subText(fc[2], 'h4', t.ftC3);
     if (fc[3]) subText(fc[3], 'h4', t.ftC4);
+    setText('.geo-label', t.geoLabel);
+    setText('.geo-title', t.geoTitle);
+    setText('.geo-p', t.geoP);
     setText('.footer-bottom span', t.ftBottom);
     // Widget placeholder
     var inp = document.getElementById('vaiInput');
