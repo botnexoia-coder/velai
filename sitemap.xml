@@ -19,6 +19,24 @@
     <priority>0.9</priority>
   </url>
   <url>
+    <loc>https://hirevai.com/clinicas/</loc>
+    <lastmod>2026-06-11</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.9</priority>
+  </url>
+  <url>
+    <loc>https://hirevai.com/talleres/</loc>
+    <lastmod>2026-06-11</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.9</priority>
+  </url>
+  <url>
+    <loc>https://hirevai.com/inmobiliarias/</loc>
+    <lastmod>2026-06-11</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.9</priority>
+  </url>
+  <url>
     <loc>https://hirevai.com/diagnostico-whatsapp/</loc>
     <lastmod>2026-06-11</lastmod>
     <changefreq>monthly</changefreq>

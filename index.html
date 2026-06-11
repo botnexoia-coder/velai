@@ -802,7 +802,7 @@
 
     /* ── FOOTER ── */
     footer { border-top:1px solid var(--border); background:var(--bg2); padding:3rem 2rem; }
-    .footer-inner { max-width:1160px; margin:0 auto; display:grid; grid-template-columns:1.5fr 1fr 1fr; gap:3rem; }
+    .footer-inner { max-width:1160px; margin:0 auto; display:grid; grid-template-columns:1.6fr repeat(4, 1fr); gap:2.2rem; }
     .footer-brand p { font-size:.85rem; color:var(--muted); line-height:1.65; margin-top:.8rem; max-width:280px; }
     .footer-col h4 { font-size:.8rem; font-weight:600; text-transform:uppercase; letter-spacing:.08em; color:var(--muted); margin-bottom:1rem; }
     .footer-col a { display:block; color:var(--muted2); text-decoration:none; font-size:.85rem; margin-bottom:.5rem; transition:color .2s; }
@@ -1717,6 +1717,19 @@
       <a href="tel:+15706160059">+1 570-616-0059</a>
       <a href="https://wa.me/15706160059" data-wa target="_blank" rel="noopener noreferrer">WhatsApp</a>
     </div>
+    <div class="footer-col">
+      <h4>Por sector</h4>
+      <a href="/restaurantes/">Restaurantes</a>
+      <a href="/clinicas/">Clínicas</a>
+      <a href="/talleres/">Talleres</a>
+      <a href="/inmobiliarias/">Inmobiliarias</a>
+    </div>
+    <div class="footer-col">
+      <h4>Herramientas</h4>
+      <a href="/diagnostico-whatsapp/">Diagnóstico WhatsApp</a>
+      <a href="/calculadora-ventas-perdidas/">Calculadora de pérdidas</a>
+      <a href="/calculadora-roi/">Calculadora ROI</a>
+    </div>
   </div>
   <div class="footer-bottom">
     <span>© 2026 Velai. Todos los derechos reservados.</span>
@@ -1875,7 +1888,7 @@
       ctaB1:'WhatsApp directo →', ctaB2:'Escribirnos →', ctaB3:'Llámanos →',
       ftP:'El ecosistema de IA que gestiona tu negocio 24/7. Presentamos Vai — tu asistente que nunca duerme.',
       ftC1:'Producto', ftL1:'Cómo funciona', ftL2:'Industrias', ftL3:'Precios', ftL4:'Conoce a Vai',
-      ftC2:'Contacto', ftBottom:'© 2026 Velai. Todos los derechos reservados.',
+      ftC2:'Contacto', ftC3:'Por sector', ftC4:'Herramientas', ftBottom:'© 2026 Velai. Todos los derechos reservados.',
       rtLive:'En vivo ahora', rtTitle:'Vai trabajando en tiempo real ahora mismo', rtSub:'Números reales. Sin editar. Actualizado cada pocos segundos.',
       rtConvLabel:'Conversaciones activas ahora', rtMsgLabel:'Mensajes gestionados hoy',
       rtBizLabel:'Negocios con Vai activo', rtRespLabel:'Tiempo de respuesta', rtRespTag:'En todos los canales'
@@ -1941,7 +1954,7 @@
       ctaB1:'WhatsApp direct →', ctaB2:'Write to us →', ctaB3:'Call us →',
       ftP:'The AI ecosystem that manages your business 24/7. Introducing Vai — your assistant that never sleeps.',
       ftC1:'Product', ftL1:'How it works', ftL2:'Industries', ftL3:'Pricing', ftL4:'Meet Vai',
-      ftC2:'Contact', ftBottom:'© 2026 Velai. All rights reserved.',
+      ftC2:'Contact', ftC3:'By industry', ftC4:'Tools', ftBottom:'© 2026 Velai. All rights reserved.',
       rtLive:'Live right now', rtTitle:'Vai working in real time right now', rtSub:'Real numbers. Unfiltered. Updated every few seconds.',
       rtConvLabel:'Active conversations right now', rtMsgLabel:'Messages handled today',
       rtBizLabel:'Businesses running Vai', rtRespLabel:'Response time', rtRespTag:'Across all channels'
@@ -2089,6 +2102,8 @@
       if (fl[3]) fl[3].textContent = t.ftL4;
     }
     if (fc[1]) subText(fc[1], 'h4', t.ftC2);
+    if (fc[2]) subText(fc[2], 'h4', t.ftC3);
+    if (fc[3]) subText(fc[3], 'h4', t.ftC4);
     setText('.footer-bottom span', t.ftBottom);
     // Widget placeholder
     var inp = document.getElementById('vaiInput');
