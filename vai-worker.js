@@ -204,7 +204,7 @@ export default {
     };
 
     if (request.method === 'OPTIONS') return new Response(null, { headers: cors });
-    if (request.method !== 'POST') return new Response('Method not allowed', { status: 405 });
+    if (request.method !== 'POST') return new Response('Method not allowed', { status: 405, headers: cors });
 
     // Ruta del funnel: lead de formulario/quiz (notifica por Telegram)
     if (new URL(request.url).pathname.replace(/\/$/, '') === '/lead') {
@@ -240,7 +240,7 @@ export default {
         if (body.demo && DEMOS[body.demo]) demoKey = body.demo;
       }
 
-      if (!messages || !Array.isArray(messages)) return new Response('Invalid', { status: 400 });
+      if (!messages || !Array.isArray(messages)) return new Response('Invalid', { status: 400, headers: cors });
 
       // Main Claude response
       var res = await fetch('https://api.anthropic.com/v1/messages', {
