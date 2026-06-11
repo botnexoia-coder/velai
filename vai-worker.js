@@ -45,6 +45,30 @@ Barbería, restaurante, clínica, tienda, inmobiliaria, hotel, taller — cualqu
 
 Responde siempre en español.`;
 
+// ── Personas de DEMO por sector ──
+// El prospecto "juega" a ser cliente de un negocio ficticio y experimenta a
+// Vai en acción. Tras unos turnos, Vai rompe la cuarta pared y ofrece la demo
+// real de Velai. En modo demo NO se notifican leads (es un juego de rol).
+const DEMOS = {
+  restaurante: `Eres Vai, el asistente de WhatsApp de "La Parrilla del Puerto", un restaurante ficticio de demostración (mediterráneo, 60 cubiertos, en la costa).
+
+Tu trabajo: atender al cliente como lo haría el restaurante real — con naturalidad, cercano, mensajes cortos tipo WhatsApp, algún emoji.
+
+== DATOS DEL RESTAURANTE (ficticios, úsalos con seguridad) ==
+- Horario: martes a domingo, 13:00–16:00 y 20:00–23:30. Lunes cerrado.
+- Carta: arroces (paella marinera 18€, arroz negro 17€), pescado fresco del día, mariscos, entrantes para compartir (8–14€), postres caseros. Menú del día mediodía 16€.
+- Reservas: gestionas la reserva pidiendo día, hora, nº de personas y un nombre. Confirmas disponibilidad (invéntala de forma razonable) y la das por hecha.
+- Alérgenos y opciones: hay opciones sin gluten y vegetarianas. Terraza disponible.
+- Ubicación: paseo marítimo (ficticio).
+
+== CÓMO ACTUAR ==
+1. Atiende la consulta o reserva con naturalidad, como el restaurante real.
+2. Tras 3–4 intercambios, o si el cliente muestra que le ha gustado la experiencia, rompe el rol con algo como: "Por cierto 😊 soy Vai, una demo de Velai. Así de natural atendería yo el WhatsApp de TU negocio, 24/7. ¿Quieres una Vai para lo tuyo?" y ofrece agendar una demo real o escribir al equipo de Velai.
+3. Si preguntan por Velai directamente, explica brevemente: implantamos asistentes de IA llave en mano para PYMEs, funcionando en menos de 48h, desde 100€/mes.
+
+Responde siempre en español. Mensajes cortos.`
+};
+
 const SUMMARY_PROMPT = `Analiza esta conversación entre un cliente y Vai (asistente de Velai). Extrae los datos del lead.
 
 Responde ÚNICAMENTE con un JSON válido, sin texto adicional antes ni después. Usa null (sin comillas) para campos desconocidos.
@@ -191,6 +215,7 @@ export default {
       var messages = [];
       var fromWhatsApp = false;
       var twilioFrom = '';
+      var demoKey = '';
       var contentType = request.headers.get('content-type') || '';
 
       if (contentType.includes('application/x-www-form-urlencoded')) {
@@ -212,6 +237,7 @@ export default {
       } else {
         var body = await request.json();
         messages = body.messages;
+        if (body.demo && DEMOS[body.demo]) demoKey = body.demo;
       }
 
       if (!messages || !Array.isArray(messages)) return new Response('Invalid', { status: 400 });
@@ -227,7 +253,7 @@ export default {
         body: JSON.stringify({
           model: 'claude-sonnet-4-6',
           max_tokens: 300,
-          system: SYSTEM,
+          system: demoKey ? DEMOS[demoKey] : SYSTEM,
           messages: messages,
         }),
       });
@@ -256,7 +282,7 @@ export default {
       var cleanMsg = lastUserMsg.replace(/[\s\-\.\(\)]/g, '');
       var phoneMatch = cleanMsg.match(/\+?[0-9]{6,}/);
 
-      if (phoneMatch && env.TELEGRAM_TOKEN) {
+      if (!demoKey && phoneMatch && env.TELEGRAM_TOKEN) {
         var phone = phoneMatch[0];
         var allMessages = messages.concat([{ role: 'assistant', content: reply }]);
         var lead = await summarizeLead(env.ANTHROPIC_API_KEY, allMessages);
