@@ -133,12 +133,20 @@
   }
 
   // ════ 4. EVENTOS DE CONVERSIÓN ════
+  // Eventos de alta intención que cuentan como conversión en pauta.
+  var CONV = { whatsapp_click: 1, demo_click: 1, lead_submit: 1, calc_complete: 1, quiz_complete: 1, quote_complete: 1 };
+
   window.velaiTrack = function (name, params) {
     params = params || {};
     if (Object.keys(UTM).length) params = Object.assign({}, params, UTM);
     try { gtag('event', name, params); } catch (e) {}
+    // Google Ads: registra la conversión (necesita `ads` AND `adsLabel`).
+    // Sin esto, Google Ads no puede medir ni optimizar a conversión → pauta a ciegas.
+    if (CFG.ads && CFG.adsLabel && CONV[name]) {
+      try { gtag('event', 'conversion', { send_to: CFG.ads + '/' + CFG.adsLabel }); } catch (e) {}
+    }
     if (window.fbq) {
-      var fbMap = { whatsapp_click: 'Contact', demo_click: 'Lead', lead_submit: 'Lead', calc_complete: 'Lead', quiz_complete: 'Lead' };
+      var fbMap = { whatsapp_click: 'Contact', demo_click: 'Lead', lead_submit: 'Lead', calc_complete: 'Lead', quiz_complete: 'Lead', quote_complete: 'Lead' };
       try { window.fbq('trackCustom', name, params); if (fbMap[name]) window.fbq('track', fbMap[name], params); } catch (e) {}
     }
   };
