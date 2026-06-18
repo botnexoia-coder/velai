@@ -218,7 +218,7 @@
     el.setAttribute('role', 'dialog');
     el.setAttribute('aria-label', 'Cookies');
     el.innerHTML =
-      '<p>' + t.msg + ' <a href="/#contacto" rel="nofollow">' + t.more + '</a></p>' +
+      '<p>' + t.msg + ' <a href="/privacidad/" rel="nofollow">' + t.more + '</a></p>' +
       '<div class="vc-btns">' +
       '<button class="vc-reject" type="button">' + t.reject + '</button>' +
       '<button class="vc-accept" type="button">' + t.accept + '</button>' +

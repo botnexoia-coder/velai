@@ -50,7 +50,7 @@ Hasta que lo despliegues, el formulario de demo cae al **fallback de WhatsApp** 
 - [ ] **Definir presupuesto** y canal de arranque (Google Search vs Meta/Instagram).
 - [ ] **Textos de anuncios** que coincidan con el titular de la landing `/lp/restaurantes/` (message match) — te puedo ayudar a redactarlos.
 - [ ] **Creatividades** (imágenes/vídeo) para Meta si vas por ese canal.
-- [ ] **Página de privacidad/cookies**: el banner enlaza a `/#contacto` como "más info" provisional. Conviene una página real de **Política de Privacidad y Cookies** (RGPD). → puedo crearla.
+- [x] **Página de privacidad/cookies** (RGPD): creada en `/privacidad/`. El banner de cookies y el footer ya enlazan a ella; está en el sitemap. ⚠️ **Falta que rellenes los datos fiscales** (razón social, NIF/CIF, domicilio) — están marcados con `[CORCHETES]` en la página.
 
 ---
 
@@ -77,3 +77,5 @@ Hasta que lo despliegues, el formulario de demo cae al **fallback de WhatsApp** 
 - WhatsApp unificado: **todos los enlaces públicos van al bot Vai** (15706160059).
 - Notificaciones a founders: se mantienen **solo como aviso**; toda interacción del cliente es con el bot.
 - Landing de Restaurantes: versión SEO (`/restaurantes/`) + versión de pauta (`/lp/restaurantes/`, noindex).
+- **Conversión de Google Ads cableada** (`funnel.js` v2): los eventos de alta intención (envío de formulario, clic en WhatsApp, diagnóstico y cotizador completados) ya disparan `gtag('event','conversion')` con tu `adsLabel`. Antes el `adsLabel` se leía pero no se usaba → Google Ads no podía medir conversiones. **En cuanto pongas los IDs, la medición de pauta funciona.**
+- Página de Política de Privacidad y Cookies (`/privacidad/`), RGPD + LSSI, enlazada desde el banner de cookies y el footer.
