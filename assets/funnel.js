@@ -240,8 +240,13 @@
   function init() {
     decorateWaLinks();
     wireEvents();
+    // Consent Mode v2: cargamos Google de inmediato en modo cookieless (el
+    // consentimiento sigue 'denied' por defecto, sin cookies). Así la etiqueta
+    // es detectable por Google y mide desde la primera visita, aunque el
+    // usuario aún no haya tocado el banner. El Pixel de Meta NO se carga aquí.
+    loadGoogle();
     if (storedConsent === 'granted' || storedConsent === 'denied') {
-      applyConsent(storedConsent);   // ya decidió antes: aplica sin banner
+      applyConsent(storedConsent);   // ya decidió antes: aplica (carga Pixel si aceptó)
     } else {
       showBanner();                  // primera visita: pedir consentimiento
     }
