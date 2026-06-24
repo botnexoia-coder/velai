@@ -4,6 +4,34 @@
 > aquí está pensada para mover la métrica de **dominios de referencia** y
 > **autoridad de dominio** del checker SEO.
 
+## ⏸️ Estado actual (act. 2026-06-11)
+
+**EN STANDBY** — se pausó al priorizar el funnel de ventas (paid + SEO). Resumen:
+
+| Plano | Estado |
+|---|---|
+| **Activos enlazables (on-page)** | ✅ Muy ampliados. Ver "Activos disponibles" abajo. |
+| **Adquisición de enlaces (off-page, §1-5)** | ⬜ Sin empezar — es trabajo **manual tuyo** (directorios, LinkedIn, PH, guest posts, PR). |
+| **Medición real (dominios/enlaces)** | ⚠️ No re-medida desde mayo. Fuente real = Google Search Console, no este MD. |
+
+> Este archivo es un **plan de tareas**, no un registro automático: solo refleja lo que se marca a mano aquí.
+
+### 📦 Activos enlazables disponibles (para ofrecer en outreach)
+
+Construidos durante el funnel (no estaban en el plan original). Úsalos como gancho al enviar a directorios, en LinkedIn o en guest posts:
+
+- **Herramientas gratuitas** (las que más enlaces atraen):
+  - Calculadora ROI — `/calculadora-roi/`
+  - Calculadora de ventas perdidas — `/calculadora-ventas-perdidas/`
+  - Generador de enlace de WhatsApp + QR — `/generador-link-whatsapp/`
+  - Cotizador de precio (3 pasos) — `/cotizador-precio/`
+  - Diagnóstico de atención por WhatsApp — `/diagnostico-whatsapp/`
+  - Test Ley de Atención al Cliente — `/test-ley-atencion-cliente/`
+- **Landings por sector:** `/restaurantes/` · `/clinicas/` · `/talleres/` · `/inmobiliarias/`
+- **Blog:** comparativa ManyChat/Tidio/Intercom/Velai · "Alternativa a ManyChat / Landbot / Cliengo" · cuánto cuesta un chatbot IA · mejores herramientas WhatsApp Business API · atención 24/7 · reservas WhatsApp restaurante
+
+---
+
 **Estado inicial (mayo 2026):** 3 backlinks · 3 dominios de referencia · 2 IPs
 **Objetivo a 30 días:** ≥15 dominios de referencia · ≥50 backlinks totales
 **Objetivo a 90 días:** ≥40 dominios · ≥150 backlinks · 1 mención en medios tech
