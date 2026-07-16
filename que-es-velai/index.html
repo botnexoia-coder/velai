@@ -1,0 +1,349 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>¿Qué es Velai? — El asistente de IA Vai, explicado</title>
+<meta name="description" content="Qué es Velai, para qué sirve, cómo funciona, por qué existe y cuándo lo necesitas. Vai: un asistente de IA llave en mano que atiende, vende y agenda en WhatsApp, web e Instagram 24/7.">
+<meta name="theme-color" content="#09070A">
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="canonical" href="https://hirevai.com/que-es-velai/">
+<meta property="og:type" content="website">
+<meta property="og:title" content="¿Qué es Velai? — El asistente de IA Vai, explicado">
+<meta property="og:description" content="Qué es, para qué, cómo, por qué y cuándo. Todo sobre Velai y su asistente Vai.">
+<meta property="og:image" content="https://hirevai.com/og-velai.jpg">
+<meta property="og:url" content="https://hirevai.com/que-es-velai/">
+<link rel="stylesheet" href="/fonts/fonts.css">
+<style>
+  :root{
+    --orange:#FF6B1A; --orange2:#FF8C40; --orange3:#FFB380; --amber:#FFAA00;
+    --bg:#09070A; --bg2:#110D13; --surface:#181220;
+    --border:rgba(255,107,26,0.14); --border2:rgba(255,107,26,0.28);
+    --white:#FFF8F4; --muted:rgba(255,248,244,0.55); --muted2:rgba(255,248,244,0.30);
+    --font-d:'Cabinet Grotesk',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
+    --font-b:'Satoshi',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
+    --max:1080px;
+  }
+  *{margin:0;padding:0;box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{font-family:var(--font-b);background:var(--bg);color:var(--white);line-height:1.65;overflow-x:hidden;-webkit-font-smoothing:antialiased}
+  h1,h2,h3,.wm{font-family:var(--font-d);letter-spacing:-0.03em;line-height:1.1}
+  a{color:inherit}
+  .bg{position:fixed;inset:0;z-index:-1;overflow:hidden}
+  .bg::before,.bg::after{content:"";position:absolute;border-radius:50%;filter:blur(130px)}
+  .bg::before{width:50vw;height:50vw;background:rgba(255,107,26,.14);top:-14vw;right:-10vw}
+  .bg::after{width:44vw;height:44vw;background:rgba(255,170,0,.08);bottom:-16vw;left:-12vw}
+  .wrap{max-width:var(--max);margin:0 auto;padding:0 24px}
+  .narrow{max-width:820px;margin:0 auto;padding:0 24px}
+
+  /* nav */
+  nav{position:sticky;top:0;z-index:40;backdrop-filter:blur(14px);background:rgba(9,7,10,.72);border-bottom:1px solid var(--border)}
+  nav .wrap{display:flex;align-items:center;justify-content:space-between;height:66px}
+  .brand{display:flex;align-items:center;gap:11px;text-decoration:none}
+  .brand svg{width:34px;height:34px}
+  .brand b{font-family:var(--font-d);font-weight:900;font-size:1.35rem;letter-spacing:-.04em}
+  .nav-cta{padding:.6rem 1.25rem;border-radius:9px;background:var(--orange);color:#fff;font-weight:700;font-size:.9rem;text-decoration:none;transition:background .2s}
+  .nav-cta:hover{background:var(--orange2)}
+
+  /* hero */
+  .hero{text-align:center;padding:76px 0 40px}
+  .eyebrow{display:inline-block;font-size:.8rem;font-weight:700;letter-spacing:.22em;text-transform:uppercase;color:var(--orange2);border:1px solid var(--border2);padding:6px 14px;border-radius:999px;margin-bottom:22px}
+  .hero h1{font-size:clamp(2.3rem,6vw,4rem);font-weight:900}
+  .grad{background:linear-gradient(100deg,var(--orange),var(--amber));-webkit-background-clip:text;background-clip:text;color:transparent}
+  .hero p{max-width:620px;margin:22px auto 0;color:var(--muted);font-size:1.15rem}
+  .hero .badges{display:flex;gap:10px;justify-content:center;flex-wrap:wrap;margin-top:26px}
+  .badge{font-size:.82rem;font-weight:600;color:var(--orange3);background:rgba(255,107,26,.08);border:1px solid var(--border);border-radius:999px;padding:7px 14px}
+
+  section{padding:52px 0}
+  .kicker{font-size:.78rem;font-weight:700;letter-spacing:.2em;text-transform:uppercase;color:var(--orange2);margin-bottom:12px}
+  h2{font-size:clamp(1.7rem,3.6vw,2.5rem);font-weight:900}
+  .lead{color:var(--muted);font-size:1.08rem;margin-top:14px;max-width:640px}
+  p.body{color:rgba(255,248,244,.82);font-size:1.05rem;margin-top:16px}
+  p.body strong{color:var(--white)}
+
+  .card{background:linear-gradient(180deg,var(--surface),var(--bg2));border:1px solid var(--border);border-radius:18px;padding:26px}
+  .grid{display:grid;gap:16px;margin-top:26px}
+  .g2{grid-template-columns:1fr 1fr}
+  .g3{grid-template-columns:repeat(3,1fr)}
+  @media(max-width:760px){.g2,.g3{grid-template-columns:1fr}}
+  .card h3{font-size:1.2rem;font-weight:800;margin-bottom:8px}
+  .card p{color:var(--muted);font-size:.96rem}
+  .ico{width:44px;height:44px;border-radius:12px;background:rgba(255,107,26,.12);border:1px solid var(--border2);display:grid;place-items:center;margin-bottom:14px}
+  .ico svg{width:22px;height:22px;stroke:var(--orange2);fill:none;stroke-width:1.8}
+
+  ul.checks{list-style:none;margin-top:18px;display:flex;flex-direction:column;gap:11px}
+  ul.checks li{display:flex;gap:11px;align-items:flex-start;color:rgba(255,248,244,.82);font-size:1.02rem}
+  ul.checks li b{color:var(--white)}
+  ul.checks li::before{content:"✓";color:var(--orange);font-weight:900;flex:none}
+
+  /* chat mockup */
+  .chat{background:var(--bg2);border:1px solid var(--border2);border-radius:20px;padding:22px;max-width:420px}
+  .chat .top{display:flex;align-items:center;gap:10px;padding-bottom:14px;border-bottom:1px solid var(--border);margin-bottom:16px}
+  .chat .av{width:36px;height:36px;border-radius:50%;background:var(--orange);display:grid;place-items:center;font-weight:800;color:#fff}
+  .chat .top small{color:var(--amber)}
+  .bub{padding:11px 14px;font-size:.92rem;border-radius:0 13px 13px 13px;background:rgba(255,255,255,.05);border:1px solid var(--border);max-width:86%;margin-bottom:9px}
+  .bub.me{background:var(--orange);color:#fff;border:0;border-radius:13px 0 13px 13px;margin-left:auto;max-width:74%}
+
+  /* arquitectura */
+  .arch{display:flex;flex-direction:column;gap:14px;margin-top:26px}
+  .arch .row{display:flex;align-items:center;gap:14px;flex-wrap:wrap;justify-content:center}
+  .node{background:var(--surface);border:1px solid var(--border2);border-radius:12px;padding:12px 16px;font-size:.9rem;font-weight:600;display:flex;align-items:center;gap:8px}
+  .node small{display:block;color:var(--muted);font-weight:400;font-size:.78rem}
+  .arrow{color:var(--orange2);font-size:1.3rem}
+  .arch .fan{display:grid;grid-template-columns:repeat(2,1fr);gap:10px;width:100%;max-width:640px;margin:0 auto}
+  @media(max-width:560px){.arch .fan{grid-template-columns:1fr}}
+  .mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+
+  /* pasos / cuando */
+  .steps{counter-reset:s;display:flex;flex-direction:column;gap:14px;margin-top:26px}
+  .step{display:flex;gap:16px;align-items:flex-start;background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:18px 20px}
+  .step .n{counter-increment:s;flex:none;width:36px;height:36px;border-radius:50%;background:linear-gradient(135deg,var(--orange),var(--amber));color:#fff;font-weight:800;display:grid;place-items:center}
+  .step .n::before{content:counter(s)}
+  .step h3{font-size:1.08rem;font-weight:800}
+  .step p{color:var(--muted);font-size:.96rem;margin-top:3px}
+
+  /* precio */
+  .price{background:linear-gradient(135deg,rgba(255,107,26,.14),rgba(255,170,0,.06));border:1px solid var(--border2);border-radius:20px;padding:34px;text-align:center;margin-top:26px}
+  .price .big{font-family:var(--font-d);font-size:clamp(2rem,5vw,3rem);font-weight:900}
+  .price .big span{color:var(--orange2)}
+  .price p{color:var(--muted);margin-top:8px}
+
+  /* cta */
+  .cta{text-align:center;padding:60px 0}
+  .cta h2{max-width:640px;margin:0 auto}
+  .btns{display:flex;gap:12px;justify-content:center;flex-wrap:wrap;margin-top:26px}
+  .btn{display:inline-flex;align-items:center;gap:9px;padding:15px 28px;border-radius:12px;font-weight:800;font-size:1rem;text-decoration:none;transition:transform .18s ease,background .2s}
+  .btn:hover{transform:translateY(-2px)}
+  .btn-o{background:var(--orange);color:#fff;box-shadow:0 16px 40px -14px rgba(255,107,26,.7)}
+  .btn-o:hover{background:var(--orange2)}
+  .btn-g{background:transparent;color:var(--white);border:1px solid var(--border2)}
+
+  .divider{height:1px;background:linear-gradient(90deg,transparent,var(--border2),transparent);margin:0 auto;max-width:var(--max)}
+  footer{border-top:1px solid var(--border);padding:34px 0;text-align:center;color:var(--muted2);font-size:.85rem}
+  footer a{color:var(--muted);text-decoration:none}
+
+  .reveal{opacity:0;transform:translateY(24px)}
+  .reveal.in{opacity:1;transform:none;transition:opacity .7s ease,transform .7s cubic-bezier(.2,.7,.2,1)}
+  @media(prefers-reduced-motion:reduce){.reveal{opacity:1;transform:none}}
+</style>
+</head>
+<body>
+<div class="bg"></div>
+
+<nav>
+  <div class="wrap">
+    <a class="brand" href="/">
+      <svg viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg"><rect width="32" height="32" rx="7" fill="#FF6B1A"/><circle cx="16" cy="16" r="5.5" fill="#FFF8F4" opacity=".97"/><g stroke="#FFF8F4" stroke-width="2.4" stroke-linecap="round" fill="none"><path d="M16 4.2v4.6" opacity=".62"/><path d="M16 23.2v4.6" opacity=".62"/><path d="M4.2 16h4.6" opacity=".62"/><path d="M23.2 16h4.6" opacity=".62"/></g></svg>
+      <b>Velai</b>
+    </a>
+    <a class="nav-cta" href="/#vai">Probar a Vai →</a>
+  </div>
+</nav>
+
+<header class="hero">
+  <div class="wrap">
+    <span class="eyebrow">Qué es · Para qué · Cómo · Por qué · Cuándo</span>
+    <h1>Conoce a <span class="grad">Vai</span>,<br>tu negocio que nunca duerme</h1>
+    <p><strong style="color:var(--white)">Velai</strong> pone a trabajar a <strong style="color:var(--white)">Vai</strong>, un asistente de inteligencia artificial que atiende, vende y agenda por ti —en WhatsApp, tu web e Instagram— las 24 horas, todos los días.</p>
+    <div class="badges">
+      <span class="badge">⚡ Funcionando en 48 h</span>
+      <span class="badge">💬 WhatsApp · Web · Instagram</span>
+      <span class="badge">🌙 24/7 sin descanso</span>
+      <span class="badge">🔧 Sin que montes nada</span>
+    </div>
+  </div>
+</header>
+
+<div class="divider"></div>
+
+<!-- QUÉ ES -->
+<section>
+  <div class="narrow reveal">
+    <div class="kicker">Qué es</div>
+    <h2>Un empleado de IA, entregado listo para trabajar</h2>
+    <p class="body">Imagina al mejor empleado de atención al cliente: responde al instante, nunca se cansa, conoce de memoria tus precios, horarios y servicios, y jamás deja un mensaje sin contestar. <strong>Eso es Vai.</strong></p>
+    <p class="body">Velai es la empresa que lo crea, lo entrena con la información de <em>tu</em> negocio y te lo entrega <strong>funcionando</strong>. No es una app que tú tienes que configurar y mantener: es un <strong>resultado</strong> que recibes hecho.</p>
+    <div class="grid g3">
+      <div class="card">
+        <div class="ico"><svg viewBox="0 0 24 24"><path d="M21 11.5a8.5 8.5 0 0 1-12.2 7.6L3 21l1.9-5.7A8.5 8.5 0 1 1 21 11.5Z"/></svg></div>
+        <h3>Atiende</h3>
+        <p>Responde consultas de clientes al instante, a cualquier hora, en su idioma y con el tono de tu marca.</p>
+      </div>
+      <div class="card">
+        <div class="ico"><svg viewBox="0 0 24 24"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg></div>
+        <h3>Vende y agenda</h3>
+        <p>Recomienda, cotiza, toma reservas y citas, y guía al cliente hasta cerrar —sin que muevas un dedo.</p>
+      </div>
+      <div class="card">
+        <div class="ico"><svg viewBox="0 0 24 24"><path d="M22 2 11 13"/><path d="M22 2 15 22l-4-9-9-4 20-7Z"/></svg></div>
+        <h3>Te pasa el lead</h3>
+        <p>Captura nombre y contacto de cada interesado y te avisa al instante para que cierres tú la venta.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- POR QUÉ -->
+<section>
+  <div class="narrow reveal">
+    <div class="kicker">Por qué existe</div>
+    <h2>Cada mensaje sin responder es una venta que se va</h2>
+    <p class="body">Los clientes de hoy escriben por WhatsApp y esperan respuesta <strong>ya</strong>. Pero ningún negocio puede estar pegado al móvil 24/7: llega la noche, el fin de semana, la hora punta… y los mensajes se acumulan o se pierden. Ese cliente no espera: se va a la competencia.</p>
+    <ul class="checks">
+      <li><b>Contratar gente para responder 24/7</b> es caro y difícil de sostener.</li>
+      <li><b>Las herramientas "hazlo tú mismo"</b> (tipo chatbots que montas solo) terminan abandonadas porque nadie tiene tiempo de configurarlas.</li>
+      <li><b>Las grandes consultoras de IA</b> no atienden al negocio pequeño, o cuestan una fortuna.</li>
+    </ul>
+    <p class="body">Velai llena ese hueco: <strong>la potencia de una IA a medida, con la sencillez de que alguien te la deja funcionando</strong> —a precio de PYME.</p>
+  </div>
+</section>
+
+<!-- PARA QUÉ / EJEMPLO -->
+<section>
+  <div class="narrow reveal">
+    <div class="kicker">Para qué sirve</div>
+    <h2>Así conversa Vai con un cliente</h2>
+    <p class="lead">Un ejemplo real en un restaurante. Lo mismo aplica a clínicas, talleres, inmobiliarias y más.</p>
+    <div style="display:flex;justify-content:center;margin-top:26px">
+      <div class="chat">
+        <div class="top"><div class="av">V</div><div><b>Vai</b><br><small>● en línea 24/7</small></div></div>
+        <div class="bub">¡Hola! 👋 Soy Vai, del restaurante. ¿En qué te ayudo?</div>
+        <div class="bub me">Quiero reservar mesa para 4 esta noche 🍽️</div>
+        <div class="bub">¡Perfecto! ¿A qué hora te viene bien? Tenemos sitio a las 21:00 y 21:30.</div>
+        <div class="bub me">A las 21:00</div>
+        <div class="bub">✅ <b>Reserva confirmada</b> — 4 personas, hoy 21:00. Te esperamos 💛 (El dueño ya recibió el aviso.)</div>
+      </div>
+    </div>
+    <p class="body" style="text-align:center">Este negocio acaba de cerrar una reserva… <strong>aunque el dueño esté durmiendo o atendiendo mesas.</strong></p>
+  </div>
+</section>
+
+<!-- PARA QUIÉN / CUÁNDO LO NECESITAS -->
+<section>
+  <div class="narrow reveal">
+    <div class="kicker">Para quién · Cuándo lo necesitas</div>
+    <h2>¿Es para tu negocio?</h2>
+    <p class="body">Velai brilla en <strong>PYMEs de servicios que reciben muchos mensajes</strong> y no tienen equipo técnico: restaurantes, clínicas y consultorios, talleres, inmobiliarias, agencias, salones, academias…</p>
+    <div class="grid g2">
+      <div class="card">
+        <h3>Señales de que lo necesitas 🚩</h3>
+        <ul class="checks" style="margin-top:12px">
+          <li>Recibes <b>30–100+ mensajes al día</b> y no das abasto.</li>
+          <li>Pierdes clientes que escriben <b>fuera de horario</b>.</li>
+          <li>Tardas en responder y notas que <b>se van a otro</b>.</li>
+          <li>Contestas siempre <b>lo mismo</b> (precios, horarios, ubicación).</li>
+        </ul>
+      </div>
+      <div class="card">
+        <h3>Lo que ganas 💰</h3>
+        <ul class="checks" style="margin-top:12px">
+          <li><b>Respuesta inmediata</b>, de día y de noche.</li>
+          <li><b>Menos ventas perdidas</b> y más reservas/citas.</li>
+          <li><b>Tiempo libre</b>: dejas de vivir pegado al móvil.</li>
+          <li><b>Todo tu negocio en un canal</b>, ordenado y medible.</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- CÓMO FUNCIONA: SIMPLE -->
+<section>
+  <div class="narrow reveal">
+    <div class="kicker">Cómo funciona · en fácil</div>
+    <h2>De tu idea a Vai atendiendo, en 3 pasos</h2>
+    <div class="steps">
+      <div class="step"><div class="n"></div><div><h3>Nos cuentas tu negocio</h3><p>Carta o servicios, precios, horarios, cómo tomas reservas o citas, tus preguntas frecuentes. Nosotros nos encargamos del resto.</p></div></div>
+      <div class="step"><div class="n"></div><div><h3>Entrenamos a Vai a tu medida</h3><p>Le damos la personalidad de tu marca y toda tu información, y la conectamos a tus canales (WhatsApp, web, Instagram).</p></div></div>
+      <div class="step"><div class="n"></div><div><h3>En menos de 48 h está trabajando</h3><p>Vai empieza a atender, vender y agendar por ti. Tú solo recibes los avisos de los clientes listos para cerrar.</p></div></div>
+    </div>
+  </div>
+</section>
+
+<!-- CÓMO FUNCIONA: TÉCNICO -->
+<section>
+  <div class="narrow reveal">
+    <div class="kicker">Cómo funciona · por dentro (técnico)</div>
+    <h2>La tecnología detrás de Vai</h2>
+    <p class="body">Para quien quiera el detalle: Velai corre sobre una arquitectura <strong>serverless</strong> ligera y veloz, sin servidores que mantener, con la IA de <strong>Claude (Anthropic)</strong> como cerebro conversacional.</p>
+    <div class="arch card">
+      <div class="row"><div class="node">🌐 Web / WhatsApp / Instagram <small>canales del cliente</small></div></div>
+      <div class="row"><span class="arrow">↓</span></div>
+      <div class="row"><div class="node mono">Cloudflare Pages <small>sitio estático (HTML/CSS/JS)</small></div><span class="arrow">→</span><div class="node mono">Cloudflare Worker <small>backend serverless · vai-worker</small></div></div>
+      <div class="row"><span class="arrow">↓</span></div>
+      <div class="fan">
+        <div class="node mono">🧠 Anthropic · Claude <small>respuestas de Vai (Sonnet + Haiku)</small></div>
+        <div class="node mono">🗂️ Cloudflare KV <small>memoria de conversación</small></div>
+        <div class="node mono">📲 Telegram Bot <small>aviso de leads al equipo</small></div>
+        <div class="node mono">💬 Twilio WhatsApp <small>canal de WhatsApp</small></div>
+      </div>
+    </div>
+    <div class="grid g3" style="margin-top:16px">
+      <div class="card"><h3>Rápido y sin caídas</h3><p>Todo sobre la red global de Cloudflare: carga instantánea, protección DDoS y SSL incluidos, sin servidores que se caigan.</p></div>
+      <div class="card"><h3>IA de primer nivel</h3><p>Claude atiende con naturalidad y, cuando detecta un cliente interesado, resume la conversación y captura el lead automáticamente.</p></div>
+      <div class="card"><h3>Privacidad y RGPD</h3><p>Consentimiento por defecto denegado, banner propio bilingüe y cualificación honesta: no se guardan datos si el negocio no encaja.</p></div>
+    </div>
+  </div>
+</section>
+
+<!-- PRECIO -->
+<section>
+  <div class="narrow reveal">
+    <div class="kicker">Cuánto cuesta · transparente</div>
+    <h2>Precio claro, sin letra pequeña</h2>
+    <div class="price">
+      <div class="big">Desde <span>1.000 €</span> de setup<br>+ desde <span>100 €/mes</span></div>
+      <p>Instalación única + mantenimiento mensual. <strong style="color:var(--white)">Funcionando en menos de 48 horas.</strong></p>
+    </div>
+    <p class="body" style="text-align:center">Mientras muchos esconden el precio detrás de un "contáctanos", en Velai lo decimos de frente. Un solo cliente recuperado al mes ya lo paga.</p>
+  </div>
+</section>
+
+<!-- DIFERENCIADOR -->
+<section>
+  <div class="narrow reveal">
+    <div class="kicker">Por qué Velai y no otra cosa</div>
+    <h2>No es una herramienta. Es un resultado.</h2>
+    <div class="grid g3">
+      <div class="card"><h3>🧰 Chatbots "hazlo tú"</h3><p>Te dan un programa vacío y tú lo montas, lo entrenas y lo mantienes. La mayoría acaba abandonado.</p></div>
+      <div class="card"><h3>🏢 Consultoras enterprise</h3><p>Proyectos largos y caros, pensados para grandes empresas. No miran al negocio pequeño.</p></div>
+      <div class="card" style="border-color:var(--border2);background:linear-gradient(180deg,rgba(255,107,26,.12),var(--bg2))"><h3>⭐ Velai</h3><p>Te lo entregamos <b>funcionando</b>, a medida de tu sector, en 48 h y a precio de PYME. Tú solo vendes.</p></div>
+    </div>
+  </div>
+</section>
+
+<!-- CTA -->
+<section class="cta">
+  <div class="wrap reveal">
+    <h2>La mejor forma de entenderlo es <span class="grad">hablar con Vai</span></h2>
+    <p class="lead" style="margin:16px auto 0">Escríbele como si fueras un cliente y siente cómo atendería a los tuyos.</p>
+    <div class="btns">
+      <a class="btn btn-o" href="/#vai">💬 Probar a Vai ahora</a>
+      <a class="btn btn-g" href="/">Ver más de Velai</a>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">
+    <p><b style="color:var(--white);font-family:var(--font-d)">Velai</b> — asistentes de IA que atienden, venden y agendan por ti.</p>
+    <p style="margin-top:8px"><a href="/">hirevai.com</a> · <a href="/blog/">Blog</a> · <a href="/#vai">Probar a Vai</a></p>
+    <p style="margin-top:10px;opacity:.6">© 2026 Velai</p>
+  </div>
+</footer>
+
+<script>
+(function(){
+  try{
+    if(!('IntersectionObserver' in window)) return;
+    if(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+    var els=[].slice.call(document.querySelectorAll('.reveal')); if(!els.length) return;
+    var vh=window.innerHeight||document.documentElement.clientHeight;
+    var io=new IntersectionObserver(function(en){en.forEach(function(e){if(e.isIntersecting){e.target.classList.add('in');io.unobserve(e.target);}});},{rootMargin:'0px 0px -8% 0px',threshold:0.08});
+    els.forEach(function(el){var r=el.getBoundingClientRect(); if(r.top<vh*0.92){el.classList.add('in');} else {io.observe(el);}});
+    setTimeout(function(){els.forEach(function(el){if(!el.classList.contains('in'))el.classList.add('in');});},3000);
+  }catch(e){}
+})();
+</script>
+</body>
+</html>
