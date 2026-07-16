@@ -50,8 +50,14 @@
     "offers": {
       "@type": "Offer",
       "priceCurrency": "EUR",
-      "price": "0",
-      "description": "Consulta gratuita de diagnóstico de 30 minutos"
+      "price": "1000",
+      "priceSpecification": {
+        "@type": "PriceSpecification",
+        "priceCurrency": "EUR",
+        "price": "1000",
+        "description": "Implantación desde 1.000€ + 100€/mes"
+      },
+      "description": "Implantación de Vai desde 1.000€ (pago único) + 100€/mes"
     },
     "creator": {
       "@type": "Organization",
@@ -235,8 +241,8 @@
       --border:   rgba(255,107,26,0.12);
       --border2:  rgba(255,107,26,0.22);
       --white:    #FFF8F4;
-      --muted:    rgba(255,248,244,0.48);
-      --muted2:   rgba(255,248,244,0.22);
+      --muted:    rgba(255,248,244,0.62);
+      --muted2:   rgba(255,248,244,0.58);
       --font-d:   'Cabinet Grotesk', sans-serif;
       --font-b:   'Satoshi', sans-serif;
     }
@@ -979,8 +985,8 @@
       --border:  rgba(160,70,15,0.13);
       --border2: rgba(160,70,15,0.22);
       --white:   #1A0D05;
-      --muted:   rgba(26,13,5,0.52);
-      --muted2:  rgba(26,13,5,0.32);
+      --muted:   rgba(26,13,5,0.66);
+      --muted2:  rgba(26,13,5,0.62);
     }
     body.light nav { background: rgba(245,240,236,0.92); }
     body.light body::before { opacity: .6; }
@@ -1051,7 +1057,7 @@
         <button class="lang-btn" id="btnEn" onclick="setLang('en')">EN</button>
       </div>
     </div>
-    <button class="hamburger" id="hamburger" onclick="toggleMenu()">☰</button>
+    <button class="hamburger" id="hamburger" onclick="toggleMenu()" aria-label="Abrir menú" aria-expanded="false">☰</button>
   </div>
 </nav>
 
@@ -1074,14 +1080,14 @@
         las 24 horas, sin excepciones, sin que toques nada.
       </p>
       <div class="hero-btns">
-        <a href="#contacto" class="btn-primary">Ver demo en vivo →</a>
+        <a href="#contacto" class="btn-primary">Agenda tu demo →</a>
         <a href="#como-funciona" class="btn-secondary">Cómo funciona</a>
       </div>
       <div class="hero-stats">
         <div><div class="stat-num">24/7</div><div class="stat-label">Sin interrupciones</div></div>
-        <div><div class="stat-num">+40%</div><div class="stat-label">Ventas fuera de horario</div></div>
-        <div><div class="stat-num">8 seg</div><div class="stat-label">Tiempo de respuesta</div></div>
-        <div><div class="stat-num">−80%</div><div class="stat-label">Tareas repetitivas</div></div>
+        <div><div class="stat-num">Segundos</div><div class="stat-label">En responder</div></div>
+        <div><div class="stat-num">3</div><div class="stat-label">Canales en un panel</div></div>
+        <div><div class="stat-num">48 h</div><div class="stat-label">Puesta en marcha</div></div>
       </div>
     </div>
 
@@ -1161,9 +1167,9 @@
     <p class="s-sub fade-up">Cada mensaje sin respuesta a las 11pm es una venta perdida. Para siempre.</p>
     <div class="problem-grid">
       <div class="problem-card fade-up">
-        <div class="problem-stat">67%</div>
+        <div class="problem-stat">&lt; 1 h</div>
         <h3>Clientes que no vuelven</h3>
-        <p>De los clientes que no reciben respuesta en menos de 1 hora compran en la competencia. Sin excepción.</p>
+        <p>Si tardas más de una hora en responder, muchos clientes ya se han ido a la competencia. Y rara vez vuelven.</p>
       </div>
       <div class="problem-card fade-up">
         <div class="problem-stat">8h</div>
@@ -1628,34 +1634,30 @@
   </div>
 </section>
 
-<!-- REALTIME -->
+<!-- CÓMO TRABAJA VAI -->
 <section class="realtime-section">
   <div class="s-inner">
     <div class="rt-header fade-up">
-      <div class="rt-live-badge"><div class="rt-pulse"></div><span id="rtLiveLabel">En vivo ahora</span></div>
-      <h2 class="s-title" id="rtTitle">Vai trabajando en tiempo real ahora mismo</h2>
-      <p class="s-sub" id="rtSub">Números reales. Sin editar. Actualizado cada pocos segundos.</p>
+      <h2 class="s-title" id="rtTitle">Así trabaja Vai en tu negocio</h2>
+      <p class="s-sub" id="rtSub">Lo que consigues desde el primer día que lo activamos.</p>
     </div>
     <div class="rt-grid fade-up">
       <div class="rt-card rt-card-accent">
-        <div class="rt-num" id="rtConv">47</div>
-        <div class="rt-label" id="rtConvLabel">Conversaciones activas ahora</div>
-        <div class="rt-bar"><div class="rt-bar-fill" id="rtConvBar"></div></div>
+        <div class="rt-num" id="rtConv">24/7</div>
+        <div class="rt-label" id="rtConvLabel">Atiende sin descanso, también de madrugada y festivos</div>
       </div>
       <div class="rt-card">
-        <div class="rt-num" id="rtMsg">8,412</div>
-        <div class="rt-label" id="rtMsgLabel">Mensajes gestionados hoy</div>
-        <div class="rt-bar"><div class="rt-bar-fill" id="rtMsgBar"></div></div>
+        <div class="rt-num rt-num-small" id="rtMsg">Al instante</div>
+        <div class="rt-label" id="rtMsgLabel">Responde en segundos, sin colas ni esperas</div>
       </div>
       <div class="rt-card">
-        <div class="rt-num" id="rtBiz">340</div>
-        <div class="rt-label" id="rtBizLabel">Negocios con Vai activo</div>
-        <div class="rt-bar"><div class="rt-bar-fill" id="rtBizBar"></div></div>
+        <div class="rt-num" id="rtBiz">3</div>
+        <div class="rt-label" id="rtBizLabel">Canales en un panel: WhatsApp, web e Instagram</div>
       </div>
       <div class="rt-card">
-        <div class="rt-num rt-num-small" id="rtResp">&lt; 8 seg</div>
-        <div class="rt-label" id="rtRespLabel">Tiempo de respuesta</div>
-        <div class="rt-tag" id="rtRespTag">En todos los canales</div>
+        <div class="rt-num rt-num-small" id="rtResp">48 h</div>
+        <div class="rt-label" id="rtRespLabel">Lo dejamos funcionando en tu negocio</div>
+        <div class="rt-tag" id="rtRespTag">Nosotros lo configuramos todo</div>
       </div>
     </div>
   </div>
@@ -1769,9 +1771,23 @@
   function toggleFaq(el) {
     const item = el.parentElement;
     const isOpen = item.classList.contains('open');
-    document.querySelectorAll('.faq-item').forEach(i => i.classList.remove('open'));
-    if (!isOpen) item.classList.add('open');
+    document.querySelectorAll('.faq-item').forEach(i => {
+      i.classList.remove('open');
+      const q = i.querySelector('.faq-q');
+      if (q) q.setAttribute('aria-expanded', 'false');
+    });
+    if (!isOpen) { item.classList.add('open'); el.setAttribute('aria-expanded', 'true'); }
   }
+
+  // Accesibilidad de la FAQ: foco por teclado y activación con Enter/Espacio
+  document.querySelectorAll('.faq-q').forEach(function (q) {
+    q.setAttribute('role', 'button');
+    q.setAttribute('tabindex', '0');
+    q.setAttribute('aria-expanded', 'false');
+    q.addEventListener('keydown', function (e) {
+      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleFaq(q); }
+    });
+  });
 
   // ── HERO CHAT ANIMATION (Barbería WA) ──
   const hmIds = ['hm1','hm2','hm3','hm4','hm5','hm6'];
@@ -1849,10 +1865,10 @@
       heroBadge:'Presentamos Vai — tu asistente IA',
       heroH1:'Tu negocio funciona<br>aunque tú <span class="fire">estés durmiendo.</span>',
       heroP:'Vai atiende, vende y gestiona tus clientes en WhatsApp, web y redes sociales — las 24 horas, sin excepciones, sin que toques nada.',
-      heroBtn1:'Ver demo en vivo →', heroBtn2:'Cómo funciona',
-      heroS1:'Sin interrupciones', heroS2:'Ventas fuera de horario', heroS3:'Tiempo de respuesta', heroS4:'Tareas repetitivas',
+      heroBtn1:'Agenda tu demo →', heroBtn2:'Cómo funciona',
+      heroS1:'Sin interrupciones', heroS2:'En responder', heroS3:'Canales en un panel', heroS4:'Puesta en marcha',
       probLabel:'El problema', probTitle:'Tu negocio pierde dinero cada día', probSub:'Cada mensaje sin respuesta a las 11pm es una venta perdida. Para siempre.',
-      prob1H:'Clientes que no vuelven', prob1P:'De los clientes que no reciben respuesta en menos de 1 hora compran en la competencia. Sin excepción.',
+      prob1H:'Clientes que no vuelven', prob1P:'Si tardas más de una hora en responder, muchos clientes ya se han ido a la competencia. Y rara vez vuelven.',
       prob2H:'Sin cobertura cada día', prob2P:'Tu negocio duerme 8 horas. Tu competencia con IA, no. Cada noche pierdes oportunidades que no se recuperan.',
       prob3H:'Productividad del equipo', prob3P:'Tu equipo responde las mismas preguntas una y otra vez. Tiempo que podrían usar en lo que realmente importa.',
       howLabel:'Cómo funciona', howTitle:'El ciclo completo, automatizado en WhatsApp y web', howSub:'Vai no solo responde — gestiona todo el flujo de principio a fin.',
@@ -1907,19 +1923,19 @@
       ftC1:'Producto', ftL1:'Cómo funciona', ftL2:'Industrias', ftL3:'Precios', ftL4:'Conoce a Vai',
       ftC2:'Contacto', ftC3:'Por sector', ftC4:'Herramientas', ftBottom:'© 2026 Velai. Todos los derechos reservados.',
       geoLabel:'Velai en la IA', geoTitle:'¿Investigas proveedores con IA? Pregúntale por nosotros', geoP:'Abre tu asistente favorito y pídele que te resuma qué es Velai y si encaja con tu negocio. Sin filtros de marketing.',
-      rtLive:'En vivo ahora', rtTitle:'Vai trabajando en tiempo real ahora mismo', rtSub:'Números reales. Sin editar. Actualizado cada pocos segundos.',
-      rtConvLabel:'Conversaciones activas ahora', rtMsgLabel:'Mensajes gestionados hoy',
-      rtBizLabel:'Negocios con Vai activo', rtRespLabel:'Tiempo de respuesta', rtRespTag:'En todos los canales'
+      rtTitle:'Así trabaja Vai en tu negocio', rtSub:'Lo que consigues desde el primer día que lo activamos.', rtMsgNum:'Al instante',
+      rtConvLabel:'Atiende sin descanso, también de madrugada y festivos', rtMsgLabel:'Responde en segundos, sin colas ni esperas',
+      rtBizLabel:'Canales en un panel: WhatsApp, web e Instagram', rtRespLabel:'Lo dejamos funcionando en tu negocio', rtRespTag:'Nosotros lo configuramos todo'
     },
     en: {
       navHow:'How it works', navInd:'Industries', navPrice:'Pricing', navCalc:'Calculator', navDemo:'Request a demo',
       heroBadge:'Introducing Vai — your AI assistant',
       heroH1:'Your business runs<br>even while you <span class="fire">sleep.</span>',
       heroP:'Vai handles, sells, and manages your customers on WhatsApp, web, and social media — 24 hours a day, no exceptions, no manual work.',
-      heroBtn1:'See live demo →', heroBtn2:'How it works',
-      heroS1:'No interruptions', heroS2:'After-hours sales', heroS3:'Response time', heroS4:'Repetitive tasks',
+      heroBtn1:'Book your demo →', heroBtn2:'How it works',
+      heroS1:'No interruptions', heroS2:'To reply', heroS3:'Channels in one panel', heroS4:'Go-live time',
       probLabel:'The problem', probTitle:'Your business loses money every day', probSub:'Every unanswered message at 11pm is a lost sale. Forever.',
-      prob1H:"Customers who don't return", prob1P:"Customers who don't get a reply within 1 hour buy from the competition. Without exception.",
+      prob1H:"Customers who don't return", prob1P:"If you take more than an hour to reply, many customers have already gone to the competition. And they rarely come back.",
       prob2H:'No coverage every day', prob2P:"Your business sleeps 8 hours. Your AI-powered competition doesn't. Every night you lose opportunities that never come back.",
       prob3H:'Team productivity', prob3P:'Your team answers the same questions over and over. Time they could spend on what really matters.',
       howLabel:'How it works', howTitle:'The complete cycle, automated on WhatsApp and web', howSub:"Vai doesn't just reply — it manages the entire flow from start to finish.",
@@ -1974,9 +1990,9 @@
       ftC1:'Product', ftL1:'How it works', ftL2:'Industries', ftL3:'Pricing', ftL4:'Meet Vai',
       ftC2:'Contact', ftC3:'By industry', ftC4:'Tools', ftBottom:'© 2026 Velai. All rights reserved.',
       geoLabel:'Velai in AI', geoTitle:'Researching providers with AI? Ask it about us', geoP:'Open your favorite assistant and ask it to summarize what Velai is and whether it fits your business. No marketing filter.',
-      rtLive:'Live right now', rtTitle:'Vai working in real time right now', rtSub:'Real numbers. Unfiltered. Updated every few seconds.',
-      rtConvLabel:'Active conversations right now', rtMsgLabel:'Messages handled today',
-      rtBizLabel:'Businesses running Vai', rtRespLabel:'Response time', rtRespTag:'Across all channels'
+      rtTitle:'How Vai works in your business', rtSub:'What you get from the first day we switch it on.', rtMsgNum:'Instant',
+      rtConvLabel:'Always on — nights, weekends and holidays too', rtMsgLabel:'Replies in seconds, no queues or waiting',
+      rtBizLabel:'Channels in one panel: WhatsApp, web and Instagram', rtRespLabel:'We get it live in your business', rtRespTag:'We set everything up'
     }
   };
 
@@ -2101,9 +2117,9 @@
       cb[2].setAttribute('aria-label', t.ctaB3);
     }
     // Realtime section
-    setTextEl(document.getElementById('rtLiveLabel'), t.rtLive);
     setTextEl(document.getElementById('rtTitle'), t.rtTitle);
     setTextEl(document.getElementById('rtSub'), t.rtSub);
+    setTextEl(document.getElementById('rtMsg'), t.rtMsgNum);
     setTextEl(document.getElementById('rtConvLabel'), t.rtConvLabel);
     setTextEl(document.getElementById('rtMsgLabel'), t.rtMsgLabel);
     setTextEl(document.getElementById('rtBizLabel'), t.rtBizLabel);
@@ -2144,49 +2160,7 @@
   function setLang(lang) { applyLang(lang); }
   applyLang(_lang);
 
-  // ── REALTIME COUNTERS ──
-  var _rtConv = 47, _rtMsg = 8412, _rtBiz = 340;
-
-  function _rtFlash(id) {
-    var el = document.getElementById(id);
-    if (!el) return;
-    el.classList.add('flash');
-    setTimeout(function() { el.classList.remove('flash'); }, 400);
-  }
-
-  function _rtSetBar(id, pct) {
-    var el = document.getElementById(id);
-    if (el) el.style.width = Math.min(100, Math.max(4, pct)) + '%';
-  }
-
-  function _rtInit() {
-    _rtSetBar('rtConvBar', ((_rtConv - 25) / 65) * 100);
-    _rtSetBar('rtMsgBar', (_rtMsg / 20000) * 100);
-    _rtSetBar('rtBizBar', ((_rtBiz - 280) / 220) * 100);
-  }
-  setTimeout(_rtInit, 800);
-
-  setInterval(function() {
-    _rtConv += Math.random() < 0.62 ? 1 : -1;
-    _rtConv = Math.max(28, Math.min(84, _rtConv));
-    var convEl = document.getElementById('rtConv');
-    if (convEl) { convEl.textContent = _rtConv; _rtFlash('rtConv'); }
-    _rtSetBar('rtConvBar', ((_rtConv - 25) / 65) * 100);
-
-    _rtMsg += Math.floor(Math.random() * 6) + 2;
-    var msgEl = document.getElementById('rtMsg');
-    if (msgEl) msgEl.textContent = _rtMsg.toLocaleString('es-ES');
-    _rtSetBar('rtMsgBar', (_rtMsg / 20000) * 100);
-  }, 2800);
-
-  setInterval(function() {
-    if (Math.random() < 0.35) {
-      _rtBiz++;
-      var bizEl = document.getElementById('rtBiz');
-      if (bizEl) { bizEl.textContent = _rtBiz; _rtFlash('rtBiz'); }
-      _rtSetBar('rtBizBar', ((_rtBiz - 280) / 220) * 100);
-    }
-  }, 14000);
+  // (Sección "Así trabaja Vai": contenido estático y honesto, sin contadores simulados.)
 </script>
 
   <!-- VAI CHAT WIDGET -->
@@ -2270,6 +2244,13 @@
         setTimeout(() => vaiGreet(), 600);
       }
     }
+
+    // Abre el chat automáticamente si se llega con ?chat=1 (p. ej. desde /que-es-velai)
+    try {
+      if (/[?&]chat=1/.test(location.search)) {
+        setTimeout(function () { if (!vaiOpen) toggleVai(); }, 500);
+      }
+    } catch (e) {}
 
     function vaiGreet() {
       vaiAddMsg('bot', '¡Hola! Soy Vai 👋 ¿Tienes un negocio que pierde clientes fuera de horario? Cuéntame y te explico cómo puedo ayudarte.');

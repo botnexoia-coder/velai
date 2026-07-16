@@ -37,6 +37,7 @@
       channel: 'Canal principal', channelPh: 'Elige un canal',
       who: '¿Quién responde hoy?', whoPh: 'Elige una opción',
       submit: 'Pedir demo →', sending: 'Enviando…',
+      legal: 'Al enviar aceptas nuestra <a href="/privacidad/" target="_blank" rel="noopener">Política de Privacidad</a>. Usamos tus datos solo para contactarte sobre Velai.',
       okTitle: '¡Recibido! 🎉', okMsg: 'Te contactamos hoy mismo por WhatsApp. Si quieres, escríbenos ya:',
       okWa: 'Abrir WhatsApp →',
       errMsg: 'Ups, algo falló al enviar. Escríbenos directo por WhatsApp:',
@@ -59,6 +60,7 @@
       channel: 'Main channel', channelPh: 'Choose a channel',
       who: 'Who replies today?', whoPh: 'Choose an option',
       submit: 'Request demo →', sending: 'Sending…',
+      legal: 'By submitting you accept our <a href="/privacidad/" target="_blank" rel="noopener">Privacy Policy</a>. We use your data only to contact you about Velai.',
       okTitle: 'Got it! 🎉', okMsg: 'We’ll contact you on WhatsApp today. If you like, message us now:',
       okWa: 'Open WhatsApp →',
       errMsg: 'Oops, something failed. Message us directly on WhatsApp:',
@@ -97,6 +99,8 @@
       'padding:14px 24px;font-family:var(--font-b);font-weight:700;font-size:1rem;cursor:pointer;transition:transform .18s ease,box-shadow .18s ease,background .18s ease;}' +
       '.lf button.lf-submit:hover{transform:translateY(-2px);box-shadow:0 12px 30px rgba(255,107,26,.34);background:var(--orange2);}' +
       '.lf button.lf-submit:disabled{opacity:.6;cursor:default;transform:none;box-shadow:none;}' +
+      '.lf .lf-legal{margin:10px 2px 0;font-size:.74rem;line-height:1.5;color:var(--muted);text-align:center;}' +
+      '.lf .lf-legal a{color:var(--orange2);text-decoration:underline;text-underline-offset:2px;}' +
       '.lf .lf-result{text-align:center;padding:8px 0;}' +
       '.lf .lf-result h3{font-size:1.4rem;}' +
       '.lf .lf-result p{color:var(--muted);margin:0 0 18px;}' +
@@ -139,6 +143,7 @@
       '</div>' +
       field('quienResponde', t.who, '<select id="lf-quienResponde">' + opts(t.whos, t.whoPh) + '</select>') +
       '<button type="submit" class="lf-submit">' + t.submit + '</button>' +
+      '<p class="lf-legal">' + t.legal + '</p>' +
       '</form>';
     container.innerHTML = html;
 
