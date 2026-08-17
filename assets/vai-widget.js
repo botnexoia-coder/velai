@@ -39,6 +39,7 @@
   var TEASER_DELAY = typeof CFG.teaserDelay === 'number' ? CFG.teaserDelay : 18000;
   var SS_TEASER = 'velai-chat-teaser';
   var SS_OPENED = 'velai-chat-opened';
+  var SS_STATE = 'velai-chat-state'; // conversación persistida entre páginas (muere al cerrar la pestaña)
 
   var ORANGE = '#FF6B1A';
 
@@ -187,7 +188,32 @@
   var open = false, started = false, sent = 0, busy = false;
   var demo = '';
   var history = [];
+  var wasOpen = false; // el panel estaba abierto en la página anterior
   var el = {};
+
+  function saveState() {
+    try {
+      sessionStorage.setItem(SS_STATE, JSON.stringify({ demo: demo, history: history, sent: sent, open: open }));
+    } catch (e) {}
+  }
+  function loadState() {
+    try {
+      var s = JSON.parse(sessionStorage.getItem(SS_STATE));
+      if (!s || !Array.isArray(s.history) || !s.history.length) return;
+      history = s.history;
+      sent = typeof s.sent === 'number' ? s.sent : history.length;
+      demo = typeof s.demo === 'string' && DEMO_SCRIPTS[s.demo] ? s.demo : '';
+      wasOpen = !!s.open;
+    } catch (e) {}
+  }
+  // Repinta la conversación restaurada: saludo + historial (el saludo no viaja en history)
+  function renderHistory() {
+    el.msgs.innerHTML = '';
+    addMsg('bot', script().greeting);
+    history.forEach(function (m) {
+      addMsg(m.role === 'assistant' ? 'bot' : 'user', m.content, m.t);
+    });
+  }
 
   function script() { return (demo && DEMO_SCRIPTS[demo]) || DEFAULT_SCRIPT; }
 
@@ -240,11 +266,18 @@
     watchConsentBanner();
     track('chat_view', { page: location.pathname });
 
+    loadState();
+
     // Apertura automática con ?chat=1 (respeta ?demo=)
     try {
       if (/[?&]chat=1/.test(location.search)) {
+        // sin &demo= no se pasa demoKey: abrir sin resetear una conversación restaurada
         var d = demoFromQuery();
-        setTimeout(function () { toggle(true, 'querystring', d); }, 500);
+        setTimeout(function () { toggle(true, 'querystring', d || undefined); }, 500);
+      } else if (wasOpen && window.innerWidth > 480) {
+        // conversación en curso con el panel abierto: reabrir al navegar
+        // (en móvil no: el panel es pantalla completa y taparía la página)
+        setTimeout(function () { toggle(true, 'restore'); }, 300);
       } else {
         scheduleTeaser();
       }
@@ -307,6 +340,7 @@
       demo = demoKey;
       started = false; sent = 0; history = [];
       el.msgs.innerHTML = '';
+      saveState();
     }
 
     el.win.classList.toggle('is-open', open);
@@ -320,11 +354,18 @@
       started = true;
       ssSet(SS_OPENED, '1');
       track('chat_open', { source: source || 'bubble', page: location.pathname, demo: demo || 'none' });
-      setTimeout(function () {
-        addMsg('bot', script().greeting);
-        renderChips();
-      }, 500);
+      if (history.length) {
+        // conversación restaurada de otra página: repintar sin saludo demorado
+        renderHistory();
+        if (!sent) renderChips();
+      } else {
+        setTimeout(function () {
+          addMsg('bot', script().greeting);
+          renderChips();
+        }, 500);
+      }
     }
+    saveState(); // persistir abierto/cerrado entre páginas
     if (open && window.innerWidth > 480) setTimeout(function () { el.input.focus(); }, 620);
   }
 
@@ -342,9 +383,9 @@
   }
 
   /* ── 8. Mensajes ────────────────────────────────────────────────────── */
-  function addMsg(role, text) {
+  function addMsg(role, text, t) {
     var isBot = role === 'bot';
-    var d = new Date();
+    var d = t ? new Date(t) : new Date();
     var time = d.getHours() + ':' + (d.getMinutes() < 10 ? '0' : '') + d.getMinutes();
     var row = document.createElement('div');
     row.className = 'vai-row ' + (isBot ? 'is-bot' : 'is-user');
@@ -363,8 +404,9 @@
     el.chips.classList.add('is-off');
 
     addMsg('user', text);
-    history.push({ role: 'user', content: text });
+    history.push({ role: 'user', content: text, t: Date.now() }); // el worker ignora campos extra (sanitizeMessages)
     sent++;
+    saveState();
     if (sent === 1) track('chat_first_message', { source: source || 'input', page: location.pathname, demo: demo || 'none' });
     track('chat_message', { n: sent, demo: demo || 'none' });
 
@@ -384,7 +426,8 @@
       var data = await res.json();
       var reply = data.reply || (data.content && data.content[0] ? data.content[0].text : null);
       if (!reply) throw new Error('empty');
-      history.push({ role: 'assistant', content: reply });
+      history.push({ role: 'assistant', content: reply, t: Date.now() });
+      saveState();
       el.typing.classList.remove('is-on');
       addMsg('bot', reply);
       track('chat_reply', { n: sent });
