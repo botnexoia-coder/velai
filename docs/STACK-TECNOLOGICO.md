@@ -131,7 +131,9 @@ panel) y `LEAD_RETENTION_MONTHS` (purga RGPD).
   CI en `.github/workflows/ci.yml` ejecuta `npm run check` en cada push.
 - **Migraciones D1** — `migrations/` (aplicar con `wrangler d1 migrations apply`).
 - El runbook operativo completo (puesta en marcha, deploy, rollback) vive en
-  `docs/OPERATIONS.md`.
+  `docs/OPERATIONS.md`. Para implementar Workers o endpoints nuevos, la guía de
+  patrones obligatoria del equipo es `docs/GUIA-WORKERS.md` (la arquitectura
+  monolítica anterior está retirada — su endpoint responde 410).
 
 ---
 

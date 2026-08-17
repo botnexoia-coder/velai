@@ -17,6 +17,7 @@ migrations/                Esquema D1 (aplicar con wrangler d1 migrations apply)
 test/worker.test.js        Tests (node --test, sin dependencias)
 scripts/check-site.mjs     Validador del sitio (páginas, JSON-LD, enlaces, marcadores)
 docs/OPERATIONS.md         ★ Runbook: puesta en marcha, deploy, degradación, rollback
+docs/GUIA-WORKERS.md       ★ Para el equipo: cómo crear/consumir Workers (arquitectura vigente)
 docs/STACK-TECNOLOGICO.md  Referencia de arquitectura y servicios
 ```
 
