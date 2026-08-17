@@ -6,6 +6,16 @@ import { encryptSecret, decryptSecret } from '../worker/crypto.js';
 
 const TEST_KEK = btoa(String.fromCharCode(...new Uint8Array(32).map((_, i) => i + 1)));
 
+// El system viaja como array de bloques con cache_control (caché de prompt);
+// este helper extrae el texto y verifica el contrato del caché de paso.
+function sysText(body) {
+  const s = body.system;
+  if (typeof s === 'string') return s;
+  if (!Array.isArray(s) || !s.length || s[0].type !== 'text') throw new Error('system sin bloques');
+  if (!s[0].cache_control || s[0].cache_control.type !== 'ephemeral') throw new Error('bloque estable sin cache_control');
+  return s.map((b) => b.text).join('');
+}
+
 test('normaliza teléfonos válidos y rechaza longitudes peligrosas', () => {
   assert.equal(testing.normalizePhone('+34 612 345 678'), '+34612345678');
   assert.equal(testing.normalizePhone('612-345-678'), '612345678');
@@ -222,7 +232,7 @@ test('el webhook de Twilio enruta por To al tenant correcto y aísla el historia
   const realFetch = globalThis.fetch;
   globalThis.fetch = async (url, init) => {
     if (String(url).includes('api.anthropic.com')) {
-      anthropicSystems.push(JSON.parse(init.body).system);
+      anthropicSystems.push(sysText(JSON.parse(init.body)));
       return new Response(JSON.stringify({ content: [{ text: 'hola' }] }), { status: 200 });
     }
     return new Response('{}', { status: 200 });
@@ -284,7 +294,7 @@ test('webhook de subcuenta: firma con el token cifrado del tenant, sin respaldo 
   const calls = [];
   const realFetch = globalThis.fetch;
   globalThis.fetch = async (url, init) => {
-    if (String(url).includes('api.anthropic.com')) { calls.push(JSON.parse(init.body).system); return new Response(JSON.stringify({ content: [{ text: 'ok' }] }), { status: 200 }); }
+    if (String(url).includes('api.anthropic.com')) { calls.push(sysText(JSON.parse(init.body))); return new Response(JSON.stringify({ content: [{ text: 'ok' }] }), { status: 200 }); }
     return new Response('{}', { status: 200 });
   };
   try {
@@ -607,7 +617,7 @@ test('un tenant web: atiende por el chat con su contexto y es activable', async 
   const realFetch = globalThis.fetch;
   globalThis.fetch = async (url, init) => {
     if (String(url).includes('siteverify')) return new Response(JSON.stringify({ success: true, action: 'chat', hostname: 'zoetravelspain.com' }), { status: 200 });
-    if (String(url).includes('api.anthropic.com')) { anthropicSystems.push(JSON.parse(init.body).system); return new Response(JSON.stringify({ content: [{ text: 'hola' }] }), { status: 200 }); }
+    if (String(url).includes('api.anthropic.com')) { anthropicSystems.push(sysText(JSON.parse(init.body))); return new Response(JSON.stringify({ content: [{ text: 'hola' }] }), { status: 200 }); }
     return new Response('{}', { status: 200 });
   };
   try {

@@ -143,18 +143,32 @@ async function aiBudgetGuard(env) {
 async function callAnthropic(env, payload) {
   if (!env.ANTHROPIC_API_KEY) throw new HttpError(503, 'ai_not_configured');
   await aiBudgetGuard(env);
+  // Caché de prompt (CONTEXTOS-AMPLIOS fase 1): el system es estable por tenant y se
+  // reenvía EN CADA turno — con cache_control la relectura cuesta 0,1x desde el segundo
+  // mensaje de la conversación (escritura 1,25x, TTL 5 min). Por debajo del mínimo
+  // cacheable (1.024 tokens en Sonnet) la API lo ignora sin coste. El bloque debe ser
+  // idéntico byte a byte: nada variable (fechas, nombres) puede entrar en el system.
+  const body = { ...payload };
+  if (typeof body.system === 'string' && body.system) {
+    body.system = [{ type: 'text', text: body.system, cache_control: { type: 'ephemeral' } }];
+  }
   let response;
   for (let attempt = 0; attempt < 2; attempt++) {
     response = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'x-api-key': env.ANTHROPIC_API_KEY, 'anthropic-version': '2023-06-01' },
-      body: JSON.stringify(payload),
+      body: JSON.stringify(body),
       signal: AbortSignal.timeout(15000),
     });
     if (response.ok || ![429, 500, 502, 503, 504].includes(response.status) || attempt) break;
   }
   if (!response.ok) throw new HttpError(response.status === 429 ? 429 : 502, 'ai_unavailable');
   const data = await response.json();
+  // Contadores del caché al log (sin PII): si cache_w y cache_r son siempre 0, el
+  // caché NO está acertando — y la API no avisa. Verificable en Workers Logs.
+  if (data.usage) {
+    console.log(JSON.stringify({ level: 'info', code: 'ai_usage', in: data.usage.input_tokens || 0, out: data.usage.output_tokens || 0, cache_w: data.usage.cache_creation_input_tokens || 0, cache_r: data.usage.cache_read_input_tokens || 0 }));
+  }
   const reply = data.content?.[0]?.text;
   if (!reply) throw new HttpError(502, 'ai_invalid_response');
   return reply;

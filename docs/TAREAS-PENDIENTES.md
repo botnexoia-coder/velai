@@ -51,6 +51,14 @@ Sin esto, las campañas gastarían presupuesto a ciegas (sin medir conversiones)
 - [ ] Cerrar los `[PENDIENTE:…]` de `tenants/hiredatavision.md`, `dialogos.md` y `myxu-costura.md` (3 repos inaccesibles con el token gh actual: prompts de los bots viejos sin contrastar).
 - [ ] Los workers `hiredatavision-bot` y `gogestion-bot` NO se apagan hasta que su tenant responda igual o mejor; anotar en OPERATIONS cuando se apaguen.
 
+### 2d. Contextos amplios (CONTEXTOS-AMPLIOS.md — fase 1 hecha, quedan las siguientes)
+
+- [ ] Tras unos días: revisar `ai_usage` en Workers Logs — `cache_r` > 0 confirma que el caché acierta; si el tráfico es esporádico y `cache_w` se repite mucho, valorar TTL de 1 hora.
+- [ ] **Fase 2** (cuando se toque el panel): partir `system_prompt` en instrucciones + conocimiento (`tenant_docs` en D1) — es la que arregla la calidad ("220 caracteres" dejará de competir con 13k de datos; hoy Zoe y GOgestión contestan más largo de lo que su prompt pide).
+- [ ] **Fase 3** (al pasar de ~20k car. o varios documentos): herramienta `consultar_base(tema)` con índice en el prompt base.
+- [ ] **Fase 4** (solo si el corpus se dispara): Vectorize. Hoy sería sobreingeniería.
+- Regla del doc que se mantiene: NO recortar la base de conocimiento de Zoe para ahorrar — el problema es cómo se entrega, no cuánto hay.
+
 ### 2b. De la revisión de seguridad de Johan (lo manual — el resto ya está aplicado)
 
 - [ ] **Reglas WAF/Rate Limiting de borde** para `/chat` y `/lead` (dashboard → Security → WAF; el worker ya limita por IP y por conversación como segunda capa).
