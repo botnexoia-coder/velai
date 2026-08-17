@@ -647,6 +647,32 @@ test('el webhook rechaza direcciones no enrutables (web:/pending:) sin tocar D1'
   assert.equal(dbTouched, false, 'ninguna consulta a D1');
 });
 
+test('el panel rediseñado: sin dominios externos salvo las fuentes, nonce y todos los controles', async () => {
+  const { ADMIN_HTML } = await import('../worker/admin-page.js');
+  assert.equal(ADMIN_HTML.includes('http://'), false, 'nada por http://');
+  const externals = [...ADMIN_HTML.matchAll(/https:\/\/([a-z0-9.-]+)/gi)].map((m) => m[1]);
+  assert.deepEqual([...new Set(externals)], ['hirevai.com'], 'solo hirevai.com (fuentes)');
+  assert.ok([...ADMIN_HTML.matchAll(/hirevai\.com\/([a-z]+)\//g)].every((m) => m[1] === 'fonts'), 'y solo su ruta /fonts/');
+  assert.ok(ADMIN_HTML.includes('__NONCE__'));
+  for (const id of ['tName', 'tSlug', 'tAddress', 'tFrom', 'tTeam', 'tChat', 'tTpl', 'tSub', 'tWaba', 'tToken', 'tPartner', 'tActive', 'tPrompt', 'tNote', 'pSub', 'pTpl', 'pPhone', 'pSender', 'pCode', 'pVerify', 'tenantFilter', 'newTenant', 'export', 'tTokenState']) {
+    assert.ok(ADMIN_HTML.includes(`id="${id}"`), `falta #${id}`);
+  }
+  assert.ok(!/localStorage/.test(ADMIN_HTML), 'sin localStorage');
+});
+
+test('la serie de 14 días devuelve 14 entradas incluso sin leads y la respuesta de stats no lleva PII', async () => {
+  const empty = testing.fillSeries([], 14);
+  assert.equal(empty.length, 14);
+  assert.ok(empty.every((x) => x.n === 0 && /^\d{4}-\d{2}-\d{2}$/.test(x.d)));
+  const withData = testing.fillSeries([{ d: empty[13].d, n: 3 }], 14);
+  assert.equal(withData[13].n, 3);
+  // /api/admin/stats sin JWT → 401 (Access primero); con host equivocado → 404
+  const worker = createWorker({ SYSTEM: 's', DEMOS: {}, SUMMARY_PROMPT: '', GUARDRAILS: '' });
+  const env = { ALLOWED_WEB_ORIGINS: '', ADMIN_ORIGIN: 'https://admin.hirevai.com' };
+  const res = await worker.fetch(new Request('https://admin.hirevai.com/api/admin/stats'), env, { waitUntil() {} });
+  assert.equal(res.status, 401);
+});
+
 test('el Worker rechaza CORS desconocido y exige Access en administración', async () => {
   const worker = createWorker({ SYSTEM: '', DEMOS: {}, SUMMARY_PROMPT: '' });
   const ctx = { waitUntil() {} };

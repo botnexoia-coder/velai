@@ -15,7 +15,9 @@ function adminPageResponse() {
   const nonce = btoa(String.fromCharCode(...crypto.getRandomValues(new Uint8Array(18))));
   const headers = {
     ...ADMIN_HEADERS,
-    'Content-Security-Policy': `default-src 'none'; script-src 'nonce-${nonce}'; style-src 'nonce-${nonce}'; connect-src 'self'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'`,
+    // font-src es la ÚNICA apertura: las fuentes de marca se sirven desde hirevai.com
+    // (con CORS en _headers de Pages); el resto sigue cerrado con nonce.
+    'Content-Security-Policy': `default-src 'none'; script-src 'nonce-${nonce}'; style-src 'nonce-${nonce}'; connect-src 'self'; font-src https://hirevai.com; form-action 'self'; frame-ancestors 'none'; base-uri 'none'`,
   };
   return new Response(ADMIN_HTML.replaceAll('__NONCE__', nonce), { headers });
 }
@@ -896,6 +898,19 @@ function csvCell(value) {
 // Datos administrativos: nunca cacheables (ni en el navegador ni en proxies).
 const NO_STORE = { 'Cache-Control': 'no-store' };
 
+// La serie del gráfico rellena los días vacíos con 0 EN EL SERVIDOR: si no, el
+// gráfico comprime el eje y miente sobre la distribución.
+function fillSeries(rows, days) {
+  const byDay = new Map(rows.map((r) => [r.d, r.n]));
+  const out = [];
+  const today = new Date();
+  for (let i = days - 1; i >= 0; i--) {
+    const d = new Date(today.getTime() - i * 86400000).toISOString().slice(0, 10);
+    out.push({ d, n: byDay.get(d) || 0 });
+  }
+  return out;
+}
+
 // ── Aprovisionamiento de Twilio desde el panel (PR 6) ────────────────────────
 // Cerrojo para la ventana entre la llamada a Twilio y el UPDATE en D1: dos clics
 // simultáneos no deben crear dos subcuentas (en Twilio no se borran, se cierran).
@@ -1106,6 +1121,26 @@ async function handleAdmin(request, env, ctx, path, url, config) {
     await env.DB.prepare('INSERT INTO tenant_versions (tenant_id,actor_email,field,previous_value,note,created_at) VALUES (?,?,?,?,?,?)')
       .bind(tenantId, actor, 'config', null, clean(body.note, 200) || 'alta', now).run();
     return json({ ok: true, id: tenantId, updated_at: now }, 201, NO_STORE);
+  }
+  if (path === '/api/admin/stats' && request.method === 'GET') {
+    // Métricas para la cabecera del panel: solo recuentos y fechas, nunca PII.
+    // El listado está paginado — contar en cliente daría números falsos.
+    const [total30, nuevos, fallidos7, tenantsRows, serieRows] = await env.DB.batch([
+      env.DB.prepare("SELECT COUNT(*) AS n FROM leads WHERE created_at >= datetime('now','-30 days')"),
+      env.DB.prepare("SELECT COUNT(*) AS n, MIN(created_at) AS oldest FROM leads WHERE status = 'new'"),
+      env.DB.prepare("SELECT COUNT(*) AS n FROM lead_notifications WHERE status = 'failed' AND updated_at >= datetime('now','-7 days')"),
+      env.DB.prepare('SELECT active, COUNT(*) AS n FROM tenants GROUP BY active'),
+      env.DB.prepare("SELECT date(created_at) AS d, COUNT(*) AS n FROM leads WHERE created_at >= datetime('now','-14 days') GROUP BY d ORDER BY d"),
+    ]);
+    const activos = (tenantsRows.results || []).find((r) => Number(r.active) === 1);
+    return json({
+      total30: total30.results[0].n,
+      sinContactar: nuevos.results[0].n,
+      sinContactarDesde: nuevos.results[0].oldest || null,
+      fallidos7: fallidos7.results[0].n,
+      tenantsActivos: activos ? activos.n : 0,
+      porDia: fillSeries(serieRows.results || [], 14),
+    }, 200, NO_STORE);
   }
   const provMatch = path.match(/^\/api\/admin\/tenants\/([0-9a-f-]+)\/provision(?:\/(subaccount|template|sender\/verify|sender))?$/i);
   if (provMatch) {
@@ -1371,4 +1406,4 @@ export function createWorker(config) {
   };
 }
 
-export const testing = { clean, normalizePhone, extractPhone, safeUtm, publicCors, validTwilioSignature, csvCell, expiryDate, leadFilters, isDemoKey, templateVar, leadTemplateVariables, readJson, deliver, drainQueuedLeads, verifyTurnstile, systemFor, validateTenant, invalidateTenantCache, tenantWriteError, assertNotActivePending, handleProvision, pollProvisioning };
+export const testing = { clean, normalizePhone, extractPhone, safeUtm, publicCors, validTwilioSignature, csvCell, expiryDate, leadFilters, isDemoKey, templateVar, leadTemplateVariables, readJson, deliver, drainQueuedLeads, verifyTurnstile, systemFor, validateTenant, invalidateTenantCache, tenantWriteError, assertNotActivePending, handleProvision, pollProvisioning, fillSeries };
