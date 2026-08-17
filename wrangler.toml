@@ -28,6 +28,13 @@ AI_DAILY_LIMIT = "1000"
 # Tenant del canal web cuando el payload no trae `tenant` (el widget de hirevai.com).
 DEFAULT_TENANT_SLUG = "velai"
 
+# Workers Logs: sin este bloque cada deploy lo deja APAGADO y los logs operativos
+# (tenant_token_undecryptable, provision_orphan, lead_d1_fallback…) no se ven en
+# ninguna parte. Los logs no llevan PII por diseño, así que muestreo al 100%.
+[observability]
+enabled = true
+head_sampling_rate = 1
+
 [triggers]
 crons = ["*/5 * * * *"]
 
