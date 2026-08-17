@@ -25,6 +25,8 @@ ADMIN_ORIGIN = "https://admin.hirevai.com"
 LEAD_RETENTION_MONTHS = "24"
 # Tope diario global de llamadas al modelo (presupuesto anti-abuso, resetea a medianoche UTC).
 AI_DAILY_LIMIT = "1000"
+# Tenant del canal web cuando el payload no trae `tenant` (el widget de hirevai.com).
+DEFAULT_TENANT_SLUG = "velai"
 
 [triggers]
 crons = ["*/5 * * * *"]

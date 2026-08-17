@@ -169,6 +169,81 @@ test('el filtro de fecha final incluye el día completo', () => {
   assert.ok(passthrough.values.includes('2026-08-17T10:00:00Z'));
 });
 
+test('el prompt efectivo incluye siempre los guardrails, con fallback si el seed falta', () => {
+  const config = { SYSTEM: 'VELAI-CODE', GUARDRAILS: 'REGLA-INQUEBRANTABLE' };
+  const full = testing.systemFor(config, { system_prompt: 'NEGOCIO-D1' });
+  assert.ok(full.includes('NEGOCIO-D1') && full.includes('REGLA-INQUEBRANTABLE'));
+  assert.ok(!full.includes('VELAI-CODE'));
+  for (const tenant of [{ system_prompt: 'PENDIENTE' }, { system_prompt: '' }, null]) {
+    const fallback = testing.systemFor(config, tenant);
+    assert.ok(fallback.includes('VELAI-CODE') && fallback.includes('REGLA-INQUEBRANTABLE'), JSON.stringify(tenant));
+  }
+});
+
+test('las variables de plantilla usan el teléfono E.164 normalizado', () => {
+  const vars = JSON.parse(testing.leadTemplateVariables({ whatsapp: '602 608 940', whatsapp_normalized: '+34602608940', name: 'Ana' }));
+  assert.equal(vars[1], '+34602608940');
+});
+
+async function twilioRequest(url, params, authToken) {
+  const data = url + Object.keys(params).sort().map((key) => key + params[key]).join('');
+  const key = await crypto.subtle.importKey('raw', new TextEncoder().encode(authToken), { name: 'HMAC', hash: 'SHA-1' }, false, ['sign']);
+  const signed = await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(data));
+  const signature = btoa(String.fromCharCode(...new Uint8Array(signed)));
+  return new Request(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'X-Twilio-Signature': signature },
+    body: new URLSearchParams(params).toString(),
+  });
+}
+
+test('el webhook de Twilio enruta por To al tenant correcto y aísla el historial', async () => {
+  const worker = createWorker({ SYSTEM: 'VELAI-CODE', DEMOS: {}, SUMMARY_PROMPT: '', GUARDRAILS: 'REGLA' });
+  const ctx = { waitUntil() {} };
+  const kvPuts = [];
+  const tenants = {
+    'whatsapp:+15550000001': { id: 't-uno', slug: 'uno', system_prompt: 'PROMPT-UNO' },
+    'whatsapp:+15550000002': { id: 't-dos', slug: 'dos', system_prompt: 'PROMPT-DOS' },
+  };
+  const env = {
+    TWILIO_AUTH_TOKEN: 'tok',
+    ANTHROPIC_API_KEY: 'k',
+    KV: { async get() { return null; }, async put(key, value) { kvPuts.push(key); }, async delete() {} },
+    DB: { prepare: (sql) => ({ bind: (...args) => ({
+      first: async () => sql.includes('channel_address') ? (tenants[args[0]] || null) : null,
+      all: async () => ({ results: [] }), run: async () => {},
+    }) }), batch: async () => [] },
+  };
+  const anthropicSystems = [];
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = async (url, init) => {
+    if (String(url).includes('api.anthropic.com')) {
+      anthropicSystems.push(JSON.parse(init.body).system);
+      return new Response(JSON.stringify({ content: [{ text: 'hola' }] }), { status: 200 });
+    }
+    return new Response('{}', { status: 200 });
+  };
+  try {
+    for (const to of ['whatsapp:+15550000001', 'whatsapp:+15550000002']) {
+      const request = await twilioRequest('https://worker.test/', { From: 'whatsapp:+34600000000', To: to, Body: 'hola' }, 'tok');
+      const response = await worker.fetch(request, env, ctx);
+      assert.equal(response.status, 200);
+    }
+    assert.ok(anthropicSystems[0].includes('PROMPT-UNO') && anthropicSystems[0].includes('REGLA'));
+    assert.ok(anthropicSystems[1].includes('PROMPT-DOS'));
+    // historiales namespaceados por tenant: mismo usuario final, claves distintas
+    const convKeys = kvPuts.filter((k) => k.startsWith('conv:wa:'));
+    assert.deepEqual([...new Set(convKeys)].sort(), ['conv:wa:t-dos:whatsapp:+34600000000', 'conv:wa:t-uno:whatsapp:+34600000000']);
+    // To desconocido: 404 unknown_tenant y sin llamar al modelo
+    const before = anthropicSystems.length;
+    const unknown = await twilioRequest('https://worker.test/', { From: 'whatsapp:+34600000000', To: 'whatsapp:+15559999999', Body: 'hola' }, 'tok');
+    const notFound = await worker.fetch(unknown, env, ctx);
+    assert.equal(notFound.status, 404);
+    assert.equal((await notFound.json()).error, 'unknown_tenant');
+    assert.equal(anthropicSystems.length, before, 'no debe llamar al modelo');
+  } finally { globalThis.fetch = realFetch; }
+});
+
 test('el Worker rechaza CORS desconocido y exige Access en administración', async () => {
   const worker = createWorker({ SYSTEM: '', DEMOS: {}, SUMMARY_PROMPT: '' });
   const ctx = { waitUntil() {} };

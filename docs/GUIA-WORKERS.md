@@ -73,6 +73,15 @@ solo si `keep_vars = true`. Documenta cada variable nueva en `.dev.vars.example`
 | Rutas admin | Solo en el hostname de `ADMIN_ORIGIN` + JWT de Cloudflare Access verificado (firma JWKS, `iss`, `aud`, `exp`, `alg`) — ver `adminIdentity` |
 | Datos | Payload limitado (`readJson(request, maxBytes)`), campos con `clean()`, SQL SIEMPRE con `prepare().bind()` |
 
+## 4b. Multi-tenant
+
+La config por cliente es un DATO (tabla `tenants` en D1, cacheada en KV 5 min), nunca
+código. La excepción deliberada: los **guardrails antiinyección van en código**
+(`GUARDRAILS` + `systemFor`) y se concatenan siempre — editar una fila no puede
+degradar la seguridad de nadie. Todo estado por conversación/lead se namespacea por
+`tenant.id` (historiales, marcas KV, `request_id`); sin eso dos clientes con el mismo
+usuario final se pisan. Alta de clientes: `docs/OPERATIONS.md` §Multi-tenant.
+
 ## 5. Persistencia y resiliencia
 
 - **D1 = fuente de verdad**; **KV** = estado efímero con TTL (historiales, rate limit,

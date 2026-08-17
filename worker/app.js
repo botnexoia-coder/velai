@@ -164,6 +164,72 @@ function expiryDate(env) {
   return date.toISOString();
 }
 
+// ── Multi-tenant ─────────────────────────────────────────────────────────────
+// La config de cada negocio es un dato (tabla `tenants`); los guardrails
+// antiinyección son código y se concatenan SIEMPRE (systemFor). El webhook de
+// Twilio enruta por `To`; el canal web por `body.tenant` (default: velai).
+const TENANT_TTL = 300; // 5 min: un cambio en la fila se ve casi al momento
+
+// Caché en KV para no pegarle a D1 en cada mensaje. Se cachea también el fallo
+// (objeto vacío) para que un bombardeo a un To inexistente no golpee la base.
+async function tenantCached(env, cacheKey, query, bindValue) {
+  if (env.KV) {
+    try {
+      const cached = await env.KV.get(cacheKey, 'json');
+      if (cached) return cached.id ? cached : null;
+    } catch (_) {}
+  }
+  const row = await env.DB.prepare(query).bind(bindValue).first();
+  if (env.KV) { try { await env.KV.put(cacheKey, JSON.stringify(row || {}), { expirationTtl: TENANT_TTL }); } catch (_) {} }
+  return row || null;
+}
+
+async function tenantByAddress(env, address) {
+  if (!env.DB) throw new HttpError(503, 'tenant_storage_not_configured');
+  return tenantCached(env, `tenant:addr:${address}`, 'SELECT * FROM tenants WHERE channel_address = ? AND active = 1', address);
+}
+
+async function tenantBySlug(env, slug) {
+  if (!env.DB) throw new HttpError(503, 'tenant_storage_not_configured');
+  return tenantCached(env, `tenant:slug:${slug}`, 'SELECT * FROM tenants WHERE slug = ? AND active = 1', slug);
+}
+
+function defaultTenantSlug(env) {
+  return clean(env.DEFAULT_TENANT_SLUG, 40) || 'velai';
+}
+
+// Resuelve el tenant del canal web: slug del body, o el de por defecto. El widget
+// de un cliente solo tendrá que definir window.VELAI_TENANT y adjuntarlo al payload.
+async function webTenant(env, body) {
+  const slug = clean(body && body.tenant, 40) || defaultTenantSlug(env);
+  const tenant = await tenantBySlug(env, slug);
+  if (!tenant) throw new HttpError(400, 'invalid_tenant');
+  return tenant;
+}
+
+// Un sender registrado en Twilio sin fila en `tenants` es un agujero negro: los
+// mensajes llegan y nadie los ve. Que avise, no que se pierda en un log. Antirebote 1 h.
+async function alertUnknownTenant(env, address) {
+  if (!env.KV) return;
+  const key = `alert:tenant:${address}`;
+  try {
+    if (await env.KV.get(key)) return;
+    await env.KV.put(key, '1', { expirationTtl: 3600 });
+  } catch (_) {}
+  try {
+    await sendTelegramText(env, `⚠️ <b>Velai</b>: mensaje entrante para <code>${escapeHtml(address)}</code> sin fila en <code>tenants</code>. El cliente no está siendo atendido.`);
+  } catch (_) {}
+}
+
+// prompt efectivo = negocio del tenant (D1) + guardrails (código, innegociables).
+// Si el prompt sigue en 'PENDIENTE' (entre migración y seed) cae al SYSTEM de código:
+// el bot nunca contesta vacío.
+function systemFor(config, tenant) {
+  const base = tenant && tenant.system_prompt && tenant.system_prompt !== 'PENDIENTE'
+    ? tenant.system_prompt : config.SYSTEM;
+  return `${base}\n${config.GUARDRAILS || ''}`.trim();
+}
+
 // Guarda contra claves heredadas del prototipo ('constructor', '__proto__', …):
 // un demo inválido nunca debe colar un valor no-string como system prompt.
 function isDemoKey(config, key) {
@@ -184,7 +250,7 @@ async function persistLead(env, input) {
   const now = new Date().toISOString();
   const id = crypto.randomUUID();
   const args = [
-    id, input.requestId, input.conversationId || null, input.source, input.name || null,
+    id, input.tenantId || null, input.requestId, input.conversationId || null, input.source, input.name || null,
     input.whatsapp || null, input.phone || null, input.sector || null, input.messagesPerDay || null,
     input.channel || null, input.currentResponder || null, input.score, input.note || null,
     input.need || null, input.context || null, JSON.stringify(input.utm || {}), input.pageUrl || null,
@@ -193,8 +259,8 @@ async function persistLead(env, input) {
   try {
     await env.DB.batch([
       env.DB.prepare(`INSERT INTO leads
-        (id,request_id,conversation_id,source,name,whatsapp,whatsapp_normalized,sector,messages_per_day,channel,current_responder,score,note,need,context,attribution_json,page_url,created_at,updated_at,expires_at)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).bind(...args),
+        (id,tenant_id,request_id,conversation_id,source,name,whatsapp,whatsapp_normalized,sector,messages_per_day,channel,current_responder,score,note,need,context,attribution_json,page_url,created_at,updated_at,expires_at)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).bind(...args),
       env.DB.prepare("INSERT INTO lead_notifications (lead_id,channel,status,updated_at) VALUES (?,'telegram','pending',?)").bind(id, now),
       env.DB.prepare("INSERT INTO lead_notifications (lead_id,channel,status,updated_at) VALUES (?,'whatsapp','pending',?)").bind(id, now),
     ]);
@@ -224,11 +290,12 @@ function notificationText(lead) {
   return text + '\n⚡ <b>Contactar hoy mismo</b>';
 }
 
-async function sendTelegramText(env, text) {
-  if (!env.TELEGRAM_TOKEN || !env.TELEGRAM_CHAT_ID) return { skipped: true, error: 'not_configured' };
+async function sendTelegramText(env, text, chatId) {
+  const target = chatId || env.TELEGRAM_CHAT_ID;
+  if (!env.TELEGRAM_TOKEN || !target) return { skipped: true, error: 'not_configured' };
   const response = await fetch(`https://api.telegram.org/bot${env.TELEGRAM_TOKEN}/sendMessage`, {
     method: 'POST', headers: JSON_HEADERS,
-    body: JSON.stringify({ chat_id: env.TELEGRAM_CHAT_ID, text, parse_mode: 'HTML' }),
+    body: JSON.stringify({ chat_id: target, text, parse_mode: 'HTML' }),
     signal: AbortSignal.timeout(8000),
   });
   if (!response.ok) return { error: `telegram_${response.status}` };
@@ -247,22 +314,28 @@ function templateVar(value, fallback) {
 // Si cambias la plantilla, cambia esto a la vez.
 function leadTemplateVariables(lead) {
   return JSON.stringify({
-    1: templateVar(lead.whatsapp, 'sin teléfono'),
+    // E.164 (whatsapp_normalized) para que el equipo pueda pulsar-para-llamar.
+    1: templateVar(lead.whatsapp_normalized || lead.whatsapp, 'sin teléfono'),
     2: templateVar(lead.name, 'sin nombre'),
     3: templateVar(lead.sector, 'sin especificar'),
     4: templateVar(lead.need || lead.note, 'sin especificar'),
   });
 }
 
-async function deliver(env, channel, lead) {
-  if (channel === 'telegram') return sendTelegramText(env, notificationText(lead));
-  const recipients = clean(env.TEAM_WHATSAPP, 1000).split(',').map((x) => x.trim()).filter(Boolean);
-  if (!recipients.length || !env.TWILIO_FROM || !env.TWILIO_ACCOUNT_SID || !env.TWILIO_AUTH_TOKEN) {
+// Los canales de aviso se resuelven por tenant con respaldo a las variables de
+// entorno: Velai sigue funcionando aunque su fila falte o esté incompleta.
+async function deliver(env, channel, lead, tenant) {
+  if (channel === 'telegram') return sendTelegramText(env, notificationText(lead), tenant && tenant.telegram_chat_id);
+  const recipientsRaw = (tenant && tenant.team_whatsapp) || env.TEAM_WHATSAPP;
+  const templateSid = (tenant && tenant.lead_template_sid) || env.TWILIO_LEAD_TEMPLATE_SID;
+  const fromAddress = (tenant && tenant.twilio_from) || env.TWILIO_FROM;
+  const recipients = clean(recipientsRaw, 1000).split(',').map((x) => x.trim()).filter(Boolean);
+  if (!recipients.length || !fromAddress || !env.TWILIO_ACCOUNT_SID || !env.TWILIO_AUTH_TOKEN) {
     return { skipped: true, error: 'not_configured' };
   }
   // Sin plantilla, el aviso al equipo es un mensaje iniciado por el negocio fuera de la
   // ventana de 24 h y WhatsApp lo rechaza siempre con 63016. Mejor 'skipped' explícito.
-  if (!env.TWILIO_LEAD_TEMPLATE_SID) return { skipped: true, error: 'template_not_configured' };
+  if (!templateSid) return { skipped: true, error: 'template_not_configured' };
   const auth = `Basic ${btoa(`${env.TWILIO_ACCOUNT_SID}:${env.TWILIO_AUTH_TOKEN}`)}`;
   const variables = leadTemplateVariables(lead);
   // allSettled, no all: con Promise.all un timeout de un destinatario tumbaba el envío
@@ -272,9 +345,9 @@ async function deliver(env, channel, lead) {
       method: 'POST',
       headers: { Authorization: auth, 'Content-Type': 'application/x-www-form-urlencoded' },
       body: new URLSearchParams({
-        From: env.TWILIO_FROM,
+        From: fromAddress,
         To: to,
-        ContentSid: env.TWILIO_LEAD_TEMPLATE_SID,
+        ContentSid: templateSid,
         ContentVariables: variables,
       }),
       signal: AbortSignal.timeout(8000),
@@ -288,13 +361,16 @@ async function processNotifications(env, leadId, force = false) {
   if (!env.DB) return;
   const lead = await env.DB.prepare('SELECT * FROM leads WHERE id = ?').bind(leadId).first();
   if (!lead) return;
+  const tenant = lead.tenant_id
+    ? await env.DB.prepare('SELECT * FROM tenants WHERE id = ?').bind(lead.tenant_id).first()
+    : null;
   // 'skipped' (canal sin configurar) no consume intentos y se revisita cada 6 h:
   // al configurar el canal, el aviso sale solo sin pasar por el botón Reintentar.
   const jobs = (await env.DB.prepare(`SELECT * FROM lead_notifications WHERE lead_id = ? AND ((status IN ('pending','failed') AND attempts < 5) OR status = 'skipped')`).bind(leadId).all()).results;
   for (const job of jobs) {
     if (!force && job.next_attempt_at && job.next_attempt_at > new Date().toISOString()) continue;
     let outcome;
-    try { outcome = await deliver(env, job.channel, lead); }
+    try { outcome = await deliver(env, job.channel, lead, tenant); }
     catch (error) { outcome = { error: error.name === 'TimeoutError' ? 'timeout' : 'network_error' }; }
     const now = new Date().toISOString();
     const attempts = outcome.skipped ? job.attempts : job.attempts + 1;
@@ -308,8 +384,9 @@ async function processNotifications(env, leadId, force = false) {
 
 function inputToNotifiable(input) {
   return {
-    source: input.source, name: input.name, whatsapp: input.whatsapp, sector: input.sector,
-    messages_per_day: input.messagesPerDay, channel: input.channel, need: input.need, note: input.note,
+    source: input.source, name: input.name, whatsapp: input.whatsapp, whatsapp_normalized: input.phone,
+    sector: input.sector, messages_per_day: input.messagesPerDay, channel: input.channel,
+    need: input.need, note: input.note,
   };
 }
 
@@ -330,11 +407,20 @@ async function storeLead(env, ctx, input) {
     // ausente NO debe pasar por "degradado OK" en silencio.
     const misconfigured = error instanceof HttpError && error.code === 'lead_storage_not_configured';
     console.log(JSON.stringify({ level: 'error', code: misconfigured ? 'lead_d1_misconfigured' : 'lead_d1_fallback', error: error.code || error.name }));
-    // Guardar QUÉ canales entregaron (no un booleano): el drenaje solo marca 'sent'
-    // los que de verdad salieron; el resto se notifica al reinsertar en D1.
+    // El aviso directo del modo degradado sale SIEMPRE por los canales de Velai (env):
+    // con D1 caída no se puede resolver la fila del tenant. Por eso, si el lead es de
+    // un tenant cliente, NO se registran notifiedChannels — al drenar, sus filas quedan
+    // 'pending' y el cron notifica por los canales correctos del cliente. Marcarlas
+    // habría dejado al cliente sin su aviso con un 'sent' falso en el panel.
+    let alerted = false;
     const notifiedChannels = [];
     for (const channel of ['telegram', 'whatsapp']) {
-      try { if ((await deliver(env, channel, inputToNotifiable(input))).ok) notifiedChannels.push(channel); } catch (_) {}
+      try {
+        if ((await deliver(env, channel, inputToNotifiable(input))).ok) {
+          alerted = true;
+          if (input.tenantIsDefault !== false) notifiedChannels.push(channel);
+        }
+      } catch (_) {}
     }
     const notified = notifiedChannels.length > 0;
     let queued = false;
@@ -353,7 +439,7 @@ async function storeLead(env, ctx, input) {
         }
       } catch (_) {}
     }
-    if (!queued && !notified) throw error;
+    if (!queued && !alerted) throw error;
     console.log(JSON.stringify({ level: 'error', code: 'lead_degraded', stored: queued ? 'kv' : 'notification' }));
     return { ok: true, duplicate: false, stored: queued ? 'kv' : 'notification', degraded: true };
   }
@@ -368,8 +454,10 @@ async function handleLead(request, env, cors, ctx) {
   if (!clean(body.nombre, 100)) throw new HttpError(400, 'invalid_name');
   const score = body.score == null ? null : Number(body.score);
   if (score != null && (!Number.isFinite(score) || score < 0 || score > 100)) throw new HttpError(400, 'invalid_score');
+  const tenant = await webTenant(env, body);
   const result = await storeLead(env, ctx, {
     requestId: body.requestId, source: clean(body.fuente, 80) || 'formulario web',
+    tenantId: tenant.id, tenantIsDefault: tenant.slug === defaultTenantSlug(env),
     name: clean(body.nombre, 100), whatsapp: clean(body.whatsapp, 40), phone,
     sector: clean(body.sector, 100), messagesPerDay: clean(body.mensajesDia, 50),
     channel: clean(body.canal, 50), currentResponder: clean(body.quienResponde, 80), score,
@@ -399,16 +487,17 @@ async function summarizeLead(config, env, messages) {
   } catch (_) { return {}; }
 }
 
-async function captureChatLead(config, env, ctx, body, phone, messages) {
+async function captureChatLead(config, env, ctx, tenant, body, phone, messages) {
   // Mismas guardas que el canal WhatsApp: una captura por conversación (marca en KV),
-  // mínimo 2 turnos del usuario. Sin esto, cada cifra suelta del mensaje generaba un
-  // lead + 2 avisos + 1 llamada a Haiku, hasta 20/min por el rate limit del chat.
-  const mark = `lead:web:${body.conversationId}`;
+  // mínimo 2 turnos del usuario. Claves namespaceadas por tenant: dos clientes con el
+  // mismo usuario final no se pisan el UNIQUE(request_id).
+  const mark = `lead:web:${tenant.id}:${body.conversationId}`;
   if (env.KV && await env.KV.get(mark)) return;
   if (messages.filter((m) => m.role === 'user').length < 2) return;
   const summary = await summarizeLead(config, env, messages);
   const result = await storeLead(env, ctx, {
-    requestId: `chat:${body.conversationId}:${phone}`, conversationId: body.conversationId,
+    requestId: `chat:${tenant.id}:${body.conversationId}:${phone}`, conversationId: body.conversationId,
+    tenantId: tenant.id, tenantIsDefault: tenant.slug === defaultTenantSlug(env),
     source: 'chat web', name: clean(summary.nombre, 100), whatsapp: phone, phone,
     sector: clean(summary.negocio, 100), need: clean(summary.necesidad, 200),
     context: clean(summary.contexto, 300), pageUrl: clean(body.pageUrl, 500),
@@ -422,8 +511,8 @@ async function captureChatLead(config, env, ctx, body, phone, messages) {
 // sola vez por remitente (marca en KV + request_id idempotente `wa:<phone>`).
 // Se dispara con intención comercial mínima: ≥2 turnos del cliente y un resumen
 // de Haiku que detecte negocio o necesidad.
-async function captureWhatsAppLead(config, env, ctx, from, phone, messages) {
-  const mark = `lead:wa:${from}`;
+async function captureWhatsAppLead(config, env, ctx, tenant, from, phone, messages) {
+  const mark = `lead:wa:${tenant.id}:${from}`;
   if (env.KV && await env.KV.get(mark)) return;
   if (messages.filter((m) => m.role === 'user').length < 2) return;
   const summary = await summarizeLead(config, env, messages);
@@ -431,7 +520,8 @@ async function captureWhatsAppLead(config, env, ctx, from, phone, messages) {
   const need = clean(summary.necesidad, 200);
   if (!sector && !need) return;
   const result = await storeLead(env, ctx, {
-    requestId: `wa:${phone}`, source: 'whatsapp',
+    requestId: `wa:${tenant.id}:${phone}`, source: 'whatsapp',
+    tenantId: tenant.id, tenantIsDefault: tenant.slug === defaultTenantSlug(env),
     name: clean(summary.nombre, 100), whatsapp: from.replace(/^whatsapp:/i, ''), phone,
     sector, need, context: clean(summary.contexto, 300), score: null,
   });
@@ -443,12 +533,13 @@ async function handleChat(request, env, cors, ctx, config) {
   if (!UUID_RE.test(body.conversationId || '')) throw new HttpError(400, 'invalid_conversation_id');
   const message = clean(body.message, 2000);
   if (!message) throw new HttpError(400, 'invalid_message');
-  if (!env.KV) throw new HttpError(503, 'conversation_storage_not_configured');
-  const key = `conv:web:${body.conversationId}`;
-  let state = await env.KV.get(key, 'json');
   if (body.demo && !isDemoKey(config, body.demo)) throw new HttpError(400, 'invalid_demo');
+  if (!env.KV) throw new HttpError(503, 'conversation_storage_not_configured');
   // Límite también por conversación: rotar de IP (CGNAT/móvil) no multiplica el cupo.
   if (await rateLimited(env, body.conversationId, 'chatconv', 20)) throw new HttpError(429, 'rate_limited');
+  const tenant = await webTenant(env, body);
+  const key = `conv:web:${tenant.id}:${body.conversationId}`;
+  let state = await env.KV.get(key, 'json');
   if (!state) {
     await verifyTurnstile(env, body.turnstileToken, request, 'chat');
     state = { demo: isDemoKey(config, body.demo) ? body.demo : '', messages: [] };
@@ -458,14 +549,15 @@ async function handleChat(request, env, cors, ctx, config) {
   state.messages = state.messages.slice(-20);
   const reply = await callAnthropic(env, {
     model: 'claude-sonnet-4-6', max_tokens: 300,
-    system: isDemoKey(config, state.demo) ? config.DEMOS[state.demo] : config.SYSTEM, messages: state.messages,
+    // Las DEMOS son material comercial de Velai, no de un tenant: van tal cual.
+    system: isDemoKey(config, state.demo) ? config.DEMOS[state.demo] : systemFor(config, tenant), messages: state.messages,
   });
   state.messages.push({ role: 'assistant', content: reply });
   state.messages = state.messages.slice(-20);
   await env.KV.put(key, JSON.stringify(state), { expirationTtl: 86400 });
   const phone = extractPhone(message);
   if (!state.demo && phone) {
-    ctx.waitUntil(captureChatLead(config, env, ctx, body, phone, state.messages).catch((error) => {
+    ctx.waitUntil(captureChatLead(config, env, ctx, tenant, body, phone, state.messages).catch((error) => {
       console.log(JSON.stringify({ level: 'error', code: 'chat_lead_capture_failed', conversationId: body.conversationId, error: error.name }));
     }));
   }
@@ -480,17 +572,29 @@ async function handleTwilio(request, env, ctx, config) {
     throw new HttpError(403, 'invalid_twilio_signature');
   }
   const from = clean(params.get('From'), 80);
+  const to = clean(params.get('To'), 80);
   const message = clean(params.get('Body'), 2000);
-  if (!from || !message) throw new HttpError(400, 'invalid_twilio_payload');
-  let history = env.KV ? await env.KV.get(`conv:wa:${from}`, 'json') || [] : [];
+  if (!from || !to || !message) throw new HttpError(400, 'invalid_twilio_payload');
+
+  // Enrutado multi-tenant: el To del webhook decide qué negocio contesta.
+  const tenant = await tenantByAddress(env, to);
+  if (!tenant) {
+    ctx.waitUntil(alertUnknownTenant(env, to));
+    throw new HttpError(404, 'unknown_tenant');
+  }
+
+  // Historial namespaceado por tenant: dos clientes distintos con el mismo usuario
+  // final no comparten conversación.
+  const key = `conv:wa:${tenant.id}:${from}`;
+  let history = env.KV ? await env.KV.get(key, 'json') || [] : [];
   history.push({ role: 'user', content: message }); history = history.slice(-20);
-  const reply = await callAnthropic(env, { model: 'claude-sonnet-4-6', max_tokens: 300, system: config.SYSTEM, messages: history });
+  const reply = await callAnthropic(env, { model: 'claude-sonnet-4-6', max_tokens: 300, system: systemFor(config, tenant), messages: history });
   history.push({ role: 'assistant', content: reply }); history = history.slice(-20);
-  if (env.KV) await env.KV.put(`conv:wa:${from}`, JSON.stringify(history), { expirationTtl: 86400 });
+  if (env.KV) await env.KV.put(key, JSON.stringify(history), { expirationTtl: 86400 });
   const phone = normalizePhone(from.replace(/^whatsapp:/i, ''));
   if (phone) {
-    ctx.waitUntil(captureWhatsAppLead(config, env, ctx, from, phone, history).catch((error) => {
-      console.log(JSON.stringify({ level: 'error', code: 'wa_lead_capture_failed', error: error.name }));
+    ctx.waitUntil(captureWhatsAppLead(config, env, ctx, tenant, from, phone, history).catch((error) => {
+      console.log(JSON.stringify({ level: 'error', code: 'wa_lead_capture_failed', tenant: tenant.slug, error: error.name }));
     }));
   }
   const safe = escapeHtml(reply);
@@ -575,6 +679,8 @@ function leadFilters(url) {
     clauses.push('EXISTS (SELECT 1 FROM lead_notifications nf WHERE nf.lead_id=l.id AND nf.status=?)');
     values.push(notification);
   }
+  const tenant = clean(url.searchParams.get('tenant'), 40);
+  if (tenant && UUID_RE.test(tenant)) { clauses.push('l.tenant_id = ?'); values.push(tenant); }
   const query = clean(url.searchParams.get('q'), 100);
   if (query) { clauses.push('(l.name LIKE ? OR l.whatsapp LIKE ? OR l.sector LIKE ? OR l.source LIKE ?)'); values.push(...Array(4).fill(`%${query}%`)); }
   const from = clean(url.searchParams.get('from'), 30);
@@ -610,22 +716,26 @@ async function handleAdmin(request, env, ctx, path, url) {
       if (cId) { filters.sql += ' AND (l.created_at < ? OR (l.created_at = ? AND l.id < ?))'; filters.values.push(cAt, cAt, cId); }
       else { filters.sql += ' AND l.created_at < ?'; filters.values.push(cAt); }
     }
-    const result = await env.DB.prepare(`SELECT l.*, GROUP_CONCAT(n.channel || ':' || n.status) notification_summary FROM leads l LEFT JOIN lead_notifications n ON n.lead_id=l.id WHERE ${filters.sql} GROUP BY l.id ORDER BY l.created_at DESC, l.id DESC LIMIT ?`).bind(...filters.values, limit + 1).all();
+    const result = await env.DB.prepare(`SELECT l.*, t.name AS tenant_name, GROUP_CONCAT(n.channel || ':' || n.status) notification_summary FROM leads l LEFT JOIN tenants t ON t.id=l.tenant_id LEFT JOIN lead_notifications n ON n.lead_id=l.id WHERE ${filters.sql} GROUP BY l.id ORDER BY l.created_at DESC, l.id DESC LIMIT ?`).bind(...filters.values, limit + 1).all();
     const rows = result.results; const more = rows.length > limit; if (more) rows.pop();
     return json({ leads: rows, nextCursor: more ? `${rows.at(-1).created_at}|${rows.at(-1).id}` : null }, 200, NO_STORE);
   }
   if (path === '/api/admin/leads/export.csv' && request.method === 'GET') {
     const filters = leadFilters(url);
-    const rows = (await env.DB.prepare(`SELECT created_at,status,source,name,whatsapp,sector,messages_per_day,channel,score,note,page_url FROM leads l WHERE ${filters.sql} ORDER BY created_at DESC LIMIT 5000`).bind(...filters.values).all()).results;
-    const keys = ['created_at','status','source','name','whatsapp','sector','messages_per_day','channel','score','note','page_url'];
+    const rows = (await env.DB.prepare(`SELECT l.created_at,l.status,t.name AS tenant_name,l.source,l.name,l.whatsapp,l.sector,l.messages_per_day,l.channel,l.score,l.note,l.page_url FROM leads l LEFT JOIN tenants t ON t.id=l.tenant_id WHERE ${filters.sql} ORDER BY l.created_at DESC LIMIT 5000`).bind(...filters.values).all()).results;
+    const keys = ['created_at','status','tenant_name','source','name','whatsapp','sector','messages_per_day','channel','score','note','page_url'];
     const csv = [keys.join(','), ...rows.map((row) => keys.map((key) => csvCell(row[key])).join(','))].join('\r\n');
     return new Response('\uFEFF' + csv, { headers: { 'Content-Type': 'text/csv; charset=utf-8', 'Content-Disposition': 'attachment; filename="velai-leads.csv"', 'Cache-Control': 'no-store' } });
+  }
+  if (path === '/api/admin/tenants' && request.method === 'GET') {
+    const rows = (await env.DB.prepare('SELECT id, slug, name, active FROM tenants ORDER BY name').all()).results;
+    return json({ tenants: rows }, 200, NO_STORE);
   }
   const match = path.match(/^\/api\/admin\/leads\/([0-9a-f-]+)(?:\/(notes|retry))?$/i);
   if (!match || !UUID_RE.test(match[1])) throw new HttpError(404, 'not_found');
   const id = match[1]; const action = match[2];
   if (!action && request.method === 'GET') {
-    const lead = await env.DB.prepare('SELECT * FROM leads WHERE id=?').bind(id).first();
+    const lead = await env.DB.prepare('SELECT l.*, t.name AS tenant_name FROM leads l LEFT JOIN tenants t ON t.id=l.tenant_id WHERE l.id=?').bind(id).first();
     if (!lead) throw new HttpError(404, 'not_found');
     const [notes, events, notifications] = await Promise.all([
       env.DB.prepare('SELECT * FROM lead_notes WHERE lead_id=? ORDER BY created_at DESC').bind(id).all(),
@@ -751,4 +861,4 @@ export function createWorker(config) {
   };
 }
 
-export const testing = { clean, normalizePhone, extractPhone, safeUtm, publicCors, validTwilioSignature, csvCell, expiryDate, leadFilters, isDemoKey, templateVar, leadTemplateVariables, readJson, deliver, drainQueuedLeads, verifyTurnstile };
+export const testing = { clean, normalizePhone, extractPhone, safeUtm, publicCors, validTwilioSignature, csvCell, expiryDate, leadFilters, isDemoKey, templateVar, leadTemplateVariables, readJson, deliver, drainQueuedLeads, verifyTurnstile, systemFor };

@@ -75,6 +75,23 @@ La test key de Turnstile del example siempre valida. `ALLOWED_WEB_ORIGINS` del `
 
 Ejecutar `npm run check` antes de desplegar (sintaxis JS, validación de las 26 páginas, marcadores sin sustituir y tests del Worker). Después, enviar un lead de prueba y verificar D1, Telegram, WhatsApp y el panel; comprobar que la respuesta fue `stored: "d1"` sin `degraded`. Para rollback, conservar D1 y volver a la versión anterior del Worker/Pages; la migración es aditiva y no debe revertirse destruyendo datos.
 
+## Multi-tenant: alta de un cliente
+
+El Worker es multi-tenant (Fase 1, `docs/FASE1-MULTITENANT.md`): un despliegue, N clientes,
+enrutado por el `To` de Twilio. Para dar de alta un cliente:
+
+1. `INSERT INTO tenants (...)` con su `channel_address` (`whatsapp:+E164` o `messenger:<pageId>`),
+   sus canales de aviso (`team_whatsapp`, `telegram_chat_id`, `lead_template_sid`, `twilio_from`)
+   y su `system_prompt` de negocio (los guardrails antiinyección los pone el código, no la fila).
+2. Copia versionada del prompt en `tenants/<slug>.md` (patrón de `tenants/velai.md`).
+3. En Twilio: sender bajo la misma WABA, display name del cliente, plantilla
+   `nuevo_lead_<cliente>` en categoría **Utility**, webhook apuntando al mismo Worker.
+4. Para su widget web: `window.VELAI_TENANT = '<slug>'` en su página (el payload lo adjunta).
+
+Un mensaje entrante a un sender sin fila responde `404 unknown_tenant` y avisa a Telegram
+(antirebote 1 h). El caché de tenants es de 5 min: un `UPDATE` tarda eso en verse.
+**Orden en cambios de esquema: migración D1 primero, deploy del Worker después.**
+
 ## Alertas operativas
 
 Automáticas (llegan al Telegram del equipo, con antirebote de 1 h):

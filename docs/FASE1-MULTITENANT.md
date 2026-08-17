@@ -1,5 +1,16 @@
 # Fase 1 — Worker multi-tenant
 
+> **Estado (2026-08-17): APLICADA Y DESPLEGADA.** Migración `0002_tenants.sql` en remoto,
+> prompt de Velai sembrado (1883 chars, `seed/seed-velai.sql`, copia en `tenants/velai.md`),
+> GUARDRAILS en código, enrutado por `To` verificado (tenant por defecto OK, tenant
+> inexistente → 400, `To` desconocido → 404 + alerta). **Messenger tiene fila propia**
+> (`velai-messenger`) por decisión de Juan. Correcciones aplicadas sobre este doc:
+> (1) eliminado el índice erróneo `leads_tenant_idx ON tenants(id)`; (2) en modo degradado,
+> `notifiedChannels` solo se registra para el tenant por defecto — el aviso directo va a
+> Velai como alerta operativa y los canales del cliente quedan `pending` para el cron;
+> (3) `tenantBySlug` también cachea en KV; (4) `systemFor` cae al SYSTEM de código si el
+> prompt está en `PENDIENTE` (el bot nunca contesta vacío). Tests 20/20.
+
 > **Fase 0 verificada en producción el 2026-08-17 a las 16:20:32 CEST.** Tres avisos a los
 > tres números del equipo: dos `Read`, uno `Delivered`, cero `Undelivered`. El `MessageSid`
 > empieza por `MM` (no `SM`), que es la marca de que salió por la Content API con `ContentSid`.

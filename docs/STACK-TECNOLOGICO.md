@@ -79,9 +79,14 @@ Worker serverless (módulo ES `export default { fetch, scheduled }`). Responsabi
   caída degrada a KV + aviso directo (`stored`/`degraded` en la respuesta) y el
   cron re-inserta. El chat web y el **WhatsApp entrante** también capturan leads
   (en WhatsApp, teléfono = `From` de Twilio, una vez por remitente).
+- **Multi-tenant**: la config de cada negocio vive en la tabla `tenants` (D1); el
+  webhook de Twilio enruta por `To` y el canal web por `body.tenant` (default
+  `velai`). El prompt efectivo es `tenant.system_prompt + GUARDRAILS` (los
+  guardrails son código y se concatenan siempre). Lookup cacheado en KV 5 min.
+  Copias versionadas de los prompts en `tenants/*.md`; seed en `seed/`.
 - **Chat web v2**: `/chat` recibe solo el nuevo mensaje, conserva el historial
-  canónico 24 h en KV y verifica Turnstile en la primera interacción. El antiguo
-  `POST /` JSON devuelve **410 `legacy_chat_retired`**.
+  canónico 24 h en KV (namespaceado por tenant) y verifica Turnstile en la primera
+  interacción. El antiguo `POST /` JSON devuelve **410 `legacy_chat_retired`**.
 - **Panel**: hostname de `ADMIN_ORIGIN` (hoy `admin.hirevai.com`), protegido con
   Cloudflare Access y JWT validado por el propio Worker (JWKS cacheado 10 min).
   Rutas: `GET/PATCH/DELETE /api/admin/leads[...]`, `/notes`, `/retry`,
