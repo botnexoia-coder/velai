@@ -362,6 +362,8 @@ body.light .article-body td { color: rgba(26,13,5,0.82); }
   transform: translateY(-2px);
   box-shadow: 0 12px 30px rgba(255,107,26,0.34);
 }
+.cta-box .cta-chat { margin: 16px 0 0; font-size: .95rem; }
+.cta-box .cta-chat a { color: var(--orange2); font-weight: 600; }
 
 .related {
   margin-top: 70px;
