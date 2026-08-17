@@ -1,0 +1,10 @@
+# Config de deploy del worker del chat (Vai).
+# La compatibility_date y el binding KV replican la versión desplegada el 2026-07-16;
+# sin declarar el KV aquí, un `wrangler deploy` lo eliminaría del worker.
+name = "vai-worker"
+main = "vai-worker.js"
+compatibility_date = "2026-04-14"
+
+[[kv_namespaces]]
+binding = "KV"
+id = "14fbc395a218428bb677f61243c9e3f6"
