@@ -4,17 +4,40 @@
 > aquí está pensada para mover la métrica de **dominios de referencia** y
 > **autoridad de dominio** del checker SEO.
 
-## ⏸️ Estado actual (act. 2026-06-11)
+## ✅ Estado actual (act. 2026-06-24)
 
-**EN STANDBY** — se pausó al priorizar el funnel de ventas (paid + SEO). Resumen:
+**SESIÓN DE EJECUCIÓN con Claude in Chrome (2026-06-24).** Se trabajó la adquisición
+de enlaces (§2) en directorios. Resumen de resultados abajo.
 
 | Plano | Estado |
 |---|---|
 | **Activos enlazables (on-page)** | ✅ Muy ampliados. Ver "Activos disponibles" abajo. |
-| **Adquisición de enlaces (off-page, §1-5)** | ⬜ Sin empezar — es trabajo **manual tuyo** (directorios, LinkedIn, PH, guest posts, PR). |
-| **Medición real (dominios/enlaces)** | ⚠️ No re-medida desde mayo. Fuente real = Google Search Console, no este MD. |
+| **Adquisición de enlaces (off-page, §2)** | 🟢 **6 backlinks enviados/publicados hoy** + 1 programado. Detalle en §2 y en el registro de sesión. |
+| **Medición real (dominios/enlaces)** | ⚠️ No re-medida. Fuente real = Google Search Console, no este MD. Re-medir en ~2 semanas. |
 
-> Este archivo es un **plan de tareas**, no un registro automático: solo refleja lo que se marca a mano aquí.
+### 📌 Registro de sesión — 2026-06-24 (Claude in Chrome)
+
+**Backlinks conseguidos (6):**
+1. ✅ **AI Tools Directory** — formulario público enviado (pendiente revisión manual).
+2. ✅ **SaaSHub** — producto "Velai" creado (plan Free) y **VERIFICADO** (status ACTIVE). Cuenta: usuario `velai` / equipo@hirevai.com. *Pendiente:* el envío a sus 107 directorios (pestaña "Submit") se abre cuando SaaSHub apruebe el listado público (pending approval).
+3. ✅ **Crunchbase** (DR ~94) — perfil de empresa enviado con web, descripción y email.
+4. ✅ **SourceForge** (DR 92) — listado de software empresarial enviado (+ logo og-velai.jpg).
+5. ✅ **G2** (DR ~91) — producto **aprobado al instante** ("Profile Approved"). Cuenta G2 logueada como "Juan".
+6. ✅ **F6S** — perfil "Velai IA" publicado (f6s.com/velai-ia) con tagline, descripción, logo y enlace a hirevai.com. Cuenta: botnexo.ia@gmail.com.
+
+**Programado:**
+- ⏳ **AlternativeTo** — cuenta creada y verificada, pero bloquea envíos de cuentas <7 días. **Cron programado para el 1-jul-2026** ("velai-alternativeto-submit") que lo enviará automáticamente.
+
+**Guardado para decisión (de pago):**
+- 💳 **AI Collection** (thataicollection.com) — ya NO acepta PRs en GitHub; ahora es self-service y **de pago $19 one-time**. Borrador de Velai guardado en el dashboard (cuenta botnexo.ia@gmail.com). No se pagó.
+
+**Descartados / no viables hoy:**
+- ❌ **De pago** (el plan los daba como gratis; cambiaron): There's An AI For That ($49+), Futurepedia ($247+), Toolify ($99), Topai.tools ($47+).
+- ❌ **Caídos/pivotaron:** AI Tool Hunt (dominio 404), Insidr.ai (pivotó a formación), Chatbots.org (modelo "match"/publicidad), startups.es y spain-startup.com (caídos).
+- ❌ **Solo registro mercantil (no addable):** Empresia.es, eInforma.
+- ❌ **Portal cerrado:** Capterra/GetApp ahora bajo "G2 Digital Markets" (solo login, sin alta abierta; requiere onboarding de vendor).
+
+> Nota de marca: el nombre exacto "Velai" ya lo ocupaba otra empresa ajena en F6S, por eso allí se usó "Velai (hirevai.com)" → se muestra como "Velai IA".
 
 ### 📦 Activos enlazables disponibles (para ofrecer en outreach)
 
@@ -33,6 +56,7 @@ Construidos durante el funnel (no estaban en el plan original). Úsalos como gan
 ---
 
 **Estado inicial (mayo 2026):** 3 backlinks · 3 dominios de referencia · 2 IPs
+**Avance 2026-06-24:** +6 dominios de referencia en marcha (≈9 potenciales) + 1 programado
 **Objetivo a 30 días:** ≥15 dominios de referencia · ≥50 backlinks totales
 **Objetivo a 90 días:** ≥40 dominios · ≥150 backlinks · 1 mención en medios tech
 
@@ -67,6 +91,9 @@ Tener estos textos listos antes de empezar ahorra horas. Cópialos al portapapel
 ### Descripción larga (1 párrafo, ~600 chars)
 > Velai implanta **Vai**, un asistente de IA conversacional que atiende a tus clientes en WhatsApp, web e Instagram las 24 horas. Entiende lenguaje natural, gestiona reservas, procesa pedidos, notifica al equipo en tiempo real y se entrena con tu catálogo, precios y procesos. Pensado para PYMEs en España: restaurantes, clínicas, tiendas e inmobiliarias. Operativo en menos de 48 horas, sin instalaciones ni código. Cumple RGPD. Desde 100€/mes.
 
+### Descripción en INGLÉS (varios directorios la exigen — usada el 2026-06-24)
+> Velai is a conversational AI assistant for small and medium businesses in Spain. The assistant, named Vai, answers customer enquiries in natural language across WhatsApp, web chat and Instagram 24/7. It manages bookings, processes orders, qualifies leads and notifies the team in real time, trained on each business's catalogue, prices and processes. Typical users include restaurants, clinics, shops and real estate agencies. Setup requires no coding and goes live in under 48 hours. GDPR compliant, no long-term contracts, pricing from 100 euros per month.
+
 ### URLs a usar en formularios
 - Web: `https://hirevai.com`
 - Blog: `https://hirevai.com/blog/`
@@ -93,41 +120,42 @@ Tener estos textos listos antes de empezar ahorra horas. Cópialos al portapapel
 
 ### 2.1. Directorios de productos de IA (alta autoridad)
 
-Todos gratis. Usa los textos del bloque anterior.
+> ⚠️ act. 2026-06-24: los grandes directorios de IA se han pasado a modelo de pago.
 
-- [ ] **There's An AI For That** — [theresanaiforthat.com/submit-ai/](https://theresanaiforthat.com/submit-ai/)
-- [ ] **Futurepedia** — [futurepedia.io/submit-tool](https://www.futurepedia.io/submit-tool)
-- [ ] **AI Tool Hunt** — [aitoolhunt.com/submit](https://www.aitoolhunt.com/submit)
-- [ ] **Insidr.ai** — [insidr.ai/submit-ai-tool/](https://www.insidr.ai/submit-ai-tool/)
-- [ ] **AI Tools Directory** — [aitoolsdirectory.com/submit](https://aitoolsdirectory.com/submit)
-- [ ] **Toolify.ai** — [toolify.ai/submit-ai-website](https://www.toolify.ai/submit-ai-website)
-- [ ] **AI Collection (GitHub)** — [github.com/ai-collection/ai-collection](https://github.com/ai-collection/ai-collection) → fork + PR añadiendo Velai a la lista en `README.md` bajo "Chatbots" o "Customer Support".
-- [ ] **Topai.tools** — [topai.tools/submit](https://topai.tools/submit)
-- [ ] **AIToolGuru** — buscar en Google "ai tool guru submit"
-- [ ] **SaaSHub** — [saashub.com/submit](https://www.saashub.com/submit)
+- [ ] **There's An AI For That** — ❌ ahora DE PAGO ($49+). Saltar.
+- [ ] **Futurepedia** — ❌ ahora DE PAGO ($247+). Saltar.
+- [ ] **AI Tool Hunt** — ❌ dominio caído (404). Muerto.
+- [ ] **Insidr.ai** — ❌ pivotó a formación; ya no lista herramientas.
+- [x] **AI Tools Directory** — ✅ ENVIADO 2026-06-24 (formulario público gratis). Pendiente revisión manual.
+- [ ] **Toolify.ai** — ❌ ahora DE PAGO ($99). Saltar.
+- [ ] **AI Collection (GitHub)** — ❌ ya no acepta PR; self-service DE PAGO $19. Borrador guardado en dashboard (sin pagar).
+- [ ] **Topai.tools** — ❌ ahora DE PAGO ($47+). Saltar.
+- [ ] **AIToolGuru** — sin verificar.
+- [x] **SaaSHub** — ✅ ENVIADO + VERIFICADO 2026-06-24 (plan Free). Hub a 107 dirs: se abre al aprobarse el listado.
 
 ### 2.2. Directorios SaaS / Software (Capterra ecosystem)
 
-- [ ] **Capterra España** — [capterra.es/vendors/sign-up](https://www.capterra.es/vendors/sign-up)
-- [ ] **GetApp España** — [getapp.es/sign-up](https://www.getapp.es/sign-up)
-- [ ] **Software Advice España** — comparten cuenta con Capterra
-- [ ] **G2** — [g2.com/products/new](https://www.g2.com/products/new)
-- [ ] **SourceForge** — registro de software libre/comercial — DR 92
-- [ ] **AlternativeTo** — [alternativeto.net/software/](https://alternativeto.net/software/) → añade Velai como alternativa a: ManyChat, Tidio, Intercom, Chatfuel, Landbot.
+- [ ] **Capterra España** — ❌ ahora bajo "G2 Digital Markets", sin alta abierta (login/onboarding de vendor).
+- [ ] **GetApp España** — ❌ igual que Capterra (mismo portal cerrado).
+- [ ] **Software Advice España** — comparten cuenta con Capterra (mismo portal).
+- [x] **G2** — ✅ APROBADO 2026-06-24 (g2.com). Perfil de Velai aprobado al instante.
+- [x] **SourceForge** — ✅ ENVIADO 2026-06-24 (DR 92). Listado de software empresarial.
+- [x] **AlternativeTo** — ⏳ cuenta creada/verificada; bloqueada hasta 7 días. **CRON programado 1-jul-2026** para enviar Velai como alternativa a ManyChat, Tidio, Intercom, Chatfuel, Landbot.
 
 ### 2.3. Directorios españoles de startups y empresas
 
-- [ ] **Crunchbase** — [crunchbase.com](https://www.crunchbase.com/add-new) (imprescindible, DR 94)
-- [ ] **Startups.es** — perfil de empresa
-- [ ] **Spain Startup** — [spain-startup.com](https://www.spain-startup.com/)
-- [ ] **Empresia.es** — directorio de empresas españolas
-- [ ] **eInforma** — verificación opcional, registro gratuito
+- [x] **Crunchbase** — ✅ ENVIADO 2026-06-24 (DR ~94). Perfil de empresa.
+- [ ] **Startups.es** — ❌ caído / dominio no responde.
+- [ ] **Spain Startup** — ❌ caído / dominio no responde.
+- [ ] **Empresia.es** — ❌ solo Registro Mercantil (no admite alta de usuario).
+- [ ] **eInforma** — ❌ idem (registro mercantil).
+- [x] **F6S** — ✅ PUBLICADO 2026-06-24 (f6s.com/velai-ia). *(añadido; no estaba en el plan original)*
 
 ### 2.4. Directorios de chatbots y WhatsApp
 
-- [ ] **Chatbots.org** — [chatbots.org/submit_chatbot/](https://www.chatbots.org/submit_chatbot/)
-- [ ] **BotList** — [botlist.co/submit](https://botlist.co/submit)
-- [ ] **WAPP Hub** o similares — busca en Google "whatsapp business directory submit"
+- [ ] **Chatbots.org** — ❌ ya no ofrece alta propia (modelo "match"/publicidad).
+- [ ] **BotList** — sin verificar (dominio bloqueado en la sesión).
+- [ ] **WAPP Hub** o similares — busca en Google "whatsapp business directory submit".
 
 ---
 
@@ -366,24 +394,29 @@ Mide cada 2 semanas para no estresarte con el día a día.
 
 ⚠️ **DR sube lento.** Si pasas de DR 5 a DR 12 en 30 días es excelente. No te frustres si va lento — es trabajo de meses.
 
+> **Tras la sesión 2026-06-24:** se enviaron altas a 6 dominios nuevos (AI Tools Directory,
+> SaaSHub, Crunchbase, SourceForge, G2, F6S). La mayoría aparecen tras revisión (de horas a
+> días). Re-medir en GSC/Ahrefs en ~2 semanas para ver cuáles indexaron.
+
 ---
 
 ## 8. Calendario sugerido
 
 ### Semana 1 (intensiva inicial)
-- **Día 1 (2h):** todos los directorios IA (sección 2.1) + Crunchbase + AlternativeTo.
-- **Día 2 (1h):** directorios SaaS y españoles (2.2 + 2.3).
-- **Día 3 (30min):** directorios chatbots (2.4).
-- **Día 4-5:** los 3 fundadores actualizan LinkedIn + primer post cada uno.
+- **Día 1 (2h):** ~~todos los directorios IA~~ → hecho lo viable 2026-06-24 (varios resultaron de pago/caídos). Crunchbase ✅. AlternativeTo programado.
+- **Día 2 (1h):** directorios SaaS y españoles → G2 ✅, SourceForge ✅, F6S ✅. Capterra/GetApp cerrados.
+- **Día 3 (30min):** directorios chatbots (2.4) → Chatbots.org descartado.
+- **Día 4-5:** los 3 fundadores actualizan LinkedIn + primer post cada uno. *(pendiente — §3)*
 
 ### Semana 2-4 (rutina)
 - **L/M/V cada semana:** cada fundador publica 1 post en LinkedIn.
 - **1 vez/semana:** comentar/responder en 3-5 hilos de comunidades (Reddit, FB, Indie Hackers).
 - **1 vez/semana:** enviar 2-3 emails de outreach para guest posts.
+- **Pendiente puntual:** cuando SaaSHub apruebe el listado, abrir su "Submit" → enviar a 107 directorios.
 
 ### Mes 2
 - Lanzamiento Product Hunt (1 día intensivo).
-- Construir calculadora ROI (1-2 semanas de dev + diseño).
+- ~~Construir calculadora ROI~~ ✅ HECHO.
 - Iniciar recopilación de datos para el informe sectorial.
 
 ### Mes 3
@@ -402,4 +435,4 @@ Mide cada 2 semanas para no estresarte con el día a día.
 
 ---
 
-*Última actualización: 2026-05-16*
+*Última actualización: 2026-06-24 (sesión de ejecución de directorios con Claude in Chrome)*
