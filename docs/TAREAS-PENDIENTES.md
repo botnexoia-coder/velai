@@ -4,6 +4,9 @@
 > despliegues, datos reales). Marca las casillas a medida que las completes.
 > Última actualización: 2026-08-17.
 
+> Revisión técnica para validar antes de reutilizar esta arquitectura:
+> [`REVISION-SEGURIDAD-PENDIENTE.md`](./REVISION-SEGURIDAD-PENDIENTE.md).
+
 ---
 
 ## 🔴 Bloqueantes para poder pagar pauta medible
