@@ -9,6 +9,9 @@ TWILIO_AUTH_TOKEN=""
 TWILIO_FROM=""
 TEAM_DOMAIN="https://your-team.cloudflareaccess.com"
 POLICY_AUD=""
+# KEK para cifrar tokens de subcuentas de Twilio en D1 (AES-256-GCM).
+# Generar la real con: openssl rand -base64 32 — este valor es SOLO de ejemplo.
+SECRETS_KEK="EJEMPLOEJEMPLOEJEMPLOEJEMPLOEJEMPLOEJEMPLOs="
 # Vars (en producción viven en wrangler.toml [vars]; aquí se sobreescriben para dev).
 # localhost:8080 = python3 -m http.server; añade el puerto que uses de verdad.
 ALLOWED_WEB_ORIGINS="http://localhost:8080,http://127.0.0.1:8080"

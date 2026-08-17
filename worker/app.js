@@ -1,4 +1,5 @@
 import { ADMIN_HEADERS, ADMIN_HTML } from './admin-page.js';
+import { encryptSecret, decryptSecret } from './crypto.js';
 
 const JSON_HEADERS = { 'Content-Type': 'application/json; charset=utf-8' };
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -223,6 +224,12 @@ async function alertUnknownTenant(env, address) {
 
 // ── Gestión de tenants desde el panel (Fase 2) ──────────────────────────────
 const ADDRESS_RE = /^(whatsapp:\+[1-9]\d{6,14}|messenger:\d{5,25})$/;
+// Dirección reservada para clientes en negociación (prospectos): NO es enrutable
+// (Twilio nunca manda un To con este prefijo) y ocupa el UNIQUE sin pisar la real.
+const PENDING_RE = /^pending:[a-z0-9][a-z0-9-]{1,39}$/;
+const ACCOUNT_SID_RE = /^AC[0-9a-f]{32}$/i;
+const WABA_RE = /^\d{10,20}$/;
+const PARTNER_STATUS = new Set(['pendiente', 'concedido', 'revocado']);
 const WA_RE = /^whatsapp:\+[1-9]\d{6,14}$/;
 const TEMPLATE_RE = /^HX[0-9a-f]{32}$/i;
 const SLUG_RE = /^[a-z0-9][a-z0-9-]{1,39}$/;
@@ -243,7 +250,7 @@ function validateTenant(body, { partial = false } = {}) {
   }
   if (has('channel_address') || !partial) {
     out.channel_address = clean(body.channel_address, 80);
-    if (!ADDRESS_RE.test(out.channel_address)) bad('channel_address');
+    if (!ADDRESS_RE.test(out.channel_address) && !PENDING_RE.test(out.channel_address)) bad('channel_address');
   }
   if (has('twilio_from')) {
     out.twilio_from = clean(body.twilio_from, 80) || null;
@@ -266,8 +273,38 @@ function validateTenant(body, { partial = false } = {}) {
     out.system_prompt = String(body.system_prompt ?? '').trim().slice(0, PROMPT_MAX + 1);
     if (out.system_prompt.length < PROMPT_MIN || out.system_prompt.length > PROMPT_MAX) bad('system_prompt');
   }
+  if (has('twilio_subaccount_sid')) {
+    out.twilio_subaccount_sid = clean(body.twilio_subaccount_sid, 40) || null;
+    if (out.twilio_subaccount_sid && !ACCOUNT_SID_RE.test(out.twilio_subaccount_sid)) bad('twilio_subaccount_sid');
+  }
+  if (has('waba_id')) {
+    out.waba_id = clean(body.waba_id, 30) || null;
+    if (out.waba_id && !WABA_RE.test(out.waba_id)) bad('waba_id');
+  }
+  if (has('meta_partner_status')) {
+    out.meta_partner_status = clean(body.meta_partner_status, 20);
+    if (!PARTNER_STATUS.has(out.meta_partner_status)) bad('meta_partner_status');
+  }
   if (has('active')) out.active = body.active ? 1 : 0;
   return out;
+}
+
+// Write-only: el auth token de la subcuenta entra en claro, se guarda cifrado y
+// nunca vuelve a salir del worker. No pasa por validateTenant (cifrar es asíncrono)
+// y NUNCA entra en el versionado de tenant_versions.
+async function tenantTokenColumn(env, tenantId, body) {
+  if (body.twilio_auth_token === undefined || body.twilio_auth_token === '') return null;
+  const token = clean(body.twilio_auth_token, 64);
+  if (!/^[0-9a-f]{32}$/i.test(token)) throw new HttpError(400, 'invalid_twilio_auth_token');
+  return encryptSecret(env, tenantId, token);
+}
+
+// Activar un prospecto sin ponerle antes su dirección real dejaría una fila "activa"
+// que no atiende a nadie y que tapa el hueco del semáforo. Se rechaza explícitamente.
+function assertNotActivePending(finalAddress, finalActive) {
+  if (Number(finalActive) === 1 && PENDING_RE.test(String(finalAddress))) {
+    throw new HttpError(400, 'pending_tenant_cannot_be_active');
+  }
 }
 
 // Los choques de unicidad se traducen, no revientan en 500. address_taken es EL error
@@ -276,6 +313,7 @@ function tenantWriteError(error) {
   const msg = String(error);
   if (/UNIQUE.*slug/i.test(msg)) return new HttpError(409, 'slug_taken');
   if (/UNIQUE.*channel_address/i.test(msg)) return new HttpError(409, 'address_taken');
+  if (/UNIQUE.*twilio_subaccount_sid/i.test(msg)) return new HttpError(409, 'subaccount_taken');
   return error;
 }
 
@@ -412,8 +450,12 @@ async function deliver(env, channel, lead, tenant) {
   const variables = leadTemplateVariables(lead);
   // allSettled, no all: con Promise.all un timeout de un destinatario tumbaba el envío
   // entero y el reintento duplicaba el mensaje a quien sí lo había recibido.
+  // La cuenta padre puede operar recursos de sus subcuentas: se autentica con las
+  // credenciales del padre y el SID de la subcuenta va en la URL. Si Twilio lo
+  // rechazara en la prueba real, el plan B es autenticar con el token del tenant.
+  const sendAccountSid = (tenant && tenant.twilio_subaccount_sid) || env.TWILIO_ACCOUNT_SID;
   const results = await Promise.allSettled(recipients.map((to) => fetch(
-    `https://api.twilio.com/2010-04-01/Accounts/${env.TWILIO_ACCOUNT_SID}/Messages.json`, {
+    `https://api.twilio.com/2010-04-01/Accounts/${sendAccountSid}/Messages.json`, {
       method: 'POST',
       headers: { Authorization: auth, 'Content-Type': 'application/x-www-form-urlencoded' },
       body: new URLSearchParams({
@@ -636,29 +678,66 @@ async function handleChat(request, env, cors, ctx, config) {
   return json({ reply }, 200, cors);
 }
 
+async function twilioAuthTokenFor(env, tenant) {
+  if (!tenant || !tenant.twilio_auth_token_enc) return null;
+  const out = await decryptSecret(env, tenant.id, tenant.twilio_auth_token_enc);
+  return out ? out.value : null;
+}
+
+// Un tenant con subcuenta pero sin auth token descifrable = mensajes entrantes que no
+// se atienden. Alerta al equipo de Velai con antirebote de 1 h.
+async function alertTenantMisconfigured(env, tenant, accountSid) {
+  if (!env.KV) return;
+  const key = `alert:token:${tenant.id}`;
+  try {
+    if (await env.KV.get(key)) return;
+    await env.KV.put(key, '1', { expirationTtl: 3600 });
+  } catch (_) {}
+  try {
+    await sendTelegramText(env, `⚠️ <b>Velai</b>: mensajes entrantes de <code>${escapeHtml(accountSid)}</code> para <b>${escapeHtml(tenant.name)}</b> sin auth token configurado. El cliente no está siendo atendido.`);
+  } catch (_) {}
+}
+
 async function handleTwilio(request, env, ctx, config) {
   const raw = await request.text();
   const params = new URLSearchParams(raw);
   const object = {}; params.forEach((value, key) => { object[key] = value; });
-  if (!await validTwilioSignature(env.TWILIO_AUTH_TOKEN, request.url, object, request.headers.get('X-Twilio-Signature') || '')) {
+  const accountSid = clean(params.get('AccountSid'), 40);
+  const to = clean(params.get('To'), 80);
+  if (!accountSid || !to) throw new HttpError(400, 'invalid_twilio_payload');
+
+  // ORDEN: la firma depende del auth token de la cuenta que envía, y con subcuentas
+  // ese token vive cifrado en la fila del tenant. Primero el tenant (por To, que es
+  // único) y después la firma. Sin tenant o sin token NO se valida y NO se pasa:
+  // nunca hay camino "pasa igualmente".
+  const tenant = await tenantByAddress(env, to);
+  if (!tenant) {
+    ctx.waitUntil(alertUnknownTenant(env, to));
+    throw new HttpError(404, 'unknown_tenant');
+  }
+  // La cuenta padre (los números de Velai) firma con el token del entorno. Cada
+  // subcuenta de cliente, con el suyo. El token global NO sirve de respaldo para un
+  // AccountSid ajeno: eso convertiría un despiste de configuración en un bypass.
+  const isParent = Boolean(env.TWILIO_ACCOUNT_SID) && accountSid === env.TWILIO_ACCOUNT_SID;
+  if (!isParent && tenant.twilio_subaccount_sid && tenant.twilio_subaccount_sid !== accountSid) {
+    throw new HttpError(403, 'account_tenant_mismatch');
+  }
+  const authToken = isParent ? env.TWILIO_AUTH_TOKEN : await twilioAuthTokenFor(env, tenant);
+  if (!authToken) {
+    ctx.waitUntil(alertTenantMisconfigured(env, tenant, accountSid));
+    throw new HttpError(403, 'twilio_auth_token_missing');
+  }
+  if (!await validTwilioSignature(authToken, request.url, object, request.headers.get('X-Twilio-Signature') || '')) {
     throw new HttpError(403, 'invalid_twilio_signature');
   }
   const from = clean(params.get('From'), 80);
-  const to = clean(params.get('To'), 80);
   const message = clean(params.get('Body'), 2000);
-  if (!from || !to) throw new HttpError(400, 'invalid_twilio_payload');
+  if (!from) throw new HttpError(400, 'invalid_twilio_payload');
   // Messenger manda adjuntos (stickers, fotos) sin Body: 200 con TwiML vacío en vez
   // de 400, para no llenar los logs de Twilio de errores por cada sticker.
   if (!message) {
     console.log(JSON.stringify({ level: 'info', code: 'messenger_attachment_ignored', to }));
     return new Response('<?xml version="1.0" encoding="UTF-8"?><Response></Response>', { headers: { 'Content-Type': 'text/xml; charset=utf-8' } });
-  }
-
-  // Enrutado multi-tenant: el To del webhook decide qué negocio contesta.
-  const tenant = await tenantByAddress(env, to);
-  if (!tenant) {
-    ctx.waitUntil(alertUnknownTenant(env, to));
-    throw new HttpError(404, 'unknown_tenant');
   }
 
   // Historial namespaceado por tenant: dos clientes distintos con el mismo usuario
@@ -812,6 +891,9 @@ async function handleAdmin(request, env, ctx, path, url, config) {
       SELECT t.id, t.slug, t.name, t.channel_address, t.active, t.updated_at,
              t.lead_template_sid IS NOT NULL AS has_template,
              t.team_whatsapp IS NOT NULL AS has_team,
+             t.twilio_subaccount_sid IS NOT NULL AS has_subaccount,
+             t.twilio_auth_token_enc IS NOT NULL AS has_twilio_token,
+             t.meta_partner_status,
              length(t.system_prompt) AS prompt_len,
              COUNT(l.id) AS lead_count
       FROM tenants t LEFT JOIN leads l ON l.tenant_id = t.id
@@ -821,15 +903,18 @@ async function handleAdmin(request, env, ctx, path, url, config) {
   if (path === '/api/admin/tenants' && request.method === 'POST') {
     const body = await readJson(request, 32000);
     const fields = validateTenant(body, { partial: false });
+    assertNotActivePending(fields.channel_address, fields.active ?? 1);
     const now = new Date().toISOString();
     const tenantId = crypto.randomUUID();
+    const tokenColumn = await tenantTokenColumn(env, tenantId, body);
     try {
       await env.DB.prepare(`INSERT INTO tenants
-        (id,slug,name,channel_address,team_whatsapp,telegram_chat_id,lead_template_sid,twilio_from,system_prompt,active,created_at,updated_at)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`)
+        (id,slug,name,channel_address,team_whatsapp,telegram_chat_id,lead_template_sid,twilio_from,twilio_subaccount_sid,waba_id,twilio_auth_token_enc,meta_partner_status,system_prompt,active,created_at,updated_at)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
         .bind(tenantId, fields.slug, fields.name, fields.channel_address, fields.team_whatsapp ?? null,
           fields.telegram_chat_id ?? null, fields.lead_template_sid ?? null, fields.twilio_from ?? null,
-          fields.system_prompt, fields.active ?? 1, now, now).run();
+          fields.twilio_subaccount_sid ?? null, fields.waba_id ?? null, tokenColumn,
+          fields.meta_partner_status ?? 'pendiente', fields.system_prompt, fields.active ?? 1, now, now).run();
     } catch (error) { throw tenantWriteError(error); }
     await env.DB.prepare('INSERT INTO tenant_versions (tenant_id,actor_email,field,previous_value,note,created_at) VALUES (?,?,?,?,?,?)')
       .bind(tenantId, actor, 'config', null, clean(body.note, 200) || 'alta', now).run();
@@ -841,7 +926,11 @@ async function handleAdmin(request, env, ctx, path, url, config) {
     if (!UUID_RE.test(tenantMatch[1])) throw new HttpError(404, 'not_found');
     const tenantId = tenantMatch[1]; const tenantAction = tenantMatch[2]; const versionId = tenantMatch[3];
     if (!tenantAction && request.method === 'GET') {
-      const tenant = await env.DB.prepare('SELECT * FROM tenants WHERE id=?').bind(tenantId).first();
+      // Columnas explícitas, NUNCA SELECT *: twilio_auth_token_enc no sale del worker.
+      const tenant = await env.DB.prepare(`SELECT id, slug, name, channel_address, team_whatsapp, telegram_chat_id,
+        lead_template_sid, twilio_from, twilio_subaccount_sid, waba_id, meta_partner_status, system_prompt,
+        active, created_at, updated_at, twilio_auth_token_enc IS NOT NULL AS has_twilio_token
+        FROM tenants WHERE id=?`).bind(tenantId).first();
       if (!tenant) throw new HttpError(404, 'not_found');
       return json({ tenant }, 200, NO_STORE);
     }
@@ -850,14 +939,19 @@ async function handleAdmin(request, env, ctx, path, url, config) {
       const previous = await env.DB.prepare('SELECT * FROM tenants WHERE id=?').bind(tenantId).first();
       if (!previous) throw new HttpError(404, 'not_found');
       const fields = validateTenant(body, { partial: true });
-      if (!Object.keys(fields).length) throw new HttpError(400, 'nothing_to_update');
+      const tokenColumn = await tenantTokenColumn(env, tenantId, body);
+      if (!Object.keys(fields).length && !tokenColumn) throw new HttpError(400, 'nothing_to_update');
+      assertNotActivePending(fields.channel_address ?? previous.channel_address, fields.active ?? previous.active);
       const now = new Date().toISOString();
+      // `columns` alimenta también el versionado: el token va aparte y jamás entra ahí.
       const columns = Object.keys(fields);
+      const setSql = [...columns.map((c) => `${c}=?`), ...(tokenColumn ? ['twilio_auth_token_enc=?'] : [])].join(',');
+      const setValues = [...columns.map((c) => fields[c]), ...(tokenColumn ? [tokenColumn] : [])];
       // Bloqueo optimista: sin el updated_at cargado, el último en guardar pisaría al otro.
       let result;
       try {
-        result = await env.DB.prepare(`UPDATE tenants SET ${columns.map((c) => `${c}=?`).join(',')}, updated_at=? WHERE id=? AND updated_at=?`)
-          .bind(...columns.map((c) => fields[c]), now, tenantId, clean(body.expected_updated_at, 40)).run();
+        result = await env.DB.prepare(`UPDATE tenants SET ${setSql}, updated_at=? WHERE id=? AND updated_at=?`)
+          .bind(...setValues, now, tenantId, clean(body.expected_updated_at, 40)).run();
       } catch (error) { throw tenantWriteError(error); }
       if (!result.meta.changes) throw new HttpError(409, 'stale_tenant');
       // El prompt se versiona aparte porque es lo que de verdad se querrá revertir.
@@ -1020,7 +1114,12 @@ export function createWorker(config) {
           return await handleAdmin(request, env, ctx, path, url, config);
         }
         const contentType = request.headers.get('Content-Type') || '';
-        if (path === '/' && request.method === 'POST' && contentType.includes('application/x-www-form-urlencoded')) return await handleTwilio(request, env, ctx, config);
+        if (path === '/' && request.method === 'POST' && contentType.includes('application/x-www-form-urlencoded')) {
+          // Con el reorden tenant→firma, una petición sin firma ya toca D1: rate limit por IP.
+          const twilioIp = request.headers.get('CF-Connecting-IP') || 'unknown';
+          if (await rateLimited(env, twilioIp, 'twilio', 120)) throw new HttpError(429, 'rate_limited');
+          return await handleTwilio(request, env, ctx, config);
+        }
         if (path === '/lead' || path === '/chat') {
           const cors = publicCors(request, env);
           if (!cors) throw new HttpError(403, 'origin_not_allowed');
@@ -1043,4 +1142,4 @@ export function createWorker(config) {
   };
 }
 
-export const testing = { clean, normalizePhone, extractPhone, safeUtm, publicCors, validTwilioSignature, csvCell, expiryDate, leadFilters, isDemoKey, templateVar, leadTemplateVariables, readJson, deliver, drainQueuedLeads, verifyTurnstile, systemFor, validateTenant, invalidateTenantCache, tenantWriteError };
+export const testing = { clean, normalizePhone, extractPhone, safeUtm, publicCors, validTwilioSignature, csvCell, expiryDate, leadFilters, isDemoKey, templateVar, leadTemplateVariables, readJson, deliver, drainQueuedLeads, verifyTurnstile, systemFor, validateTenant, invalidateTenantCache, tenantWriteError, assertNotActivePending };

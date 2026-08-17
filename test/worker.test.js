@@ -2,6 +2,9 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { createWorker, testing } from '../worker/app.js';
+import { encryptSecret, decryptSecret } from '../worker/crypto.js';
+
+const TEST_KEK = btoa(String.fromCharCode(...new Uint8Array(32).map((_, i) => i + 1)));
 
 test('normaliza teléfonos válidos y rechaza longitudes peligrosas', () => {
   assert.equal(testing.normalizePhone('+34 612 345 678'), '+34612345678');
@@ -207,7 +210,7 @@ test('el webhook de Twilio enruta por To al tenant correcto y aísla el historia
     'whatsapp:+15550000002': { id: 't-dos', slug: 'dos', system_prompt: 'PROMPT-DOS' },
   };
   const env = {
-    TWILIO_AUTH_TOKEN: 'tok',
+    TWILIO_AUTH_TOKEN: 'tok', TWILIO_ACCOUNT_SID: 'AC' + 'p'.repeat(32),
     ANTHROPIC_API_KEY: 'k',
     KV: { async get() { return null; }, async put(key, value) { kvPuts.push(key); }, async delete() {} },
     DB: { prepare: (sql) => ({ bind: (...args) => ({
@@ -226,7 +229,7 @@ test('el webhook de Twilio enruta por To al tenant correcto y aísla el historia
   };
   try {
     for (const to of ['whatsapp:+15550000001', 'whatsapp:+15550000002']) {
-      const request = await twilioRequest('https://worker.test/', { From: 'whatsapp:+34600000000', To: to, Body: 'hola' }, 'tok');
+      const request = await twilioRequest('https://worker.test/', { AccountSid: env.TWILIO_ACCOUNT_SID, From: 'whatsapp:+34600000000', To: to, Body: 'hola' }, 'tok');
       const response = await worker.fetch(request, env, ctx);
       assert.equal(response.status, 200);
     }
@@ -237,12 +240,109 @@ test('el webhook de Twilio enruta por To al tenant correcto y aísla el historia
     assert.deepEqual([...new Set(convKeys)].sort(), ['conv:wa:t-dos:whatsapp:+34600000000', 'conv:wa:t-uno:whatsapp:+34600000000']);
     // To desconocido: 404 unknown_tenant y sin llamar al modelo
     const before = anthropicSystems.length;
-    const unknown = await twilioRequest('https://worker.test/', { From: 'whatsapp:+34600000000', To: 'whatsapp:+15559999999', Body: 'hola' }, 'tok');
+    const unknown = await twilioRequest('https://worker.test/', { AccountSid: env.TWILIO_ACCOUNT_SID, From: 'whatsapp:+34600000000', To: 'whatsapp:+15559999999', Body: 'hola' }, 'tok');
     const notFound = await worker.fetch(unknown, env, ctx);
     assert.equal(notFound.status, 404);
     assert.equal((await notFound.json()).error, 'unknown_tenant');
     assert.equal(anthropicSystems.length, before, 'no debe llamar al modelo');
   } finally { globalThis.fetch = realFetch; }
+});
+
+test('cifrado de tokens: ida y vuelta, AAD por tenant y formato corrupto', async () => {
+  const env = { SECRETS_KEK: TEST_KEK };
+  const stored = await encryptSecret(env, 'tenant-a', 'a1b2c3d4e5f60718293a4b5c6d7e8f90');
+  assert.ok(stored.startsWith('v1:'), 'formato v1:<iv>:<ct>');
+  assert.equal((await decryptSecret(env, 'tenant-a', stored)).value, 'a1b2c3d4e5f60718293a4b5c6d7e8f90');
+  await assert.rejects(decryptSecret(env, 'tenant-B', stored), /cipher_undecryptable/, 'otro tenantId no descifra');
+  await assert.rejects(decryptSecret(env, 'tenant-a', 'basura'), /cipher_format/);
+});
+
+async function subaccountHarness() {
+  const env = {
+    TWILIO_AUTH_TOKEN: 'parent-tok', TWILIO_ACCOUNT_SID: 'AC' + 'p'.repeat(32),
+    ANTHROPIC_API_KEY: 'k', SECRETS_KEK: TEST_KEK,
+    KV: { async get() { return null; }, async put() {}, async delete() {} },
+  };
+  const subSid = 'AC' + 'c'.repeat(32);
+  const subToken = 'f0e1d2c3b4a5968778695a4b3c2d1e0f';
+  const tenant = {
+    id: 't-cliente', slug: 'cliente', name: 'Cliente', system_prompt: 'PROMPT-CLIENTE',
+    twilio_subaccount_sid: subSid,
+    twilio_auth_token_enc: await encryptSecret(env, 't-cliente', subToken),
+  };
+  env.DB = { prepare: (sql) => ({ bind: (...args) => ({
+    first: async () => sql.includes('channel_address') && args[0] === 'whatsapp:+15551112222' ? tenant : null,
+    all: async () => ({ results: [] }), run: async () => {},
+  }) }), batch: async () => [] };
+  return { env, subSid, subToken, tenant };
+}
+
+test('webhook de subcuenta: firma con el token cifrado del tenant, sin respaldo global', async () => {
+  const worker = createWorker({ SYSTEM: 's', DEMOS: {}, SUMMARY_PROMPT: '', GUARDRAILS: 'REGLA' });
+  const ctx = { waitUntil() {} };
+  const { env, subSid, subToken } = await subaccountHarness();
+  const calls = [];
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = async (url, init) => {
+    if (String(url).includes('api.anthropic.com')) { calls.push(JSON.parse(init.body).system); return new Response(JSON.stringify({ content: [{ text: 'ok' }] }), { status: 200 }); }
+    return new Response('{}', { status: 200 });
+  };
+  try {
+    const base = { AccountSid: subSid, From: 'whatsapp:+34611111111', To: 'whatsapp:+15551112222', Body: 'hola' };
+    // firmado con el token de la subcuenta → 200 y contesta con su contexto
+    const ok = await worker.fetch(await twilioRequest('https://worker.test/', base, subToken), env, ctx);
+    assert.equal(ok.status, 200);
+    assert.ok(calls[0].includes('PROMPT-CLIENTE'));
+    // el MISMO webhook firmado con el token del padre → 403 (no hay respaldo global)
+    const spoofed = await worker.fetch(await twilioRequest('https://worker.test/', base, 'parent-tok'), env, ctx);
+    assert.equal(spoofed.status, 403);
+    assert.equal((await spoofed.json()).error, 'invalid_twilio_signature');
+    // AccountSid que no coincide con la subcuenta de la fila → 403 mismatch
+    const mismatch = await worker.fetch(await twilioRequest('https://worker.test/', { ...base, AccountSid: 'AC' + 'x'.repeat(32) }, subToken), env, ctx);
+    assert.equal((await mismatch.json()).error, 'account_tenant_mismatch');
+  } finally { globalThis.fetch = realFetch; }
+});
+
+test('tenant con subcuenta pero sin token: 403 sin llamar al modelo', async () => {
+  const worker = createWorker({ SYSTEM: 's', DEMOS: {}, SUMMARY_PROMPT: '', GUARDRAILS: '' });
+  const ctx = { waitUntil() {} };
+  const { env, subSid, subToken, tenant } = await subaccountHarness();
+  tenant.twilio_auth_token_enc = null;
+  let modelCalled = false;
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = async (url) => { if (String(url).includes('api.anthropic.com')) modelCalled = true; return new Response('{}', { status: 200 }); };
+  try {
+    const res = await worker.fetch(await twilioRequest('https://worker.test/', { AccountSid: subSid, From: 'whatsapp:+34611111111', To: 'whatsapp:+15551112222', Body: 'hola' }, subToken), env, ctx);
+    assert.equal(res.status, 403);
+    assert.equal((await res.json()).error, 'twilio_auth_token_missing');
+    assert.equal(modelCalled, false);
+  } finally { globalThis.fetch = realFetch; }
+});
+
+test('deliver envía desde la subcuenta del tenant (SID en la URL, auth del padre)', async () => {
+  const calls = [];
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = async (url) => { calls.push(String(url)); return new Response('{}', { status: 201 }); };
+  try {
+    const env = { TEAM_WHATSAPP: 'whatsapp:+34600000001', TWILIO_FROM: 'whatsapp:+15550000000', TWILIO_ACCOUNT_SID: 'AC' + 'p'.repeat(32), TWILIO_AUTH_TOKEN: 't', TWILIO_LEAD_TEMPLATE_SID: 'HXtest' };
+    const sub = 'AC' + 'c'.repeat(32);
+    await testing.deliver(env, 'whatsapp', { whatsapp: '+34612345678' }, { twilio_subaccount_sid: sub });
+    assert.ok(calls[0].includes(`/Accounts/${sub}/Messages.json`), 'usa el SID de la subcuenta');
+    await testing.deliver(env, 'whatsapp', { whatsapp: '+34612345678' }, null);
+    assert.ok(calls[1].includes(`/Accounts/${env.TWILIO_ACCOUNT_SID}/`), 'sin tenant usa el padre');
+  } finally { globalThis.fetch = realFetch; }
+});
+
+test('un prospecto pending: no puede activarse y el webhook tiene rate limit por IP', async () => {
+  assert.throws(() => testing.assertNotActivePending('pending:myxu-costura', 1), (e) => e.code === 'pending_tenant_cannot_be_active');
+  testing.assertNotActivePending('pending:myxu-costura', 0);
+  testing.assertNotActivePending('whatsapp:+34910000000', 1);
+  assert.doesNotThrow(() => testing.validateTenant({ channel_address: 'pending:myxu-costura' }, { partial: true }));
+  // rate limit del webhook: con el contador a tope, 429 antes de tocar D1
+  const worker = createWorker({ SYSTEM: 's', DEMOS: {}, SUMMARY_PROMPT: '', GUARDRAILS: '' });
+  const env = { KV: { async get(k) { return k.startsWith('rl:twilio:') ? '120' : null; }, async put() {}, async delete() {} } };
+  const res = await worker.fetch(new Request('https://worker.test/', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'CF-Connecting-IP': '9.9.9.9' }, body: 'a=b' }), env, { waitUntil() {} });
+  assert.equal(res.status, 429);
 });
 
 test('el widget y el formulario envían el tenant en el payload', async () => {
