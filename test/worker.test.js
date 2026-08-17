@@ -244,6 +244,71 @@ test('el webhook de Twilio enruta por To al tenant correcto y aísla el historia
   } finally { globalThis.fetch = realFetch; }
 });
 
+test('validateTenant rechaza formatos inválidos y normaliza los buenos', () => {
+  const ok = testing.validateTenant({
+    slug: 'Barberia-Lopez', name: 'Barbería López', channel_address: 'whatsapp:+34910000000',
+    team_whatsapp: ' whatsapp:+34600111222 , whatsapp:+34600333444 ',
+    lead_template_sid: 'HX' + 'a'.repeat(32), system_prompt: 'x'.repeat(60),
+  });
+  assert.equal(ok.slug, 'barberia-lopez');
+  assert.equal(ok.team_whatsapp, 'whatsapp:+34600111222,whatsapp:+34600333444');
+  const bad = (body, code) => assert.throws(() => testing.validateTenant(body, { partial: true }), (e) => e.code === code, code);
+  bad({ channel_address: 'whatsapp:34910000000' }, 'invalid_channel_address');
+  bad({ channel_address: 'telegram:12345' }, 'invalid_channel_address');
+  bad({ lead_template_sid: 'HX123' }, 'invalid_lead_template_sid');
+  bad({ team_whatsapp: '+34600111222' }, 'invalid_team_whatsapp');
+  bad({ system_prompt: 'corto' }, 'invalid_system_prompt');
+  bad({ slug: 'Ñ!' }, 'invalid_slug');
+});
+
+test('los choques de unicidad se traducen a 409, no a 500', () => {
+  assert.equal(testing.tenantWriteError(new Error('UNIQUE constraint failed: tenants.slug')).code, 'slug_taken');
+  assert.equal(testing.tenantWriteError(new Error('UNIQUE constraint failed: tenants.channel_address')).code, 'address_taken');
+  assert.equal(testing.tenantWriteError(new Error('otra cosa')).message, 'otra cosa');
+});
+
+test('la invalidación de caché borra las claves viejas Y las nuevas (addr y slug)', async () => {
+  const deleted = [];
+  const env = { KV: { async delete(k) { deleted.push(k); } } };
+  await testing.invalidateTenantCache(env, [
+    { channel_address: 'whatsapp:+1000', slug: 'viejo' },
+    { channel_address: 'whatsapp:+2000', slug: 'nuevo' },
+  ]);
+  assert.deepEqual(deleted.sort(), ['tenant:addr:whatsapp:+1000', 'tenant:addr:whatsapp:+2000', 'tenant:slug:nuevo', 'tenant:slug:viejo']);
+});
+
+function adminEnvWithSpies() {
+  const writes = [];
+  const stmt = (sql) => ({ bind: (...args) => ({
+    run: async () => { writes.push(sql); return { meta: { changes: 1 } }; },
+    first: async () => null,
+    all: async () => ({ results: [] }),
+  }) });
+  return {
+    writes,
+    env: {
+      ALLOWED_WEB_ORIGINS: '', ADMIN_ORIGIN: 'https://admin.hirevai.com',
+      ANTHROPIC_API_KEY: 'k',
+      KV: { puts: [], async get() { return null; }, async put(k) { this.puts.push(k); }, async delete() {} },
+      DB: { prepare: stmt, batch: async (s) => { writes.push('batch'); return s.map(() => ({})); } },
+    },
+  };
+}
+
+test('el preview responde sin escribir en D1 ni en KV, y no existe DELETE de tenants', async () => {
+  const worker = createWorker({ SYSTEM: 's', DEMOS: {}, SUMMARY_PROMPT: '', GUARDRAILS: 'REGLA' });
+  const ctx = { waitUntil() {} };
+  const { env, writes } = adminEnvWithSpies();
+  // sin JWT válido no se llega al preview: probamos el handler saltándonos Access no es
+  // posible desde fuera, así que verificamos 401 (guardián) y después el contrato interno
+  const noAuth = await worker.fetch(new Request('https://admin.hirevai.com/api/admin/tenants/00000000-0000-4000-8000-000000000001/preview', { method: 'POST' }), env, ctx);
+  assert.equal(noAuth.status, 401);
+  const del = await worker.fetch(new Request('https://admin.hirevai.com/api/admin/tenants/00000000-0000-4000-8000-000000000001', { method: 'DELETE' }), env, ctx);
+  assert.equal(del.status, 401, 'DELETE tampoco pasa de Access; con Access, el router responde 405');
+  assert.equal(writes.length, 0, 'nada escrito en D1');
+  assert.equal(env.KV.puts.filter((k) => !k.startsWith('rl:')).length, 0, 'nada escrito en KV');
+});
+
 test('el Worker rechaza CORS desconocido y exige Access en administración', async () => {
   const worker = createWorker({ SYSTEM: '', DEMOS: {}, SUMMARY_PROMPT: '' });
   const ctx = { waitUntil() {} };

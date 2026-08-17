@@ -80,9 +80,12 @@ Ejecutar `npm run check` antes de desplegar (sintaxis JS, validación de las 26 
 El Worker es multi-tenant (Fase 1, `docs/FASE1-MULTITENANT.md`): un despliegue, N clientes,
 enrutado por el `To` de Twilio. Para dar de alta un cliente:
 
-1. `INSERT INTO tenants (...)` con su `channel_address` (`whatsapp:+E164` o `messenger:<pageId>`),
-   sus canales de aviso (`team_whatsapp`, `telegram_chat_id`, `lead_template_sid`, `twilio_from`)
-   y su `system_prompt` de negocio (los guardrails antiinyección los pone el código, no la fila).
+1. **Desde el panel** (`admin.hirevai.com` → pestaña Clientes → "Nuevo cliente", Fase 2):
+   canal (`whatsapp:+E164` o `messenger:<pageId>`), canales de aviso y `system_prompt` de
+   negocio (los guardrails antiinyección los pone el código, no la fila). El botón
+   "Duplicar de…" copia el contexto de otro cliente; "Probar" ejecuta el borrador sin
+   guardar; cada guardado queda versionado con rollback del prompt. Un tenant nunca se
+   borra: solo se desactiva.
 2. Copia versionada del prompt en `tenants/<slug>.md` (patrón de `tenants/velai.md`).
 3. En Twilio: sender bajo la misma WABA, display name del cliente, plantilla
    `nuevo_lead_<cliente>` en categoría **Utility**, webhook apuntando al mismo Worker.

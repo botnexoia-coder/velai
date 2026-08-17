@@ -221,6 +221,78 @@ async function alertUnknownTenant(env, address) {
   } catch (_) {}
 }
 
+// ── Gestión de tenants desde el panel (Fase 2) ──────────────────────────────
+const ADDRESS_RE = /^(whatsapp:\+[1-9]\d{6,14}|messenger:\d{5,25})$/;
+const WA_RE = /^whatsapp:\+[1-9]\d{6,14}$/;
+const TEMPLATE_RE = /^HX[0-9a-f]{32}$/i;
+const SLUG_RE = /^[a-z0-9][a-z0-9-]{1,39}$/;
+const CHAT_ID_RE = /^-?\d{5,20}$/;
+// El mínimo de 50 evita que un guardado accidental con el campo casi vacío deje
+// al bot de un cliente sin contexto contestando cualquier cosa.
+const PROMPT_MIN = 50, PROMPT_MAX = 20000;
+
+function validateTenant(body, { partial = false } = {}) {
+  const out = {}; const bad = (f) => { throw new HttpError(400, `invalid_${f}`); };
+  const has = (k) => body[k] !== undefined;
+  if (has('slug') || !partial) {
+    out.slug = clean(body.slug, 40).toLowerCase();
+    if (!SLUG_RE.test(out.slug)) bad('slug');
+  }
+  if (has('name') || !partial) {
+    out.name = clean(body.name, 120); if (!out.name) bad('name');
+  }
+  if (has('channel_address') || !partial) {
+    out.channel_address = clean(body.channel_address, 80);
+    if (!ADDRESS_RE.test(out.channel_address)) bad('channel_address');
+  }
+  if (has('twilio_from')) {
+    out.twilio_from = clean(body.twilio_from, 80) || null;
+    if (out.twilio_from && !WA_RE.test(out.twilio_from)) bad('twilio_from');
+  }
+  if (has('team_whatsapp')) {
+    const list = clean(body.team_whatsapp, 1000).split(',').map((x) => x.trim()).filter(Boolean);
+    if (list.length > 10 || list.some((x) => !WA_RE.test(x))) bad('team_whatsapp');
+    out.team_whatsapp = list.join(',') || null;
+  }
+  if (has('telegram_chat_id')) {
+    out.telegram_chat_id = clean(body.telegram_chat_id, 30) || null;
+    if (out.telegram_chat_id && !CHAT_ID_RE.test(out.telegram_chat_id)) bad('telegram_chat_id');
+  }
+  if (has('lead_template_sid')) {
+    out.lead_template_sid = clean(body.lead_template_sid, 40) || null;
+    if (out.lead_template_sid && !TEMPLATE_RE.test(out.lead_template_sid)) bad('lead_template_sid');
+  }
+  if (has('system_prompt') || !partial) {
+    out.system_prompt = String(body.system_prompt ?? '').trim().slice(0, PROMPT_MAX + 1);
+    if (out.system_prompt.length < PROMPT_MIN || out.system_prompt.length > PROMPT_MAX) bad('system_prompt');
+  }
+  if (has('active')) out.active = body.active ? 1 : 0;
+  return out;
+}
+
+// Los choques de unicidad se traducen, no revientan en 500. address_taken es EL error
+// que desviaría las conversaciones de un cliente al prompt de otro: mensaje claro.
+function tenantWriteError(error) {
+  const msg = String(error);
+  if (/UNIQUE.*slug/i.test(msg)) return new HttpError(409, 'slug_taken');
+  if (/UNIQUE.*channel_address/i.test(msg)) return new HttpError(409, 'address_taken');
+  return error;
+}
+
+// La caché KV guarda la fila COMPLETA del tenant: CUALQUIER edición (también el
+// prompt) debe invalidar, y al cambiar dirección o slug hay que borrar las claves
+// viejas Y las nuevas. También tras un alta: los fallos de lookup se cachean.
+async function invalidateTenantCache(env, tenants) {
+  if (!env.KV) return;
+  const keys = new Set();
+  for (const t of tenants) {
+    if (!t) continue;
+    if (t.channel_address) keys.add(`tenant:addr:${t.channel_address}`);
+    if (t.slug) keys.add(`tenant:slug:${t.slug}`);
+  }
+  await Promise.all([...keys].map((k) => env.KV.delete(k).catch(() => {})));
+}
+
 // prompt efectivo = negocio del tenant (D1) + guardrails (código, innegociables).
 // Si el prompt sigue en 'PENDIENTE' (entre migración y seed) cae al SYSTEM de código:
 // el bot nunca contesta vacío.
@@ -701,7 +773,7 @@ function csvCell(value) {
 // Datos administrativos: nunca cacheables (ni en el navegador ni en proxies).
 const NO_STORE = { 'Cache-Control': 'no-store' };
 
-async function handleAdmin(request, env, ctx, path, url) {
+async function handleAdmin(request, env, ctx, path, url, config) {
   adminCorsGuard(request, env);
   const actor = await adminIdentity(request, env);
   if (!env.DB) throw new HttpError(503, 'lead_storage_not_configured');
@@ -728,8 +800,112 @@ async function handleAdmin(request, env, ctx, path, url) {
     return new Response('\uFEFF' + csv, { headers: { 'Content-Type': 'text/csv; charset=utf-8', 'Content-Disposition': 'attachment; filename="velai-leads.csv"', 'Cache-Control': 'no-store' } });
   }
   if (path === '/api/admin/tenants' && request.method === 'GET') {
-    const rows = (await env.DB.prepare('SELECT id, slug, name, active FROM tenants ORDER BY name').all()).results;
+    // Semáforo de configuración de un vistazo: sin plantilla, sin equipo o con
+    // prompt sospechosamente corto se ve desde el listado, sin abrir nada.
+    const rows = (await env.DB.prepare(`
+      SELECT t.id, t.slug, t.name, t.channel_address, t.active, t.updated_at,
+             t.lead_template_sid IS NOT NULL AS has_template,
+             t.team_whatsapp IS NOT NULL AS has_team,
+             length(t.system_prompt) AS prompt_len,
+             COUNT(l.id) AS lead_count
+      FROM tenants t LEFT JOIN leads l ON l.tenant_id = t.id
+      GROUP BY t.id ORDER BY t.active DESC, t.name ASC`).all()).results;
     return json({ tenants: rows }, 200, NO_STORE);
+  }
+  if (path === '/api/admin/tenants' && request.method === 'POST') {
+    const body = await readJson(request, 32000);
+    const fields = validateTenant(body, { partial: false });
+    const now = new Date().toISOString();
+    const tenantId = crypto.randomUUID();
+    try {
+      await env.DB.prepare(`INSERT INTO tenants
+        (id,slug,name,channel_address,team_whatsapp,telegram_chat_id,lead_template_sid,twilio_from,system_prompt,active,created_at,updated_at)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`)
+        .bind(tenantId, fields.slug, fields.name, fields.channel_address, fields.team_whatsapp ?? null,
+          fields.telegram_chat_id ?? null, fields.lead_template_sid ?? null, fields.twilio_from ?? null,
+          fields.system_prompt, fields.active ?? 1, now, now).run();
+    } catch (error) { throw tenantWriteError(error); }
+    await env.DB.prepare('INSERT INTO tenant_versions (tenant_id,actor_email,field,previous_value,note,created_at) VALUES (?,?,?,?,?,?)')
+      .bind(tenantId, actor, 'config', null, clean(body.note, 200) || 'alta', now).run();
+    await invalidateTenantCache(env, [fields]);
+    return json({ ok: true, id: tenantId, updated_at: now }, 201, NO_STORE);
+  }
+  const tenantMatch = path.match(/^\/api\/admin\/tenants\/([0-9a-f-]+)(?:\/(preview|versions))?(?:\/(\d+)\/restore)?$/i);
+  if (tenantMatch) {
+    if (!UUID_RE.test(tenantMatch[1])) throw new HttpError(404, 'not_found');
+    const tenantId = tenantMatch[1]; const tenantAction = tenantMatch[2]; const versionId = tenantMatch[3];
+    if (!tenantAction && request.method === 'GET') {
+      const tenant = await env.DB.prepare('SELECT * FROM tenants WHERE id=?').bind(tenantId).first();
+      if (!tenant) throw new HttpError(404, 'not_found');
+      return json({ tenant }, 200, NO_STORE);
+    }
+    if (!tenantAction && request.method === 'PATCH') {
+      const body = await readJson(request, 32000);   // el prompt es grande
+      const previous = await env.DB.prepare('SELECT * FROM tenants WHERE id=?').bind(tenantId).first();
+      if (!previous) throw new HttpError(404, 'not_found');
+      const fields = validateTenant(body, { partial: true });
+      if (!Object.keys(fields).length) throw new HttpError(400, 'nothing_to_update');
+      const now = new Date().toISOString();
+      const columns = Object.keys(fields);
+      // Bloqueo optimista: sin el updated_at cargado, el último en guardar pisaría al otro.
+      let result;
+      try {
+        result = await env.DB.prepare(`UPDATE tenants SET ${columns.map((c) => `${c}=?`).join(',')}, updated_at=? WHERE id=? AND updated_at=?`)
+          .bind(...columns.map((c) => fields[c]), now, tenantId, clean(body.expected_updated_at, 40)).run();
+      } catch (error) { throw tenantWriteError(error); }
+      if (!result.meta.changes) throw new HttpError(409, 'stale_tenant');
+      // El prompt se versiona aparte porque es lo que de verdad se querrá revertir.
+      const changedPrompt = fields.system_prompt !== undefined && fields.system_prompt !== previous.system_prompt;
+      await env.DB.prepare('INSERT INTO tenant_versions (tenant_id,actor_email,field,previous_value,note,created_at) VALUES (?,?,?,?,?,?)')
+        .bind(tenantId, actor, changedPrompt ? 'system_prompt' : 'config',
+          changedPrompt ? previous.system_prompt : JSON.stringify(
+            Object.fromEntries(columns.filter((c) => c !== 'system_prompt').map((c) => [c, previous[c]]))),
+          clean(body.note, 200) || null, now).run();
+      await invalidateTenantCache(env, [previous, fields]);
+      if (changedPrompt) {
+        ctx.waitUntil(sendTelegramText(env, `✏️ <b>${escapeHtml(actor)}</b> cambió el contexto de <b>${escapeHtml(previous.name)}</b>`).catch(() => {}));
+      }
+      return json({ ok: true, updated_at: now }, 200, NO_STORE);
+    }
+    if (tenantAction === 'versions' && !versionId && request.method === 'GET') {
+      const rows = (await env.DB.prepare('SELECT id, actor_email, field, previous_value, note, created_at FROM tenant_versions WHERE tenant_id=? ORDER BY created_at DESC LIMIT 20').bind(tenantId).all()).results;
+      return json({ versions: rows }, 200, NO_STORE);
+    }
+    if (tenantAction === 'versions' && versionId && request.method === 'POST') {
+      // Restaurar crea una versión nueva, no borra: siempre se puede deshacer el deshacer.
+      // Solo se restauran versiones de prompt; las de config son consultables ("Ver").
+      const version = await env.DB.prepare('SELECT * FROM tenant_versions WHERE id=? AND tenant_id=?').bind(versionId, tenantId).first();
+      if (!version) throw new HttpError(404, 'not_found');
+      if (version.field !== 'system_prompt' || !version.previous_value) throw new HttpError(400, 'not_restorable');
+      const previous = await env.DB.prepare('SELECT * FROM tenants WHERE id=?').bind(tenantId).first();
+      if (!previous) throw new HttpError(404, 'not_found');
+      const now = new Date().toISOString();
+      await env.DB.batch([
+        env.DB.prepare('UPDATE tenants SET system_prompt=?, updated_at=? WHERE id=?').bind(version.previous_value, now, tenantId),
+        env.DB.prepare('INSERT INTO tenant_versions (tenant_id,actor_email,field,previous_value,note,created_at) VALUES (?,?,?,?,?,?)')
+          .bind(tenantId, actor, 'system_prompt', previous.system_prompt, `restore #${version.id}`, now),
+      ]);
+      await invalidateTenantCache(env, [previous]);
+      return json({ ok: true, updated_at: now }, 200, NO_STORE);
+    }
+    if (tenantAction === 'preview' && request.method === 'POST') {
+      // Ejecuta el prompt BORRADOR contra el modelo. No guarda, no toca KV, no crea
+      // lead, no notifica. Rate limit por actor (no por IP): son llamadas que se pagan.
+      if (await rateLimited(env, actor, 'preview', 20)) throw new HttpError(429, 'rate_limited');
+      const body = await readJson(request, 32000);
+      const draft = String(body.prompt ?? '').trim().slice(0, PROMPT_MAX);
+      const message = clean(body.message, 500);
+      if (draft.length < PROMPT_MIN || !message) throw new HttpError(400, 'invalid_preview');
+      const reply = await callAnthropic(env, {
+        model: 'claude-sonnet-4-6', max_tokens: 300,
+        system: `${draft}\n${config.GUARDRAILS || ''}`.trim(),
+        messages: [{ role: 'user', content: message }],
+      });
+      return json({ reply }, 200, NO_STORE);
+    }
+    // Un tenant no se borra NUNCA: los leads apuntan a tenant_id y el histórico es
+    // del negocio. El panel solo desactiva (active=0).
+    throw new HttpError(405, 'method_not_allowed');
   }
   const match = path.match(/^\/api\/admin\/leads\/([0-9a-f-]+)(?:\/(notes|retry))?$/i);
   if (!match || !UUID_RE.test(match[1])) throw new HttpError(404, 'not_found');
@@ -835,7 +1011,7 @@ export function createWorker(config) {
           const host = adminHost(env);
           if (!host) throw new HttpError(503, 'admin_misconfigured');
           if (url.hostname !== host) throw new HttpError(404, 'not_found');
-          return await handleAdmin(request, env, ctx, path, url);
+          return await handleAdmin(request, env, ctx, path, url, config);
         }
         const contentType = request.headers.get('Content-Type') || '';
         if (path === '/' && request.method === 'POST' && contentType.includes('application/x-www-form-urlencoded')) return await handleTwilio(request, env, ctx, config);
@@ -861,4 +1037,4 @@ export function createWorker(config) {
   };
 }
 
-export const testing = { clean, normalizePhone, extractPhone, safeUtm, publicCors, validTwilioSignature, csvCell, expiryDate, leadFilters, isDemoKey, templateVar, leadTemplateVariables, readJson, deliver, drainQueuedLeads, verifyTurnstile, systemFor };
+export const testing = { clean, normalizePhone, extractPhone, safeUtm, publicCors, validTwilioSignature, csvCell, expiryDate, leadFilters, isDemoKey, templateVar, leadTemplateVariables, readJson, deliver, drainQueuedLeads, verifyTurnstile, systemFor, validateTenant, invalidateTenantCache, tenantWriteError };
