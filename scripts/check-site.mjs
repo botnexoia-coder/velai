@@ -25,6 +25,10 @@ for (const file of htmlFiles) {
   }
   if (!allowPlaceholders && /REPLACE_WITH_[A-Z_]+/.test(html)) failures.push(`${rel}: marcador REPLACE_WITH_* sin sustituir`);
   if (/data-velai-leadform/.test(html) && !/assets\/leadform\.js/.test(html)) failures.push(`${rel}: usa data-velai-leadform pero no carga leadform.js`);
+  // Los CSS son immutable 1 año en _headers: sin ?v= un cambio no llega a visitantes recurrentes.
+  for (const cssMatch of html.matchAll(/href="(\/[^"]+\.css)(\?[^"]*)?"/g)) {
+    if (!cssMatch[2]) failures.push(`${rel}: CSS sin versión ?v= → ${cssMatch[1]}`);
+  }
   for (const match of html.matchAll(/<script type="application\/ld\+json">([\s\S]*?)<\/script>/gi)) {
     try { JSON.parse(match[1]); } catch (error) { failures.push(`${rel}: JSON-LD inválido (${error.message})`); }
   }

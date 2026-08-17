@@ -35,8 +35,10 @@ Sin esto, las campañas gastarían presupuesto a ciegas (sin medir conversiones)
 - [x] `admin.hirevai.com` como custom domain del Worker + app de Access con OTP.
 - [x] Desplegado y verificado end-to-end: lead de prueba en D1 y **aviso entregado en Telegram**.
 - [x] `.dev.vars` en `.gitignore` (los secretos de desarrollo local nunca se commitean).
-- [ ] **`TEAM_WHATSAPP` y `TWILIO_FROM`** (formato `whatsapp:+E164`): único cabo suelto del sistema de avisos. Sin ellas, el canal WhatsApp de los avisos queda `skipped` — se activará solo (≤6 h) cuando las pongas.
+- [x] **`TEAM_WHATSAPP`, `TWILIO_FROM` y `TWILIO_LEAD_TEMPLATE_SID`** configurados; el aviso de WhatsApp va por plantilla (arreglo del `Undelivered 63016` — ver `docs/FASE0-TWILIO-PLANTILLA.md`).
+- [ ] **Duplicar la plantilla `velai_nuevo_lead` en categoría Utility** (Twilio Content Template Builder → Duplicate) y pasar el SID nuevo cuando esté aprobada (más barata y sin topes de Marketing).
 - [ ] Login de prueba en `admin.hirevai.com` con tu email + PIN, y verificar que ves el lead de prueba.
+- [ ] De FASE0 §6: status callback del sender (para ver `Undelivered` sin entrar a la consola), perfil de negocio del sender, verificación de Meta (bloqueante para el primer cliente), webhook de voz, bundle +34.
 
 ### 3. Verificar conversiones antes de invertir
 

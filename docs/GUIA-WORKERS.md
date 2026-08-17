@@ -69,6 +69,7 @@ solo si `keep_vars = true`. Documenta cada variable nueva en `.dev.vars.example`
 | Antiabuso | `verifyTurnstile(env, token, request, '<action>')` en endpoints públicos que escriben; la `action` del cliente y del servidor deben coincidir |
 | Rate limit | `rateLimited(env, ip, '<bucket>', N)` (KV, ventana 60 s, fail-open) |
 | Webhooks | Validar firma (ver `validTwilioSignature`: HMAC en tiempo constante) |
+| WhatsApp saliente | Mensaje iniciado por el negocio = SIEMPRE plantilla aprobada (`ContentSid` + `ContentVariables` vía `templateVar`); texto libre fuera de la ventana de 24 h falla con 63016 |
 | Rutas admin | Solo en el hostname de `ADMIN_ORIGIN` + JWT de Cloudflare Access verificado (firma JWKS, `iss`, `aud`, `exp`, `alg`) — ver `adminIdentity` |
 | Datos | Payload limitado (`readJson(request, maxBytes)`), campos con `clean()`, SQL SIEMPRE con `prepare().bind()` |
 

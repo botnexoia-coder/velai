@@ -28,9 +28,15 @@ function normalizePhone(value) {
   return digits.length >= 6 && digits.length <= 15 ? (raw.startsWith('+') ? '+' : '') + digits : '';
 }
 
+// Sin '.' en la clase (importes «40.000»), sin fechas y con longitud de teléfono real:
+// una conversación sobre facturación o CIFs no debe disparar la captura de lead.
+const DATE_RE = /\b\d{1,2}[-/.]\d{1,2}[-/.]\d{2,4}\b/;
 function extractPhone(text) {
-  const candidates = String(text || '').match(/\+?\d[\d\s().-]{4,}\d/g) || [];
+  const candidates = String(text || '').match(/\+?\d[\d\s()-]{7,}\d/g) || [];
   for (const candidate of candidates) {
+    if (DATE_RE.test(candidate)) continue;
+    const digits = candidate.replace(/\D/g, '');
+    if (digits.length < 9 || digits.length > 15) continue;
     const phone = normalizePhone(candidate);
     if (phone) return phone;
   }
@@ -58,7 +64,11 @@ async function readJson(request, maxBytes = 16000) {
   if (length > maxBytes) throw new HttpError(413, 'payload_too_large');
   let text = await request.text();
   if (text.length > maxBytes) throw new HttpError(413, 'payload_too_large');
-  try { return JSON.parse(text); } catch (_) { throw new HttpError(400, 'invalid_json'); }
+  let parsed;
+  try { parsed = JSON.parse(text); } catch (_) { throw new HttpError(400, 'invalid_json'); }
+  // `null`, arrays o primitivos son entrada inválida (400), no un 500 al leer .campo
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new HttpError(400, 'invalid_json');
+  return parsed;
 }
 
 class HttpError extends Error {
@@ -114,9 +124,10 @@ async function callAnthropic(env, payload) {
 }
 
 function expiryDate(env) {
-  const months = Number(env.LEAD_RETENTION_MONTHS);
+  // `Number('')` es 0 (finito) y el clamp lo convertía en 1 mes; `|| 24` cubre '', 0 y NaN.
+  const months = Number(env.LEAD_RETENTION_MONTHS) || 24;
   const date = new Date();
-  date.setUTCMonth(date.getUTCMonth() + (Number.isFinite(months) ? Math.min(60, Math.max(1, months)) : 24));
+  date.setUTCMonth(date.getUTCMonth() + Math.min(60, Math.max(1, months)));
   return date.toISOString();
 }
 
@@ -180,29 +191,64 @@ function notificationText(lead) {
   return text + '\n⚡ <b>Contactar hoy mismo</b>';
 }
 
-async function deliver(env, channel, text) {
-  if (channel === 'telegram') {
-    if (!env.TELEGRAM_TOKEN || !env.TELEGRAM_CHAT_ID) return { skipped: true, error: 'not_configured' };
-    const response = await fetch(`https://api.telegram.org/bot${env.TELEGRAM_TOKEN}/sendMessage`, {
-      method: 'POST', headers: JSON_HEADERS,
-      body: JSON.stringify({ chat_id: env.TELEGRAM_CHAT_ID, text, parse_mode: 'HTML' }),
-      signal: AbortSignal.timeout(8000),
-    });
-    if (!response.ok) return { error: `telegram_${response.status}` };
-    const data = await response.json();
-    return data.ok ? { ok: true } : { error: 'telegram_rejected' };
-  }
+async function sendTelegramText(env, text) {
+  if (!env.TELEGRAM_TOKEN || !env.TELEGRAM_CHAT_ID) return { skipped: true, error: 'not_configured' };
+  const response = await fetch(`https://api.telegram.org/bot${env.TELEGRAM_TOKEN}/sendMessage`, {
+    method: 'POST', headers: JSON_HEADERS,
+    body: JSON.stringify({ chat_id: env.TELEGRAM_CHAT_ID, text, parse_mode: 'HTML' }),
+    signal: AbortSignal.timeout(8000),
+  });
+  if (!response.ok) return { error: `telegram_${response.status}` };
+  const data = await response.json();
+  return data.ok ? { ok: true } : { error: 'telegram_rejected' };
+}
+
+// WhatsApp rechaza variables de plantilla vacías, con saltos de línea o con más de
+// 4 espacios seguidos. Todo campo se normaliza y lleva respaldo.
+function templateVar(value, fallback) {
+  const text = String(value ?? '').replace(/\s+/g, ' ').trim().slice(0, 200);
+  return text || fallback;
+}
+
+// Orden fijado por la plantilla velai_nuevo_lead: 1 WhatsApp, 2 Nombre, 3 Negocio, 4 Necesidad.
+// Si cambias la plantilla, cambia esto a la vez.
+function leadTemplateVariables(lead) {
+  return JSON.stringify({
+    1: templateVar(lead.whatsapp, 'sin teléfono'),
+    2: templateVar(lead.name, 'sin nombre'),
+    3: templateVar(lead.sector, 'sin especificar'),
+    4: templateVar(lead.need || lead.note, 'sin especificar'),
+  });
+}
+
+async function deliver(env, channel, lead) {
+  if (channel === 'telegram') return sendTelegramText(env, notificationText(lead));
   const recipients = clean(env.TEAM_WHATSAPP, 1000).split(',').map((x) => x.trim()).filter(Boolean);
   if (!recipients.length || !env.TWILIO_FROM || !env.TWILIO_ACCOUNT_SID || !env.TWILIO_AUTH_TOKEN) {
     return { skipped: true, error: 'not_configured' };
   }
+  // Sin plantilla, el aviso al equipo es un mensaje iniciado por el negocio fuera de la
+  // ventana de 24 h y WhatsApp lo rechaza siempre con 63016. Mejor 'skipped' explícito.
+  if (!env.TWILIO_LEAD_TEMPLATE_SID) return { skipped: true, error: 'template_not_configured' };
   const auth = `Basic ${btoa(`${env.TWILIO_ACCOUNT_SID}:${env.TWILIO_AUTH_TOKEN}`)}`;
-  const results = await Promise.all(recipients.map((to) => fetch(`https://api.twilio.com/2010-04-01/Accounts/${env.TWILIO_ACCOUNT_SID}/Messages.json`, {
-    method: 'POST', headers: { Authorization: auth, 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: new URLSearchParams({ From: env.TWILIO_FROM, To: to, Body: text.replace(/<[^>]+>/g, '') }),
-    signal: AbortSignal.timeout(8000),
-  })));
-  return results.every((r) => r.ok) ? { ok: true } : { error: 'twilio_rejected' };
+  const variables = leadTemplateVariables(lead);
+  // allSettled, no all: con Promise.all un timeout de un destinatario tumbaba el envío
+  // entero y el reintento duplicaba el mensaje a quien sí lo había recibido.
+  const results = await Promise.allSettled(recipients.map((to) => fetch(
+    `https://api.twilio.com/2010-04-01/Accounts/${env.TWILIO_ACCOUNT_SID}/Messages.json`, {
+      method: 'POST',
+      headers: { Authorization: auth, 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        From: env.TWILIO_FROM,
+        To: to,
+        ContentSid: env.TWILIO_LEAD_TEMPLATE_SID,
+        ContentVariables: variables,
+      }),
+      signal: AbortSignal.timeout(8000),
+    })));
+  const delivered = results.filter((r) => r.status === 'fulfilled' && r.value.ok).length;
+  if (!delivered) return { error: 'twilio_rejected' };
+  return { ok: true, partial: delivered < recipients.length };
 }
 
 async function processNotifications(env, leadId, force = false) {
@@ -215,7 +261,7 @@ async function processNotifications(env, leadId, force = false) {
   for (const job of jobs) {
     if (!force && job.next_attempt_at && job.next_attempt_at > new Date().toISOString()) continue;
     let outcome;
-    try { outcome = await deliver(env, job.channel, notificationText(lead)); }
+    try { outcome = await deliver(env, job.channel, lead); }
     catch (error) { outcome = { error: error.name === 'TimeoutError' ? 'timeout' : 'network_error' }; }
     const now = new Date().toISOString();
     const attempts = outcome.skipped ? job.attempts : job.attempts + 1;
@@ -247,16 +293,31 @@ async function storeLead(env, ctx, input) {
     }
     return { ok: true, leadId: result.id, duplicate: !result.created, stored: 'd1' };
   } catch (error) {
-    console.log(JSON.stringify({ level: 'error', code: 'lead_d1_fallback', error: error.code || error.name }));
-    let notified = false;
+    // Distinguir la caída transitoria del error de configuración: un binding DB
+    // ausente NO debe pasar por "degradado OK" en silencio.
+    const misconfigured = error instanceof HttpError && error.code === 'lead_storage_not_configured';
+    console.log(JSON.stringify({ level: 'error', code: misconfigured ? 'lead_d1_misconfigured' : 'lead_d1_fallback', error: error.code || error.name }));
+    // Guardar QUÉ canales entregaron (no un booleano): el drenaje solo marca 'sent'
+    // los que de verdad salieron; el resto se notifica al reinsertar en D1.
+    const notifiedChannels = [];
     for (const channel of ['telegram', 'whatsapp']) {
-      try { if ((await deliver(env, channel, notificationText(inputToNotifiable(input)))).ok) notified = true; } catch (_) {}
+      try { if ((await deliver(env, channel, inputToNotifiable(input))).ok) notifiedChannels.push(channel); } catch (_) {}
     }
+    const notified = notifiedChannels.length > 0;
     let queued = false;
     if (env.KV) {
       try {
-        await env.KV.put(`leadq:${input.requestId}`, JSON.stringify({ ...input, notified }), { expirationTtl: 7 * 86400 });
+        await env.KV.put(`leadq:${input.requestId}`, JSON.stringify({ ...input, notified, notifiedChannels }), { expirationTtl: 30 * 86400 });
         queued = true;
+      } catch (_) {}
+    }
+    // Alerta al equipo con antirebote de 1 h: el modo degradado no puede ser invisible.
+    if (env.KV) {
+      try {
+        if (!(await env.KV.get('alert:degraded'))) {
+          await env.KV.put('alert:degraded', '1', { expirationTtl: 3600 });
+          await sendTelegramText(env, '⚠️ <b>Velai</b>: D1 no disponible, leads en cola KV. Revisar el binding DB del worker.');
+        }
       } catch (_) {}
     }
     if (!queued && !notified) throw error;
@@ -306,14 +367,21 @@ async function summarizeLead(config, env, messages) {
 }
 
 async function captureChatLead(config, env, ctx, body, phone, messages) {
+  // Mismas guardas que el canal WhatsApp: una captura por conversación (marca en KV),
+  // mínimo 2 turnos del usuario. Sin esto, cada cifra suelta del mensaje generaba un
+  // lead + 2 avisos + 1 llamada a Haiku, hasta 20/min por el rate limit del chat.
+  const mark = `lead:web:${body.conversationId}`;
+  if (env.KV && await env.KV.get(mark)) return;
+  if (messages.filter((m) => m.role === 'user').length < 2) return;
   const summary = await summarizeLead(config, env, messages);
-  await storeLead(env, ctx, {
+  const result = await storeLead(env, ctx, {
     requestId: `chat:${body.conversationId}:${phone}`, conversationId: body.conversationId,
     source: 'chat web', name: clean(summary.nombre, 100), whatsapp: phone, phone,
     sector: clean(summary.negocio, 100), need: clean(summary.necesidad, 200),
     context: clean(summary.contexto, 300), pageUrl: clean(body.pageUrl, 500),
     utm: safeUtm(body.utm), score: null,
   });
+  if (result.ok && env.KV) await env.KV.put(mark, '1', { expirationTtl: 30 * 86400 });
 }
 
 // El canal WhatsApp también captura leads (regresión corregida): el teléfono es el
@@ -410,20 +478,30 @@ async function accessKeys(issuer, forceRefresh = false) {
   return jwksCache.keys;
 }
 
+let jwksLastForcedRefresh = 0;
+
 async function adminIdentity(request, env) {
   const token = request.headers.get('Cf-Access-Jwt-Assertion');
   if (!token || !env.TEAM_DOMAIN || !env.POLICY_AUD) throw new HttpError(401, 'admin_unauthorized');
   const parts = token.split('.');
   if (parts.length !== 3) throw new HttpError(401, 'admin_unauthorized');
-  const header = JSON.parse(new TextDecoder().decode(decodeBase64Url(parts[0])));
-  const payload = JSON.parse(new TextDecoder().decode(decodeBase64Url(parts[1])));
+  // Datos del atacante: base64/JSON inválidos son 401, no un 500 del catch genérico.
+  let header, payload;
+  try {
+    header = JSON.parse(new TextDecoder().decode(decodeBase64Url(parts[0])));
+    payload = JSON.parse(new TextDecoder().decode(decodeBase64Url(parts[1])));
+  } catch (_) { throw new HttpError(401, 'admin_unauthorized'); }
   if (header.alg !== 'RS256') throw new HttpError(401, 'admin_unauthorized');
   const issuer = env.TEAM_DOMAIN.replace(/\/$/, '');
   const aud = Array.isArray(payload.aud) ? payload.aud : [payload.aud];
   // exp ausente o no numérico debe rechazar: NaN <= Date.now() es false y colaría.
   if (payload.iss !== issuer || !aud.includes(env.POLICY_AUD) || !Number.isFinite(payload.exp) || payload.exp * 1000 <= Date.now()) throw new HttpError(401, 'admin_unauthorized');
   let jwk = (await accessKeys(issuer)).find((item) => item.kid === header.kid);
-  if (!jwk) jwk = (await accessKeys(issuer, true)).find((item) => item.kid === header.kid);
+  if (!jwk && Date.now() - jwksLastForcedRefresh > 30000) {
+    // Antirebote: un kid inventado no puede forzar un fetch al JWKS por petición.
+    jwksLastForcedRefresh = Date.now();
+    jwk = (await accessKeys(issuer, true)).find((item) => item.kid === header.kid);
+  }
   if (!jwk) throw new HttpError(401, 'admin_unauthorized');
   const key = await crypto.subtle.importKey('jwk', jwk, { name: 'RSASSA-PKCS1-v1_5', hash: 'SHA-256' }, false, ['verify']);
   const valid = await crypto.subtle.verify('RSASSA-PKCS1-v1_5', key, decodeBase64Url(parts[2]), new TextEncoder().encode(`${parts[0]}.${parts[1]}`));
@@ -431,13 +509,24 @@ async function adminIdentity(request, env) {
   return clean(payload.email, 200) || 'admin';
 }
 
+// Sin fallback silencioso: si ADMIN_ORIGIN falta o es inválida, las rutas de admin
+// fallan con 503 explícito — pero las rutas públicas del router no deben verse afectadas,
+// por eso estas funciones devuelven null en vez de lanzar.
+function adminOrigin(env) {
+  try { return new URL(env.ADMIN_ORIGIN).origin; } catch (_) { return null; }
+}
+
 function adminHost(env) {
-  try { return new URL(env.ADMIN_ORIGIN).hostname; } catch (_) { return 'admin.hirevai.com'; }
+  const origin = adminOrigin(env);
+  return origin ? new URL(origin).hostname : null;
 }
 
 function adminCorsGuard(request, env) {
+  const expected = adminOrigin(env);
+  if (!expected) throw new HttpError(503, 'admin_misconfigured');
   const origin = request.headers.get('Origin');
-  if (origin && origin !== env.ADMIN_ORIGIN) throw new HttpError(403, 'invalid_admin_origin');
+  // Comparar orígenes normalizados: una barra final en la variable no debe romper las escrituras.
+  if (origin && origin !== expected) throw new HttpError(403, 'invalid_admin_origin');
 }
 
 function leadFilters(url) {
@@ -473,7 +562,9 @@ async function handleAdmin(request, env, ctx, path, url) {
   const actor = await adminIdentity(request, env);
   if (!env.DB) throw new HttpError(503, 'lead_storage_not_configured');
   if (path === '/api/admin/leads' && request.method === 'GET') {
-    const filters = leadFilters(url); const limit = Math.min(100, Math.max(1, Number(url.searchParams.get('limit') || 50)));
+    const filters = leadFilters(url);
+    const rawLimit = Number(url.searchParams.get('limit'));
+    const limit = Number.isFinite(rawLimit) ? Math.min(100, Math.max(1, rawLimit)) : 50; // NaN en LIMIT = sin límite en SQLite
     // Cursor por tupla (created_at, id): un created_at repetido en el borde de página no salta leads.
     const cursor = clean(url.searchParams.get('cursor'), 80);
     if (cursor) {
@@ -546,9 +637,15 @@ async function drainQueuedLeads(env) {
     if (!input) { await env.KV.delete(entry.name); continue; }
     try {
       const result = await persistLead(env, input);
-      if (result.created && input.notified) {
+      // Solo los canales que entregaron durante el fallback se marcan 'sent';
+      // compat con colas antiguas que solo traían el booleano `notified`.
+      const channels = Array.isArray(input.notifiedChannels) ? input.notifiedChannels
+        : (input.notified ? ['telegram', 'whatsapp'] : []);
+      if (result.created && channels.length) {
         const now = new Date().toISOString();
-        await env.DB.prepare("UPDATE lead_notifications SET status='sent',attempts=1,sent_at=?,updated_at=? WHERE lead_id=?").bind(now, now, result.id).run();
+        await env.DB.batch(channels.map((ch) => env.DB
+          .prepare("UPDATE lead_notifications SET status='sent',attempts=1,sent_at=?,updated_at=? WHERE lead_id=? AND channel=?")
+          .bind(now, now, result.id, ch)));
       }
       await env.KV.delete(entry.name);
     } catch (_) { /* D1 sigue caída: se reintenta en el siguiente cron */ }
@@ -559,9 +656,20 @@ async function scheduled(env) {
   if (!env.DB) return;
   const now = new Date().toISOString();
   await drainQueuedLeads(env);
-  const due = (await env.DB.prepare("SELECT DISTINCT lead_id FROM lead_notifications WHERE ((status IN ('pending','failed') AND attempts < 5) OR status = 'skipped') AND (next_attempt_at IS NULL OR next_attempt_at <= ?) LIMIT 25").bind(now).all()).results;
-  for (const row of due) await processNotifications(env, row.lead_id);
-  await env.DB.prepare('DELETE FROM leads WHERE expires_at <= ?').bind(now).run();
+  // Dos consultas con ORDER BY: lo entregable (pending/failed) tiene prioridad y las
+  // filas 'skipped' perpetuas no pueden acaparar la ventana del cron (inanición).
+  const due = (await env.DB.prepare(`
+    SELECT lead_id FROM lead_notifications
+    WHERE status IN ('pending','failed') AND attempts < 5
+      AND (next_attempt_at IS NULL OR next_attempt_at <= ?)
+    GROUP BY lead_id ORDER BY MIN(updated_at) ASC LIMIT 20`).bind(now).all()).results;
+  const idle = (await env.DB.prepare(`
+    SELECT lead_id FROM lead_notifications
+    WHERE status = 'skipped' AND (next_attempt_at IS NULL OR next_attempt_at <= ?)
+    GROUP BY lead_id ORDER BY MIN(updated_at) ASC LIMIT 5`).bind(now).all()).results;
+  for (const row of [...due, ...idle]) await processNotifications(env, row.lead_id);
+  // Purga acotada: una acumulación grande no debe chocar con los límites por sentencia de D1.
+  await env.DB.prepare('DELETE FROM leads WHERE id IN (SELECT id FROM leads WHERE expires_at <= ? LIMIT 500)').bind(now).run();
 }
 
 export function createWorker(config) {
@@ -576,7 +684,9 @@ export function createWorker(config) {
         if (path.startsWith('/api/admin/')) {
           // El panel y su API solo existen en el hostname de Access; en workers.dev el
           // JWT seguiría siendo el guardián, pero no hay motivo para exponer la ruta.
-          if (url.hostname !== adminHost(env)) throw new HttpError(404, 'not_found');
+          const host = adminHost(env);
+          if (!host) throw new HttpError(503, 'admin_misconfigured');
+          if (url.hostname !== host) throw new HttpError(404, 'not_found');
           return await handleAdmin(request, env, ctx, path, url);
         }
         const contentType = request.headers.get('Content-Type') || '';
@@ -603,4 +713,4 @@ export function createWorker(config) {
   };
 }
 
-export const testing = { clean, normalizePhone, extractPhone, safeUtm, publicCors, validTwilioSignature, csvCell, expiryDate, leadFilters, isDemoKey };
+export const testing = { clean, normalizePhone, extractPhone, safeUtm, publicCors, validTwilioSignature, csvCell, expiryDate, leadFilters, isDemoKey, templateVar, leadTemplateVariables, readJson, deliver, drainQueuedLeads };

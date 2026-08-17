@@ -55,11 +55,11 @@
   }
   </script>
 
-  <link rel="stylesheet" href="/fonts/fonts.css">
-  <link rel="stylesheet" href="/blog/blog.css">
+  <link rel="stylesheet" href="/fonts/fonts.css?v=1">
+  <link rel="stylesheet" href="/blog/blog.css?v=2">
 
   <script>window.VELAI_TRACK={ga4:'G-8HC3SQ0T0Q',ads:'AW-18250158066',adsLabel:'VMZdCLXFn8EcEPKfrf5D',pixel:'1928880717825520'};window.VELAI_WA='15706160059';window.VELAI_TURNSTILE_SITEKEY='0x4AAAAAAESkAwvlDVJD9Z1l';</script>
-  <script src="/assets/funnel.js?v=5" defer></script>
+  <script src="/assets/funnel.js?v=6" defer></script>
 
   <style>
     .dx { max-width: 640px; margin: 0 auto; padding: 30px 24px 90px; }
@@ -301,7 +301,8 @@
     var wa=(document.getElementById('dxWa').value||'').trim();
     var errs=body.querySelectorAll('.dx-err'); var ok=true;
     if(!name){ errs[0].textContent=T.reqName; errs[0].style.display='block'; ok=false; } else errs[0].style.display='none';
-    if(wa.replace(/[^0-9]/g,'').length<6){ errs[1].textContent=T.reqWa; errs[1].style.display='block'; ok=false; } else errs[1].style.display='none';
+    var waDigits=wa.replace(/[^0-9]/g,'').length;
+    if(waDigits<6||waDigits>15){ errs[1].textContent=T.reqWa; errs[1].style.display='block'; ok=false; } else errs[1].style.display='none';
     if(!ok) return;
     var score=compute();
     pendingLead={ requestId:(window.VELAI_UUID?window.VELAI_UUID():crypto.randomUUID()), fuente:'test ley atención al cliente', nombre:name, whatsapp:wa, sector:optOf('sector').t||'', score:score, nota:'Preparación atención al cliente: '+score+'/100', utm:(window.VELAI_getUTM&&window.VELAI_getUTM())||{}, pageUrl:location.href.slice(0,500) };
@@ -381,6 +382,6 @@
   renderQuestion();
 })();
 </script>
-<script src="/assets/vai-widget.js?v=3" defer></script>
+<script src="/assets/vai-widget.js?v=4" defer></script>
 </body>
 </html>

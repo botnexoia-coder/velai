@@ -31,7 +31,10 @@
 
   // ── idioma (compartido con el resto del sitio) ──
   function lang() {
-    var l = localStorage.getItem('velai-lang');
+    // Safari con cookies bloqueadas lanza SecurityError en localStorage: sin el
+    // try/catch no se pintaba ni el banner de consentimiento.
+    var l = null;
+    try { l = localStorage.getItem('velai-lang'); } catch (e) {}
     if (l === 'en' || l === 'es') return l;
     return (document.documentElement.lang === 'en') ? 'en' : 'es';
   }
@@ -87,14 +90,27 @@
       script.src = 'https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit';
       script.async = true; script.defer = true;
       script.onload = resolve;
-      script.onerror = function () { reject(new Error('turnstile_load_failed')); };
+      script.onerror = function () {
+        turnstileLoader = null;   // no cachear el fallo: el siguiente intento reinserta el script
+        script.remove();
+        reject(new Error('turnstile_load_failed'));
+      };
       document.head.appendChild(script);
     });
     return turnstileLoader;
   }
+  // Un solo widget Turnstile en la página: dos execute() solapados (formulario + chat)
+  // se pisaban el widget y el segundo mataba el callback del primero. Se serializan.
+  var humanQueue = Promise.resolve();
   window.VELAI_HUMAN = {
     execute: function (action) {
-      var local = /^(localhost|127\.0\.0\.1)$/.test(location.hostname);
+      var run = function () { return doHumanExecute(action); };
+      humanQueue = humanQueue.then(run, run);
+      return humanQueue;
+    }
+  };
+  function doHumanExecute(action) {
+    var local = /^(localhost|127\.0\.0\.1)$/.test(location.hostname);
       var sitekey = window.VELAI_TURNSTILE_SITEKEY || '';
       // El marcador del repo cuenta como "sin configurar": mejor un error claro
       // que un widget que renderiza y falla en silencio.
@@ -123,8 +139,7 @@
           window.turnstile.execute(turnstileWidget);
         });
       });
-    }
-  };
+  }
 
   // anexa los UTM persistidos a un href wa.me como texto pre-rellenado opcional
   // (no rompe el enlace; solo añade ?text si no lo tenía y queremos trazar campaña)

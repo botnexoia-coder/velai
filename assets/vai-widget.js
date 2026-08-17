@@ -216,7 +216,7 @@
       if (typeof s.conversationId === 'string') conversationId = s.conversationId;
       humanVerified = !!s.humanVerified;
       sent = typeof s.sent === 'number' ? s.sent : history.length;
-      demo = typeof s.demo === 'string' && DEMO_SCRIPTS[s.demo] ? s.demo : '';
+      demo = isDemo(s.demo) ? s.demo : '';
       wasOpen = !!s.open;
     } catch (e) {}
   }
@@ -229,14 +229,20 @@
     });
   }
 
-  function script() { return (demo && DEMO_SCRIPTS[demo]) || DEFAULT_SCRIPT; }
+  // hasOwnProperty: '?demo=constructor' pintaba "undefined" como saludo y rompía los
+  // chips; el worker ya se defiende (isDemoKey) — el cliente también debe hacerlo.
+  function isDemo(key) {
+    return typeof key === 'string' && key !== '' && Object.prototype.hasOwnProperty.call(DEMO_SCRIPTS, key);
+  }
+
+  function script() { return (isDemo(demo) && DEMO_SCRIPTS[demo]) || DEFAULT_SCRIPT; }
 
   function demoFromQuery() {
     try {
       var m = /[?&]demo=([a-z]+)/i.exec(location.search);
-      if (m && DEMO_SCRIPTS[m[1].toLowerCase()]) return m[1].toLowerCase();
+      if (m && isDemo(m[1].toLowerCase())) return m[1].toLowerCase();
     } catch (e) {}
-    return window.VELAI_DEMO && DEMO_SCRIPTS[window.VELAI_DEMO] ? window.VELAI_DEMO : '';
+    return isDemo(window.VELAI_DEMO) ? window.VELAI_DEMO : '';
   }
 
   function mount() {
@@ -306,7 +312,7 @@
       if (!t) return;
       e.preventDefault();
       var key = (t.getAttribute('data-vai-demo') || '').toLowerCase();
-      toggle(true, 'cta', DEMO_SCRIPTS[key] ? key : '');
+      toggle(true, 'cta', isDemo(key) ? key : '');
     });
   }
 
@@ -453,8 +459,13 @@
       humanVerified = false;
       saveState();
       el.typing.classList.remove('is-on');
-      addMsg('bot', 'Ups, ahora mismo no puedo responder. Escríbenos por WhatsApp y te contestamos en minutos: https://wa.me/' + (window.VELAI_WA || '15706160059'));
-      track('chat_error', { msg: String(err && (err.code || err.message) || err) });
+      // Si el fallo es de la verificación humana (script de Turnstile bloqueado/red),
+      // recargar la página sí lo arregla — decírselo al usuario.
+      var code = String(err && (err.code || err.message) || err);
+      addMsg('bot', /turnstile|human/i.test(code)
+        ? 'No pude verificar que eres humano (a veces lo causa una red inestable o un bloqueador). Recarga la página e inténtalo de nuevo, o escríbenos por WhatsApp: https://wa.me/' + (window.VELAI_WA || '15706160059')
+        : 'Ups, ahora mismo no puedo responder. Escríbenos por WhatsApp y te contestamos en minutos: https://wa.me/' + (window.VELAI_WA || '15706160059'));
+      track('chat_error', { msg: code });
     } finally {
       busy = false;
     }

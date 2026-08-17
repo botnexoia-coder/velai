@@ -21,7 +21,10 @@
   var WA = window.VELAI_WA || '15706160059';
 
   function lang() {
-    var l = localStorage.getItem('velai-lang');
+    // Safari con cookies bloqueadas lanza SecurityError: sin try/catch, render()
+    // reventaba antes del innerHTML y el formulario desaparecía sin mensaje.
+    var l = null;
+    try { l = localStorage.getItem('velai-lang'); } catch (e) {}
     if (l === 'en' || l === 'es') return l;
     return (document.documentElement.lang === 'en') ? 'en' : 'es';
   }
@@ -42,6 +45,7 @@
       okWa: 'Abrir WhatsApp →',
       errMsg: 'Ups, algo falló al enviar. Escríbenos directo por WhatsApp:',
       errRetry: 'No pudimos enviar tus datos. Vuelve a intentarlo o escríbenos por WhatsApp.',
+      errPhone: 'Revisa el número: escribe un solo WhatsApp, sin extensiones.',
       errHuman: 'No pudimos verificar que eres humano. Recarga la página e inténtalo de nuevo.',
       errRate: 'Demasiados intentos seguidos. Espera un minuto y vuelve a probar.',
       retry: 'Reintentar →',
@@ -69,6 +73,7 @@
       okWa: 'Open WhatsApp →',
       errMsg: 'Oops, something failed. Message us directly on WhatsApp:',
       errRetry: 'We couldn’t send your details. Try again or message us on WhatsApp.',
+      errPhone: 'Check the number: one WhatsApp only, no extensions.',
       errHuman: 'We couldn’t verify you’re human. Reload the page and try again.',
       errRate: 'Too many attempts in a row. Wait a minute and try again.',
       retry: 'Retry →',
@@ -172,9 +177,16 @@
       var input = form.querySelector('#lf-' + id);
       var val = (input.value || '').trim();
       var bad = !val;
-      if (id === 'whatsapp' && val) bad = (val.replace(/[^0-9]/g, '').length < 6);
+      var phoneBad = false;
+      if (id === 'whatsapp' && val) {
+        // El worker exige 6-15 dígitos: dos números separados por / o extensiones
+        // superan los 15 y daban 400 en bucle con el mensaje genérico.
+        var n = val.replace(/[^0-9]/g, '').length;
+        phoneBad = n < 6 || n > 15;
+        bad = phoneBad;
+      }
       f.classList.toggle('invalid', bad);
-      f.querySelector('.lf-err').textContent = t.required;
+      f.querySelector('.lf-err').textContent = phoneBad ? t.errPhone : t.required;
       if (bad) ok = false;
     });
     return ok;
@@ -246,7 +258,7 @@
         slot.style.cssText = 'color:#ff6b6b;font-size:.85rem;margin-top:10px';
         btn.parentNode.insertBefore(slot, btn.nextSibling);
       }
-      slot.textContent = /human|turnstile/.test(code) ? t.errHuman : /rate_limited/.test(code) ? t.errRate : t.errRetry;
+      slot.textContent = /invalid_phone/.test(code) ? t.errPhone : /human|turnstile/.test(code) ? t.errHuman : /rate_limited/.test(code) ? t.errRate : t.errRetry;
       btn.disabled = false; btn.textContent = t.retry;
       if (window.velaiTrack) window.velaiTrack('lead_error', { code: code.slice(0, 60) });
     }
