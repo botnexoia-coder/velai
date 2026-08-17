@@ -327,7 +327,8 @@ test('deliver envía desde la subcuenta con SUS credenciales (SID en URL y en el
     const env = { TEAM_WHATSAPP: 'whatsapp:+34600000001', TWILIO_FROM: 'whatsapp:+15550000000', TWILIO_ACCOUNT_SID: 'AC' + 'p'.repeat(32), TWILIO_AUTH_TOKEN: 'parent-tok', TWILIO_LEAD_TEMPLATE_SID: 'HXtest', SECRETS_KEK: TEST_KEK };
     const sub = 'AC' + 'c'.repeat(32);
     const subToken = 'f0e1d2c3b4a5968778695a4b3c2d1e0f';
-    const tenant = { id: 't-x', twilio_subaccount_sid: sub, twilio_auth_token_enc: await encryptSecret(env, 't-x', subToken) };
+    // Con subcuenta ya no hay respaldo cruzado: el tenant necesita SU From y SU plantilla.
+    const tenant = { id: 't-x', twilio_subaccount_sid: sub, twilio_from: 'whatsapp:+34910000000', lead_template_sid: 'HX' + 'b'.repeat(32), twilio_auth_token_enc: await encryptSecret(env, 't-x', subToken) };
     await testing.deliver(env, 'whatsapp', { whatsapp: '+34612345678' }, tenant);
     assert.ok(calls[0].url.includes(`/Accounts/${sub}/Messages.json`), 'usa el SID de la subcuenta en la URL');
     assert.equal(calls[0].auth, `Basic ${btoa(`${sub}:${subToken}`)}`, 'autentica con las credenciales de la subcuenta');
@@ -502,6 +503,100 @@ test('provision/sender sin waba → 400 sin llamada; el cron aprueba plantillas 
     await testing.pollProvisioning(env);
     assert.ok(cronUpdates.some((sql) => sql.includes("lead_template_status='approved'")), 'el cron marca approved');
   } finally { globalThis.fetch = realFetch; }
+});
+
+test('un token que no descifra da 403 con alerta, nunca 500 mudo', async () => {
+  const worker = createWorker({ SYSTEM: 's', DEMOS: {}, SUMMARY_PROMPT: '', GUARDRAILS: '' });
+  const ctx = { promises: [], waitUntil(p) { this.promises.push(p); } };
+  const otherKek = btoa(String.fromCharCode(...new Uint8Array(32).map((_, i) => i + 99)));
+  const id = '00000000-0000-4000-8000-0000000000c1';
+  const subSid = 'AC' + 'c'.repeat(32);
+  const subToken = 'a1b2c3d4e5f60718293a4b5c6d7e8f90';
+  const tenant = { id, slug: 'rot', name: 'Rot', channel_address: 'whatsapp:+34911111111', active: 1,
+    twilio_subaccount_sid: subSid, system_prompt: 'x'.repeat(60),
+    twilio_auth_token_enc: await encryptSecret({ SECRETS_KEK: otherKek }, id, subToken) };
+  const telegramCalls = [];
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = async (url) => {
+    if (String(url).includes('api.telegram.org')) telegramCalls.push(1);
+    return new Response(JSON.stringify({ ok: true }), { status: 200 });
+  };
+  try {
+    const env = {
+      SECRETS_KEK: TEST_KEK, TELEGRAM_TOKEN: 'tg', TELEGRAM_CHAT_ID: '-1',
+      TWILIO_ACCOUNT_SID: 'AC' + 'p'.repeat(32), TWILIO_AUTH_TOKEN: 'ptok', ANTHROPIC_API_KEY: 'k',
+      KV: { async get() { return null; }, async put() {}, async delete() {} },
+      DB: { prepare: (sql) => ({ bind: () => ({ first: async () => sql.includes('channel_address') ? tenant : null, all: async () => ({ results: [] }), run: async () => ({ meta: { changes: 1 } }) }) }), batch: async () => [] },
+    };
+    const request = await twilioRequest('https://worker.test/', { AccountSid: subSid, From: 'whatsapp:+34600', To: 'whatsapp:+34911111111', Body: 'hola' }, subToken);
+    const res = await worker.fetch(request, env, ctx);
+    assert.equal(res.status, 403);
+    assert.equal((await res.json()).error, 'twilio_auth_token_missing');
+    await Promise.allSettled(ctx.promises);
+    assert.ok(telegramCalls.length >= 1, 'debe alertar a Telegram');
+  } finally { globalThis.fetch = realFetch; }
+});
+
+test('un ciphertext corrupto no lanza DOMException y deliver lo trata como no configurado', async () => {
+  await assert.rejects(decryptSecret({ SECRETS_KEK: TEST_KEK }, 't', 'v1:@@@:@@@'), (e) => e.message === 'cipher_format');
+  const out = await testing.deliver(
+    { SECRETS_KEK: TEST_KEK, TWILIO_ACCOUNT_SID: 'AC' + 'p'.repeat(32), TWILIO_AUTH_TOKEN: 'p' },
+    'whatsapp', { whatsapp: '+34612' },
+    { id: 't', twilio_subaccount_sid: 'AC' + 'c'.repeat(32), twilio_auth_token_enc: 'v1:@@@:@@@',
+      team_whatsapp: 'whatsapp:+34600111222', twilio_from: 'whatsapp:+34910000000', lead_template_sid: 'HX' + '9'.repeat(32) });
+  assert.equal(out.skipped, true);
+});
+
+test('un tenant con subcuenta nunca usa el From ni la plantilla de Velai', async () => {
+  const calls = [];
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = async (url) => { calls.push(String(url)); return new Response('{}', { status: 201 }); };
+  try {
+    const env = { SECRETS_KEK: TEST_KEK, TEAM_WHATSAPP: 'whatsapp:+34600000001', TWILIO_FROM: 'whatsapp:+15706160059', TWILIO_ACCOUNT_SID: 'AC' + 'p'.repeat(32), TWILIO_AUTH_TOKEN: 'p', TWILIO_LEAD_TEMPLATE_SID: 'HXvelai' };
+    const tenant = { id: 't-n', twilio_subaccount_sid: 'AC' + 'c'.repeat(32), team_whatsapp: 'whatsapp:+34600111222', twilio_from: null, lead_template_sid: null };
+    tenant.twilio_auth_token_enc = await encryptSecret(env, 't-n', 'a1b2c3d4e5f60718293a4b5c6d7e8f90');
+    const out = await testing.deliver(env, 'whatsapp', { whatsapp: '+34612' }, tenant);
+    assert.equal(out.skipped, true, 'skipped, no un envío condenado al 21606');
+    assert.equal(calls.length, 0, 'ninguna llamada a Twilio');
+  } finally { globalThis.fetch = realFetch; }
+});
+
+test('sin SECRETS_KEK no se crea ninguna subcuenta en Twilio', async () => {
+  const calls = [];
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = async (url) => { calls.push(String(url)); return new Response('{}', { status: 201 }); };
+  try {
+    const h = provisionHarness();
+    delete h.env.SECRETS_KEK;
+    await assert.rejects(testing.handleProvision(provReq(), h.env, h.ctx, h.row.id, 'subaccount', 'juan@x'), (e) => e.code === 'kek_not_configured');
+    assert.equal(calls.filter((u) => u.includes('/Accounts.json')).length, 0);
+  } finally { globalThis.fetch = realFetch; }
+});
+
+test('el UPDATE de aprovisionamiento exige columna vacía (carrera → provision_orphan)', async () => {
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = async (url) => {
+    if (String(url).includes('api.telegram.org')) return new Response(JSON.stringify({ ok: true }), { status: 200 });
+    return new Response(JSON.stringify({ sid: 'AC' + 'n'.repeat(32), auth_token: 'a1b2c3d4e5f60718293a4b5c6d7e8f90' }), { status: 201 });
+  };
+  try {
+    const h = provisionHarness();
+    // Simular la carrera: el UPDATE condicionado no cambia nada (otro ya escribió)
+    h.env.DB.prepare = (sql) => ({ bind: () => ({
+      first: async () => (sql.startsWith('SELECT * FROM tenants') ? h.row : null),
+      run: async () => ({ meta: { changes: sql.includes('IS NULL') ? 0 : 1 } }),
+      all: async () => ({ results: [] }),
+    }) });
+    await assert.rejects(testing.handleProvision(provReq(), h.env, h.ctx, h.row.id, 'subaccount', 'juan@x'), (e) => e.code === 'provision_orphan');
+  } finally { globalThis.fetch = realFetch; }
+});
+
+test('el cerrojo de aprovisionamiento se libera al fallar el paso', async () => {
+  const kvOps = { puts: [], deletes: [] };
+  const h = provisionHarness({ tenant: { id: '00000000-0000-4000-8000-00000000000a', slug: 'acme', name: 'Acme', twilio_subaccount_sid: 'AC' + 'x'.repeat(32) } });
+  h.env.KV = { async get() { return null; }, async put(k) { kvOps.puts.push(k); }, async delete(k) { kvOps.deletes.push(k); } };
+  await assert.rejects(testing.handleProvision(provReq(), h.env, h.ctx, h.row.id, 'subaccount', 'juan@x'), (e) => e.code === 'already_provisioned');
+  assert.ok(kvOps.deletes.includes(`provision:${h.row.id}:subaccount`), 'la clave del cerrojo se borra aunque el paso falle');
 });
 
 test('el Worker rechaza CORS desconocido y exige Access en administración', async () => {

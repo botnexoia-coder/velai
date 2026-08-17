@@ -437,9 +437,13 @@ function leadTemplateVariables(lead) {
 // entorno: Velai sigue funcionando aunque su fila falte o esté incompleta.
 async function deliver(env, channel, lead, tenant) {
   if (channel === 'telegram') return sendTelegramText(env, notificationText(lead), tenant && tenant.telegram_chat_id);
+  const sub = tenant && tenant.twilio_subaccount_sid;
   const recipientsRaw = (tenant && tenant.team_whatsapp) || env.TEAM_WHATSAPP;
-  const templateSid = (tenant && tenant.lead_template_sid) || env.TWILIO_LEAD_TEMPLATE_SID;
-  const fromAddress = (tenant && tenant.twilio_from) || env.TWILIO_FROM;
+  // Los recursos del padre (número y plantilla de Velai) NO existen dentro de una
+  // subcuenta: si el tenant tiene subcuenta, no hay respaldo cruzado posible —
+  // Twilio rechazaría siempre (21606/20404) y quemaría los 5 intentos en silencio.
+  const templateSid = (tenant && tenant.lead_template_sid) || (sub ? null : env.TWILIO_LEAD_TEMPLATE_SID);
+  const fromAddress = (tenant && tenant.twilio_from) || (sub ? null : env.TWILIO_FROM);
   const recipients = clean(recipientsRaw, 1000).split(',').map((x) => x.trim()).filter(Boolean);
   if (!recipients.length || !fromAddress || !env.TWILIO_ACCOUNT_SID || !env.TWILIO_AUTH_TOKEN) {
     return { skipped: true, error: 'not_configured' };
@@ -690,8 +694,24 @@ async function handleChat(request, env, cors, ctx, config) {
 
 async function twilioAuthTokenFor(env, tenant) {
   if (!tenant || !tenant.twilio_auth_token_enc) return null;
-  const out = await decryptSecret(env, tenant.id, tenant.twilio_auth_token_enc);
-  return out ? out.value : null;
+  try {
+    const out = await decryptSecret(env, tenant.id, tenant.twilio_auth_token_enc);
+    if (!out) return null;
+    // Rotación perezosa: si descifró con la KEK antigua, se re-guarda con la actual.
+    if (out.stale && env.DB) {
+      try {
+        const rewrapped = await encryptSecret(env, tenant.id, out.value);
+        await env.DB.prepare('UPDATE tenants SET twilio_auth_token_enc=? WHERE id=?').bind(rewrapped, tenant.id).run();
+        await invalidateTenantCache(env, [tenant]);
+      } catch (_) { /* mejor stale que roto */ }
+    }
+    return out.value;
+  } catch (error) {
+    // Un token ilegible (KEK rotada sin re-guardar, fila corrupta) equivale a no tenerlo:
+    // 403 + alerta, nunca un 500 mudo que Twilio reintenta y nadie ve.
+    console.log(JSON.stringify({ level: 'error', code: 'tenant_token_undecryptable', tenant: tenant.slug }));
+    return null;
+  }
 }
 
 // Un tenant con subcuenta pero sin auth token descifrable = mensajes entrantes que no
@@ -914,19 +934,42 @@ async function handleProvision(request, env, ctx, tenantId, step, actor) {
   // Rate limit por actor: cada llamada crea recursos facturables.
   if (await rateLimited(env, actor, 'provision', 5)) throw new HttpError(429, 'rate_limited');
   if (!await provisionLock(env, tenantId, step)) throw new HttpError(409, 'provision_in_progress');
+  // El cerrojo se libera SIEMPRE al terminar (éxito o fallo): un OTP mal escrito no
+  // puede dejar "ese paso ya está en curso" durante un minuto sin nada en curso.
+  try {
+    return await runProvisionStep(request, env, ctx, tenant, tenantId, step, actor);
+  } finally {
+    if (env.KV) { try { await env.KV.delete(`provision:${tenantId}:${step}`); } catch (_) {} }
+  }
+}
+
+async function runProvisionStep(request, env, ctx, tenant, tenantId, step, actor) {
   const now = new Date().toISOString();
 
   if (step === 'subaccount') {
     if (tenant.twilio_subaccount_sid) throw new HttpError(409, 'already_provisioned');
     if (!env.TWILIO_ACCOUNT_SID || !env.TWILIO_AUTH_TOKEN) throw new HttpError(503, 'twilio_not_configured');
+    // La KEK se comprueba ANTES de gastar dinero: si no puede cifrar, no se crea nada
+    // (una subcuenta no se borra, solo se cierra con eliminación a 30 días).
+    try { await encryptSecret(env, tenantId, 'probe'); }
+    catch (_) { throw new HttpError(503, 'kek_not_configured'); }
     const created = await createSubaccount(env, `cliente-${tenant.slug}`);
-    const encrypted = await encryptSecret(env, tenantId, created.authToken);
+    let encrypted = null;
+    try { encrypted = await encryptSecret(env, tenantId, created.authToken); }
+    catch (error) { await provisionOrphan(env, ctx, tenant, 'subcuenta', created.sid, error); }
     try {
-      await env.DB.prepare('UPDATE tenants SET twilio_subaccount_sid=?, twilio_auth_token_enc=?, provisioned_at=?, updated_at=? WHERE id=?')
+      // La idempotencia la impone D1 (WHERE … IS NULL), no el cerrojo de KV: dos
+      // peticiones simultáneas no pueden pisarse el SID/token la una a la otra.
+      const res = await env.DB.prepare(`UPDATE tenants SET twilio_subaccount_sid=?, twilio_auth_token_enc=?,
+        provisioned_at=?, updated_at=? WHERE id=? AND twilio_subaccount_sid IS NULL`)
         .bind(created.sid, encrypted, now, now, tenantId).run();
-    } catch (error) { await provisionOrphan(env, ctx, tenant, 'subcuenta', created.sid, error); }
-    await provisionAudit(env, ctx, tenantId, actor, `subcuenta ${created.sid} creada para ${tenant.name} (token cifrado en el acto)`);
+      if (!res.meta.changes) await provisionOrphan(env, ctx, tenant, 'subcuenta (carrera)', created.sid, new Error('already_provisioned'));
+    } catch (error) {
+      if (error instanceof HttpError) throw error;
+      await provisionOrphan(env, ctx, tenant, 'subcuenta', created.sid, error);
+    }
     await invalidateTenantCache(env, [tenant]);
+    await provisionAudit(env, ctx, tenantId, actor, `subcuenta ${created.sid} creada para ${tenant.name} (token cifrado en el acto)`);
     return json({ ok: true, sid: created.sid }, 201, NO_STORE);
   }
 
@@ -941,9 +984,13 @@ async function handleProvision(request, env, ctx, tenantId, step, actor) {
     const { contentSid } = await createLeadTemplate(credentials, tenant.slug, tenant.name);
     try {
       await submitTemplateApproval(credentials, contentSid, `nuevo_lead_${tenant.slug}`);
-      await env.DB.prepare("UPDATE tenants SET lead_template_sid=?, lead_template_status='pending', updated_at=? WHERE id=?")
+      const res = await env.DB.prepare("UPDATE tenants SET lead_template_sid=?, lead_template_status='pending', updated_at=? WHERE id=? AND lead_template_sid IS NULL")
         .bind(contentSid, now, tenantId).run();
-    } catch (error) { await provisionOrphan(env, ctx, tenant, 'plantilla', contentSid, error); }
+      if (!res.meta.changes) await provisionOrphan(env, ctx, tenant, 'plantilla (carrera)', contentSid, new Error('already_provisioned'));
+    } catch (error) {
+      if (error instanceof HttpError) throw error;
+      await provisionOrphan(env, ctx, tenant, 'plantilla', contentSid, error);
+    }
     await provisionAudit(env, ctx, tenantId, actor, `plantilla nuevo_lead_${tenant.slug} (${contentSid}) enviada a aprobación Utility`);
     await invalidateTenantCache(env, [tenant]);
     return json({ ok: true, sid: contentSid, status: 'pending' }, 201, NO_STORE);
@@ -957,9 +1004,13 @@ async function handleProvision(request, env, ctx, tenantId, step, actor) {
     if (!/^\+[1-9]\d{6,14}$/.test(phone)) throw new HttpError(400, 'invalid_phone');
     const created = await createWhatsAppSender(credentials, { phone, wabaId: tenant.waba_id, callbackUrl: 'https://vai-worker.botnexo-ia.workers.dev' });
     try {
-      await env.DB.prepare('UPDATE tenants SET sender_sid=?, sender_status=?, updated_at=? WHERE id=?')
+      const res = await env.DB.prepare('UPDATE tenants SET sender_sid=?, sender_status=?, updated_at=? WHERE id=? AND sender_sid IS NULL')
         .bind(created.senderSid, created.status || 'CREATING', now, tenantId).run();
-    } catch (error) { await provisionOrphan(env, ctx, tenant, 'sender', created.senderSid, error); }
+      if (!res.meta.changes) await provisionOrphan(env, ctx, tenant, 'sender (carrera)', created.senderSid, new Error('already_provisioned'));
+    } catch (error) {
+      if (error instanceof HttpError) throw error;
+      await provisionOrphan(env, ctx, tenant, 'sender', created.senderSid, error);
+    }
     await provisionAudit(env, ctx, tenantId, actor, `sender whatsapp:${phone} creado (${created.senderSid})`);
     await invalidateTenantCache(env, [tenant]);
     return json({ ok: true, sid: created.senderSid, status: created.status }, 201, NO_STORE);
@@ -1016,6 +1067,7 @@ async function handleAdmin(request, env, ctx, path, url, config) {
              t.team_whatsapp IS NOT NULL AS has_team,
              t.twilio_subaccount_sid IS NOT NULL AS has_subaccount,
              t.twilio_auth_token_enc IS NOT NULL AS has_twilio_token,
+             t.twilio_from IS NOT NULL AS has_from,
              t.meta_partner_status,
              length(t.system_prompt) AS prompt_len,
              COUNT(l.id) AS lead_count
@@ -1039,9 +1091,11 @@ async function handleAdmin(request, env, ctx, path, url, config) {
           fields.twilio_subaccount_sid ?? null, fields.waba_id ?? null, tokenColumn,
           fields.meta_partner_status ?? 'pendiente', fields.system_prompt, fields.active ?? 1, now, now).run();
     } catch (error) { throw tenantWriteError(error); }
+    // Invalidar ANTES del versionado: si el INSERT de la versión fallara, la caché
+    // no puede quedarse 5 minutos sirviendo el estado anterior.
+    await invalidateTenantCache(env, [fields]);
     await env.DB.prepare('INSERT INTO tenant_versions (tenant_id,actor_email,field,previous_value,note,created_at) VALUES (?,?,?,?,?,?)')
       .bind(tenantId, actor, 'config', null, clean(body.note, 200) || 'alta', now).run();
-    await invalidateTenantCache(env, [fields]);
     return json({ ok: true, id: tenantId, updated_at: now }, 201, NO_STORE);
   }
   const provMatch = path.match(/^\/api\/admin\/tenants\/([0-9a-f-]+)\/provision(?:\/(subaccount|template|sender\/verify|sender))?$/i);
@@ -1210,7 +1264,7 @@ async function pollProvisioning(env) {
   const rows = (await env.DB.prepare(`SELECT * FROM tenants
     WHERE (lead_template_status = 'pending' AND lead_template_sid IS NOT NULL)
        OR (sender_sid IS NOT NULL AND (sender_status IS NULL OR sender_status != 'ONLINE'))
-    LIMIT 10`).all()).results;
+    ORDER BY updated_at ASC LIMIT 10`).all()).results;
   for (const tenant of rows) {
     try {
       const token = await twilioAuthTokenFor(env, tenant);

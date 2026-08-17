@@ -5,7 +5,10 @@
 const KEYS = new Map();
 
 function b64(bytes) { return btoa(String.fromCharCode(...new Uint8Array(bytes))); }
-function unb64(text) { return Uint8Array.from(atob(text), (c) => c.charCodeAt(0)); }
+function unb64(text) {
+  try { return Uint8Array.from(atob(text), (c) => c.charCodeAt(0)); }
+  catch (_) { throw new Error('cipher_format'); }
+}
 
 async function kek(env, name) {
   const raw = env[name];
