@@ -89,7 +89,22 @@ enrutado por el `To` de Twilio. Para dar de alta un cliente:
 2. Copia versionada del prompt en `tenants/<slug>.md` (patrón de `tenants/velai.md`).
 3. En Twilio: sender bajo la misma WABA, display name del cliente, plantilla
    `nuevo_lead_<cliente>` en categoría **Utility**, webhook apuntando al mismo Worker.
-4. Para su widget web: `window.VELAI_TENANT = '<slug>'` en su página (el payload lo adjunta).
+4. Para su widget web: script inline `window.VELAI_TENANT = '<slug>'` **antes** del
+   `<script src=…vai-widget.js>` en su página (el widget lo adjunta al payload desde el
+   PR 1 de PLAN-ALTA-CLIENTES), su dominio en `ALLOWED_WEB_ORIGINS` (wrangler.toml →
+   requiere deploy del Worker) **y** en los hostnames del widget de Turnstile.
+5. WhatsApp con WABA del cliente: subcuenta de Twilio por cliente (Twilio solo admite
+   1 WABA por cuenta/subcuenta). El **auth token de la subcuenta** se pega en el panel
+   (write-only) y se guarda **cifrado** en D1 con `SECRETS_KEK` (AES-256-GCM, AAD por
+   tenant). La firma del webhook se valida con el token de la cuenta que envía — el del
+   padre nunca respalda a una subcuenta. Runbook completo: `docs/ALTACLIENTE.md`.
+
+### Rotación de `SECRETS_KEK`
+
+1. `openssl rand -base64 32` → `npx wrangler secret put SECRETS_KEK` (la nueva).
+2. La anterior a `SECRETS_KEK_OLD` (`wrangler secret put`): el descifrado prueba ambas.
+3. Re-guardar el token de cada tenant desde el panel (re-cifra con la nueva) y borrar
+   `SECRETS_KEK_OLD`.
 
 Un mensaje entrante a un sender sin fila responde `404 unknown_tenant` y avisa a Telegram
 (antirebote 1 h). El caché de tenants es de 5 min: un `UPDATE` tarda eso en verse.

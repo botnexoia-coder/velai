@@ -288,7 +288,8 @@ tal cual (es material de Velai, no de un cliente).
 
 En `handleLead`, igual, y `tenantId` entra en el `storeLead`.
 
-> El widget no necesita cambios hoy: sin `tenant` en el body cae al de por defecto. Cuando lo
+> **[HISTÓRICO — resuelto en el PR 1 de PLAN-ALTA-CLIENTES: el widget y el leadform ya
+> adjuntan `window.VELAI_TENANT` al payload.]** El widget no necesita cambios hoy: sin `tenant` en el body cae al de por defecto. Cuando lo
 > pongas en la web de un cliente, basta un `window.VELAI_TENANT = 'barberia-lopez'` que el
 > widget adjunte al payload.
 

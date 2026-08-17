@@ -38,7 +38,18 @@ Sin esto, las campañas gastarían presupuesto a ciegas (sin medir conversiones)
 - [x] **`TEAM_WHATSAPP`, `TWILIO_FROM` y `TWILIO_LEAD_TEMPLATE_SID`** configurados; el aviso de WhatsApp va por plantilla (arreglo del `Undelivered 63016` — ver `docs/FASE0-TWILIO-PLANTILLA.md`).
 - [ ] **Duplicar la plantilla `velai_nuevo_lead` en categoría Utility** (Twilio Content Template Builder → Duplicate) y pasar el SID nuevo cuando esté aprobada (más barata y sin topes de Marketing).
 - [ ] Login de prueba en `admin.hirevai.com` con tu email + PIN, y verificar que ves el lead de prueba.
-- [ ] De FASE0 §6: status callback del sender (para ver `Undelivered` sin entrar a la consola), perfil de negocio del sender, verificación de Meta (bloqueante para el primer cliente), webhook de voz, bundle +34.
+- [ ] De FASE0 §6: status callback del sender (para ver `Undelivered` sin entrar a la consola), perfil de negocio del sender, webhook de voz, bundle +34.
+
+### 2c. Alta de los 4 clientes + 1 prospecto (PLAN-ALTA-CLIENTES, PRs 1-3 desplegados)
+
+- [ ] **Alta en el panel** de `hiredatavision`, `gogestion`, `zoe`, `dialogos` (contextos listos en `tenants/*.md` — pegar, Probar y guardar; SIDs de subcuenta en el propio plan) y `myxu-costura` como prospecto (`pending:myxu-costura`, inactivo).
+- [ ] **Auth tokens de las 4 subcuentas** pegados en el panel (campo write-only; Twilio → subcuenta → Keys & Credentials).
+- [ ] **Verificación de negocio en Meta de cada cliente** (con su CIF; añaden a Velai como socio) — bloqueante para su WhatsApp.
+- [ ] **Tope de gasto por subcuenta** en Twilio.
+- [ ] **Revisión de categoría** de `velai_solicitud_contacto` (Marketing → Utility, disponible hasta el **17 oct 2026**).
+- [ ] **Prueba real de Messenger** (¿acepta TwiML?) antes de prometer el canal.
+- [ ] Cerrar los `[PENDIENTE:…]` de `tenants/hiredatavision.md`, `dialogos.md` y `myxu-costura.md` (3 repos inaccesibles con el token gh actual: prompts de los bots viejos sin contrastar).
+- [ ] Los workers `hiredatavision-bot` y `gogestion-bot` NO se apagan hasta que su tenant responda igual o mejor; anotar en OPERATIONS cuando se apaguen.
 
 ### 2b. De la revisión de seguridad de Johan (lo manual — el resto ya está aplicado)
 
