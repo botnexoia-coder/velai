@@ -28,6 +28,15 @@ No desplegar con el UUID D1 de ceros ni con el marcador de Turnstile. **No quita
 - **Declarar `routes` desactiva `workers.dev`** salvo `workers_dev = true` explícito —
   y todo el frontend llama a `vai-worker.botnexo-ia.workers.dev`. Ambas líneas ya
   están en `wrangler.toml` con su comentario.
+- **El webhook GitHub→Pages a veces pierde pushes** (pasó el 2026-08-17: dos pushes
+  seguidos sin build). Si `wrangler pages deployment list` no muestra el commit,
+  forzar por API: `POST /accounts/<acc>/pages/projects/velai/deployments` con
+  `branch=main` (equivale al botón "Create deployment" del dashboard).
+- **Nunca pedir una URL versionada (`?v=N`) antes de que su deployment esté activo**:
+  Pages sirve el contenido viejo con `immutable` 1 año y el CDN la envenena para
+  siempre (sin permiso de purga, la única salida es quemar la versión y saltar a
+  `?v=N+1` — así se perdió `funnel.js?v=6`). Para esperar un deploy, consultar el
+  ESTADO del deployment por API, no la URL del asset.
 
 ### Orden de despliegue Pages ↔ Worker
 
