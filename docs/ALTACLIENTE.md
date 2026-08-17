@@ -41,6 +41,21 @@
 **Antes de prometer fechas:** su número no puede tener WhatsApp activo; si lo tiene, hay
 que eliminar esa cuenta y **pierde su historial**. Esa conversación va primero.
 
+## Ruta "solo web" — el entregable sin trámites de Meta
+
+Alta en el panel con `channel_address = web:<slug>` (activable), contexto, y **al menos un
+canal de aviso** (Telegram del cliente recomendado; sin subcuenta, el WhatsApp de respaldo
+diría "Nuevo lead – Velai"). En la web del cliente, antes de cargar el widget:
+
+```html
+<script>window.VELAI_TENANT='<slug>';</script>
+<script src="https://hirevai.com/assets/vai-widget.js?v=5" defer></script>
+```
+
+Los dos pasos de deploy (**ya hechos para hiredatavision, gogestion, zoe y dialogos**):
+su dominio en `ALLOWED_WEB_ORIGINS` (wrangler.toml → deploy del Worker) y su hostname en
+el widget de Turnstile. Para clientes futuros, ambos de una vez.
+
 ## Prospectos (negociación abierta)
 
 Fila con `channel_address = pending:<slug>` y **Activo desmarcado**: el contexto queda

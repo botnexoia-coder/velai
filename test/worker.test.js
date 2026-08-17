@@ -599,6 +599,54 @@ test('el cerrojo de aprovisionamiento se libera al fallar el paso', async () => 
   assert.ok(kvOps.deletes.includes(`provision:${h.row.id}:subaccount`), 'la clave del cerrojo se borra aunque el paso falle');
 });
 
+test('un tenant web: atiende por el chat con su contexto y es activable', async () => {
+  const worker = createWorker({ SYSTEM: 'VELAI', DEMOS: {}, SUMMARY_PROMPT: '', GUARDRAILS: 'REGLA' });
+  const ctx = { waitUntil() {} };
+  const webTenantRow = { id: 't-web', slug: 'zoe', name: 'Zoe', channel_address: 'web:zoe', active: 1, system_prompt: 'PROMPT-ZOE' };
+  const anthropicSystems = [];
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = async (url, init) => {
+    if (String(url).includes('siteverify')) return new Response(JSON.stringify({ success: true, action: 'chat', hostname: 'zoetravelspain.com' }), { status: 200 });
+    if (String(url).includes('api.anthropic.com')) { anthropicSystems.push(JSON.parse(init.body).system); return new Response(JSON.stringify({ content: [{ text: 'hola' }] }), { status: 200 }); }
+    return new Response('{}', { status: 200 });
+  };
+  try {
+    const env = {
+      ALLOWED_WEB_ORIGINS: 'https://zoetravelspain.com', TURNSTILE_SECRET_KEY: 's', ANTHROPIC_API_KEY: 'k',
+      KV: { async get() { return null; }, async put() {}, async delete() {} },
+      DB: { prepare: (sql) => ({ bind: (...args) => ({ first: async () => sql.includes('slug = ?') && args[0] === 'zoe' ? webTenantRow : null, all: async () => ({ results: [] }), run: async () => ({ meta: { changes: 1 } }) }) }), batch: async () => [] },
+    };
+    const res = await worker.fetch(new Request('https://worker.test/chat', {
+      method: 'POST', headers: { Origin: 'https://zoetravelspain.com', 'Content-Type': 'application/json' },
+      body: JSON.stringify({ conversationId: 'f23e4567-e89b-42d3-a456-426614174000', message: 'hola', tenant: 'zoe', turnstileToken: 'tok' }),
+    }), env, ctx);
+    assert.equal(res.status, 200);
+    assert.ok(anthropicSystems[0].includes('PROMPT-ZOE') && anthropicSystems[0].includes('REGLA'));
+  } finally { globalThis.fetch = realFetch; }
+  // web: es activable; pending: sigue sin poderlo ser
+  testing.assertNotActivePending('web:zoe', 1);
+  assert.throws(() => testing.assertNotActivePending('pending:zoe', 1), (e) => e.code === 'pending_tenant_cannot_be_active');
+  assert.doesNotThrow(() => testing.validateTenant({ channel_address: 'web:zoe' }, { partial: true }));
+});
+
+test('el webhook rechaza direcciones no enrutables (web:/pending:) sin tocar D1', async () => {
+  const worker = createWorker({ SYSTEM: 's', DEMOS: {}, SUMMARY_PROMPT: '', GUARDRAILS: '' });
+  const ctx = { waitUntil() {} };
+  let dbTouched = false;
+  const env = {
+    TWILIO_ACCOUNT_SID: 'AC' + 'p'.repeat(32), TWILIO_AUTH_TOKEN: 'tok',
+    KV: { async get() { return null; }, async put() {}, async delete() {} },
+    DB: { prepare: () => ({ bind: () => ({ first: async () => { dbTouched = true; return null; }, all: async () => ({ results: [] }), run: async () => {} }) }), batch: async () => [] },
+  };
+  for (const to of ['web:zoe', 'pending:myxu-costura', 'telegram:123']) {
+    const request = await twilioRequest('https://worker.test/', { AccountSid: env.TWILIO_ACCOUNT_SID, From: 'whatsapp:+34600', To: to, Body: 'hola' }, 'tok');
+    const res = await worker.fetch(request, env, ctx);
+    assert.equal(res.status, 400, to);
+    assert.equal((await res.json()).error, 'invalid_twilio_payload');
+  }
+  assert.equal(dbTouched, false, 'ninguna consulta a D1');
+});
+
 test('el Worker rechaza CORS desconocido y exige Access en administración', async () => {
   const worker = createWorker({ SYSTEM: '', DEMOS: {}, SUMMARY_PROMPT: '' });
   const ctx = { waitUntil() {} };

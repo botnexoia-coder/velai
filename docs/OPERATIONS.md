@@ -106,6 +106,14 @@ enrutado por el `To` de Twilio. Para dar de alta un cliente:
 3. Re-guardar el token de cada tenant desde el panel (re-cifra con la nueva) y borrar
    `SECRETS_KEK_OLD`.
 
+**Las tres formas de `channel_address`:** `whatsapp:+E164` / `messenger:<pageId>` (enrutables
+por el webhook de Twilio), `web:<slug>` (cliente solo-web: activable, atiende por el chat de
+su página vía `window.VELAI_TENANT`, el webhook la rechaza con 400 antes de tocar D1) y
+`pending:<slug>` (prospecto: no activable). Para un cliente solo-web, el aviso de leads
+recomendado es **Telegram con su `telegram_chat_id`**: sin subcuenta propia, el respaldo de
+WhatsApp saldría con la plantilla de Velai ("Nuevo lead – Velai"); si se usa igualmente,
+es un comportamiento consciente del piloto.
+
 Un mensaje entrante a un sender sin fila responde `404 unknown_tenant` y avisa a Telegram
 (antirebote 1 h). El caché de tenants es de 5 min: un `UPDATE` tarda eso en verse.
 **Orden en cambios de esquema: migración D1 primero, deploy del Worker después.**

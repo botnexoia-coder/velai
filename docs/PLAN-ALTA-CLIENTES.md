@@ -376,6 +376,10 @@ FROM tenants WHERE id=?
 
 ### 3.6 Clientes en negociación: tenants "prospecto"
 
+> **Nota (2026-08-18):** el prefijo `web:<slug>` (SPEC-CANAL-WEB.md) complementa a
+> `pending:`: `web:` es para clientes solo-web ACTIVOS, `pending:` para negociaciones
+> abiertas e inactivas. El webhook rechaza ambos antes de tocar D1.
+
 Un cliente cuya negociación no está cerrada (hoy **MyXu Costura**) debe poder existir en el panel
 con su contexto ya escrito, **sin atender a nadie**, y activarse el día que se firme sin rehacer
 trabajo. `active = 0` ya lo consigue en el enrutado (`tenantByAddress`/`tenantBySlug` filtran

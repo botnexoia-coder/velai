@@ -20,7 +20,9 @@ routes = [
 [vars]
 # El alias de Pages permite validar chat/formularios en preview antes de mergear.
 # Cualquier hostname añadido aquí debe añadirse TAMBIÉN al widget de Turnstile.
-ALLOWED_WEB_ORIGINS = "https://hirevai.com,https://www.hirevai.com,https://velai-dey.pages.dev"
+# Incluye los dominios de los 4 clientes solo-web (SPEC-CANAL-WEB §7): su chat y su
+# formulario llaman al worker desde SU origen.
+ALLOWED_WEB_ORIGINS = "https://hirevai.com,https://www.hirevai.com,https://velai-dey.pages.dev,https://hiredatavision.com,https://www.hiredatavision.com,https://gogestion.es,https://www.gogestion.es,https://zoetravelspain.com,https://www.zoetravelspain.com,https://dialogosqueensenan.com,https://www.dialogosqueensenan.com"
 ADMIN_ORIGIN = "https://admin.hirevai.com"
 LEAD_RETENTION_MONTHS = "24"
 # Tope diario global de llamadas al modelo (presupuesto anti-abuso, resetea a medianoche UTC).

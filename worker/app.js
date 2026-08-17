@@ -228,6 +228,9 @@ const ADDRESS_RE = /^(whatsapp:\+[1-9]\d{6,14}|messenger:\d{5,25})$/;
 // Dirección reservada para clientes en negociación (prospectos): NO es enrutable
 // (Twilio nunca manda un To con este prefijo) y ocupa el UNIQUE sin pisar la real.
 const PENDING_RE = /^pending:[a-z0-9][a-z0-9-]{1,39}$/;
+// Cliente solo-web: atiende por `body.tenant` (resuelto por slug), nunca por webhook de
+// Twilio. Es una dirección legal y ACTIVABLE — al revés que `pending:`, que fuerza inactivo.
+const WEB_RE = /^web:[a-z0-9][a-z0-9-]{1,39}$/;
 const ACCOUNT_SID_RE = /^AC[0-9a-f]{32}$/i;
 const WABA_RE = /^\d{10,20}$/;
 const PARTNER_STATUS = new Set(['pendiente', 'concedido', 'revocado']);
@@ -251,7 +254,8 @@ function validateTenant(body, { partial = false } = {}) {
   }
   if (has('channel_address') || !partial) {
     out.channel_address = clean(body.channel_address, 80);
-    if (!ADDRESS_RE.test(out.channel_address) && !PENDING_RE.test(out.channel_address)) bad('channel_address');
+    if (!ADDRESS_RE.test(out.channel_address) && !PENDING_RE.test(out.channel_address)
+      && !WEB_RE.test(out.channel_address)) bad('channel_address');
   }
   if (has('twilio_from')) {
     out.twilio_from = clean(body.twilio_from, 80) || null;
@@ -735,6 +739,10 @@ async function handleTwilio(request, env, ctx, config) {
   const accountSid = clean(params.get('AccountSid'), 40);
   const to = clean(params.get('To'), 80);
   if (!accountSid || !to) throw new HttpError(400, 'invalid_twilio_payload');
+  // Twilio solo manda `whatsapp:` o `messenger:`. Cualquier otra cosa (incluidas las
+  // direcciones internas `web:` y `pending:`) se rechaza aquí: una dirección interna
+  // no puede recibir tráfico ni gastar una consulta a D1, ni con el token del padre.
+  if (!ADDRESS_RE.test(to)) throw new HttpError(400, 'invalid_twilio_payload');
 
   // ORDEN: la firma depende del auth token de la cuenta que envía, y con subcuentas
   // ese token vive cifrado en la fila del tenant. Primero el tenant (por To, que es
@@ -1068,6 +1076,7 @@ async function handleAdmin(request, env, ctx, path, url, config) {
              t.twilio_subaccount_sid IS NOT NULL AS has_subaccount,
              t.twilio_auth_token_enc IS NOT NULL AS has_twilio_token,
              t.twilio_from IS NOT NULL AS has_from,
+             t.telegram_chat_id IS NOT NULL AS has_telegram,
              t.meta_partner_status,
              length(t.system_prompt) AS prompt_len,
              COUNT(l.id) AS lead_count
