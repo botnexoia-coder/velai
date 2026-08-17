@@ -646,7 +646,13 @@ async function handleTwilio(request, env, ctx, config) {
   const from = clean(params.get('From'), 80);
   const to = clean(params.get('To'), 80);
   const message = clean(params.get('Body'), 2000);
-  if (!from || !to || !message) throw new HttpError(400, 'invalid_twilio_payload');
+  if (!from || !to) throw new HttpError(400, 'invalid_twilio_payload');
+  // Messenger manda adjuntos (stickers, fotos) sin Body: 200 con TwiML vacío en vez
+  // de 400, para no llenar los logs de Twilio de errores por cada sticker.
+  if (!message) {
+    console.log(JSON.stringify({ level: 'info', code: 'messenger_attachment_ignored', to }));
+    return new Response('<?xml version="1.0" encoding="UTF-8"?><Response></Response>', { headers: { 'Content-Type': 'text/xml; charset=utf-8' } });
+  }
 
   // Enrutado multi-tenant: el To del webhook decide qué negocio contesta.
   const tenant = await tenantByAddress(env, to);

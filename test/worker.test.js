@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
 import { createWorker, testing } from '../worker/app.js';
 
 test('normaliza teléfonos válidos y rechaza longitudes peligrosas', () => {
@@ -242,6 +243,13 @@ test('el webhook de Twilio enruta por To al tenant correcto y aísla el historia
     assert.equal((await notFound.json()).error, 'unknown_tenant');
     assert.equal(anthropicSystems.length, before, 'no debe llamar al modelo');
   } finally { globalThis.fetch = realFetch; }
+});
+
+test('el widget y el formulario envían el tenant en el payload', async () => {
+  const widget = await readFile(new URL('../assets/vai-widget.js', import.meta.url), 'utf8');
+  const form = await readFile(new URL('../assets/leadform.js', import.meta.url), 'utf8');
+  assert.match(widget, /payload\.tenant\s*=\s*window\.VELAI_TENANT/);
+  assert.match(form, /payload\.tenant\s*=\s*window\.VELAI_TENANT/);
 });
 
 test('validateTenant rechaza formatos inválidos y normaliza los buenos', () => {

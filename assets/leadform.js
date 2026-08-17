@@ -234,6 +234,11 @@
       utm: (window.VELAI_getUTM && window.VELAI_getUTM()) || {},
       pageUrl: location.href.slice(0, 500)
     };
+    // Canal web multi-tenant: sin esto, un lead del formulario de un cliente se
+    // guardaría con el tenant_id de Velai y el aviso saldría al equipo equivocado.
+    if (typeof window.VELAI_TENANT === 'string' && window.VELAI_TENANT) {
+      payload.tenant = window.VELAI_TENANT.slice(0, 40);
+    }
 
     var btn = form.querySelector('.lf-submit');
     btn.disabled = true; btn.textContent = t.sending;

@@ -478,6 +478,11 @@
       pageUrl: location.href.slice(0, 500),
       utm: (window.VELAI_getUTM && window.VELAI_getUTM()) || {}
     };
+    // Canal web multi-tenant: la web de un cliente declara su slug antes de cargar el
+    // widget. Sin esto el worker cae en DEFAULT_TENANT_SLUG y contesta como Velai.
+    if (typeof window.VELAI_TENANT === 'string' && window.VELAI_TENANT) {
+      payload.tenant = window.VELAI_TENANT.slice(0, 40);
+    }
     if (demo) payload.demo = demo;
     if (!humanVerified) {
       if (!window.VELAI_HUMAN) throw new Error('human_check_unavailable');
