@@ -15,7 +15,7 @@
        window.VELAI_TRACK = { ga4:'', ads:'', adsLabel:'', pixel:'' };
        window.VELAI_WA    = '15706160059';   // número del bot Vai (Twilio)
      </script>
-     <script src="/assets/funnel.js?v=1" defer></script>
+     <script src="/assets/funnel.js?v=4" defer></script>
 
    Mientras los IDs estén vacíos, el banner y los UTM funcionan igual; los
    tags de Google/Meta simplemente no se cargan. Rellena los IDs y redeploy.
@@ -74,6 +74,57 @@
   }
   var UTM = captureUTM();
   window.VELAI_getUTM = function () { return UTM; };
+
+  // Turnstile se carga solo cuando el usuario intenta enviar datos o el primer
+  // mensaje del chat. La site key es pública y se define inline en el HTML.
+  var turnstileLoader = null;
+  var turnstileWidget = null;
+  function loadTurnstile() {
+    if (window.turnstile) return Promise.resolve();
+    if (turnstileLoader) return turnstileLoader;
+    turnstileLoader = new Promise(function (resolve, reject) {
+      var script = document.createElement('script');
+      script.src = 'https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit';
+      script.async = true; script.defer = true;
+      script.onload = resolve;
+      script.onerror = function () { reject(new Error('turnstile_load_failed')); };
+      document.head.appendChild(script);
+    });
+    return turnstileLoader;
+  }
+  window.VELAI_HUMAN = {
+    execute: function (action) {
+      var local = /^(localhost|127\.0\.0\.1)$/.test(location.hostname);
+      var sitekey = window.VELAI_TURNSTILE_SITEKEY || '';
+      // El marcador del repo cuenta como "sin configurar": mejor un error claro
+      // que un widget que renderiza y falla en silencio.
+      if (/^REPLACE_WITH/.test(sitekey)) sitekey = '';
+      if (!sitekey && local) sitekey = '1x00000000000000000000AA';
+      if (!sitekey) return Promise.reject(new Error('turnstile_not_configured'));
+      return loadTurnstile().then(function () {
+        return new Promise(function (resolve, reject) {
+          var host = document.getElementById('velai-turnstile');
+          if (!host) {
+            host = document.createElement('div'); host.id = 'velai-turnstile';
+            host.style.cssText = 'position:fixed;left:-9999px;bottom:0';
+            document.body.appendChild(host);
+          }
+          if (turnstileWidget != null) window.turnstile.remove(turnstileWidget);
+          var timer = setTimeout(function () { reject(new Error('turnstile_timeout')); }, 12000);
+          // El modo invisible lo define el TIPO de widget creado en el dashboard de
+          // Turnstile ('size' no admite 'invisible' en el API); execution:'execute'
+          // difiere el challenge hasta este punto.
+          turnstileWidget = window.turnstile.render(host, {
+            sitekey: sitekey, execution: 'execute', action: action,
+            callback: function (token) { clearTimeout(timer); resolve(token); },
+            'error-callback': function () { clearTimeout(timer); reject(new Error('turnstile_failed')); },
+            'expired-callback': function () { clearTimeout(timer); reject(new Error('turnstile_expired')); }
+          });
+          window.turnstile.execute(turnstileWidget);
+        });
+      });
+    }
+  };
 
   // anexa los UTM persistidos a un href wa.me como texto pre-rellenado opcional
   // (no rompe el enlace; solo añade ?text si no lo tenía y queremos trazar campaña)

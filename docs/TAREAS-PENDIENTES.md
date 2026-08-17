@@ -2,7 +2,7 @@
 
 > Cosas que el código **no puede hacer solo** y dependen de ti (cuentas, IDs,
 > despliegues, datos reales). Marca las casillas a medida que las completes.
-> Última actualización: 2026-06-11.
+> Última actualización: 2026-08-17.
 
 ---
 
@@ -12,31 +12,26 @@ Sin esto, las campañas gastarían presupuesto a ciegas (sin medir conversiones)
 
 ### 1. Crear cuentas de medición y poner los IDs
 
-- [ ] **Google Analytics 4** → crear propiedad y copiar el ID (`G-XXXXXXX`).
-- [ ] **Google Ads** → crear cuenta + una *acción de conversión*; copiar el ID (`AW-XXXXXXXXX`) y la *etiqueta de conversión*.
-- [ ] **Meta (Facebook/Instagram) Pixel** → crear el pixel y copiar el ID numérico.
+- [x] **Google Analytics 4** configurado.
+- [x] **Google Ads** y etiqueta de conversión configurados.
+- [x] **Meta (Facebook/Instagram) Pixel** configurado.
 
-**Dónde se ponen:** en CADA archivo HTML, en el `<head>`, hay esta línea con los valores vacíos:
+> Los IDs reales ya están desplegados en las **26 páginas**, en la línea inline del `<head>`:
+>
+> ```html
+> <script>window.VELAI_TRACK={ga4:'G-8HC3SQ0T0Q',ads:'AW-18250158066',adsLabel:'VMZdCLXFn8EcEPKfrf5D',pixel:'1928880717825520'};window.VELAI_WA='15706160059';window.VELAI_TURNSTILE_SITEKEY='…';</script>
+> ```
+>
+> Si algún ID cambia, se edita esa línea en cada HTML y se sube el `?v=` de los scripts.
 
-```html
-<script>window.VELAI_TRACK={ga4:'',ads:'',adsLabel:'',pixel:''};window.VELAI_WA='15706160059';</script>
-```
+### 2. Activar persistencia segura y panel
 
-Rellena así (ejemplo):
-
-```html
-<script>window.VELAI_TRACK={ga4:'G-ABC123',ads:'AW-987654321',adsLabel:'AbCdEfg',pixel:'1234567890'};window.VELAI_WA='15706160059';</script>
-```
-
-> 💡 Cuando me pases los IDs, **yo los pongo en las ~11 páginas de una vez** y subo el `?v=` del script. No hace falta que los edites a mano.
-
-Mientras estén vacíos: el banner de cookies y la captura de UTM **sí** funcionan; lo que no se carga es Google/Meta.
-
-### 2. Redeployar el Cloudflare Worker
-
-- [ ] Desplegar `vai-worker.js` para activar la nueva ruta **`/lead`** (la que recibe los formularios del funnel y avisa por Telegram).
-
-Hasta que lo despliegues, el formulario de demo cae al **fallback de WhatsApp** (sigue siendo usable, pero no registra el lead en Telegram).
+- [ ] Crear D1, aplicar la migración y sustituir el UUID de ceros en `wrangler.toml`.
+- [ ] Crear Turnstile y sustituir `REPLACE_WITH_TURNSTILE_SITE_KEY` en los HTML.
+- [ ] Configurar secrets/variables del Worker descritos en `docs/OPERATIONS.md`.
+- [ ] Crear `admin.hirevai.com`, protegerlo con Access y autorizar los emails del equipo.
+- [ ] Desplegar y completar las comprobaciones post-deploy.
+- [x] `.dev.vars` en `.gitignore` (los secretos de desarrollo local nunca se commitean).
 
 ### 3. Verificar conversiones antes de invertir
 
@@ -50,7 +45,7 @@ Hasta que lo despliegues, el formulario de demo cae al **fallback de WhatsApp** 
 - [ ] **Definir presupuesto** y canal de arranque (Google Search vs Meta/Instagram).
 - [ ] **Textos de anuncios** que coincidan con el titular de la landing `/lp/restaurantes/` (message match) — te puedo ayudar a redactarlos.
 - [ ] **Creatividades** (imágenes/vídeo) para Meta si vas por ese canal.
-- [x] **Página de privacidad/cookies** (RGPD): creada en `/privacidad/`. El banner de cookies y el footer ya enlazan a ella; está en el sitemap. ⚠️ **Falta que rellenes los datos fiscales** (razón social, NIF/CIF, domicilio) — están marcados con `[CORCHETES]` en la página.
+- [x] **Página de privacidad/cookies** creada y actualizada con D1, Turnstile y retención. ⚠️ La identificación jurídica del titular sigue pendiente de validación antes de formalizar ventas o pauta.
 
 ---
 
@@ -70,10 +65,10 @@ Hasta que lo despliegues, el formulario de demo cae al **fallback de WhatsApp** 
 
 ## ✅ Ya hecho (no requiere nada de tu parte)
 
-- Fundación de medición + Consent Mode v2 + banner RGPD bilingüe (en las 8 páginas).
+- Fundación de medición + Consent Mode v2 + banner RGPD bilingüe (en las 26 páginas).
 - Captura de UTM/gclid/fbclid con atribución end-to-end hasta el lead.
 - Formulario cualificador con descalificación honesta (`<10 msg/día`).
-- Endpoint `/lead` en el worker (notifica por Telegram).
+- Endpoint `/lead` en el worker: valida Turnstile, persiste en D1 (con degradación a KV + aviso directo si D1 cae) y notifica por Telegram y WhatsApp con reintentos vía cron. El chat web y el WhatsApp entrante también capturan leads.
 - WhatsApp unificado: **todos los enlaces públicos van al bot Vai** (15706160059).
 - Notificaciones a founders: se mantienen **solo como aviso**; toda interacción del cliente es con el bot.
 - Landing de Restaurantes: versión SEO (`/restaurantes/`) + versión de pauta (`/lp/restaurantes/`, noindex).

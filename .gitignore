@@ -1,2 +1,7 @@
 # Estado local de wrangler (auth cache, logs)
 .wrangler/
+
+# Secretos de desarrollo local (usar .dev.vars.example como plantilla)
+.dev.vars
+
+node_modules/

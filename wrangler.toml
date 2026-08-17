@@ -1,10 +1,25 @@
-# Config de deploy del worker del chat (Vai).
-# La compatibility_date y el binding KV replican la versión desplegada el 2026-07-16;
-# sin declarar el KV aquí, un `wrangler deploy` lo eliminaría del worker.
+# Config de deploy del worker de Velai (chat Vai + leads en D1 + panel admin).
+# Sin declarar aquí los bindings KV y D1, un `wrangler deploy` los eliminaría del worker.
+# El cron drena la cola de leads (leadq:* en KV), reintenta avisos y purga leads caducados.
 name = "vai-worker"
 main = "vai-worker.js"
 compatibility_date = "2026-04-14"
 
+[vars]
+# El alias de Pages permite validar chat/formularios en preview antes de mergear.
+# Cualquier hostname añadido aquí debe añadirse TAMBIÉN al widget de Turnstile.
+ALLOWED_WEB_ORIGINS = "https://hirevai.com,https://www.hirevai.com,https://velai-dey.pages.dev"
+ADMIN_ORIGIN = "https://admin.hirevai.com"
+LEAD_RETENTION_MONTHS = "24"
+
+[triggers]
+crons = ["*/5 * * * *"]
+
 [[kv_namespaces]]
 binding = "KV"
 id = "14fbc395a218428bb677f61243c9e3f6"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "vai-leads"
+database_id = "4b3056eb-6dee-44a4-8d17-5a80af740ca5"

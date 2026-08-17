@@ -4,7 +4,7 @@
 
    Uso: coloca un contenedor en cualquier página y carga este script:
      <div data-velai-leadform data-sector="Restaurante"></div>
-     <script src="/assets/leadform.js?v=1" defer></script>
+     <script src="/assets/leadform.js?v=2" defer></script>
 
    - data-sector (opcional): pre-selecciona el sector (para landings verticales).
    - Bilingüe ES/EN (lee 'velai-lang').
@@ -41,6 +41,10 @@
       okTitle: '¡Recibido! 🎉', okMsg: 'Te contactamos hoy mismo por WhatsApp. Si quieres, escríbenos ya:',
       okWa: 'Abrir WhatsApp →',
       errMsg: 'Ups, algo falló al enviar. Escríbenos directo por WhatsApp:',
+      errRetry: 'No pudimos enviar tus datos. Vuelve a intentarlo o escríbenos por WhatsApp.',
+      errHuman: 'No pudimos verificar que eres humano. Recarga la página e inténtalo de nuevo.',
+      errRate: 'Demasiados intentos seguidos. Espera un minuto y vuelve a probar.',
+      retry: 'Reintentar →',
       dqTitle: 'Sé honesto contigo: aún no nos necesitas',
       dqMsg: 'Con menos de 10 mensajes al día, automatizar todavía no te compensa. Mejor empieza por aquí — y vuelve cuando crezcas:',
       dqLink: 'Guía: cuánto cuesta (y cuándo conviene) un chatbot de IA →',
@@ -64,6 +68,10 @@
       okTitle: 'Got it! 🎉', okMsg: 'We’ll contact you on WhatsApp today. If you like, message us now:',
       okWa: 'Open WhatsApp →',
       errMsg: 'Oops, something failed. Message us directly on WhatsApp:',
+      errRetry: 'We couldn’t send your details. Try again or message us on WhatsApp.',
+      errHuman: 'We couldn’t verify you’re human. Reload the page and try again.',
+      errRate: 'Too many attempts in a row. Wait a minute and try again.',
+      retry: 'Retry →',
       dqTitle: 'Honest take: you don’t need us yet',
       dqMsg: 'With fewer than 10 messages a day, automating isn’t worth it yet. Start here instead — and come back when you grow:',
       dqLink: 'Guide: how much an AI chatbot costs (and when it’s worth it) →',
@@ -189,7 +197,7 @@
     container.innerHTML = html;
   }
 
-  function submit(container, form, t) {
+  async function submit(container, form, t) {
     if (!validate(form, t)) return;
     var get = function (id) { return (form.querySelector('#lf-' + id).value || '').trim(); };
     var vol = get('mensajesDia');
@@ -202,6 +210,8 @@
     }
 
     var payload = {
+      // Mismo requestId en los reintentos del mismo formulario: el worker deduplica.
+      requestId: form.dataset.requestId || (form.dataset.requestId = window.VELAI_UUID ? window.VELAI_UUID() : crypto.randomUUID()),
       fuente: 'formulario web',
       nombre: get('nombre'),
       whatsapp: get('whatsapp'),
@@ -209,24 +219,37 @@
       mensajesDia: vol,
       canal: get('canal'),
       quienResponde: get('quienResponde'),
-      utm: (window.VELAI_getUTM && window.VELAI_getUTM()) || {}
+      utm: (window.VELAI_getUTM && window.VELAI_getUTM()) || {},
+      pageUrl: location.href.slice(0, 500)
     };
 
     var btn = form.querySelector('.lf-submit');
     btn.disabled = true; btn.textContent = t.sending;
 
-    fetch(WORKER + '/lead', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload)
-    }).then(function (r) { return r.json(); })
-      .then(function (d) {
-        if (d && d.ok) {
-          if (window.velaiTrack) window.velaiTrack('lead_submit', { sector: payload.sector, volume: vol });
-          showResult(container, t, 'ok');
-        } else { throw new Error('bad'); }
-      })
-      .catch(function () { showResult(container, t, 'err'); });
+    try {
+      if (!window.VELAI_HUMAN) throw new Error('human_check_unavailable');
+      payload.turnstileToken = await window.VELAI_HUMAN.execute('lead');
+      var response = await fetch(WORKER + '/lead', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload)
+      });
+      var data = await response.json();
+      if (!response.ok || !data.ok) throw new Error(data.error || 'bad');
+      if (window.velaiTrack) window.velaiTrack('lead_submit', { sector: payload.sector, volume: vol, stored: data.stored || 'd1' });
+      showResult(container, t, 'ok');
+    } catch (error) {
+      // No destruir el formulario: mensaje según la causa y reintento con el mismo requestId.
+      var code = String(error && error.message || '');
+      var slot = form.querySelector('.lf-form-error');
+      if (!slot) {
+        slot = document.createElement('p');
+        slot.className = 'lf-form-error';
+        slot.style.cssText = 'color:#ff6b6b;font-size:.85rem;margin-top:10px';
+        btn.parentNode.insertBefore(slot, btn.nextSibling);
+      }
+      slot.textContent = /human|turnstile/.test(code) ? t.errHuman : /rate_limited/.test(code) ? t.errRate : t.errRetry;
+      btn.disabled = false; btn.textContent = t.retry;
+      if (window.velaiTrack) window.velaiTrack('lead_error', { code: code.slice(0, 60) });
+    }
   }
 
   function init() {

@@ -58,8 +58,8 @@
   <link rel="stylesheet" href="/fonts/fonts.css">
   <link rel="stylesheet" href="/blog/blog.css">
 
-  <script>window.VELAI_TRACK={ga4:'G-8HC3SQ0T0Q',ads:'AW-18250158066',adsLabel:'VMZdCLXFn8EcEPKfrf5D',pixel:'1928880717825520'};window.VELAI_WA='15706160059';</script>
-  <script src="/assets/funnel.js?v=3" defer></script>
+  <script>window.VELAI_TRACK={ga4:'G-8HC3SQ0T0Q',ads:'AW-18250158066',adsLabel:'VMZdCLXFn8EcEPKfrf5D',pixel:'1928880717825520'};window.VELAI_WA='15706160059';window.VELAI_TURNSTILE_SITEKEY='0x4AAAAAAESkAwvlDVJD9Z1l';</script>
+  <script src="/assets/funnel.js?v=5" defer></script>
 
   <style>
     .dx { max-width: 640px; margin: 0 auto; padding: 30px 24px 90px; }
@@ -221,6 +221,9 @@
       ctaTitle:'Vai puede tapar estas fugas en menos de 48h.',
       ctaBtn:'Pedir demo gratis →',
       okThanks:'Te enviamos también el detalle por WhatsApp. 🎉',
+      leadSending:'Guardando tus datos…',
+      leadOk:'✓ Datos recibidos. Te contactamos hoy mismo.',
+      leadErr:'No pudimos enviar tus datos.', leadRetry:'Reintentar', leadOr:'o escríbenos por WhatsApp',
       findSpeed:'Respondéis demasiado lento: cada minuto que pasa baja la probabilidad de venta.',
       findHours:'Fuera de horario no atendéis: ahí se pierden reservas y pedidos que no vuelven.',
       findCoverage:'Se quedan mensajes sin responder: son clientes que se van a la competencia.',
@@ -264,6 +267,9 @@
       ctaTitle:'Vai can plug these leaks in under 48h.',
       ctaBtn:'Get a free demo →',
       okThanks:'We’ve also sent the details to your WhatsApp. 🎉',
+      leadSending:'Saving your details…',
+      leadOk:'✓ Details received. We’ll contact you today.',
+      leadErr:'We couldn’t send your details.', leadRetry:'Retry', leadOr:'or message us on WhatsApp',
       findSpeed:'You reply too slowly: every minute lowers the chance of a sale.',
       findHours:'You don’t answer after hours: bookings and orders are lost there and don’t come back.',
       findCoverage:'Messages go unanswered: those are customers going to your competitors.',
@@ -358,7 +364,7 @@
     return f;
   }
 
-  function submit() {
+  async function submit() {
     var T = t();
     var name = (document.getElementById('dxName').value || '').trim();
     var wa = (document.getElementById('dxWa').value || '').trim();
@@ -369,18 +375,59 @@
     if (!ok) return;
 
     var r = compute();
-    var payload = {
+    pendingLead = {
+      requestId: window.VELAI_UUID ? window.VELAI_UUID() : crypto.randomUUID(),
       fuente: 'diagnóstico whatsapp',
       nombre: name, whatsapp: wa,
       sector: optOf('sector').t || '',
       mensajesDia: optOf('vol').t || '',
       score: r.score,
       nota: 'Ventas perdidas estimadas: ' + money(r.lost) + '/mes',
-      utm: (window.VELAI_getUTM && window.VELAI_getUTM()) || {}
+      utm: (window.VELAI_getUTM && window.VELAI_getUTM()) || {},
+      pageUrl: location.href.slice(0, 500)
     };
-    fetch(WORKER + '/lead', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload) }).catch(function(){});
-    if (window.velaiTrack) window.velaiTrack('quiz_complete', { score: r.score, sector: payload.sector });
+    if (window.velaiTrack) window.velaiTrack('quiz_complete', { score: r.score, sector: pendingLead.sector });
+    // El resultado NUNCA depende del backend: se pinta ya y el lead viaja en
+    // segundo plano con su propio estado (y reintento con el mismo requestId).
     renderResult(r);
+    dispatchLead();
+  }
+
+  var pendingLead = null;
+
+  async function sendLead(payload) {
+    if (!window.VELAI_HUMAN) throw new Error('human_check_unavailable');
+    payload.turnstileToken = await window.VELAI_HUMAN.execute('lead');
+    var response = await fetch(WORKER + '/lead', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload) });
+    var data = await response.json(); if (!response.ok || !data.ok) throw new Error(data.error || 'lead_failed');
+    return data;
+  }
+
+  function setLeadStatus(mode) {
+    var T = t(), slot = document.getElementById('dxLeadStatus');
+    if (!slot) return;
+    if (mode === 'sending') slot.textContent = T.leadSending;
+    else if (mode === 'ok') slot.textContent = T.leadOk;
+    else {
+      slot.innerHTML = T.leadErr + ' <a href="#" id="dxLeadRetry">' + T.leadRetry + '</a> ' + T.leadOr +
+        ': <a href="https://wa.me/' + WA + '" data-wa data-loc="diagnostico-retry" target="_blank" rel="noopener noreferrer">WhatsApp →</a>';
+      var retry = document.getElementById('dxLeadRetry');
+      if (retry) retry.onclick = function (e) { e.preventDefault(); dispatchLead(); };
+      if (window.VELAI_decorate) window.VELAI_decorate();
+    }
+  }
+
+  function dispatchLead() {
+    if (!pendingLead) return;
+    setLeadStatus('sending');
+    sendLead(pendingLead).then(function (data) {
+      pendingLead = null;
+      setLeadStatus('ok');
+      if (window.velaiTrack) window.velaiTrack('quiz_lead_saved', { stored: data.stored || 'd1' });
+    }).catch(function (error) {
+      setLeadStatus('err');
+      if (window.velaiTrack) window.velaiTrack('lead_error', { code: String(error && error.message || '').slice(0, 60) });
+    });
   }
 
   function renderResult(r) {
@@ -399,6 +446,7 @@
     html += '<div class="dx-cta"><p style="font-weight:700;margin-bottom:14px">' + T.ctaTitle + '</p>';
     html += '<a href="https://wa.me/' + WA + '" data-wa data-loc="diagnostico-result" target="_blank" rel="noopener noreferrer">' + T.ctaBtn + '</a>';
     html += '<p style="margin:14px 0 0;font-size:.95rem"><a href="#" data-vai-demo="" data-conv="chat_cta_resultado" style="color:#FF8C40;font-weight:600">Pregúntale a Vai qué harías con estos números →</a></p></div>';
+    html += '<p class="dx-muted" id="dxLeadStatus"></p>';
     html += '<p class="dx-muted">' + T.okThanks + '</p>';
     html += '<p class="dx-muted">' + T.lostNote + '</p>';
     body.innerHTML = html;
@@ -450,6 +498,6 @@
   renderQuestion();
 })();
 </script>
-<script src="/assets/vai-widget.js?v=1" defer></script>
+<script src="/assets/vai-widget.js?v=3" defer></script>
 </body>
 </html>

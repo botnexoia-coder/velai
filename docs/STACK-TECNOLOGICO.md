@@ -9,16 +9,20 @@ asistente **Vai**. Dominio público: `hirevai.com`; correo en `velai.ai`.
 ## 1. Arquitectura general
 
 Sitio **estático multipágina** servido desde **Cloudflare Pages**, con un único
-**Cloudflare Worker** (`vai-worker.js`) como backend serverless para el chat de
-Vai y la captura de leads. No hay framework de frontend ni build pesado: HTML +
-CSS + JavaScript vanilla, optimizado para SEO/GEO y velocidad de carga.
+**Cloudflare Worker** como backend serverless para el chat de Vai, la captura de
+leads y el panel admin. El Worker está dividido en: `vai-worker.js` (entrypoint +
+prompts `SYSTEM`/`DEMOS`/`SUMMARY_PROMPT`) → `worker/app.js` (toda la lógica) +
+`worker/admin-page.js` (HTML del panel). No hay framework de frontend ni build
+pesado: HTML + CSS + JavaScript vanilla, optimizado para SEO/GEO y velocidad.
 
 ```
 Navegador ──► Cloudflare Pages (HTML/CSS/JS estáticos)
                    │
-                   └─► fetch ──► Cloudflare Worker (vai-worker.js)
+                   └─► fetch ──► Cloudflare Worker (vai-worker.js → worker/app.js)
                                       ├─► Anthropic API (Claude)  — respuestas de Vai
                                       ├─► Cloudflare KV           — historial de conversación WhatsApp
+                                      ├─► Cloudflare D1           — leads, estados, notas y reintentos
+                                      ├─► Cloudflare Turnstile    — protección antiabuso
                                       ├─► Telegram Bot API        — notificación de leads
                                       └─► Twilio WhatsApp API     — canal WhatsApp + aviso a fundadores
 ```
@@ -42,7 +46,13 @@ Navegador ──► Cloudflare Pages (HTML/CSS/JS estáticos)
   conversión y enlaces `wa.me`.
 - **`assets/leadform.js`** — formulario cualificador de demo reutilizable
   (`data-velai-leadform`), bilingüe, con descalificación honesta (<10 msgs/día
-  no envía lead), envía a la ruta `/lead` del Worker.
+  no envía lead), envía a la ruta `/lead` del Worker con reintento recuperable.
+- **`assets/vai-widget.js`** — widget de chat autocontenido (26 páginas): llama a
+  `/chat`, persiste la conversación entre páginas (sessionStorage), Turnstile en
+  el primer mensaje con reintento ante 403, modo demo por sector.
+- **Turnstile en cliente** — `funnel.js` expone `window.VELAI_HUMAN.execute(action)`
+  (carga perezosa, widget invisible); la site key pública va inline en el HTML
+  (`window.VELAI_TURNSTILE_SITEKEY`).
 
 ### Convención de caché (importante)
 Definida en `_headers`: los assets (`.js`, `.css`, fuentes, imágenes) son
@@ -53,9 +63,9 @@ Por eso la configuración variable (IDs de tracking, número de WhatsApp) va
 
 ---
 
-## 3. Backend — Cloudflare Worker (`vai-worker.js`)
+## 3. Backend — Cloudflare Worker (`vai-worker.js` → `worker/app.js`)
 
-Worker serverless (módulo ES `export default { fetch }`). Responsabilidades:
+Worker serverless (módulo ES `export default { fetch, scheduled }`). Responsabilidades:
 
 - **Chat de Vai**: recibe mensajes (JSON desde la web, o
   `x-www-form-urlencoded` desde Twilio) y llama a la **Anthropic API**.
@@ -64,22 +74,43 @@ Worker serverless (módulo ES `export default { fetch }`). Responsabilidades:
   - System prompts: `SYSTEM` (comercial) y `DEMOS` (rol-play por sector).
 - **Modo demo por sector**: el visitante juega a ser cliente de un negocio
   ficticio; en demo no se notifican leads.
-- **Captura de leads**:
-  - Ruta `/lead`: leads de formulario/quiz → notifica **solo por Telegram**.
-  - Chat: detecta teléfono en el mensaje → resume la conversación con Claude
-    (JSON estructurado) → notifica por Telegram y WhatsApp.
-- **CORS** manual, manejo de `OPTIONS`/`POST`.
+- **Captura de leads**: `/lead` valida Turnstile y persiste de forma idempotente
+  en D1 antes de confirmar; Telegram y WhatsApp son avisos reintentables. Con D1
+  caída degrada a KV + aviso directo (`stored`/`degraded` en la respuesta) y el
+  cron re-inserta. El chat web y el **WhatsApp entrante** también capturan leads
+  (en WhatsApp, teléfono = `From` de Twilio, una vez por remitente).
+- **Chat web v2**: `/chat` recibe solo el nuevo mensaje, conserva el historial
+  canónico 24 h en KV y verifica Turnstile en la primera interacción. El antiguo
+  `POST /` JSON devuelve **410 `legacy_chat_retired`**.
+- **Panel**: hostname de `ADMIN_ORIGIN` (hoy `admin.hirevai.com`), protegido con
+  Cloudflare Access y JWT validado por el propio Worker (JWKS cacheado 10 min).
+  Rutas: `GET/PATCH/DELETE /api/admin/leads[...]`, `/notes`, `/retry`,
+  `/export.csv` (con neutralización de fórmulas).
+- **Cron (`*/5 * * * *`)**: reintenta avisos (5 intentos, backoff cuadrático;
+  `skipped` se revisita cada 6 h), drena la cola `leadq:*` de KV hacia D1 y
+  purga leads caducados.
+- **Seguridad**: CORS exacto, límites de payload, rate limit, timeouts,
+  validación de firma Twilio en tiempo constante y guarda de prototipo en las
+  claves de `DEMOS`.
 
 ### Servicios externos integrados
 | Servicio | Para qué | Credenciales (env/secrets) |
 |---|---|---|
 | **Anthropic API** (`api.anthropic.com/v1/messages`, `anthropic-version: 2023-06-01`) | Respuestas de Vai + extracción de leads. | `ANTHROPIC_API_KEY` |
-| **Cloudflare KV** | Persistencia del historial de conversación de WhatsApp (`conv:<from>`, TTL 24h, máx 20 mensajes). | binding `KV` |
-| **Telegram Bot API** | Canal centralizado de notificación de leads (HTML, `chat_id` fijo). | `TELEGRAM_TOKEN` |
-| **Twilio WhatsApp API** | Canal WhatsApp del bot + aviso a fundadores. | `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN` |
+| **Cloudflare KV** | Historial de conversación (`conv:wa:<from>` y `conv:web:<uuid>`, TTL 24h, máx 20 mensajes), rate limiting (`rl:<bucket>:<ip>`), cola de leads en contingencia (`leadq:*`) y marca de lead por remitente WA (`lead:wa:*`). | binding `KV` |
+| **Cloudflare D1** | Fuente de verdad de leads, notas, estados y notificaciones. | binding `DB` |
+| **Cloudflare Turnstile** | Verificación antiabuso de formularios y primer mensaje. | `TURNSTILE_SECRET_KEY` |
+| **Cloudflare Access** | Autenticación del panel administrativo. | `TEAM_DOMAIN`, `POLICY_AUD` |
+| **Telegram Bot API** | Canal centralizado de notificación de leads (HTML). | `TELEGRAM_TOKEN`, `TELEGRAM_CHAT_ID` |
+| **Twilio WhatsApp API** | Canal WhatsApp del bot + aviso al equipo. | `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_FROM`, `TEAM_WHATSAPP` |
+
+Variables no-secretas en `wrangler.toml [vars]`: `ALLOWED_WEB_ORIGINS` (CORS
+exacto, incluye el alias de preview de Pages), `ADMIN_ORIGIN` (hostname del
+panel) y `LEAD_RETENTION_MONTHS` (purga RGPD).
 
 > El Worker se despliega en `vai-worker.botnexo-ia.workers.dev` (configurable en
-> el frontend vía `window.VELAI_WORKER`).
+> el frontend vía `window.VELAI_WORKER`); el panel solo responde en el hostname
+> de `ADMIN_ORIGIN`.
 
 ---
 
@@ -88,10 +119,19 @@ Worker serverless (módulo ES `export default { fetch }`). Responsabilidades:
 - **Cloudflare Pages** — hosting del sitio estático (deploy desde git).
 - **Cloudflare Workers** — backend serverless del chat/leads.
 - **Cloudflare KV** — almacén key-value para historial de conversaciones.
+- **Cloudflare D1** — persistencia de leads durante 24 meses desde la última actividad.
+- **Cloudflare Access** — acceso administrativo sin contraseñas propias.
 - **`_headers`** — políticas de caché y cabeceras de seguridad (HSTS no,
   pero sí `X-Content-Type-Options`, `X-Frame-Options`, `Referrer-Policy`,
   `Permissions-Policy`).
 - **Git** — control de versiones (rama `main`).
+- **Tooling** — `package.json` sin dependencias: `npm run check` = `node --check`
+  de los JS + `scripts/check-site.mjs` (valida las 26 páginas, JSON-LD, recursos
+  internos y marcadores sin sustituir) + `node --test` (`test/worker.test.js`).
+  CI en `.github/workflows/ci.yml` ejecuta `npm run check` en cada push.
+- **Migraciones D1** — `migrations/` (aplicar con `wrangler d1 migrations apply`).
+- El runbook operativo completo (puesta en marcha, deploy, rollback) vive en
+  `docs/OPERATIONS.md`.
 
 ---
 

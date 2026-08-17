@@ -1,0 +1,16 @@
+# Solo desarrollo local. La clave de prueba oficial de Turnstile siempre valida.
+ANTHROPIC_API_KEY=""
+TURNSTILE_SECRET_KEY="1x0000000000000000000000000000000AA"
+TELEGRAM_TOKEN=""
+TELEGRAM_CHAT_ID=""
+TEAM_WHATSAPP=""
+TWILIO_ACCOUNT_SID=""
+TWILIO_AUTH_TOKEN=""
+TWILIO_FROM=""
+TEAM_DOMAIN="https://your-team.cloudflareaccess.com"
+POLICY_AUD=""
+# Vars (en producción viven en wrangler.toml [vars]; aquí se sobreescriben para dev).
+# localhost:8080 = python3 -m http.server; añade el puerto que uses de verdad.
+ALLOWED_WEB_ORIGINS="http://localhost:8080,http://127.0.0.1:8080"
+ADMIN_ORIGIN="http://localhost:8787"
+LEAD_RETENTION_MONTHS="24"

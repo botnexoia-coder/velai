@@ -2,7 +2,7 @@
    VAI CHAT WIDGET — autocontenido (CSS + markup + lógica)
    ──────────────────────────────────────────────────────────────────────────
    Se carga en TODAS las páginas con una sola línea:
-     <script src="/assets/vai-widget.js?v=1" defer></script>
+     <script src="/assets/vai-widget.js?v=2" defer></script>
 
    Autocontenido a propósito: solo index.html carga /assets/styles.css, el
    resto de páginas llevan CSS inline. Por eso este archivo inyecta su propio
@@ -149,7 +149,7 @@
       '<div id="vaiChips"></div>' +
       '<div class="vai-in-wrap">' +
         '<div class="vai-in-shell">' +
-          '<textarea id="vaiInput" placeholder="Escribe un mensaje..." rows="1" aria-label="Mensaje"></textarea>' +
+          '<textarea id="vaiInput" placeholder="Escribe un mensaje..." rows="1" maxlength="2000" aria-label="Mensaje"></textarea>' +
         '</div>' +
         '<button id="vaiSend" type="button" aria-label="Enviar">' +
           '<svg width="20" height="20" viewBox="0 0 24 24" fill="white" aria-hidden="true">' +
@@ -185,7 +185,19 @@
   };
 
   /* ── 4. Estado ──────────────────────────────────────────────────────── */
-  var open = false, started = false, sent = 0, busy = false;
+  // randomUUID solo existe en secure contexts; con fallback, el widget monta siempre.
+  function uuid() {
+    try { if (crypto.randomUUID) return crypto.randomUUID(); } catch (e) {}
+    var b = new Uint8Array(16);
+    try { crypto.getRandomValues(b); } catch (e) { for (var i = 0; i < 16; i++) b[i] = Math.floor(Math.random() * 256); }
+    b[6] = (b[6] & 15) | 64; b[8] = (b[8] & 63) | 128;
+    var h = Array.prototype.map.call(b, function (x) { return (x + 256).toString(16).slice(1); }).join('');
+    return h.slice(0, 8) + '-' + h.slice(8, 12) + '-' + h.slice(12, 16) + '-' + h.slice(16, 20) + '-' + h.slice(20);
+  }
+  window.VELAI_UUID = window.VELAI_UUID || uuid; // reutilizable por leadform/quizzes
+
+  var open = false, started = false, sent = 0, busy = false, humanVerified = false;
+  var conversationId = ''; // se genera en el primer envío (o se restaura de la sesión)
   var demo = '';
   var history = [];
   var wasOpen = false; // el panel estaba abierto en la página anterior
@@ -193,7 +205,7 @@
 
   function saveState() {
     try {
-      sessionStorage.setItem(SS_STATE, JSON.stringify({ demo: demo, history: history, sent: sent, open: open }));
+      sessionStorage.setItem(SS_STATE, JSON.stringify({ conversationId: conversationId, demo: demo, history: history, sent: sent, open: open, humanVerified: humanVerified }));
     } catch (e) {}
   }
   function loadState() {
@@ -201,6 +213,8 @@
       var s = JSON.parse(sessionStorage.getItem(SS_STATE));
       if (!s || !Array.isArray(s.history) || !s.history.length) return;
       history = s.history;
+      if (typeof s.conversationId === 'string') conversationId = s.conversationId;
+      humanVerified = !!s.humanVerified;
       sent = typeof s.sent === 'number' ? s.sent : history.length;
       demo = typeof s.demo === 'string' && DEMO_SCRIPTS[s.demo] ? s.demo : '';
       wasOpen = !!s.open;
@@ -338,7 +352,7 @@
     // Cambiar de demo reinicia la conversación (el system prompt del worker cambia)
     if (open && typeof demoKey === 'string' && demoKey !== demo) {
       demo = demoKey;
-      started = false; sent = 0; history = [];
+      started = false; sent = 0; history = []; conversationId = ''; humanVerified = false;
       el.msgs.innerHTML = '';
       saveState();
     }
@@ -404,7 +418,7 @@
     el.chips.classList.add('is-off');
 
     addMsg('user', text);
-    history.push({ role: 'user', content: text, t: Date.now() }); // el worker ignora campos extra (sanitizeMessages)
+    history.push({ role: 'user', content: text, t: Date.now() });
     sent++;
     saveState();
     if (sent === 1) track('chat_first_message', { source: source || 'input', page: location.pathname, demo: demo || 'none' });
@@ -415,29 +429,64 @@
     el.msgs.scrollTop = el.msgs.scrollHeight;
 
     try {
-      var payload = { messages: history };
-      if (demo) payload.demo = demo;   // el worker cambia el system prompt (DEMOS[demo])
-      var res = await fetch(WORKER, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
-      });
-      if (!res.ok) throw new Error('HTTP ' + res.status);
-      var data = await res.json();
-      var reply = data.reply || (data.content && data.content[0] ? data.content[0].text : null);
-      if (!reply) throw new Error('empty');
+      if (!conversationId) { conversationId = uuid(); saveState(); }
+      var reply;
+      try {
+        reply = await postChat(text);
+      } catch (err) {
+        // El servidor perdió el estado (KV caducado) y vuelve a exigir verificación:
+        // reintentar UNA vez con token fresco en vez de dejar la sesión rota.
+        if (err && err.status === 403 && humanVerified) {
+          humanVerified = false; saveState();
+          reply = await postChat(text);
+        } else { throw err; }
+      }
+      humanVerified = true;
       history.push({ role: 'assistant', content: reply, t: Date.now() });
       saveState();
       el.typing.classList.remove('is-on');
       addMsg('bot', reply);
       track('chat_reply', { n: sent });
     } catch (err) {
+      // Nunca dejar humanVerified bloqueado en true tras un fallo: el próximo
+      // intento pide token nuevo y el usuario puede recuperarse solo.
+      humanVerified = false;
+      saveState();
       el.typing.classList.remove('is-on');
       addMsg('bot', 'Ups, ahora mismo no puedo responder. Escríbenos por WhatsApp y te contestamos en minutos: https://wa.me/' + (window.VELAI_WA || '15706160059'));
-      track('chat_error', { msg: String(err && err.message || err) });
+      track('chat_error', { msg: String(err && (err.code || err.message) || err) });
     } finally {
       busy = false;
     }
+  }
+
+  async function postChat(text) {
+    var payload = {
+      conversationId: conversationId,
+      message: text,
+      pageUrl: location.href.slice(0, 500),
+      utm: (window.VELAI_getUTM && window.VELAI_getUTM()) || {}
+    };
+    if (demo) payload.demo = demo;
+    if (!humanVerified) {
+      if (!window.VELAI_HUMAN) throw new Error('human_check_unavailable');
+      payload.turnstileToken = await window.VELAI_HUMAN.execute('chat');
+    }
+    var res = await fetch(WORKER + '/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    if (!res.ok) {
+      var err = new Error('HTTP ' + res.status);
+      err.status = res.status;
+      try { err.code = (await res.json()).error; } catch (e) {}
+      throw err;
+    }
+    var data = await res.json();
+    var reply = data.reply || (data.content && data.content[0] ? data.content[0].text : null);
+    if (!reply) throw new Error('empty');
+    return reply;
   }
 
   /* ── 9. API pública ─────────────────────────────────────────────────── */

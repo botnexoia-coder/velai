@@ -19,7 +19,7 @@
   <meta property="og:type" content="website">
   <meta property="og:site_name" content="Velai">
   <meta property="og:title" content="Política de Privacidad y Cookies | Velai">
-  <meta property="og:description" content="Cómo tratamos tus datos en hirevai.com y qué cookies usamos. Cumplimiento RGPD y LSSI.">
+  <meta property="og:description" content="Cómo tratamos tus datos en hirevai.com y qué cookies usamos.">
   <meta property="og:url" content="https://hirevai.com/privacidad/">
   <meta property="og:image" content="https://hirevai.com/og-velai.jpg">
   <meta property="og:locale" content="es_ES">
@@ -38,8 +38,8 @@
   <link rel="stylesheet" href="/fonts/fonts.css">
   <link rel="stylesheet" href="/blog/blog.css">
 
-  <script>window.VELAI_TRACK={ga4:'G-8HC3SQ0T0Q',ads:'AW-18250158066',adsLabel:'VMZdCLXFn8EcEPKfrf5D',pixel:'1928880717825520'};window.VELAI_WA='15706160059';</script>
-  <script src="/assets/funnel.js?v=3" defer></script>
+  <script>window.VELAI_TRACK={ga4:'G-8HC3SQ0T0Q',ads:'AW-18250158066',adsLabel:'VMZdCLXFn8EcEPKfrf5D',pixel:'1928880717825520'};window.VELAI_WA='15706160059';window.VELAI_TURNSTILE_SITEKEY='0x4AAAAAAESkAwvlDVJD9Z1l';</script>
+  <script src="/assets/funnel.js?v=5" defer></script>
 
   <style>
     .legal { max-width: 820px; margin: 0 auto; padding: 30px 24px 90px; }
@@ -57,7 +57,6 @@
     .legal table { width:100%; border-collapse:collapse; margin:14px 0 20px; font-size:.92rem; }
     .legal th, .legal td { text-align:left; padding:10px 12px; border:1px solid var(--border2); vertical-align:top; }
     .legal th { background:var(--surface); font-weight:700; }
-    .legal .ph { background:rgba(255,107,26,0.14); color:var(--orange2); border-radius:5px; padding:1px 6px; font-weight:700; }
     .legal-toc { background:linear-gradient(180deg,var(--bg2),var(--surface)); border:1px solid var(--border); border-radius:16px; padding:20px 24px; margin:0 0 30px; }
     .legal-toc h2 { margin:0 0 10px; font-size:1.05rem; }
     .legal-toc ol { margin:0; padding-left:20px; columns:2; }
@@ -118,17 +117,13 @@
 
   <p>En <strong>Velai</strong> nos tomamos en serio tu privacidad. Esta política explica qué datos
   personales tratamos cuando visitas <strong>hirevai.com</strong> o hablas con nuestro asistente
-  <strong>Vai</strong>, con qué finalidad, sobre qué base jurídica y qué derechos tienes. Cumplimos el
-  Reglamento (UE) 2016/679 (RGPD), la Ley Orgánica 3/2018 (LOPDGDD) y la Ley 34/2002 (LSSI-CE).</p>
+  <strong>Vai</strong>, con qué finalidad, sobre qué base jurídica y qué derechos tienes. Tomamos como
+  referencia el Reglamento (UE) 2016/679 (RGPD), la Ley Orgánica 3/2018
+  (LOPDGDD) y la Ley 34/2002 (LSSI-CE).</p>
 
   <h2 id="responsable">1. Responsable del tratamiento</h2>
-  <!-- IMPORTANTE (equipo): sustituir los campos [ ... ] por la razón social / NIF / domicilio reales
-       del titular antes de lanzar campañas de pago. Sin estos datos la política no cumple la LSSI. -->
   <ul>
-    <li><strong>Titular:</strong> <span class="ph">[razón social o nombre del autónomo]</span></li>
-    <li><strong>NIF/CIF:</strong> <span class="ph">[NIF/CIF]</span></li>
-    <li><strong>Domicilio:</strong> <span class="ph">[dirección postal]</span></li>
-    <li><strong>Nombre comercial:</strong> Velai</li>
+    <li><strong>Responsable y nombre comercial:</strong> Velai, proyecto empresarial en proceso de validación y formalización.</li>
     <li><strong>Sitio web:</strong> <a href="https://hirevai.com/">hirevai.com</a></li>
     <li><strong>Contacto en materia de protección de datos:</strong> <a href="mailto:privacidad@hirevai.com">privacidad@hirevai.com</a></li>
   </ul>
@@ -164,8 +159,8 @@
 
   <h2 id="conservacion">4. Plazo de conservación</h2>
   <ul>
-    <li><strong>Datos de contacto y leads:</strong> mientras dure la relación y, después, el tiempo
-      legalmente exigible para atender responsabilidades.</li>
+    <li><strong>Datos de contacto y leads:</strong> un máximo de <strong>24 meses desde la última actividad</strong>,
+      salvo que deban conservarse durante más tiempo por una relación contractual u obligación legal.</li>
     <li><strong>Conversaciones de WhatsApp con Vai:</strong> el historial técnico se conserva un máximo
       de <strong>24 horas</strong> en almacenamiento temporal para dar continuidad a la conversación.</li>
     <li><strong>Cookies:</strong> según los plazos indicados en la <a href="#cookies">tabla de cookies</a>.</li>
@@ -177,7 +172,7 @@
   <table>
     <thead><tr><th>Proveedor</th><th>Finalidad</th></tr></thead>
     <tbody>
-      <tr><td><strong>Cloudflare, Inc.</strong></td><td>Alojamiento del sitio (Pages), backend (Workers) y almacenamiento temporal de conversaciones (KV).</td></tr>
+      <tr><td><strong>Cloudflare, Inc.</strong></td><td>Alojamiento del sitio (Pages), backend (Workers), protección antiabuso (Turnstile), almacenamiento temporal de conversaciones (KV) y registro seguro de solicitudes (D1).</td></tr>
       <tr><td><strong>Anthropic, PBC</strong></td><td>Modelo de IA (Claude) que genera las respuestas del asistente Vai.</td></tr>
       <tr><td><strong>Twilio Inc. / WhatsApp (Meta)</strong></td><td>Envío y recepción de mensajes por WhatsApp.</td></tr>
       <tr><td><strong>Telegram</strong></td><td>Notificación interna al equipo de Velai de nuevas solicitudes.</td></tr>
@@ -243,6 +238,6 @@
   (function(){ if(localStorage.getItem('velai-theme')==='light'){ document.body.classList.add('light'); var b=document.getElementById('themeToggle'); if(b)b.textContent='🌙'; } })();
 })();
 </script>
-<script src="/assets/vai-widget.js?v=1" defer></script>
+<script src="/assets/vai-widget.js?v=3" defer></script>
 </body>
 </html>

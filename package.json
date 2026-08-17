@@ -1,0 +1,12 @@
+{
+  "name": "velai-site",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "check:js": "node --check vai-worker.js && node --check worker/app.js && node --check worker/admin-page.js && node --check assets/funnel.js && node --check assets/leadform.js && node --check assets/vai-widget.js",
+    "check:site": "node scripts/check-site.mjs",
+    "test": "node --test",
+    "check": "npm run check:js && npm run check:site && npm test"
+  }
+}

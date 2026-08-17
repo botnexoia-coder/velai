@@ -142,11 +142,11 @@ https://hirevai.com/lp/restaurantes/?utm_source=meta&utm_medium=paid_social&utm_
 
 ## 4. Checklist antes de activar
 
-- [ ] IDs de medición puestos en las páginas (GA4 / Ads + etiqueta de conversión / Pixel).
+- [x] IDs de medición puestos en las páginas (GA4 / Ads + etiqueta de conversión / Pixel).
 - [ ] Acción de conversión de Google Ads creada y enlazada a `lead_submit`/`whatsapp_click`.
-- [ ] Worker `vai-worker.js` redeployado (ruta `/lead` activa).
+- [ ] Backend de leads en marcha: D1 + Turnstile + secrets + deploy — seguir el runbook completo de `docs/OPERATIONS.md` (§Recursos Cloudflare).
 - [ ] Eventos verificados: GA4 DebugView, Google Ads (estado conversión), Meta Test Events.
-- [ ] Datos fiscales rellenados en `/privacidad/` (la cuenta de anuncios pedirá la política).
+- [ ] **BLOQUEANTE LEGAL**: titular, NIF y domicilio publicados en `/privacidad/` (art. 10 LSSI). Hoy la web solo identifica el nombre comercial Velai — ver `docs/OPERATIONS.md` §Riesgo legal. La cuenta de anuncios pedirá una política válida.
 - [ ] Presupuesto diario definido por campaña.
 
 ---

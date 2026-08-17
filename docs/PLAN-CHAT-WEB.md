@@ -13,14 +13,15 @@
 >
 > Levantado el 2026-08-17 sobre el commit `4e2f8bb`.
 >
-> **Estado (act. 2026-08-17): PRs 1, 2 y 3 APLICADOS y validados en preview** (ramas
-> `fix/chat-web-alcance-y-visibilidad`, `feat/demo-rol-play`, `feat/chat-ctas`), con dos
-> extras: persistencia de la conversación entre páginas (sessionStorage) y `wrangler.toml`
-> que fija la compatibility date y el binding KV del worker. El worker está redesplegado
-> con las 4 demos. **Pendientes: PR 4** (variables TEAM_WHATSAPP / TWILIO_FROM /
-> TELEGRAM_CHAT_ID + vaciar el fallback) **y PR 5** (NIF/CIF, Instagram del prompt, CSS
-> muerto, TAREAS-PENDIENTES.md, tareas de Cloudflare). Tras el deploy: medir 7 días con
-> el Anexo A.
+> **Estado (act. 2026-08-17, 2ª revisión): PRs 1–3 APLICADOS y en producción.** Después,
+> el worker se reestructuró por completo (`worker/app.js`: D1, Turnstile, panel admin,
+> cron) — **las referencias `vai-worker.js:NNN` de este documento son históricas** y ya no
+> corresponden al código actual; la operativa vigente está en `docs/OPERATIONS.md`.
+> **PR 4**: resuelto en código (el fallback hardcodeado de Telegram se eliminó); solo
+> queda configurar las variables en Cloudflare (OPERATIONS §Recursos). **PR 5**: hecho
+> 5.4 (TAREAS-PENDIENTES); pendientes 5.1 (NIF/CIF — bloqueo legal para pauta), 5.2
+> (Instagram en el prompt) y 5.3 (CSS muerto en styles.scss). Métricas del Anexo A:
+> revisar desde ~2026-08-24.
 
 ---
 
@@ -779,14 +780,16 @@ Las claves (`clinica`, `taller`, `inmobiliaria`) coinciden exactamente con las d
 npx wrangler deploy vai-worker.js --name vai-worker
 ```
 
-Comprueba que las cuatro demos responden (desde un origen permitido, no desde localhost):
+Comprueba que las cuatro demos responden (desde un origen permitido, no desde localhost).
+**Nota (post-reestructuración):** el endpoint es ahora `POST /chat` con `conversationId`
+(UUID v4) y Turnstile en el primer mensaje; el `POST /` JSON antiguo devuelve 410:
 
 ```bash
 for d in restaurante clinica taller inmobiliaria; do
   echo "--- $d"
-  curl -s -X POST https://vai-worker.botnexo-ia.workers.dev \
+  curl -s -X POST https://vai-worker.botnexo-ia.workers.dev/chat \
     -H "Origin: https://hirevai.com" -H "Content-Type: application/json" \
-    -d "{\"demo\":\"$d\",\"messages\":[{\"role\":\"user\",\"content\":\"hola, buenas\"}]}" | head -c 400
+    -d "{\"conversationId\":\"$(uuidgen)\",\"demo\":\"$d\",\"message\":\"hola, buenas\",\"turnstileToken\":\"<token>\"}" | head -c 400
   echo
 done
 ```
@@ -827,7 +830,7 @@ https://hirevai.com/clinicas/?chat=1&demo=clinica
 
 ## 2.4 Verificación
 
-- [ ] `node --check vai-worker.js` pasa.
+- [ ] `npm run check` pasa (histórico: `node --check vai-worker.js`).
 - [ ] El botón abre el chat y el saludo es el del negocio ficticio, no el comercial.
 - [ ] La conversación responde en personaje y rompe la cuarta pared hacia el turno 3–4.
 - [ ] El FAB normal (sin tocar el CTA) sigue abriendo a Vai comercial.
