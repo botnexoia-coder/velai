@@ -4,6 +4,18 @@
 name = "vai-worker"
 main = "vai-worker.js"
 compatibility_date = "2026-04-14"
+# No pisar en cada deploy las variables puestas a mano en el dashboard
+# (TELEGRAM_CHAT_ID/TEAM_WHATSAPP/TWILIO_FROM viven como secrets/vars remotos).
+keep_vars = true
+
+# El frontend llama a vai-worker.botnexo-ia.workers.dev: sin esta línea, declarar
+# `routes` desactiva esa URL y rompe chat y formularios.
+workers_dev = true
+
+# Dominio del panel admin (Cloudflare Access delante; el Worker valida el JWT).
+routes = [
+  { pattern = "admin.hirevai.com", custom_domain = true }
+]
 
 [vars]
 # El alias de Pages permite validar chat/formularios en preview antes de mergear.
