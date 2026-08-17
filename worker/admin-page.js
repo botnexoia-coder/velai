@@ -6,9 +6,9 @@ export const ADMIN_HTML = `<!doctype html>
 <html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="robots" content="noindex,nofollow"><title>Panel · Velai</title>
 <style nonce="__NONCE__">
-@font-face{font-family:'Cabinet Grotesk';src:url('https://hirevai.com/fonts/cabinet-grotesk-900.woff2') format('woff2');font-weight:900;font-display:swap}
-@font-face{font-family:'Satoshi';src:url('https://hirevai.com/fonts/satoshi-400.woff2') format('woff2');font-weight:400;font-display:swap}
-@font-face{font-family:'Satoshi';src:url('https://hirevai.com/fonts/satoshi-500.woff2') format('woff2');font-weight:500;font-display:swap}
+@font-face{font-family:'Cabinet Grotesk';src:url('https://hirevai.com/fonts/cabinet-grotesk-900.woff2?v=2') format('woff2');font-weight:900;font-display:swap}
+@font-face{font-family:'Satoshi';src:url('https://hirevai.com/fonts/satoshi-400.woff2?v=2') format('woff2');font-weight:400;font-display:swap}
+@font-face{font-family:'Satoshi';src:url('https://hirevai.com/fonts/satoshi-500.woff2?v=2') format('woff2');font-weight:500;font-display:swap}
 :root{color-scheme:dark;
 --orange:#FF6B1A;--orange2:#FF8C40;--amber:#FFAA00;
 --bg:#09070A;--bg2:#110D13;--surface:#181220;
