@@ -130,10 +130,36 @@ test('la retención de leads no explota con configuración inválida', () => {
 
 test('readJson rechaza null, arrays y primitivos con 400', async () => {
   for (const body of ['null', '[1,2]', '"hola"', '42']) {
-    const request = new Request('https://x/', { method: 'POST', body });
+    const request = new Request('https://x/', { method: 'POST', body, headers: { 'Content-Type': 'application/json' } });
     await assert.rejects(testing.readJson(request), (e) => e.status === 400 && e.code === 'invalid_json');
   }
-  assert.deepEqual(await testing.readJson(new Request('https://x/', { method: 'POST', body: '{"a":1}' })), { a: 1 });
+  assert.deepEqual(await testing.readJson(new Request('https://x/', { method: 'POST', body: '{"a":1}', headers: { 'Content-Type': 'application/json' } })), { a: 1 });
+});
+
+test('readJson exige application/json (415) y limita el tamaño (413)', async () => {
+  await assert.rejects(
+    testing.readJson(new Request('https://x/', { method: 'POST', body: '{"a":1}', headers: { 'Content-Type': 'text/plain' } })),
+    (e) => e.status === 415 && e.code === 'unsupported_media_type');
+  await assert.rejects(
+    testing.readJson(new Request('https://x/', { method: 'POST', body: `{"a":"${'x'.repeat(20000)}"}`, headers: { 'Content-Type': 'application/json' } }), 16000),
+    (e) => e.status === 413 && e.code === 'payload_too_large');
+});
+
+test('verifyTurnstile valida hostname y action contra la config del servidor', async () => {
+  const realFetch = globalThis.fetch;
+  const env = { TURNSTILE_SECRET_KEY: 's', ALLOWED_WEB_ORIGINS: 'https://hirevai.com,https://velai-dey.pages.dev' };
+  const request = new Request('https://x/', { headers: { 'CF-Connecting-IP': '1.2.3.4' } });
+  const mock = (result) => async () => new Response(JSON.stringify(result), { status: 200 });
+  try {
+    globalThis.fetch = mock({ success: true, action: 'lead', hostname: 'hirevai.com' });
+    await testing.verifyTurnstile(env, 'tok', request, 'lead'); // no lanza
+    globalThis.fetch = mock({ success: true, action: 'lead', hostname: 'evil.example' });
+    await assert.rejects(testing.verifyTurnstile(env, 'tok', request, 'lead'), (e) => e.status === 403);
+    globalThis.fetch = mock({ success: true, action: 'chat', hostname: 'hirevai.com' });
+    await assert.rejects(testing.verifyTurnstile(env, 'tok', request, 'lead'), (e) => e.status === 403);
+    globalThis.fetch = mock({ success: true, action: 'lead', hostname: 'localhost' });
+    await testing.verifyTurnstile(env, 'tok', request, 'lead'); // dev local pasa
+  } finally { globalThis.fetch = realFetch; }
 });
 
 test('el filtro de fecha final incluye el día completo', () => {

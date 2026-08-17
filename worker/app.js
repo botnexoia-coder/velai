@@ -64,6 +64,10 @@ async function readJson(request, maxBytes = 16000) {
   if (length > maxBytes) throw new HttpError(413, 'payload_too_large');
   let text = await request.text();
   if (text.length > maxBytes) throw new HttpError(413, 'payload_too_large');
+  // Las rutas JSON exigen su content-type (415); el webhook de Twilio va aparte
+  // como x-www-form-urlencoded y nunca pasa por aquí.
+  const contentType = request.headers.get('Content-Type') || '';
+  if (!contentType.includes('application/json')) throw new HttpError(415, 'unsupported_media_type');
   let parsed;
   try { parsed = JSON.parse(text); } catch (_) { throw new HttpError(400, 'invalid_json'); }
   // `null`, arrays o primitivos son entrada inválida (400), no un 500 al leer .campo
@@ -102,10 +106,39 @@ async function verifyTurnstile(env, token, request, expectedAction) {
   if (!result.success || (result.action && result.action !== expectedAction)) {
     throw new HttpError(403, 'human_verification_failed');
   }
+  // Un token emitido para un hostname ajeno no vale aunque sea "success": la lista
+  // sale de ALLOWED_WEB_ORIGINS (config del servidor), nunca del Origin del cliente.
+  if (result.hostname) {
+    const okHosts = new Set(allowedOrigins(env).map((o) => { try { return new URL(o).hostname; } catch (_) { return ''; } }));
+    okHosts.add('localhost'); okHosts.add('127.0.0.1');
+    if (!okHosts.has(result.hostname)) throw new HttpError(403, 'human_verification_failed');
+  }
+}
+
+// Presupuesto diario global de llamadas al modelo: un abuso distribuido (muchas IPs)
+// no puede quemar la API key. Contador en KV por día UTC; fail-open si KV cae
+// (igual que el rate limit — Turnstile sigue siendo la barrera principal).
+async function aiBudgetGuard(env) {
+  if (!env.KV) return;
+  const limit = Number(env.AI_DAILY_LIMIT) || 1000;
+  const key = `budget:ai:${new Date().toISOString().slice(0, 10)}`;
+  let current = 0;
+  try { current = Number(await env.KV.get(key) || 0); } catch (_) { return; }
+  if (current >= limit) {
+    try {
+      if (!(await env.KV.get('alert:aibudget'))) {
+        await env.KV.put('alert:aibudget', '1', { expirationTtl: 3600 });
+        await sendTelegramText(env, `⚠️ <b>Velai</b>: presupuesto diario de IA agotado (${limit} llamadas). El chat responde 429 hasta mañana o hasta subir AI_DAILY_LIMIT.`);
+      }
+    } catch (_) {}
+    throw new HttpError(429, 'ai_budget_exhausted');
+  }
+  try { await env.KV.put(key, String(current + 1), { expirationTtl: 2 * 86400 }); } catch (_) {}
 }
 
 async function callAnthropic(env, payload) {
   if (!env.ANTHROPIC_API_KEY) throw new HttpError(503, 'ai_not_configured');
+  await aiBudgetGuard(env);
   let response;
   for (let attempt = 0; attempt < 2; attempt++) {
     response = await fetch('https://api.anthropic.com/v1/messages', {
@@ -414,6 +447,8 @@ async function handleChat(request, env, cors, ctx, config) {
   const key = `conv:web:${body.conversationId}`;
   let state = await env.KV.get(key, 'json');
   if (body.demo && !isDemoKey(config, body.demo)) throw new HttpError(400, 'invalid_demo');
+  // Límite también por conversación: rotar de IP (CGNAT/móvil) no multiplica el cupo.
+  if (await rateLimited(env, body.conversationId, 'chatconv', 20)) throw new HttpError(429, 'rate_limited');
   if (!state) {
     await verifyTurnstile(env, body.turnstileToken, request, 'chat');
     state = { demo: isDemoKey(config, body.demo) ? body.demo : '', messages: [] };
@@ -557,6 +592,9 @@ function csvCell(value) {
   return `"${guarded.replace(/"/g, '""')}"`;
 }
 
+// Datos administrativos: nunca cacheables (ni en el navegador ni en proxies).
+const NO_STORE = { 'Cache-Control': 'no-store' };
+
 async function handleAdmin(request, env, ctx, path, url) {
   adminCorsGuard(request, env);
   const actor = await adminIdentity(request, env);
@@ -574,7 +612,7 @@ async function handleAdmin(request, env, ctx, path, url) {
     }
     const result = await env.DB.prepare(`SELECT l.*, GROUP_CONCAT(n.channel || ':' || n.status) notification_summary FROM leads l LEFT JOIN lead_notifications n ON n.lead_id=l.id WHERE ${filters.sql} GROUP BY l.id ORDER BY l.created_at DESC, l.id DESC LIMIT ?`).bind(...filters.values, limit + 1).all();
     const rows = result.results; const more = rows.length > limit; if (more) rows.pop();
-    return json({ leads: rows, nextCursor: more ? `${rows.at(-1).created_at}|${rows.at(-1).id}` : null });
+    return json({ leads: rows, nextCursor: more ? `${rows.at(-1).created_at}|${rows.at(-1).id}` : null }, 200, NO_STORE);
   }
   if (path === '/api/admin/leads/export.csv' && request.method === 'GET') {
     const filters = leadFilters(url);
@@ -594,7 +632,7 @@ async function handleAdmin(request, env, ctx, path, url) {
       env.DB.prepare('SELECT * FROM lead_events WHERE lead_id=? ORDER BY created_at DESC').bind(id).all(),
       env.DB.prepare('SELECT * FROM lead_notifications WHERE lead_id=?').bind(id).all(),
     ]);
-    return json({ lead, notes: notes.results, events: events.results, notifications: notifications.results });
+    return json({ lead, notes: notes.results, events: events.results, notifications: notifications.results }, 200, NO_STORE);
   }
   if (!action && request.method === 'PATCH') {
     const body = await readJson(request, 2000); if (!STATUSES.has(body.status)) throw new HttpError(400, 'invalid_status');
@@ -603,7 +641,7 @@ async function handleAdmin(request, env, ctx, path, url) {
       env.DB.prepare('UPDATE leads SET status=?,updated_at=?,expires_at=? WHERE id=?').bind(body.status, now, expiryDate(env), id),
       env.DB.prepare("INSERT INTO lead_events (lead_id,actor_email,event_type,detail,created_at) VALUES (?,?,'status_changed',?,?)").bind(id, actor, body.status, now),
     ]);
-    return json({ ok: true });
+    return json({ ok: true }, 200, NO_STORE);
   }
   if (action === 'notes' && request.method === 'POST') {
     const body = await readJson(request, 3000); const text = clean(body.text, 2000); if (!text) throw new HttpError(400, 'invalid_note');
@@ -612,12 +650,12 @@ async function handleAdmin(request, env, ctx, path, url) {
       env.DB.prepare('INSERT INTO lead_notes (lead_id,author_email,text,created_at) VALUES (?,?,?,?)').bind(id, actor, text, now),
       env.DB.prepare('UPDATE leads SET updated_at=?,expires_at=? WHERE id=?').bind(now, expiryDate(env), id),
     ]);
-    return json({ ok: true }, 201);
+    return json({ ok: true }, 201, NO_STORE);
   }
   if (action === 'retry' && request.method === 'POST') {
     const now = new Date().toISOString();
     await env.DB.prepare("UPDATE lead_notifications SET status='pending',attempts=0,next_attempt_at=NULL,last_error=NULL,updated_at=? WHERE lead_id=? AND status!='sent'").bind(now, id).run();
-    ctx.waitUntil(processNotifications(env, id, true)); return json({ ok: true }, 202);
+    ctx.waitUntil(processNotifications(env, id, true)); return json({ ok: true }, 202, NO_STORE);
   }
   if (!action && request.method === 'DELETE') {
     await env.DB.prepare('DELETE FROM leads WHERE id=?').bind(id).run(); return new Response(null, { status: 204 });
@@ -713,4 +751,4 @@ export function createWorker(config) {
   };
 }
 
-export const testing = { clean, normalizePhone, extractPhone, safeUtm, publicCors, validTwilioSignature, csvCell, expiryDate, leadFilters, isDemoKey, templateVar, leadTemplateVariables, readJson, deliver, drainQueuedLeads };
+export const testing = { clean, normalizePhone, extractPhone, safeUtm, publicCors, validTwilioSignature, csvCell, expiryDate, leadFilters, isDemoKey, templateVar, leadTemplateVariables, readJson, deliver, drainQueuedLeads, verifyTurnstile };

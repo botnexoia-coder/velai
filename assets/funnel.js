@@ -318,6 +318,12 @@
     }
   }
 
+  // Retirada/cambio del consentimiento sin borrar datos del navegador: cualquier
+  // página puede reabrir el banner con un enlace «Configurar cookies».
+  window.VELAI_openConsent = function () {
+    if (!document.getElementById('velai-consent')) showBanner();
+  };
+
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', init);
   } else {

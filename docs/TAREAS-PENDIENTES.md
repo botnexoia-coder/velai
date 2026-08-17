@@ -40,6 +40,13 @@ Sin esto, las campañas gastarían presupuesto a ciegas (sin medir conversiones)
 - [ ] Login de prueba en `admin.hirevai.com` con tu email + PIN, y verificar que ves el lead de prueba.
 - [ ] De FASE0 §6: status callback del sender (para ver `Undelivered` sin entrar a la consola), perfil de negocio del sender, verificación de Meta (bloqueante para el primer cliente), webhook de voz, bundle +34.
 
+### 2b. De la revisión de seguridad de Johan (lo manual — el resto ya está aplicado)
+
+- [ ] **Reglas WAF/Rate Limiting de borde** para `/chat` y `/lead` (dashboard → Security → WAF; el worker ya limita por IP y por conversación como segunda capa).
+- [ ] **Auditoría de la política de Access**: confirmar la lista exacta de correos, probar uno no autorizado, y documentar quién es el propietario/recuperación de la cuenta Zero Trust.
+- [ ] **CSP completa de recursos** empezando en `Report-Only` (la base con frame-ancestors ya está en `_headers`).
+- [ ] **Decisión legal**: retención escalonada de leads (hoy 24 meses renovados por actividad) — validar con asesoría.
+
 ### 3. Verificar conversiones antes de invertir
 
 - [ ] Con los IDs ya puestos: comprobar eventos en **GA4 DebugView**, **Google Ads** (estado de la conversión) y **Meta Events Manager → Test Events**.

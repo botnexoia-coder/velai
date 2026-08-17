@@ -75,6 +75,20 @@ La test key de Turnstile del example siempre valida. `ALLOWED_WEB_ORIGINS` del `
 
 Ejecutar `npm run check` antes de desplegar (sintaxis JS, validación de las 26 páginas, marcadores sin sustituir y tests del Worker). Después, enviar un lead de prueba y verificar D1, Telegram, WhatsApp y el panel; comprobar que la respuesta fue `stored: "d1"` sin `degraded`. Para rollback, conservar D1 y volver a la versión anterior del Worker/Pages; la migración es aditiva y no debe revertirse destruyendo datos.
 
+## Alertas operativas
+
+Automáticas (llegan al Telegram del equipo, con antirebote de 1 h):
+
+- **`lead_d1_fallback` / `lead_d1_misconfigured`** — D1 caída o binding roto; los leads van a la cola KV. Revisar el binding DB y el estado de D1; el cron re-inserta al volver.
+- **`ai_budget_exhausted`** — se agotó el tope diario de llamadas al modelo (`AI_DAILY_LIMIT`, hoy 1000). El chat responde 429 hasta medianoche UTC; si es tráfico legítimo, subir la variable y redeploy.
+
+A vigilar a mano (en Workers Logs / panel / GA4) hasta tener alerting externo:
+
+- `chat_error` > 5% de los `chat_message` (GA4) → mirar logs del worker.
+- Filas `failed` acumulándose en `lead_notifications` (panel, filtro de avisos) → revisar Twilio Monitor / Telegram.
+- Crecimiento de claves `leadq:*` en KV → D1 lleva rato caída.
+- Respuestas 429/5xx sostenidas en los logs → rate limits o Anthropic.
+
 ## Riesgo legal pendiente
 
 La web identifica por ahora únicamente el nombre comercial Velai. **No activar campañas de pago** hasta validar con asesoría y publicar el titular, NIF y domicilio que correspondan conforme al artículo 10 de la LSSI (las plataformas de anuncios exigen además una política de privacidad válida). El derecho de supresión ya es operativo: solicitudes a `privacidad@hirevai.com` se atienden con el botón «Borrar lead» del panel.

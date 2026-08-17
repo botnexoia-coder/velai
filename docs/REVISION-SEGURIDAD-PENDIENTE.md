@@ -1,5 +1,22 @@
 # Revisión de seguridad pendiente de validación
 
+> **Resolución (2026-08-17, validada por Juanes):**
+>
+> | # | Punto | Estado |
+> |---|---|---|
+> | 1 | Hostname de Turnstile | ✅ **Aceptado e implementado** — `verifyTurnstile` valida `result.hostname` contra los hostnames de `ALLOWED_WEB_ORIGINS` (+ localhost en dev), con test |
+> | 2 | Límites de coste/abuso | 🟡 **Parcial** — implementados en el worker: límite por `conversationId` (20/min) y presupuesto diario global de IA (`AI_DAILY_LIMIT`, 429 + alerta a Telegram con antirebote). Las reglas WAF/Rate Limiting de borde quedan como paso manual del dashboard (pendiente) |
+> | 3 | Auditoría de la política de Access | ⬜ **Manual pendiente** (ver TAREAS-PENDIENTES) |
+> | 4 | Cabeceras del sitio | ✅ **Ya cubierto** en `_headers` (nosniff, XFO, Referrer/Permissions-Policy, HSTS preload, COOP y CSP base con frame-ancestors). Pendiente: CSP completa de recursos, empezar en Report-Only |
+> | 5 | `no-store` en admin | ✅ **Implementado** en todas las respuestas de `/api/admin/*` |
+> | 6 | JWT malformado → 401 | ✅ **Ya cubierto** (hallazgo 14 de REVISION-2026-08-17, con test) |
+> | 7 | Content-Type 415 | ✅ **Implementado** en `readJson` (todas las rutas JSON), con test |
+> | 8 | Retención escalonada | ⬜ **Decisión negocio/legal** — hoy 24 meses renovados por actividad; validar con asesoría |
+> | 9 | Configurar cookies | ✅ **Implementado** — `window.VELAI_openConsent()` + enlace «Configurar cookies» en /privacidad/ |
+> | 10 | Promesas de canales | ⬜ **Decisión de negocio** — el usuario decidió mantener Instagram en el prompt por ahora |
+> | 11 | Más pruebas | 🟡 **Parcial** — añadidos Turnstile (hostname/action), 415, 413; suite en 17 tests. El resto, incremental |
+> | 12 | Alertas operativas | 🟡 **Parcial** — alertas activas a Telegram: D1 degradada y presupuesto IA. Umbrales documentados en OPERATIONS §Alertas |
+
 > Revisión del 2026-08-17 sobre `main` en `2bc8cca`.
 > Este documento no afirma que exista una brecha activa. Recoge controles ya
 > presentes y endurecimientos propuestos para que Juanes los valide antes de

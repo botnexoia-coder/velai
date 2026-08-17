@@ -23,6 +23,8 @@ routes = [
 ALLOWED_WEB_ORIGINS = "https://hirevai.com,https://www.hirevai.com,https://velai-dey.pages.dev"
 ADMIN_ORIGIN = "https://admin.hirevai.com"
 LEAD_RETENTION_MONTHS = "24"
+# Tope diario global de llamadas al modelo (presupuesto anti-abuso, resetea a medianoche UTC).
+AI_DAILY_LIMIT = "1000"
 
 [triggers]
 crons = ["*/5 * * * *"]
