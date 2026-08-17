@@ -24,14 +24,16 @@ Sin esto, las campañas gastarían presupuesto a ciegas (sin medir conversiones)
 >
 > Si algún ID cambia, se edita esa línea en cada HTML y se sube el `?v=` de los scripts.
 
-### 2. Activar persistencia segura y panel
+### 2. Activar persistencia segura y panel — ✅ HECHO (2026-08-17)
 
-- [ ] Crear D1, aplicar la migración y sustituir el UUID de ceros en `wrangler.toml`.
-- [ ] Crear Turnstile y sustituir `REPLACE_WITH_TURNSTILE_SITE_KEY` en los HTML.
-- [ ] Configurar secrets/variables del Worker descritos en `docs/OPERATIONS.md`.
-- [ ] Crear `admin.hirevai.com`, protegerlo con Access y autorizar los emails del equipo.
-- [ ] Desplegar y completar las comprobaciones post-deploy.
+- [x] D1 `vai-leads` creada, migración aplicada, UUID real en `wrangler.toml`.
+- [x] Turnstile invisible creado (3 hostnames) y sitekey en los 26 HTML.
+- [x] Secrets del Worker cargados, incluidos `TELEGRAM_CHAT_ID`, `TEAM_DOMAIN` y `POLICY_AUD`.
+- [x] `admin.hirevai.com` como custom domain del Worker + app de Access con OTP.
+- [x] Desplegado y verificado end-to-end: lead de prueba en D1 y **aviso entregado en Telegram**.
 - [x] `.dev.vars` en `.gitignore` (los secretos de desarrollo local nunca se commitean).
+- [ ] **`TEAM_WHATSAPP` y `TWILIO_FROM`** (formato `whatsapp:+E164`): único cabo suelto del sistema de avisos. Sin ellas, el canal WhatsApp de los avisos queda `skipped` — se activará solo (≤6 h) cuando las pongas.
+- [ ] Login de prueba en `admin.hirevai.com` con tu email + PIN, y verificar que ves el lead de prueba.
 
 ### 3. Verificar conversiones antes de invertir
 

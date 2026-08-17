@@ -17,11 +17,11 @@
 > el worker se reestructuró por completo (`worker/app.js`: D1, Turnstile, panel admin,
 > cron) — **las referencias `vai-worker.js:NNN` de este documento son históricas** y ya no
 > corresponden al código actual; la operativa vigente está en `docs/OPERATIONS.md`.
-> **PR 4**: resuelto en código (el fallback hardcodeado de Telegram se eliminó); solo
-> queda configurar las variables en Cloudflare (OPERATIONS §Recursos). **PR 5**: hecho
-> 5.4 (TAREAS-PENDIENTES); pendientes 5.1 (NIF/CIF — bloqueo legal para pauta), 5.2
-> (Instagram en el prompt) y 5.3 (CSS muerto en styles.scss). Métricas del Anexo A:
-> revisar desde ~2026-08-24.
+> **PR 4**: CASI CERRADO — Telegram funciona end-to-end (chat_id como secret, aviso
+> verificado); solo faltan `TEAM_WHATSAPP` y `TWILIO_FROM` para el segundo canal.
+> **PR 5**: hecho 5.4 (TAREAS-PENDIENTES); pendientes 5.1 (NIF/CIF — bloqueo legal
+> para pauta), 5.2 (Instagram en el prompt) y 5.3 (CSS muerto en styles.scss).
+> Métricas del Anexo A: revisar desde ~2026-08-24.
 
 ---
 

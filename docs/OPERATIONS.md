@@ -1,28 +1,47 @@
 # Operaciones — leads y panel de Velai
 
-## Recursos Cloudflare (orden de puesta en marcha)
+> **Estado (2026-08-17): TODO EN PRODUCCIÓN.** D1 `vai-leads` creada y migrada, widget
+> Turnstile invisible activo (sitekey en los 26 HTML), secrets cargados, Worker
+> desplegado con cron, panel en `admin.hirevai.com` tras Access, y avisos de Telegram
+> verificados end-to-end (lead real → D1 → Telegram). Los pasos de abajo quedan como
+> referencia para recrear el entorno. **Pendiente**: variables `TEAM_WHATSAPP` y
+> `TWILIO_FROM` (el canal whatsapp queda en `skipped` y se activará solo al ponerlas)
+> y el riesgo legal del final.
 
-1. Crear la base: `npx wrangler d1 create vai-leads`.
+## Recursos Cloudflare (orden de puesta en marcha — ya ejecutado)
+
+1. Crear la base: `npx wrangler d1 create vai-leads`. *(Hecha: id `4b3056eb-6dee-44a4-8d17-5a80af740ca5`.)*
 2. Copiar el UUID a `wrangler.toml` y ejecutar `npx wrangler d1 migrations apply vai-leads --remote`.
-3. Crear un widget Turnstile de **tipo Invisible** (el tipo se elige en el dashboard; el código usa `execution:'execute'`) con los hostnames `hirevai.com`, `www.hirevai.com` **y** `velai-dey.pages.dev`.
-4. Sustituir `REPLACE_WITH_TURNSTILE_SITE_KEY` en los 26 HTML por la site key pública. `npm run check` falla mientras quede algún marcador (en CI de ramas puede saltarse con `CHECK_ALLOW_PLACEHOLDERS=1`; el deploy real nunca).
-5. Guardar `TURNSTILE_SECRET_KEY`, `ANTHROPIC_API_KEY`, `TELEGRAM_TOKEN`, `TWILIO_ACCOUNT_SID` y `TWILIO_AUTH_TOKEN` como secrets (`npx wrangler secret put <NOMBRE>`).
-6. Configurar `TELEGRAM_CHAT_ID`, `TEAM_WHATSAPP` y `TWILIO_FROM` como variables.
-7. Desplegar el Worker: `npx wrangler deploy`. Verificar en **Workers → vai-worker → Settings → Triggers** que el cron `*/5 * * * *` quedó registrado.
+3. Crear un widget Turnstile de **tipo Invisible** (el tipo se elige en el dashboard; el código usa `execution:'execute'`) con los hostnames `hirevai.com`, `www.hirevai.com` **y** `velai-dey.pages.dev`. *(Hecho: widget `velai-web`.)*
+4. Sustituir `REPLACE_WITH_TURNSTILE_SITE_KEY` en los 26 HTML por la site key pública. `npm run check` falla mientras quede algún marcador (en CI de ramas puede saltarse con `CHECK_ALLOW_PLACEHOLDERS=1`; el deploy real nunca). *(Hecho.)*
+5. Guardar `TURNSTILE_SECRET_KEY`, `ANTHROPIC_API_KEY`, `TELEGRAM_TOKEN`, `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN` y `TELEGRAM_CHAT_ID` como secrets (`npx wrangler secret put <NOMBRE>`). *(Hechos.)*
+6. Configurar `TEAM_WHATSAPP` y `TWILIO_FROM` (formato `whatsapp:+E164`). **⬜ PENDIENTE** — sin ellas el aviso por WhatsApp queda `skipped` y se recupera solo cada 6 h al configurarlas.
+7. Desplegar el Worker: `npx wrangler deploy`. Verificar en **Workers → vai-worker → Settings → Triggers** que el cron `*/5 * * * *` quedó registrado. *(Hecho.)*
 
 No desplegar con el UUID D1 de ceros ni con el marcador de Turnstile. **No quitar de `wrangler.toml` los bindings `KV` y `DB`**: un deploy sin ellos los elimina del Worker (sin `KV`, `/chat` responde 503 y el rate limit se desactiva).
+
+### Lecciones aprendidas del primer deploy (no repetir)
+
+- **`keep_vars = true` es obligatorio**: sin él, cada `wrangler deploy` borra las
+  variables puestas a mano en el dashboard (así se perdió `TELEGRAM_CHAT_ID` y los
+  avisos quedaron en `skipped`). Las credenciales van como **secrets**, que nunca se pisan.
+- **Declarar `routes` desactiva `workers.dev`** salvo `workers_dev = true` explícito —
+  y todo el frontend llama a `vai-worker.botnexo-ia.workers.dev`. Ambas líneas ya
+  están en `wrangler.toml` con su comentario.
 
 ### Orden de despliegue Pages ↔ Worker
 
 Pages despliega **automáticamente** al hacer push a `main`; el Worker se despliega **a mano** con wrangler. El `POST /` JSON antiguo devuelve 410, así que el HTML/JS nuevo y el Worker nuevo deben ir juntos: primero deja el Worker listo (pasos 1–7), después mergea el sitio. Los previews de rama (`https://<rama>.velai-dey.pages.dev`) solo funcionan contra el Worker si su origen exacto está en `ALLOWED_WEB_ORIGINS` (`wrangler.toml`) **y** en los hostnames del widget Turnstile — no hay comodín `*.pages.dev` a propósito.
 
-## Panel administrativo
+## Panel administrativo — OPERATIVO en `admin.hirevai.com`
 
-1. Añadir `admin.hirevai.com` como dominio personalizado del Worker. El hostname del panel se deriva de `ADMIN_ORIGIN` (`wrangler.toml`); si se cambia de dominio, basta cambiar esa variable.
-2. Crear una aplicación self-hosted en Cloudflare Access para ese hostname.
-3. Usar One-time PIN y una política Allow limitada a los emails del equipo.
-4. Configurar `TEAM_DOMAIN` con `https://<equipo>.cloudflareaccess.com` y `POLICY_AUD` con la audiencia de la aplicación.
-5. Confirmar que Access bloquea sesiones anónimas y que el Worker rechaza JWT ausentes o inválidos. El Worker verifica firma (JWKS), `iss`, `aud`, `exp` y `alg`; el panel y su API solo responden en el hostname de `ADMIN_ORIGIN`, así que en `*.workers.dev` no están expuestos.
+Cómo quedó montado (referencia para recrearlo):
+
+1. `admin.hirevai.com` es dominio personalizado del Worker (declarado en `routes` de `wrangler.toml`). El hostname del panel se deriva de `ADMIN_ORIGIN`; si se cambia de dominio, basta cambiar esa variable.
+2. Aplicación self-hosted "Velai Leads Panel" en Cloudflare Access para ese hostname (Zero Trust → Access → Applications).
+3. One-time PIN y política Allow limitada a los emails del equipo.
+4. `TEAM_DOMAIN` (`https://silent-pond-acd1.cloudflareaccess.com`) y `POLICY_AUD` cargados como secrets del Worker. Truco: ambos se pueden leer de la URL de redirección del login de Access — el parámetro `kid` es el AUD.
+5. Verificado: sesión anónima → 302 al login de Access; el Worker rechaza JWT ausentes o inválidos (firma vía JWKS, `iss`, `aud`, `exp` y `alg`); el panel y su API solo responden en el hostname de `ADMIN_ORIGIN`, así que en `*.workers.dev` no están expuestos (404).
 
 ## Entrega y recuperación
 
