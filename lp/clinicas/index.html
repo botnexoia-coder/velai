@@ -43,6 +43,9 @@
     .lpx-ticks .ck { color:var(--orange); font-weight:800; flex-shrink:0; }
     .lpx-trust { margin-top:24px; font-size:.92rem; color:var(--muted); }
     .lpx-trust b { color:var(--white); font-weight:700; }
+    .lpx-demo { margin-top:14px; font-size:.95rem; }
+    .lpx-demo a { color:var(--orange2); font-weight:600; }
+    .lpx-demo span { display:block; color:var(--muted); font-size:.8rem; margin-top:3px; }
   </style>
 </head>
 <body>
@@ -73,6 +76,10 @@
         <li><span class="ck">✓</span> Funcionando en menos de 48 horas, sin permanencia</li>
       </ul>
       <p class="lpx-trust">Desde <b>1.000 € setup + 100 €/mes</b>. Lo configuramos nosotros.</p>
+      <p class="lpx-demo">
+        <a href="#" data-vai-demo="clinica" data-conv="demo_chat_click">Habla con la Vai de una clínica →</a>
+        <span>Es una clínica ficticia. Pídele cita como lo haría un paciente tuyo.</span>
+      </p>
     </div>
     <div>
       <div data-velai-leadform data-sector="Clínica / Salud"></div>
@@ -80,5 +87,6 @@
   </div>
 </main>
 
+<script src="/assets/vai-widget.js?v=1" defer></script>
 </body>
 </html>

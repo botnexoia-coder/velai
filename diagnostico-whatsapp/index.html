@@ -397,7 +397,8 @@
     findings().forEach(function (f) { html += '<li>⚠️ ' + f + '</li>'; });
     html += '</ul>';
     html += '<div class="dx-cta"><p style="font-weight:700;margin-bottom:14px">' + T.ctaTitle + '</p>';
-    html += '<a href="https://wa.me/' + WA + '" data-wa data-loc="diagnostico-result" target="_blank" rel="noopener noreferrer">' + T.ctaBtn + '</a></div>';
+    html += '<a href="https://wa.me/' + WA + '" data-wa data-loc="diagnostico-result" target="_blank" rel="noopener noreferrer">' + T.ctaBtn + '</a>';
+    html += '<p style="margin:14px 0 0;font-size:.95rem"><a href="#" data-vai-demo="" data-conv="chat_cta_resultado" style="color:#FF8C40;font-weight:600">Pregúntale a Vai qué harías con estos números →</a></p></div>';
     html += '<p class="dx-muted">' + T.okThanks + '</p>';
     html += '<p class="dx-muted">' + T.lostNote + '</p>';
     body.innerHTML = html;
@@ -449,5 +450,6 @@
   renderQuestion();
 })();
 </script>
+<script src="/assets/vai-widget.js?v=1" defer></script>
 </body>
 </html>
