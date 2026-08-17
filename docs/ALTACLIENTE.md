@@ -29,12 +29,12 @@
 | 1 | Crea su Business Portfolio (o usa el que ya tenga si hace anuncios) | C |
 | 2 | Verifica su negocio con su CIF | C |
 | 3 | Añade a Velai como **socio** con permisos sobre la WABA | C |
-| 4 | Subcuenta `cliente-<slug>` en Twilio + **tope de gasto** (las 4 primeras ya están creadas) | V |
+| 4 | Subcuenta `cliente-<slug>`: botón **"1· Crear subcuenta"** en la ficha del panel (crea, cifra el token y lo guarda solo — las 4 primeras ya existen y se quedan como están). **Tope de gasto a mano** en la consola: la API no lo permite y el panel lo recuerda | V |
 | 5 | Registras el sender con la WABA **del cliente** (Embedded Signup; el OTP lo recibe él) | V+C |
 | 6 | Display name = su marca, exacta — cambiarlo después exige ticket de soporte | V |
 | 7 | Perfil del sender con los datos del cliente | V |
 | 8 | Webhook de la subcuenta → `https://vai-worker.botnexo-ia.workers.dev` | V |
-| 9 | Plantilla `nuevo_lead_<slug>`, **Utility**, crear nueva (no duplicar) con los 4 ejemplos | V |
+| 9 | Plantilla `nuevo_lead_<slug>` Utility: botón **"2· Plantilla → aprobación"** (el cron avisa por Telegram cuando Meta la apruebe; hasta entonces el aviso queda `skipped: template_not_approved`) | V |
 | 10 | Alta/edición en el panel: canal, subcuenta (AC…), WABA, **auth token** (write-only, se guarda cifrado), plantilla, equipo, contexto, socio = concedido | V |
 | 11 | Prueba end-to-end + firma validada con el token de la subcuenta (si falta el token, el worker rechaza con `twilio_auth_token_missing` y avisa a Telegram) | V |
 

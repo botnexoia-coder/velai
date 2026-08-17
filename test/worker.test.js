@@ -319,17 +319,22 @@ test('tenant con subcuenta pero sin token: 403 sin llamar al modelo', async () =
   } finally { globalThis.fetch = realFetch; }
 });
 
-test('deliver envía desde la subcuenta del tenant (SID en la URL, auth del padre)', async () => {
+test('deliver envía desde la subcuenta con SUS credenciales (SID en URL y en el Basic)', async () => {
   const calls = [];
   const realFetch = globalThis.fetch;
-  globalThis.fetch = async (url) => { calls.push(String(url)); return new Response('{}', { status: 201 }); };
+  globalThis.fetch = async (url, init) => { calls.push({ url: String(url), auth: init.headers.Authorization }); return new Response('{}', { status: 201 }); };
   try {
-    const env = { TEAM_WHATSAPP: 'whatsapp:+34600000001', TWILIO_FROM: 'whatsapp:+15550000000', TWILIO_ACCOUNT_SID: 'AC' + 'p'.repeat(32), TWILIO_AUTH_TOKEN: 't', TWILIO_LEAD_TEMPLATE_SID: 'HXtest' };
+    const env = { TEAM_WHATSAPP: 'whatsapp:+34600000001', TWILIO_FROM: 'whatsapp:+15550000000', TWILIO_ACCOUNT_SID: 'AC' + 'p'.repeat(32), TWILIO_AUTH_TOKEN: 'parent-tok', TWILIO_LEAD_TEMPLATE_SID: 'HXtest', SECRETS_KEK: TEST_KEK };
     const sub = 'AC' + 'c'.repeat(32);
-    await testing.deliver(env, 'whatsapp', { whatsapp: '+34612345678' }, { twilio_subaccount_sid: sub });
-    assert.ok(calls[0].includes(`/Accounts/${sub}/Messages.json`), 'usa el SID de la subcuenta');
+    const subToken = 'f0e1d2c3b4a5968778695a4b3c2d1e0f';
+    const tenant = { id: 't-x', twilio_subaccount_sid: sub, twilio_auth_token_enc: await encryptSecret(env, 't-x', subToken) };
+    await testing.deliver(env, 'whatsapp', { whatsapp: '+34612345678' }, tenant);
+    assert.ok(calls[0].url.includes(`/Accounts/${sub}/Messages.json`), 'usa el SID de la subcuenta en la URL');
+    assert.equal(calls[0].auth, `Basic ${btoa(`${sub}:${subToken}`)}`, 'autentica con las credenciales de la subcuenta');
     await testing.deliver(env, 'whatsapp', { whatsapp: '+34612345678' }, null);
-    assert.ok(calls[1].includes(`/Accounts/${env.TWILIO_ACCOUNT_SID}/`), 'sin tenant usa el padre');
+    assert.equal(calls[1].auth, `Basic ${btoa(`${env.TWILIO_ACCOUNT_SID}:parent-tok`)}`, 'sin tenant usa el padre');
+    // subcuenta sin token: skipped, no un envío roto
+    assert.deepEqual(await testing.deliver(env, 'whatsapp', {}, { id: 't-y', twilio_subaccount_sid: sub, twilio_auth_token_enc: null }), { skipped: true, error: 'not_configured' });
   } finally { globalThis.fetch = realFetch; }
 });
 
@@ -415,6 +420,88 @@ test('el preview responde sin escribir en D1 ni en KV, y no existe DELETE de ten
   assert.equal(del.status, 401, 'DELETE tampoco pasa de Access; con Access, el router responde 405');
   assert.equal(writes.length, 0, 'nada escrito en D1');
   assert.equal(env.KV.puts.filter((k) => !k.startsWith('rl:')).length, 0, 'nada escrito en KV');
+});
+
+function provisionHarness({ tenant, failUpdate = false } = {}) {
+  const updates = [];
+  const row = tenant || { id: '00000000-0000-4000-8000-00000000000a', slug: 'acme', name: 'Acme', twilio_subaccount_sid: null, twilio_auth_token_enc: null, lead_template_sid: null, lead_template_status: null, sender_sid: null, waba_id: null };
+  const env = {
+    TWILIO_ACCOUNT_SID: 'AC' + 'p'.repeat(32), TWILIO_AUTH_TOKEN: 'ptok', SECRETS_KEK: TEST_KEK,
+    KV: { async get() { return null; }, async put() {}, async delete() {} },
+    DB: { prepare: (sql) => ({ bind: (...args) => ({
+      first: async () => sql.startsWith('SELECT * FROM tenants') ? row : null,
+      run: async () => { if (failUpdate && sql.startsWith('UPDATE tenants')) throw new Error('d1 down'); updates.push({ sql, args }); return { meta: { changes: 1 } }; },
+      all: async () => ({ results: [] }),
+    }) }), batch: async () => [] },
+  };
+  return { env, row, updates, ctx: { waitUntil() {} } };
+}
+const provReq = (body) => new Request('https://admin.hirevai.com/x', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body || {}) });
+
+test('provision/subaccount: idempotente, cifra el token y no lo devuelve', async () => {
+  const twilioCalls = [];
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = async (url) => {
+    twilioCalls.push(String(url));
+    return new Response(JSON.stringify({ sid: 'AC' + 'n'.repeat(32), auth_token: 'a1b2c3d4e5f60718293a4b5c6d7e8f90' }), { status: 201 });
+  };
+  try {
+    // fila ya provisionada → 409 SIN llamar a Twilio
+    const done = provisionHarness({ tenant: { id: '00000000-0000-4000-8000-00000000000a', slug: 'acme', name: 'Acme', twilio_subaccount_sid: 'AC' + 'x'.repeat(32) } });
+    await assert.rejects(testing.handleProvision(provReq(), done.env, done.ctx, done.row.id, 'subaccount', 'juan@x'), (e) => e.code === 'already_provisioned');
+    assert.equal(twilioCalls.length, 0);
+    // creación correcta: SID guardado, token cifrado v1:, respuesta sin token
+    const ok = provisionHarness();
+    const res = await testing.handleProvision(provReq(), ok.env, ok.ctx, ok.row.id, 'subaccount', 'juan@x');
+    const data = await res.json();
+    assert.equal(data.sid.startsWith('AC'), true);
+    assert.equal(JSON.stringify(data).includes('a1b2c3d4'), false, 'el token no vuelve al panel');
+    const update = ok.updates.find((u) => u.sql.includes('twilio_subaccount_sid'));
+    assert.ok(String(update.args[1]).startsWith('v1:'), 'token cifrado en D1');
+  } finally { globalThis.fetch = realFetch; }
+});
+
+test('provision: Twilio 400 → 502 sin tocar la fila; D1 caída tras crear → provision_orphan', async () => {
+  const realFetch = globalThis.fetch;
+  try {
+    globalThis.fetch = async () => new Response(JSON.stringify({ code: 21404 }), { status: 400 });
+    const bad = provisionHarness();
+    await assert.rejects(testing.handleProvision(provReq(), bad.env, bad.ctx, bad.row.id, 'subaccount', 'juan@x'), (e) => e.code === 'twilio_400_21404');
+    assert.equal(bad.updates.length, 0, 'la fila no se toca');
+    globalThis.fetch = async (url) => new Response(JSON.stringify({ sid: 'AC' + 'n'.repeat(32), auth_token: 'a1b2c3d4e5f60718293a4b5c6d7e8f90' }), { status: 201 });
+    const orphan = provisionHarness({ failUpdate: true });
+    await assert.rejects(testing.handleProvision(provReq(), orphan.env, orphan.ctx, orphan.row.id, 'subaccount', 'juan@x'), (e) => e.code === 'provision_orphan');
+  } finally { globalThis.fetch = realFetch; }
+});
+
+test('provision/sender sin waba → 400 sin llamada; el cron aprueba plantillas pendientes', async () => {
+  const realFetch = globalThis.fetch;
+  const calls = [];
+  try {
+    globalThis.fetch = async (url) => { calls.push(String(url)); return new Response('{}', { status: 200 }); };
+    const sub = { id: '00000000-0000-4000-8000-00000000000a', slug: 'acme', name: 'Acme', twilio_subaccount_sid: 'AC' + 'c'.repeat(32), waba_id: null, sender_sid: null };
+    const h = provisionHarness({ tenant: { ...sub, twilio_auth_token_enc: await encryptSecret({ SECRETS_KEK: TEST_KEK }, sub.id, 'a1b2c3d4e5f60718293a4b5c6d7e8f90') } });
+    await assert.rejects(testing.handleProvision(provReq({ phone: '+34910000000' }), h.env, h.ctx, sub.id, 'sender', 'juan@x'), (e) => e.code === 'waba_required');
+    assert.equal(calls.length, 0, 'sin llamada a Twilio');
+    // cron: pending → approved rellena el estado e invalida
+    globalThis.fetch = async (url, init) => {
+      if (String(url).includes('/ApprovalRequests')) return new Response(JSON.stringify({ whatsapp: { status: 'approved' } }), { status: 200 });
+      return new Response('{}', { status: 200 });
+    };
+    const pending = { id: '00000000-0000-4000-8000-00000000000b', slug: 'acme2', name: 'Acme2', channel_address: 'whatsapp:+1', twilio_subaccount_sid: 'AC' + 'd'.repeat(32), lead_template_sid: 'HX' + 'a'.repeat(32), lead_template_status: 'pending', sender_sid: null };
+    pending.twilio_auth_token_enc = await encryptSecret({ SECRETS_KEK: TEST_KEK }, pending.id, 'a1b2c3d4e5f60718293a4b5c6d7e8f90');
+    const cronUpdates = [];
+    const env = {
+      SECRETS_KEK: TEST_KEK,
+      KV: { async get() { return null; }, async put() {}, async delete() {} },
+      DB: { prepare: (sql) => ({
+        bind: (...args) => ({ run: async () => { cronUpdates.push(sql); return { meta: { changes: 1 } }; }, first: async () => null, all: async () => ({ results: [] }) }),
+        all: async () => ({ results: [pending] }),
+      }) },
+    };
+    await testing.pollProvisioning(env);
+    assert.ok(cronUpdates.some((sql) => sql.includes("lead_template_status='approved'")), 'el cron marca approved');
+  } finally { globalThis.fetch = realFetch; }
 });
 
 test('el Worker rechaza CORS desconocido y exige Access en administración', async () => {

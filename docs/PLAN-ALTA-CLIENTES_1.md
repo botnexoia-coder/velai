@@ -1,17 +1,16 @@
 # Plan ejecutable — alta de clientes con WABA propia (multi-cuenta Twilio)
 
-> ⚠️ **SUPERSEDIDO por `PLAN-ALTA-CLIENTES_1.md`**, que corrige §3.4 (deliver con
-> credenciales de la subcuenta, verificado contra la doc de Twilio) y añade el PR 6
-> (aprovisionamiento desde el panel). Ambos aplicados.
-
-> **Estado (2026-08-17): PRs 1, 2, 3 y 5 APLICADOS Y DESPLEGADOS; PR 4 con los contextos
-> redactados** (`tenants/*.md` — gogestion y zoe completos desde sus repos; hiredatavision,
-> dialogos y myxu-costura con `[PENDIENTE:…]` porque 3 repos dan 404 con el token gh actual).
-> El alta de las filas en el panel es de Juan (paso manual, ver TAREAS §2c). Correcciones
-> sobre este doc: leadform iba por **v4** (bump real v4→v5, no v2→v3); `docs/ALTACLIENTE.md`
-> **no existía** (creado, no reescrito); la suite quedó en **30/30** (los conteos 34/36 del
-> doc no cuadraban entre sí). Tests de firma por subcuenta, cifrado AAD, deliver por
-> subcuenta, pending no-activable y rate limit del webhook: todos en verde.
+> **Estado (2026-08-17): APLICADO ÍNTEGRO, incluida la corrección de `deliver()`**
+> (credenciales de la subcuenta en el Basic, no las del padre) **y el PR 6 completo**:
+> migración 0005, `worker/twilio.js`, endpoints `/provision/*` con las 7 guardas
+> (idempotencia 409, cerrojo KV 60s, D1-antes-de-responder + `provision_orphan` con
+> alerta, rate limit 5/min por actor, auditoría en tenant_versions, token que nunca
+> vuelve, aviso de tope de gasto), cron que sondea aprobaciones de plantilla y estado
+> del sender con aviso a Telegram, y sección de aprovisionamiento en la ficha del panel.
+> Matiz de implementación: el `lead_template_sid` se guarda al CREAR la plantilla y
+> `deliver()` no la usa hasta que el cron la marque `approved` (una sola fuente de
+> verdad, sin clave suelta en KV). Suite 33/33. Los SID de subcuenta se redactaron de
+> este doc: GitHub Push Protection bloquea el push si van en claro.
 
 > **Para Claude Code, desde la raíz del repo `botnexoia-coder/velai`.** Levantado sobre `a63b9b7`
 > (Fase 2 desplegada) el 2026-08-17. Todo el código necesario está aquí; aplica PR por PR, en
@@ -50,10 +49,10 @@ Las cuatro subcuentas están **creadas y activas**. Estos SID son los que van en
 
 | Subcuenta | Account SID | Tenant |
 |---|---|---|
-| `cliente-hiredatavision` | `AC… (en Twilio → Subaccounts, no se publica en el repo)` | `hiredatavision` |
-| `cliente-gogestion` | `AC… (en Twilio → Subaccounts, no se publica en el repo)` | `gogestion` |
-| `cliente-zoe` | `AC… (en Twilio → Subaccounts, no se publica en el repo)` | `zoe` |
-| `cliente-dialogos` | `AC… (en Twilio → Subaccounts, no se publica en el repo)` | `dialogos` |
+| `cliente-hiredatavision` | `AC… (en Twilio → Subaccounts; GitHub Push Protection no permite publicarlos)` | `hiredatavision` |
+| `cliente-gogestion` | `AC… (en Twilio → Subaccounts; GitHub Push Protection no permite publicarlos)` | `gogestion` |
+| `cliente-zoe` | `AC… (en Twilio → Subaccounts; GitHub Push Protection no permite publicarlos)` | `zoe` |
+| `cliente-dialogos` | `AC… (en Twilio → Subaccounts; GitHub Push Protection no permite publicarlos)` | `dialogos` |
 
 > **Los auth tokens de las subcuentas NO están aquí a propósito.** Están en *Keys & Credentials →
 > API keys & tokens* de cada subcuenta y los pega Juan en el panel (campo write-only). Ningún
@@ -307,10 +306,23 @@ En `worker/app.js:399-429`:
 
 y usar `accountSid` en la URL de `Messages.json`, dejando el `Authorization` del padre.
 
-> ⚠️ **Verificar con una llamada real antes de dar el PR por bueno.** Si Twilio rechaza la
-> autenticación del padre sobre la subcuenta, el plan B es descifrar el token del tenant y usarlo
-> también para enviar (`Basic <subaccountSid>:<token>`). Deja el código preparado para el cambio de
-> una línea y anota el resultado en `docs/OPERATIONS.md`.
+> ⚠️ **CORREGIDO el 2026-08-17 con la documentación de Twilio.** No uses las credenciales del
+> padre: la doc de subcuentas dice explícitamente que para operar recursos *dentro* de una
+> subcuenta se usan **el SID y el auth token de la subcuenta**, y que las **API Keys de la cuenta
+> principal NO pueden acceder a recursos de subcuenta**. Así que `deliver()` autentica con
+> `Basic <twilio_subaccount_sid>:<token descifrado>`:
+>
+> ```js
+>   const accountSid = (tenant && tenant.twilio_subaccount_sid) || env.TWILIO_ACCOUNT_SID;
+>   const token = tenant && tenant.twilio_subaccount_sid
+>     ? await twilioAuthTokenFor(env, tenant)     // el mismo que valida la firma
+>     : env.TWILIO_AUTH_TOKEN;
+>   if (!token) return { skipped: true, error: 'not_configured' };
+>   const auth = `Basic ${btoa(`${accountSid}:${token}`)}`;
+> ```
+>
+> Ventaja lateral: el token de la subcuenta ya está cifrado en la fila y se descifra una sola vez
+> por invocación, así que no hay credencial nueva ni ruta alternativa que mantener.
 
 ### 3.5 Panel y API
 
@@ -575,3 +587,141 @@ eliminar esa cuenta y **pierde su historial**. Esa conversación va primero.
 
 **Lo que no depende de nosotros y conviene lanzar ya en paralelo:** que cada cliente verifique su
 negocio en Meta (días de gestoría) y la revisión de categoría de la plantilla de Velai.
+
+---
+
+## PR 6 — Aprovisionamiento desde el panel (añadido 2026-08-17)
+
+> **Pregunta que lo motiva:** ¿se puede dar de alta un cliente en `admin.hirevai.com` y que la
+> subcuenta de Twilio se cree sola, sin entrar a la consola? **Sí, y bastante más que la subcuenta.**
+> Lo que sigue está verificado contra la documentación de Twilio.
+
+### 6.1 Qué se automatiza y qué no
+
+| Paso del alta | ¿API? | Cómo |
+|---|---|---|
+| Crear la subcuenta | ✅ | `POST /2010-04-01/Accounts` con las credenciales del **padre**. La respuesta **incluye el `auth_token` de la subcuenta**: se cifra y se guarda en el acto. Límite 1000 subcuentas |
+| Guardar el auth token | ✅ | Deja de ser un copiar-pegar humano: nunca se muestra en pantalla |
+| Crear la plantilla de aviso | ✅ | `POST https://content.twilio.com/v1/Content` con las credenciales **de la subcuenta** → devuelve el `HX…` |
+| Enviarla a aprobación | ✅ | `POST /v1/Content/{sid}/ApprovalRequests/whatsapp` con `name` (minúsculas y guiones bajos) y `category: UTILITY` |
+| Saber si ya está aprobada | ✅ | `GET /v1/Content/{sid}/ApprovalRequests` — lo sondea el cron, sin que nadie vigile |
+| Crear el sender de WhatsApp | ✅ | Senders API: `sender_id: whatsapp:+E164`, `configuration.waba_id`, método de verificación, y el `webhook.callback_url` ya apuntando al worker |
+| Completar el OTP del número | ✅ | `UPDATE` del sender con `verification_code` — el panel puede pedirle el código al cliente por teléfono y enviarlo |
+| Conectar la WABA del cliente a Twilio | ❌ | Requiere login de Meta del cliente (Embedded Signup). Sin `waba_id` no hay sender. Solo el ISV lo evita, y el ISV exige verificación de Velai |
+| Verificar el negocio del cliente en Meta | ❌ | Trámite suyo, con su CIF |
+| Añadir a Velai como socio | ❌ | Lo hace el cliente en su Business Manager |
+| Aprobación del display name / de la plantilla | ❌ | Decide Meta; solo se puede consultar |
+
+**Resultado práctico:** el alta pasa de 11 pasos manuales a **2 manuales del cliente** (conectar su
+WABA y darte acceso) **+ un botón** en el panel. Lo que no se puede automatizar tampoco lo hacías
+tú: lo hace el cliente o lo decide Meta.
+
+### 6.2 Esquema (`migrations/0005_provisioning.sql`)
+
+```sql
+-- Estado del aprovisionamiento automático. Nada aquí es secreto: los tokens siguen
+-- cifrados en twilio_auth_token_enc.
+ALTER TABLE tenants ADD COLUMN lead_template_status TEXT;  -- null|'pending'|'approved'|'rejected'
+ALTER TABLE tenants ADD COLUMN sender_sid TEXT;            -- XE… del sender de WhatsApp
+ALTER TABLE tenants ADD COLUMN sender_status TEXT;         -- CREATING|PENDING_VERIFICATION|VERIFYING|ONLINE|…
+ALTER TABLE tenants ADD COLUMN provisioned_at TEXT;
+```
+
+### 6.3 `worker/twilio.js` (nuevo)
+
+Un módulo con una función por operación, todas devolviendo `{ok, data}` o lanzando `HttpError`, y
+**ninguna** registrando credenciales:
+
+```js
+// Aprovisionamiento de Twilio desde el panel. Regla de oro: los recursos DE una subcuenta se
+// operan con las credenciales DE esa subcuenta — la doc de Twilio dice que las API Keys de la
+// cuenta principal no acceden a recursos de subcuenta. Solo la creación usa las del padre.
+async function twilioPost(url, credentials, form) {
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: {
+      Authorization: `Basic ${btoa(`${credentials.sid}:${credentials.token}`)}`,
+      'Content-Type': 'application/x-www-form-urlencoded',
+    },
+    body: new URLSearchParams(form),
+    signal: AbortSignal.timeout(10000),
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) throw new HttpError(502, `twilio_${response.status}_${data.code || 'error'}`);
+  return data;
+}
+
+export async function createSubaccount(env, friendlyName) {
+  const data = await twilioPost('https://api.twilio.com/2010-04-01/Accounts.json',
+    { sid: env.TWILIO_ACCOUNT_SID, token: env.TWILIO_AUTH_TOKEN }, { FriendlyName: friendlyName });
+  // data.auth_token solo viaja aquí: se cifra inmediatamente y no se devuelve al panel.
+  return { sid: data.sid, authToken: data.auth_token };
+}
+```
+
+Y del mismo estilo: `createLeadTemplate(credentials, slug, businessName)` (JSON contra
+`content.twilio.com/v1/Content`, con las 4 variables en el orden fijado por
+`leadTemplateVariables`), `submitTemplateApproval(credentials, contentSid, name)` con
+`category: 'UTILITY'`, `fetchApprovalStatus(credentials, contentSid)`,
+`createWhatsAppSender(credentials, {phone, wabaId, callbackUrl})` y
+`verifySender(credentials, senderSid, code)`.
+
+### 6.4 Endpoints del panel
+
+Todos bajo `/api/admin/tenants/:id/provision/…`, detrás de Cloudflare Access igual que el resto:
+
+| Endpoint | Hace | Precondición |
+|---|---|---|
+| `POST …/subaccount` | Crea la subcuenta, cifra el token, guarda SID | La fila no tiene `twilio_subaccount_sid` |
+| `POST …/template` | Crea la plantilla y la manda a aprobación (`pending`) | Hay subcuenta |
+| `POST …/sender` | Crea el sender con `waba_id` y webhook | Hay subcuenta y `waba_id` |
+| `POST …/sender/verify` | Manda el `verification_code` | Sender en `PENDING_VERIFICATION`/`VERIFYING` |
+| `GET …/provision` | Estado consolidado de los 4 pasos | — |
+
+### 6.5 Guardas — esto es lo que decide si el botón es una ayuda o un problema
+
+1. **Idempotencia por columna.** Cada endpoint se niega (409 `already_provisioned`) si su columna ya
+   tiene valor. Un doble clic no crea dos subcuentas — y en Twilio **una subcuenta no se borra**,
+   solo se cierra y se elimina 30 días después: crear basura sale caro en confusión.
+2. **Cerrojo en KV** (`provision:<tenantId>:<paso>`, TTL 60 s) para la ventana entre la llamada a
+   Twilio y el `UPDATE` en D1: sin él, dos clics simultáneos crean dos subcuentas antes de que la
+   primera se guarde.
+3. **Si Twilio responde OK pero el `UPDATE` de D1 falla**, quedaría una subcuenta huérfana con su
+   token perdido. Por eso: escribir en D1 **antes** de responder al panel y, si el `UPDATE` falla,
+   registrar `code:'provision_orphan'` con el SID **y alertar a Telegram** para reconciliar a mano.
+   Es el único fallo de este PR que no se arregla solo.
+4. **Rate limit por actor** (5/min) con el mecanismo que ya usa `preview`: son llamadas que crean
+   recursos facturables.
+5. **Auditoría**: cada paso deja fila en `tenant_versions` (`field: 'provision'`, sin secretos en
+   `previous_value`) y aviso a Telegram con actor y paso.
+6. **El token nunca vuelve**: ni en la respuesta del endpoint, ni en el `GET` de la ficha, ni en los
+   logs. El test que ya existe para `twilio_auth_token_enc` se extiende a estas rutas.
+7. **Tope de gasto**: la API no lo configura, así que el panel debe **mostrar un aviso** hasta que
+   Juan lo ponga a mano en la consola de esa subcuenta. Un cliente nuevo sin tope es riesgo abierto.
+
+### 6.6 Cron: cerrar el círculo sin vigilar nada
+
+En `scheduled()`, junto al drenaje de la cola: para cada tenant con
+`lead_template_status = 'pending'`, consultar la aprobación; si pasó a `approved`, escribir
+`lead_template_sid`, poner `lead_template_status = 'approved'`, invalidar caché y avisar por
+Telegram (*"la plantilla de Barbería López ya está aprobada, los avisos salen por la suya"*). Si
+`rejected`, avisar con el motivo. Igual con `sender_status` mientras no sea `ONLINE`.
+
+Esto es lo que convierte el runbook en algo que no hay que recordar: el sistema te dice cuándo un
+cliente quedó listo, en vez de que tú entres a mirar.
+
+### 6.7 Tests (6 más → 42/42)
+
+1. `POST …/subaccount` con la fila ya provisionada → 409, y **no** llama a Twilio.
+2. Creación correcta: el token queda cifrado (`v1:`), la respuesta **no** lo contiene y el SID se
+   guarda.
+3. Twilio devuelve 400 → 502 `twilio_400_*`, la fila **no se toca**.
+4. `UPDATE` de D1 falla tras crear en Twilio → log `provision_orphan` con el SID y alerta enviada.
+5. El cron pasa una plantilla de `pending` a `approved`, rellena `lead_template_sid` e invalida caché.
+6. `POST …/sender` sin `waba_id` → 400 `waba_required`, sin llamada a Twilio.
+
+### 6.8 Orden
+
+**PR 6 va después del 3**, no antes: reutiliza `encryptSecret` y la resolución de tenant, y no tiene
+sentido automatizar la creación de algo cuyo consumo aún no funciona. Las 4 subcuentas que ya
+existen se quedan como están: el endpoint solo se usará para el cliente número 5 en adelante.

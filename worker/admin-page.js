@@ -34,6 +34,16 @@ export const ADMIN_HTML = `<!doctype html>
 <div class="card"><b>Probar el borrador (no guarda nada)</b>
 <div class="note" style="margin-top:6px"><input id="tTestMsg" placeholder="Mensaje de prueba, p. ej. «hola, ¿tenéis hueco mañana?»" style="flex:1"><button class="btn alt" id="tenantPreview" type="button">Probar</button></div>
 <article id="tPreviewOut" class="muted" style="white-space:pre-wrap;margin-top:8px"></article></div>
+<div class="card" id="tProv" hidden><b>Aprovisionamiento Twilio (automático)</b>
+<div id="tProvState" class="muted" style="margin:8px 0;white-space:pre-line"></div>
+<div class="actions" style="margin:4px 0 0;align-items:center">
+<button class="btn alt" id="pSub" type="button">1· Crear subcuenta</button>
+<button class="btn alt" id="pTpl" type="button">2· Plantilla → aprobación</button>
+<input id="pPhone" placeholder="+34910000000" style="max-width:150px">
+<button class="btn alt" id="pSender" type="button">3· Crear sender</button>
+<input id="pCode" placeholder="OTP" style="max-width:80px">
+<button class="btn alt" id="pVerify" type="button">4· Verificar OTP</button>
+</div></div>
 <div class="timeline"><h3>Historial</h3><div id="tVersions" class="muted">—</div></div>
 </div></dialog>
 <script nonce="__NONCE__">
@@ -48,7 +58,7 @@ $('#rows').onclick=e=>{const tr=e.target.closest('[data-id]');if(tr)openLead(tr.
 async function openLead(id){try{const d=await api('/api/admin/leads/'+id);current=d.lead;const l=d.lead;const cards=[['Fecha',fmt(l.created_at)],['Cliente',l.tenant_name],['Nombre',l.name],['WhatsApp',l.whatsapp],['Sector',l.sector],['Fuente',l.source],['Mensajes/día',l.messages_per_day],['Canal',l.channel],['Puntuación',l.score],['Nota',l.note],['Página',l.page_url]].map(x=>'<div class="card"><b>'+x[0]+'</b>'+esc(x[1]??'—')+'</div>').join('');const options=['new','contacted','qualified','won','lost','spam'].map(s=>'<option '+(s===l.status?'selected':'')+'>'+s+'</option>').join('');const notices=d.notifications.map(n=>'<article><b>Aviso '+esc(n.channel)+': '+esc(n.status)+'</b><div class="muted">Intentos: '+n.attempts+(n.last_error?' · '+esc(n.last_error):'')+'</div></article>').join('');const notes=d.notes.map(n=>'<article><b>'+esc(n.author_email)+'</b><div>'+esc(n.text)+'</div><small class="muted">'+fmt(n.created_at)+'</small></article>').join('');const events=d.events.map(n=>'<article><b>'+esc(n.event_type)+'</b><div>'+esc(n.detail||'')+'</div><small class="muted">'+fmt(n.created_at)+' · '+esc(n.actor_email)+'</small></article>').join('');$('#detailBody').innerHTML='<div class="grid">'+cards+'</div><div class="actions"><select id="status">'+options+'</select><button class="btn" id="saveStatus">Guardar estado</button><button class="btn alt" id="retry">Reintentar avisos</button><button class="btn bad" id="delete">Borrar lead</button></div><div class="note"><textarea id="note" rows="3" placeholder="Añadir nota…"></textarea><button class="btn" id="addNote">Añadir</button></div><div class="timeline"><h3>Actividad</h3>'+notices+notes+events+'</div>';wireDetail();$('#detail').showModal()}catch(e){alert(e.message)}}
 function wireDetail(){$('#saveStatus').onclick=async()=>{await api('/api/admin/leads/'+current.id,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({status:$('#status').value})});$('#detail').close();load()};$('#retry').onclick=async()=>{await api('/api/admin/leads/'+current.id+'/retry',{method:'POST'});openLead(current.id)};$('#addNote').onclick=async()=>{const text=$('#note').value.trim();if(!text)return;await api('/api/admin/leads/'+current.id+'/notes',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text})});openLead(current.id)};$('#delete').onclick=async()=>{if(!confirm('¿Borrar definitivamente este lead y todos sus datos?'))return;await api('/api/admin/leads/'+current.id,{method:'DELETE'});$('#detail').close();load()}}
 // ── Pestaña Clientes ──
-const TERRS={slug_taken:'Ese slug ya existe.',address_taken:'Ese canal ya está asignado a otro cliente: guardarlo desviaría sus conversaciones.',subaccount_taken:'Esa subcuenta de Twilio ya está asignada a otro cliente.',pending_tenant_cannot_be_active:'Un prospecto (canal pending:) no puede activarse: ponle primero su canal real.',invalid_twilio_auth_token:'El auth token debe ser 32 caracteres hexadecimales (Twilio → Keys & Credentials).',stale_tenant:'Alguien modificó este cliente mientras editabas. Recarga la ficha y vuelve a aplicar tus cambios.',nothing_to_update:'No hay cambios que guardar.',invalid_preview:'Escribe un mensaje de prueba y un contexto de al menos 50 caracteres.',rate_limited:'Demasiadas pruebas seguidas: espera un minuto.'};
+const TERRS={already_provisioned:'Ese paso ya está hecho (idempotente: un doble clic no crea recursos duplicados).',provision_in_progress:'Ese paso ya está en curso, espera unos segundos.',waba_required:'Rellena y guarda primero la WABA del cliente.',subaccount_required:'Crea primero la subcuenta (paso 1).',twilio_auth_token_missing:'La subcuenta no tiene auth token guardado.',provision_orphan:'Twilio creó el recurso pero D1 no lo guardó: revisa Telegram y reconcilia a mano.',invalid_code:'El OTP son 4-8 dígitos.',slug_taken:'Ese slug ya existe.',address_taken:'Ese canal ya está asignado a otro cliente: guardarlo desviaría sus conversaciones.',subaccount_taken:'Esa subcuenta de Twilio ya está asignada a otro cliente.',pending_tenant_cannot_be_active:'Un prospecto (canal pending:) no puede activarse: ponle primero su canal real.',invalid_twilio_auth_token:'El auth token debe ser 32 caracteres hexadecimales (Twilio → Keys & Credentials).',stale_tenant:'Alguien modificó este cliente mientras editabas. Recarga la ficha y vuelve a aplicar tus cambios.',nothing_to_update:'No hay cambios que guardar.',invalid_preview:'Escribe un mensaje de prueba y un contexto de al menos 50 caracteres.',rate_limited:'Demasiadas pruebas seguidas: espera un minuto.'};
 let tenantList=[],editing=null;
 document.querySelectorAll('.tab').forEach(b=>b.onclick=()=>{document.querySelectorAll('.tab').forEach(x=>x.classList.toggle('is-on',x===b));const v=b.dataset.view;$('#viewLeads').hidden=v!=='leads';$('#viewTenants').hidden=v!=='tenants';$('#export').hidden=v!=='leads';if(v==='tenants')loadTenantList()});
 function semaforo(t){if(!t.active&&String(t.channel_address).startsWith('pending:'))return '<span class="muted">prospecto</span>';const f=[];if(!t.has_template)f.push('sin plantilla');if(!t.has_team)f.push('sin equipo');if(t.prompt_len<200)f.push('contexto corto');if(t.has_subaccount&&!t.has_twilio_token)f.push('sin token');if(t.meta_partner_status==='pendiente'&&t.has_subaccount)f.push('socio pendiente');return f.length?'<span class="error">'+esc(f.join(' · '))+'</span>':'✓'}
@@ -62,8 +72,8 @@ function updateCount(){const n=$('#tPrompt').value.length;$('#tCount').textConte
 $('#tPrompt').oninput=updateCount;
 async function openTenant(id){clearTenantErrs();$('#tPreviewOut').textContent='';$('#tTestMsg').value='';$('#tNote').value='';
  $('#tToken').value='';
- if(id){const d=await api('/api/admin/tenants/'+id);const t=d.tenant;editing={id:t.id,updated_at:t.updated_at};$('#tenantTitle').textContent=t.name;$('#tDup').hidden=true;for(const[k,sel]of Object.entries(TF))$(sel).value=t[k]??'';$('#tActive').checked=!!t.active;$('#tTokenState').textContent=t.has_twilio_token?'configurado ✓ (escribe solo para sustituirlo)':'sin configurar';loadVersions(id)}
- else{editing=null;$('#tenantTitle').textContent='Nuevo cliente';$('#tDup').hidden=false;$('#tDupSel').innerHTML='<option value="">— empezar de cero —</option>'+tenantList.map(t=>'<option value="'+t.id+'">'+esc(t.name)+'</option>').join('');for(const sel of Object.values(TF))$(sel).value='';$('#tPartner').value='pendiente';$('#tActive').checked=true;$('#tTokenState').textContent='sin configurar';$('#tVersions').textContent='—'}
+ if(id){const d=await api('/api/admin/tenants/'+id);const t=d.tenant;editing={id:t.id,updated_at:t.updated_at};$('#tenantTitle').textContent=t.name;$('#tDup').hidden=true;for(const[k,sel]of Object.entries(TF))$(sel).value=t[k]??'';$('#tActive').checked=!!t.active;$('#tTokenState').textContent=t.has_twilio_token?'configurado ✓ (escribe solo para sustituirlo)':'sin configurar';$('#tProv').hidden=false;loadProv(id);loadVersions(id)}
+ else{editing=null;$('#tenantTitle').textContent='Nuevo cliente';$('#tDup').hidden=false;$('#tDupSel').innerHTML='<option value="">— empezar de cero —</option>'+tenantList.map(t=>'<option value="'+t.id+'">'+esc(t.name)+'</option>').join('');for(const sel of Object.values(TF))$(sel).value='';$('#tPartner').value='pendiente';$('#tActive').checked=true;$('#tTokenState').textContent='sin configurar';$('#tProv').hidden=true;$('#tVersions').textContent='—'}
  updateCount();$('#tenantModal').showModal()}
 $('#tDupSel').onchange=async e=>{if(!e.target.value)return;const d=await api('/api/admin/tenants/'+e.target.value);$('#tPrompt').value=d.tenant.system_prompt||'';updateCount()};
 $('#tenantSave').onclick=async()=>{clearTenantErrs();
@@ -81,6 +91,20 @@ $('#tenantPreview').onclick=async()=>{clearTenantErrs();$('#tPreviewOut').textCo
   const r=await api('/api/admin/tenants/'+anyId+'/preview',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({prompt:$('#tPrompt').value,message:$('#tTestMsg').value})});
   $('#tPreviewOut').textContent=r.reply}
  catch(e){$('#tPreviewOut').textContent='';$('#tenantMsg').innerHTML='<p class="error">'+esc(TERRS[e.message]||e.message)+'</p>'}};
+async function loadProv(id){try{const p=await api('/api/admin/tenants/'+id+'/provision');
+ const lines=['Subcuenta: '+(p.subaccount.sid?p.subaccount.sid+(p.subaccount.hasToken?' · token cifrado ✓':' · SIN token'):'—'),
+  'Plantilla: '+(p.template.sid?p.template.sid+' · '+(p.template.status||'manual'):'—'),
+  'Sender: '+(p.sender.sid?p.sender.sid+' · '+(p.sender.status||'?'):'—')];
+ if(p.warnings&&p.warnings.length)lines.push('⚠️ '+p.warnings.join(' '));
+ $('#tProvState').textContent=lines.join('\\n')}catch(e){$('#tProvState').textContent=e.message}}
+async function provPost(step,body){clearTenantErrs();
+ try{await api('/api/admin/tenants/'+editing.id+'/provision/'+step,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body||{})});
+  $('#tenantMsg').innerHTML='<p style="color:var(--ok)">Hecho.</p>';loadProv(editing.id);loadTenantList()}
+ catch(e){$('#tenantMsg').innerHTML='<p class="error">'+esc(TERRS[e.message]||e.message)+'</p>'}}
+$('#pSub').onclick=()=>provPost('subaccount');
+$('#pTpl').onclick=()=>provPost('template');
+$('#pSender').onclick=()=>provPost('sender',{phone:$('#pPhone').value.trim()});
+$('#pVerify').onclick=()=>provPost('sender/verify',{code:$('#pCode').value.trim()});
 async function loadVersions(id){try{const d=await api('/api/admin/tenants/'+id+'/versions');
  $('#tVersions').innerHTML=d.versions.map(v=>'<article><b>'+esc(v.field)+'</b> · '+esc(v.actor_email)+' · '+fmt(v.created_at)+(v.note?' · '+esc(v.note):'')+
   ' <button class="btn alt" data-ver-show="'+v.id+'" type="button">Ver</button>'+
