@@ -132,6 +132,13 @@ dialog::backdrop{background:rgba(5,3,6,.78);backdrop-filter:blur(3px)}
 #brandPrev.bp-dark{background:#0b141a}
 #brandPrev.bp-dark .bp-g{background:#1f2c34;color:#e9edef}
 #brandPrev.bp-dark .bp-c span{background:#1f2c34;color:#e9edef;border-color:rgba(255,255,255,.2)}
+/* Toasts de resultado (guardado ✓ / error): contenedor popover para quedar en el top
+   layer POR ENCIMA de los <dialog> abiertos — un fixed normal quedaría detrás. */
+#toasts{position:fixed;top:14px;right:14px;left:auto;bottom:auto;margin:0;border:0;padding:0;background:transparent;overflow:visible;flex-direction:column;align-items:flex-end;gap:8px}
+#toasts:popover-open{display:flex}
+.toast{background:var(--bg2);border:1px solid var(--ok);color:var(--white);border-radius:var(--r-sm);padding:10px 14px;box-shadow:0 8px 30px rgba(0,0,0,.45);font-size:13px;max-width:360px;opacity:0;transform:translateY(-6px);transition:opacity .2s ease,transform .2s ease}
+.toast.on{opacity:1;transform:none}
+.toast.err{border-color:var(--bad);background:linear-gradient(180deg,rgba(230,103,103,.12),var(--bg2))}
 #tVersions article{margin-bottom:10px}
 #tVersions pre{white-space:pre-wrap;background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:8px;font-size:11.5px;max-height:220px;overflow:auto}
 @media(max-width:1000px){.metrics{grid-template-columns:1fr 1fr}.chartcard{grid-column:1/-1}}
@@ -216,9 +223,16 @@ dialog::backdrop{background:rgba(5,3,6,.78);backdrop-filter:blur(3px)}
 <small class="muted field-err" data-f="panel_email"></small></div>
 <div class="timeline"><h3>Historial</h3><div id="tVersions" class="muted">—</div></div>
 </div></dialog>
+<div id="toasts" popover="manual"></div>
 <script nonce="__NONCE__">
 function paint(root){(root||document).querySelectorAll('[data-w]').forEach(e=>{e.style.width=e.dataset.w+'%'});(root||document).querySelectorAll('[data-h]').forEach(e=>{e.style.height=e.dataset.h+'%'});(root||document).querySelectorAll('[data-c]').forEach(e=>{e.style.background=e.dataset.c});(root||document).querySelectorAll('[data-fg]').forEach(e=>{e.style.color=e.dataset.fg})}
 const $=s=>document.querySelector(s), esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));let cursor=null,current=null,loadedCount=0;
+// Aviso de resultado de CADA acción que guarda: éxito verde (2,6 s) o error rojo (6 s).
+// showPopover con try/catch: si el navegador no soporta popover, el div es visible igual.
+function toast(msg,ok=true){const box=$('#toasts');const t=document.createElement('div');t.className='toast'+(ok?'':' err');t.textContent=msg;box.appendChild(t);
+ try{if(!box.matches(':popover-open'))box.showPopover()}catch(e){}
+ requestAnimationFrame(()=>t.classList.add('on'));
+ setTimeout(()=>{t.classList.remove('on');setTimeout(()=>{t.remove();if(!box.children.length){try{box.hidePopover()}catch(e){}}},250)},ok?2600:6000)}
 const ST_LABEL={new:'nuevo',contacted:'contactado',qualified:'cualificado',won:'ganado',lost:'perdido',spam:'spam'};
 const TENANT_COLORS=['#3987e5','#9085e9','#199e70','#c98500','#2aa8b8','#c96bb4','#8ba03f','#e66767'];
 function tenantColor(id){let h=0;for(const c of String(id||''))h=(h*31+c.charCodeAt(0))>>>0;return TENANT_COLORS[h%TENANT_COLORS.length]}
@@ -249,8 +263,10 @@ async function load(append=false){try{const p=params();if(append&&cursor)p.set('
 async function loadTenants(){try{const d=await api('/api/admin/tenants');for(const t of d.tenants)$('#tenantFilter').insertAdjacentHTML('beforeend','<option value="'+esc(t.id)+'">'+esc(t.name)+'</option>')}catch(e){/* sin tenants: el filtro queda en Todos */}}
 $('#filters').onsubmit=e=>{e.preventDefault();cursor=null;load()};$('#more').onclick=()=>load(true);$('#export').onclick=()=>location.href='/api/admin/leads/export.csv?'+params();$('#close').onclick=()=>$('#detail').close();
 $('#rows').onclick=e=>{const tr=e.target.closest('[data-id]');if(tr)openLead(tr.dataset.id)};
-async function openLead(id){try{const d=await api('/api/admin/leads/'+id);current=d.lead;const l=d.lead;const cards=[['Fecha',fmt(l.created_at)],['Cliente',l.tenant_name],['Nombre',l.name],['WhatsApp',l.whatsapp],['Sector',l.sector],['Fuente',l.source],['Mensajes/día',l.messages_per_day],['Canal',l.channel],['Puntuación',l.score],['Nota',l.note],['Página',l.page_url]].map(x=>'<div class="card"><b>'+x[0]+'</b>'+esc(x[1]??'—')+'</div>').join('');const options=['new','contacted','qualified','won','lost','spam'].map(s=>'<option '+(s===l.status?'selected':'')+'>'+s+'</option>').join('');const notices=d.notifications.map(n=>'<article><b>Aviso '+esc(n.channel)+': '+esc(n.status)+'</b><div class="muted">Intentos: '+n.attempts+(n.last_error?' · '+esc(n.last_error):'')+'</div></article>').join('');const notes=d.notes.map(n=>'<article><b>'+esc(n.author_email)+'</b><div>'+esc(n.text)+'</div><small class="muted">'+fmt(n.created_at)+'</small></article>').join('');const events=d.events.map(n=>'<article><b>'+esc(n.event_type)+'</b><div>'+esc(n.detail||'')+'</div><small class="muted">'+fmt(n.created_at)+' · '+esc(n.actor_email)+'</small></article>').join('');const velaiBtns=ME.role==='velai'?'<button class="btn alt" id="retry">Reintentar avisos</button><button class="btn bad" id="delete">Borrar lead</button>':'';$('#detailBody').innerHTML='<div class="grid">'+cards+'</div><div class="actions"><select id="status" class="inpill">'+options+'</select><button class="btn" id="saveStatus">Guardar estado</button>'+velaiBtns+'</div><div class="note"><textarea id="note" rows="3" placeholder="Añadir nota…"></textarea><button class="btn" id="addNote">Añadir</button></div><div class="timeline"><h3>Actividad</h3>'+notices+notes+events+'</div>';wireDetail();$('#detail').showModal()}catch(e){alert(e.message)}}
-function wireDetail(){$('#saveStatus').onclick=async()=>{await api('/api/admin/leads/'+current.id,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({status:$('#status').value})});$('#detail').close();load();loadStats()};if($('#retry'))$('#retry').onclick=async()=>{await api('/api/admin/leads/'+current.id+'/retry',{method:'POST'});openLead(current.id)};$('#addNote').onclick=async()=>{const text=$('#note').value.trim();if(!text)return;await api('/api/admin/leads/'+current.id+'/notes',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text})});openLead(current.id)};if($('#delete'))$('#delete').onclick=async()=>{if(!confirm('¿Borrar definitivamente este lead y todos sus datos?'))return;await api('/api/admin/leads/'+current.id,{method:'DELETE'});$('#detail').close();load();loadStats()}}
+async function openLead(id){try{const d=await api('/api/admin/leads/'+id);current=d.lead;const l=d.lead;const cards=[['Fecha',fmt(l.created_at)],['Cliente',l.tenant_name],['Nombre',l.name],['WhatsApp',l.whatsapp],['Sector',l.sector],['Fuente',l.source],['Mensajes/día',l.messages_per_day],['Canal',l.channel],['Puntuación',l.score],['Nota',l.note],['Página',l.page_url]].map(x=>'<div class="card"><b>'+x[0]+'</b>'+esc(x[1]??'—')+'</div>').join('');const options=['new','contacted','qualified','won','lost','spam'].map(s=>'<option '+(s===l.status?'selected':'')+'>'+s+'</option>').join('');const notices=d.notifications.map(n=>'<article><b>Aviso '+esc(n.channel)+': '+esc(n.status)+'</b><div class="muted">Intentos: '+n.attempts+(n.last_error?' · '+esc(n.last_error):'')+'</div></article>').join('');const notes=d.notes.map(n=>'<article><b>'+esc(n.author_email)+'</b><div>'+esc(n.text)+'</div><small class="muted">'+fmt(n.created_at)+'</small></article>').join('');const events=d.events.map(n=>'<article><b>'+esc(n.event_type)+'</b><div>'+esc(n.detail||'')+'</div><small class="muted">'+fmt(n.created_at)+' · '+esc(n.actor_email)+'</small></article>').join('');const velaiBtns=ME.role==='velai'?'<button class="btn alt" id="retry">Reintentar avisos</button><button class="btn bad" id="delete">Borrar lead</button>':'';$('#detailBody').innerHTML='<div class="grid">'+cards+'</div><div class="actions"><select id="status" class="inpill">'+options+'</select><button class="btn" id="saveStatus">Guardar estado</button>'+velaiBtns+'</div><div class="note"><textarea id="note" rows="3" placeholder="Añadir nota…"></textarea><button class="btn" id="addNote">Añadir</button></div><div class="timeline"><h3>Actividad</h3>'+notices+notes+events+'</div>';wireDetail();$('#detail').showModal()}catch(e){toast('No se pudo abrir el lead: '+e.message,false)}}
+// Cada acción confirma con toast; sin el try/catch un fallo del PATCH era INVISIBLE
+// (la promesa moría sin aviso y el usuario creía que había guardado).
+function wireDetail(){$('#saveStatus').onclick=async()=>{try{await api('/api/admin/leads/'+current.id,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({status:$('#status').value})});toast('Estado guardado ✓ («'+$('#status').value+'»)');$('#detail').close();load();loadStats()}catch(e){toast('Estado NO guardado: '+e.message,false)}};if($('#retry'))$('#retry').onclick=async()=>{try{await api('/api/admin/leads/'+current.id+'/retry',{method:'POST'});toast('Reintento de avisos lanzado ✓');openLead(current.id)}catch(e){toast('Reintento fallido: '+e.message,false)}};$('#addNote').onclick=async()=>{const text=$('#note').value.trim();if(!text)return;try{await api('/api/admin/leads/'+current.id+'/notes',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text})});toast('Nota guardada ✓');openLead(current.id)}catch(e){toast('Nota NO guardada: '+e.message,false)}};if($('#delete'))$('#delete').onclick=async()=>{if(!confirm('¿Borrar definitivamente este lead y todos sus datos?'))return;try{await api('/api/admin/leads/'+current.id,{method:'DELETE'});toast('Lead borrado ✓');$('#detail').close();load();loadStats()}catch(e){toast('Lead NO borrado: '+e.message,false)}}}
 // ── Pestaña Clientes ──
 const TERRS={already_provisioned:'Ese paso ya está hecho (idempotente: un doble clic no crea recursos duplicados).',provision_in_progress:'Ese paso ya está en curso, espera unos segundos.',waba_required:'Rellena y guarda primero la WABA del cliente.',subaccount_required:'Crea primero la subcuenta (paso 1).',twilio_auth_token_missing:'La subcuenta no tiene auth token guardado.',provision_orphan:'Twilio creó el recurso pero D1 no lo guardó: revisa Telegram y reconcilia a mano.',invalid_code:'El OTP son 4-8 dígitos.',slug_taken:'Ese slug ya existe.',address_taken:'Ese canal ya está asignado a otro cliente: guardarlo desviaría sus conversaciones.',subaccount_taken:'Esa subcuenta de Twilio ya está asignada a otro cliente.',pending_tenant_cannot_be_active:'Un prospecto (canal pending:) no puede activarse: ponle primero su canal real.',invalid_twilio_auth_token:'El auth token debe ser 32 caracteres hexadecimales (Twilio → Keys & Credentials).',stale_tenant:'Alguien modificó este cliente mientras editabas. Recarga la ficha y vuelve a aplicar tus cambios.',nothing_to_update:'No hay cambios que guardar.',invalid_preview:'Escribe un mensaje de prueba y un contexto de al menos 50 caracteres.',rate_limited:'Demasiadas pruebas seguidas: espera un minuto.',email_taken:'Ese correo ya tiene acceso al panel de OTRO cliente (un correo pertenece a un solo cliente).',email_is_admin:'Ese correo es admin de Velai (ADMIN_EMAILS): ya ve todo, no puede ser usuario de un cliente.',invalid_email:'Eso no parece un correo válido.'};
 let tenantList=[],editing=null;
@@ -261,7 +277,7 @@ function semaforo(t){if(!t.active&&String(t.channel_address).startsWith('pending
  if(String(t.channel_address).startsWith('web:')){const f=[...long];if(t.prompt_len<200)f.push('contexto corto');if(!t.has_team&&!t.has_telegram)f.push('sin canal de aviso');return '<span class="flag web">solo web</span>'+(f.length?flags(f):' <span class="flag ok">listo</span>')}
  const f=[...long];if(!t.has_template)f.push('sin plantilla');if(!t.has_team)f.push('sin equipo');if(t.prompt_len<200)f.push('contexto corto');if(t.has_subaccount&&!t.has_twilio_token)f.push('sin token');if(t.has_subaccount&&!t.has_from)f.push('sin From');if(t.meta_partner_status==='pendiente'&&t.has_subaccount)f.push('socio pendiente');return f.length?flags(f):'<span class="flag ok">listo</span>'}
 function meter(chars){const w=Math.min(100,Math.round(chars/12000*100));return '<span class="meter" title="El contexto viaja al modelo en CADA mensaje"><i data-w="'+w+'"></i></span><span class="muted">'+chars+' car.</span>'}
-async function loadTenantList(){try{const d=await api('/api/admin/tenants');tenantList=d.tenants;$('#tenantRows').innerHTML=d.tenants.map(t=>'<tr data-tid="'+t.id+'"><td>'+tenantChip(t.id,t.name)+'</td><td class="muted">'+esc(t.channel_address)+'</td><td>'+t.lead_count+'</td><td>'+meter(t.prompt_len)+'</td><td>'+semaforo(t)+'</td><td>'+(t.active?'<span class="flag ok">activo</span>':'<span class="flag off">inactivo</span>')+'</td></tr>').join('')||'<tr><td colspan="6" class="empty">Sin clientes.</td></tr>';paint($('#tenantRows'))}catch(e){alert(e.message)}}
+async function loadTenantList(){try{const d=await api('/api/admin/tenants');tenantList=d.tenants;$('#tenantRows').innerHTML=d.tenants.map(t=>'<tr data-tid="'+t.id+'"><td>'+tenantChip(t.id,t.name)+'</td><td class="muted">'+esc(t.channel_address)+'</td><td>'+t.lead_count+'</td><td>'+meter(t.prompt_len)+'</td><td>'+semaforo(t)+'</td><td>'+(t.active?'<span class="flag ok">activo</span>':'<span class="flag off">inactivo</span>')+'</td></tr>').join('')||'<tr><td colspan="6" class="empty">Sin clientes.</td></tr>';paint($('#tenantRows'))}catch(e){toast('No se pudo cargar la lista de clientes: '+e.message,false)}}
 $('#tenantRows').onclick=e=>{const tr=e.target.closest('[data-tid]');if(tr)openTenant(tr.dataset.tid)};
 $('#newTenant').onclick=()=>openTenant(null);
 // Cambios sin guardar: cerrar el modal (botón o ESC) pide confirmación antes de descartar.
@@ -300,15 +316,15 @@ $('#tenantSave').onclick=async()=>{clearTenantErrs();
  try{
   if(editing){body.expected_updated_at=editing.updated_at;const r=await api('/api/admin/tenants/'+editing.id,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});editing.updated_at=r.updated_at;loadVersions(editing.id)}
   else{const r=await api('/api/admin/tenants',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});editing={id:r.id,updated_at:r.updated_at};$('#tenantTitle').textContent=body.name;$('#tDup').hidden=true}
-  $('#tenantMsg').innerHTML='<p class="okmsg">Guardado.</p>';tenantDirty=false;loadTenantList()
+  toast('Cliente guardado ✓ (el widget lo ve en ≤5 min por la caché)');tenantDirty=false;loadTenantList()
  }catch(e){const c=e.message;const m=c.match(/^invalid_(.+)$/);
-  if(m&&document.querySelector('.field-err[data-f="'+m[1]+'"]'))document.querySelector('.field-err[data-f="'+m[1]+'"]').textContent='Formato inválido — revisa el ejemplo del campo.';
-  else $('#tenantMsg').innerHTML='<p class="error">'+esc(TERRS[c]||c)+'</p>'}};
+  if(m&&document.querySelector('.field-err[data-f="'+m[1]+'"]')){document.querySelector('.field-err[data-f="'+m[1]+'"]').textContent='Formato inválido — revisa el ejemplo del campo.';toast('NO guardado: revisa el campo «'+m[1]+'»',false)}
+  else toast('NO guardado: '+(TERRS[c]||c),false)}};
 $('#tenantPreview').onclick=async()=>{clearTenantErrs();$('#tPreviewOut').textContent='Pensando…';
  try{const anyId=editing?editing.id:'00000000-0000-4000-8000-000000000001';
   const r=await api('/api/admin/tenants/'+anyId+'/preview',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({prompt:$('#tPrompt').value,message:$('#tTestMsg').value})});
   $('#tPreviewOut').textContent=r.reply}
- catch(e){$('#tPreviewOut').textContent='';$('#tenantMsg').innerHTML='<p class="error">'+esc(TERRS[e.message]||e.message)+'</p>'}};
+ catch(e){$('#tPreviewOut').textContent='';toast('Prueba fallida: '+(TERRS[e.message]||e.message),false)}};
 async function loadProv(id){try{const p=await api('/api/admin/tenants/'+id+'/provision');
  const lines=['Subcuenta: '+(p.subaccount.sid?p.subaccount.sid+(p.subaccount.hasToken?' · token cifrado ✓':' · SIN token'):'—'),
   'Plantilla: '+(p.template.sid?p.template.sid+' · '+(p.template.status||'manual'):'—'),
@@ -320,23 +336,24 @@ async function provPost(step,body){clearTenantErrs();
   // Recargar la ficha ENTERA: refresca updated_at (evita stale_tenant en el siguiente
   // Guardar) y repuebla los inputs con el SID recién creado (un input vacío guardado
   // habría borrado la subcuenta de la fila).
-  const keep=editing.id;await openTenant(keep);$('#tenantMsg').innerHTML='<p class="okmsg">Hecho.</p>';loadTenantList()}
- catch(e){$('#tenantMsg').innerHTML='<p class="error">'+esc(TERRS[e.message]||e.message)+'</p>'}}
+  const keep=editing.id;await openTenant(keep);toast('Hecho ✓ — paso «'+step+'» completado');loadTenantList()}
+ catch(e){toast('Paso «'+step+'» fallido: '+(TERRS[e.message]||e.message),false)}}
 let panelUsers=[];
 async function loadUsers(id){try{const d=await api('/api/admin/tenants/'+id+'/users');panelUsers=d.users;
  $('#tUsersList').innerHTML=d.users.map(u=>'<span class="flag off">'+esc(u.email)+' <a href="#" data-udel="'+esc(u.email)+'" title="Quitar acceso">✕</a></span>').join(' ')||'Sin usuarios: este cliente no tiene acceso al panel.'}
  catch(e){$('#tUsersList').textContent=e.message}}
 $('#uAdd').onclick=async()=>{clearTenantErrs();const email=$('#uEmail').value.trim();if(!email)return;
  try{await api('/api/admin/tenants/'+editing.id+'/users',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email})});
-  $('#uEmail').value='';$('#tenantMsg').innerHTML='<p class="okmsg">Acceso concedido.</p>';loadUsers(editing.id)}
+  $('#uEmail').value='';toast('Acceso concedido ✓ a '+email);loadUsers(editing.id)}
  catch(e){const c=e.message;const el=document.querySelector('.field-err[data-f="panel_email"]');
-  if(el&&TERRS[c])el.textContent=TERRS[c];else $('#tenantMsg').innerHTML='<p class="error">'+esc(TERRS[c]||c)+'</p>'}};
+  if(el&&TERRS[c])el.textContent=TERRS[c];
+  toast('Acceso NO concedido: '+(TERRS[c]||c),false)}};
 $('#tUsersList').onclick=async e=>{const email=e.target&&e.target.dataset&&e.target.dataset.udel;if(!email)return;e.preventDefault();
  // Quitar al último se permite (a veces es lo que se quiere) pero avisando: sin filas, ese cliente no entra.
  if(panelUsers.length===1&&!confirm('Es el ÚNICO usuario: este cliente se queda sin acceso al panel. ¿Quitarlo igualmente?'))return;
  clearTenantErrs();try{await api('/api/admin/tenants/'+editing.id+'/users/'+encodeURIComponent(email),{method:'DELETE'});
-  $('#tenantMsg').innerHTML='<p class="okmsg">Acceso revocado.</p>';loadUsers(editing.id)}
- catch(e2){$('#tenantMsg').innerHTML='<p class="error">'+esc(TERRS[e2.message]||e2.message)+'</p>'}};
+  toast('Acceso revocado ✓ a '+email);loadUsers(editing.id)}
+ catch(e2){toast('Acceso NO revocado: '+(TERRS[e2.message]||e2.message),false)}};
 $('#pSub').onclick=()=>provPost('subaccount');
 $('#pTpl').onclick=()=>provPost('template');
 $('#pSender').onclick=()=>provPost('sender',{phone:$('#pPhone').value.trim()});
@@ -347,7 +364,7 @@ async function loadVersions(id){try{const d=await api('/api/admin/tenants/'+id+'
   (v.field==='system_prompt'&&v.previous_value?' <button class="btn alt" data-ver-restore="'+v.id+'" type="button">Restaurar</button>':'')+
   '<pre hidden id="verval-'+v.id+'">'+esc(v.previous_value||'—')+'</pre></article>').join('')||'—';
  $('#tVersions').onclick=async e=>{const s=e.target.closest('[data-ver-show]');if(s){const p=$('#verval-'+s.dataset.verShow);p.hidden=!p.hidden;return}
-  const r=e.target.closest('[data-ver-restore]');if(r&&confirm('¿Restaurar esta versión del contexto? Se crea una versión nueva (reversible).')){await api('/api/admin/tenants/'+id+'/versions/'+r.dataset.verRestore+'/restore',{method:'POST'});openTenant(id);loadTenantList()}}}
+  const r=e.target.closest('[data-ver-restore]');if(r&&confirm('¿Restaurar esta versión del contexto? Se crea una versión nueva (reversible).')){try{await api('/api/admin/tenants/'+id+'/versions/'+r.dataset.verRestore+'/restore',{method:'POST'});toast('Contexto restaurado ✓ (se creó una versión nueva)');openTenant(id);loadTenantList()}catch(e2){toast('NO restaurado: '+e2.message,false)}}}}
  catch(e){$('#tVersions').textContent=e.message}}
 
 // Handoff: conversaciones con el bot en pausa (un humano las atiende). Reanudar borra la pausa.
@@ -356,7 +373,8 @@ async function loadEscalations(){try{const d=await api('/api/admin/escalations')
   return '<span class="esc">⏸ '+esc(e.from)+(tn?' · '+esc(tn):'')+' <button type="button" data-resume-t="'+esc(e.tenantId)+'" data-resume-f="'+esc(e.from)+'">Reanudar bot</button></span>'}).join('')}
  catch(e){/* sin escaladas visibles no bloqueamos el panel */}}
 $('#escalations').onclick=async e=>{const b=e.target.closest('[data-resume-t]');if(!b)return;
- await api('/api/admin/escalations/resume',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({tenantId:b.dataset.resumeT,from:b.dataset.resumeF})});loadEscalations()};
+ try{await api('/api/admin/escalations/resume',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({tenantId:b.dataset.resumeT,from:b.dataset.resumeF})});toast('Bot reanudado ✓ para '+b.dataset.resumeF)}catch(e2){toast('No se pudo reanudar: '+e2.message,false)}
+ loadEscalations()};
 
 // El rol decide la interfaz, pero la DEFENSA es del worker en cada endpoint.
 let ME={role:'velai'};
