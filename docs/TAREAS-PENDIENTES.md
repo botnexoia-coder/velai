@@ -76,13 +76,13 @@ Sin esto, las campañas gastarían presupuesto a ciegas (sin medir conversiones)
 
 ### 2a-bis. Alta de usuarios desde el panel (SPEC-USUARIOS — desplegado, falta un paso manual)
 
-- [ ] **Cambiar la política de Access a OTP-para-cualquier-correo** (Zero Trust → Access →
-  Applications → Velai Leads Panel → política Allow con include *Everyone* + One-time PIN).
-  Es UNA vez y es lo único en Cloudflare: a partir de ahí las altas/bajas de usuarios de
-  cliente se hacen enteras desde la ficha del panel (el worker autoriza con `tenant_users`;
-  un desconocido autenticado recibe 403, queda logueado y a la 3ª/hora avisa a Telegram).
-  Hasta hacerlo, el alta del panel escribe la fila pero el correo nuevo sigue necesitando
-  estar también en la política de Access.
+- [ ] ~~Política de Access a OTP-para-cualquier-correo~~ **SUSTITUIDO** por
+  [`SPEC-ACCESO-CLIENTES-POR-API.md`](./SPEC-ACCESO-CLIENTES-POR-API.md): OTP + grupo
+  `Clientes Velai` mantenido por el panel vía API (la puerta solo deja pasar correos
+  dados de alta, y queda automatizado). Diagnóstico confirmado por API el 2026-08-18:
+  la organización tiene CERO IdPs — sin OTP, el correo de Diálogos no puede entrar por
+  mucho que su fila en `tenant_users` exista. Pasos 1-2 de la spec (crear IdP OTP +
+  grupo en la política) desbloquean a Diálogos de inmediato.
 
 ### 2b. De la revisión de seguridad de Johan (lo manual — el resto ya está aplicado)
 
