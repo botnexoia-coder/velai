@@ -695,7 +695,7 @@ test('el panel rediseñado: sin dominios externos salvo las fuentes, nonce y tod
   assert.deepEqual([...new Set(externals)], ['hirevai.com'], 'solo hirevai.com (fuentes)');
   assert.ok([...ADMIN_HTML.matchAll(/hirevai\.com\/([a-z]+)\//g)].every((m) => m[1] === 'fonts'), 'y solo su ruta /fonts/');
   assert.ok(ADMIN_HTML.includes('__NONCE__'));
-  for (const id of ['tName', 'tSlug', 'tAddress', 'tFrom', 'tTeam', 'tChat', 'tTpl', 'tSub', 'tWaba', 'tToken', 'tPartner', 'tActive', 'tPrompt', 'tNote', 'pSub', 'pTpl', 'pPhone', 'pSender', 'pCode', 'pVerify', 'tenantFilter', 'newTenant', 'export', 'tTokenState', 'tBotName', 'tBrandName', 'tLogo', 'tColor1', 'tColor2', 'tGreeting', 'tGreetingEn', 'tChips', 'tPlaceholder', 'tWa', 'tTheme', 'brandPrev', 'toasts', 'tOrigins', 'tSyncDomains', 'logout']) {
+  for (const id of ['tName', 'tSlug', 'tAddress', 'tFrom', 'tTeam', 'tChat', 'tTpl', 'tSub', 'tWaba', 'tToken', 'tPartner', 'tActive', 'tPrompt', 'tNote', 'pSub', 'pTpl', 'pPhone', 'pSender', 'pCode', 'pVerify', 'tenantFilter', 'newTenant', 'export', 'tTokenState', 'tBotName', 'tBrandName', 'tLogo', 'tColor1', 'tColor2', 'tGreeting', 'tGreetingEn', 'tChips', 'tPlaceholder', 'tWa', 'tTheme', 'brandPrev', 'toasts', 'tOrigins', 'tSyncDomains', 'logout', 'adminsCard', 'adminsList', 'aEmail', 'aAdd']) {
     assert.ok(ADMIN_HTML.includes(`id="${id}"`), `falta #${id}`);
   }
   assert.ok(!/localStorage/.test(ADMIN_HTML), 'sin localStorage');
@@ -1197,4 +1197,84 @@ test('sin usuarios, el grupo de Access se cierra con un centinela (include vací
     await syncAccessGroup({ CF_API_TOKEN: 't', CF_ACCOUNT_ID: 'a', CF_ACCESS_GROUP_ID: 'g' }, []);
     assert.deepEqual(puts[0].include, [{ email: { email: 'nadie@velai.invalid' } }]);
   } finally { globalThis.fetch = realFetch; }
+});
+
+// ── Admins de Velai desde el panel (migración 0009) ──
+function adminsDb({ admins = [], clientEmail = null } = {}) {
+  const writes = [];
+  return { writes, prepare(sql) {
+    const stmt = (args) => ({
+      first: async () => {
+        if (sql.includes('FROM tenant_users')) return clientEmail && args[0] === clientEmail ? { tenant_id: 't1' } : null;
+        if (sql.includes('FROM admin_users')) return admins.find((a) => a === args[0]) ? { email: args[0] } : null;
+        return null;
+      },
+      all: async () => ({ results: admins.map((email) => ({ email, created_by: 'x', created_at: 'y' })) }),
+      run: async () => {
+        if (sql.includes('INSERT INTO admin_users') && admins.includes(args[0])) throw new Error('UNIQUE constraint failed: admin_users.email');
+        writes.push({ sql, args });
+        return { meta: { changes: sql.includes('DELETE') ? (admins.includes(args[0]) ? 1 : 0) : 1 } };
+      },
+    });
+    return { bind: (...args) => stmt(args), all: async () => ({ results: admins.map((email) => ({ email, created_by: 'x', created_at: 'y' })) }) };
+  } };
+}
+const adminsReq = (init, suffix = '') => new Request('https://admin.hirevai.com/api/admin/admins' + suffix, init);
+const adminsCall = (env, init, suffix = '') => testing.adminRouter(
+  adminsReq(init, suffix), env, { waitUntil() {} }, '/api/admin/admins' + suffix, new URL('https://x/api/admin/admins' + suffix), {}, VELAI);
+
+test('admins: el rol cliente no toca /api/admin/admins (403 antes de datos)', async () => {
+  await assert.rejects(
+    testing.adminRouter(adminsReq({ method: 'GET' }), { DB: adminsDb({}) }, { waitUntil() {} }, '/api/admin/admins', new URL('https://x/api/admin/admins'), {}, CLIENTE),
+    (e) => e.status === 403 && e.code === 'not_authorized');
+});
+
+test('admins: alta reescribe la política de Access con los RAÍZ siempre dentro', async () => {
+  const puts = [];
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = async (url, init) => {
+    if (String(url).includes('/access/apps/')) {
+      if (init && init.method === 'PUT') { puts.push(JSON.parse(init.body)); return new Response('{"success":true,"result":{}}', { status: 200 }); }
+      return new Response(JSON.stringify({ success: true, result: { name: 'Equipo Velai', decision: 'allow', precedence: 1 } }), { status: 200 });
+    }
+    return new Response('{"success":true,"ok":true,"result":{}}', { status: 200 });
+  };
+  try {
+    const env = { CF_API_TOKEN: 't', CF_ACCOUNT_ID: 'a', CF_ZONE_ID: 'z', CF_ACCESS_APP_ID: 'app', CF_ADMIN_POLICY_ID: 'pol', ADMIN_EMAILS: 'juan@velai.ai', DB: adminsDb({ admins: ['estivenrojas09@gmail.com'] }) };
+    const res = await adminsCall(env, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email: ' Nuevo@Admin.com ' }) });
+    const body = await res.json();
+    assert.equal(res.status, 201);
+    assert.equal(body.email, 'nuevo@admin.com', 'normalizado a minúsculas');
+    assert.equal(body.gate, 'sincronizado');
+    assert.equal(puts[0].name, 'Equipo Velai', 'GET antes de PUT: nombre/decisión preservados');
+    const included = puts[0].include.map((i) => i.email.email);
+    assert.ok(included.includes('juan@velai.ai'), 'los admins raíz del entorno SIEMPRE van en el PUT');
+    assert.ok(included.includes('estivenrojas09@gmail.com'));
+  } finally { globalThis.fetch = realFetch; }
+});
+
+test('admins: guardas — cliente no asciende, raíz no se borra, nadie se quita a sí mismo', async () => {
+  const env = { ADMIN_EMAILS: 'juan@velai.ai', DB: adminsDb({ clientEmail: 'gestora@cliente.com' }) };
+  await assert.rejects(
+    adminsCall(env, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email: 'gestora@cliente.com' }) }),
+    (e) => e.status === 409 && e.code === 'email_is_client');
+  await assert.rejects(
+    adminsCall(env, { method: 'DELETE' }, '/juan%40velai.ai'),
+    (e) => e.status === 400 && e.code === 'admin_is_root');
+  await assert.rejects(
+    adminsCall(env, { method: 'DELETE' }, '/' + encodeURIComponent(VELAI.email)),
+    (e) => e.status === 400 && e.code === 'cannot_remove_self');
+});
+
+test('admins: resolveScope reconoce a un admin de D1 y un admin de D1 no puede ser usuario de cliente', async () => {
+  const env = { ADMIN_EMAILS: '', DB: adminsDb({ admins: ['estivenrojas09@gmail.com'] }) };
+  const scope = await testing.resolveScope(env, 'EstivenRojas09@gmail.com');
+  assert.equal(scope.role, 'velai');
+  assert.equal(scope.tenantId, null);
+  // y el cruce inverso: darlo de alta como usuario de cliente → 400 email_is_admin
+  const db = adminsDb({ admins: ['estivenrojas09@gmail.com'] });
+  await assert.rejects(
+    testing.adminRouter(usersReq({ method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email: 'estivenrojas09@gmail.com' }) }),
+      { DB: db, ADMIN_EMAILS: '' }, { waitUntil() {} }, usersPath(), new URL('https://x' + usersPath()), {}, VELAI),
+    (e) => e.status === 400 && e.code === 'email_is_admin');
 });

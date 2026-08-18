@@ -1,6 +1,6 @@
 import { ADMIN_HEADERS, ADMIN_HTML } from './admin-page.js';
 import { encryptSecret, decryptSecret } from './crypto.js';
-import { cloudflareConfigured, syncTurnstileDomains, syncAccessGroup } from './cloudflare.js';
+import { cloudflareConfigured, syncTurnstileDomains, syncAccessGroup, syncAdminPolicy } from './cloudflare.js';
 import { createSubaccount, createLeadTemplate, submitTemplateApproval, fetchApprovalStatus, createWhatsAppSender, verifySender, fetchSenderStatus } from './twilio.js';
 
 const JSON_HEADERS = { 'Content-Type': 'application/json; charset=utf-8' };
@@ -1100,6 +1100,23 @@ const PANEL_EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 // CF_API_TOKEN o sin grupo, 'manual' (la puerta se gestiona en el dashboard).
 // No hay cerrojo: el PUT reescribe la lista COMPLETA leída tras la escritura propia,
 // así que dos operaciones simultáneas convergen con la siguiente sincronización.
+// Igual que la puerta de clientes, pero para la política «Equipo Velai»: la lista se
+// reconstruye desde env (raíz, SIEMPRE presentes) + admin_users. Un PUT fallido no
+// pierde la fila: gate 'pendiente' + log + alerta.
+async function syncAdminGate(env, ctx) {
+  if (!cloudflareConfigured(env) || !env.CF_ADMIN_POLICY_ID) return 'manual';
+  try {
+    const rows = (await env.DB.prepare('SELECT email FROM admin_users ORDER BY email').all()).results || [];
+    const emails = [...new Set([...envAdmins(env), ...rows.map((r) => r.email)])];
+    await syncAdminPolicy(env, emails);
+    return 'sincronizado';
+  } catch (error) {
+    console.log(JSON.stringify({ level: 'error', code: 'admin_policy_desync', error: String(error.message || error) }));
+    ctx.waitUntil(sendTelegramText(env, '⚠️ <b>Velai</b>: la política de admins de Access no se pudo sincronizar tras un alta/baja de admin. La fila en D1 está bien; repetir la operación o revisar CF_API_TOKEN.').catch(() => {}));
+    return 'pendiente';
+  }
+}
+
 async function syncPanelGate(env, ctx) {
   if (!cloudflareConfigured(env) || !env.CF_ACCESS_GROUP_ID) return 'manual';
   try {
@@ -1277,11 +1294,22 @@ async function runProvisionStep(request, env, ctx, tenant, tenantId, step, actor
 // Access dice QUIÉN eres; esto dice QUÉ puedes ver. Sin coincidencia no se entra:
 // que Access te deje pasar no te autoriza a ver leads de nadie. Los admins van en
 // ADMIN_EMAILS (var), nunca en la tabla: una fila borrada no deja a Velai fuera.
+// Admins raíz: los del entorno, indestructibles (ninguna operación del panel los toca).
+function envAdmins(env) {
+  return clean(env.ADMIN_EMAILS, 500).split(',').map((x) => x.trim().toLowerCase()).filter(Boolean);
+}
+
 async function resolveScope(env, email) {
-  const admins = clean(env.ADMIN_EMAILS, 500).split(',').map((x) => x.trim().toLowerCase()).filter(Boolean);
-  if (admins.includes(String(email).toLowerCase())) return { role: 'velai', tenantId: null, email };
+  const who = String(email).toLowerCase();
+  if (envAdmins(env).includes(who)) return { role: 'velai', tenantId: null, email };
+  // Admins gestionados desde el panel (admin_users, migración 0009). En try/catch:
+  // si la tabla aún no existe, el panel no se cae — simplemente no hay admins de D1.
+  try {
+    const admin = await env.DB.prepare('SELECT email FROM admin_users WHERE lower(email) = ?').bind(who).first();
+    if (admin) return { role: 'velai', tenantId: null, email };
+  } catch (_) {}
   const row = await env.DB.prepare('SELECT tenant_id, role FROM tenant_users WHERE lower(email) = ?')
-    .bind(String(email).toLowerCase()).first();
+    .bind(who).first();
   if (!row) throw new HttpError(403, 'not_authorized');
   return { role: 'cliente', tenantId: row.tenant_id, email };
 }
@@ -1487,6 +1515,55 @@ async function adminRouter(request, env, ctx, path, url, config, scope) {
     if (!UUID_RE.test(provMatch[1])) throw new HttpError(404, 'not_found');
     return await handleProvision(request, env, ctx, provMatch[1], provMatch[2] || '', actor);
   }
+  // ── Admins de Velai gestionados desde el panel (migración 0009) ──────────────
+  // Solo rol velai (clienteAllowed no incluye estas rutas). Los ADMIN_EMAILS del
+  // entorno son RAÍZ: se listan pero no se pueden borrar desde aquí. La auditoría va
+  // por Telegram + log (no hay tenant al que colgar una versión). Cada alta/baja
+  // sincroniza también la política «Equipo Velai» de Access (env raíz SIEMPRE dentro).
+  if (path === '/api/admin/admins' && request.method === 'GET') {
+    let rows = [];
+    try { rows = (await env.DB.prepare('SELECT email, created_by, created_at FROM admin_users ORDER BY created_at').all()).results || []; } catch (_) {}
+    const admins = [
+      ...envAdmins(env).map((email) => ({ email, root: true })),
+      ...rows.map((r) => ({ email: r.email, root: false, created_by: r.created_by, created_at: r.created_at })),
+    ];
+    return json({ admins }, 200, NO_STORE);
+  }
+  if (path === '/api/admin/admins' && request.method === 'POST') {
+    const body = await readJson(request, 2000);
+    const email = String(body.email || '').trim().toLowerCase();
+    if (!PANEL_EMAIL_RE.test(email) || email.length > 200) throw new HttpError(400, 'invalid_email');
+    if (envAdmins(env).includes(email)) throw new HttpError(409, 'already_admin');
+    // Un correo de cliente no puede ascender a admin conservando su fila: vería TODO
+    // y seguiría pareciendo "usuario de X". Primero baja de cliente, luego alta aquí.
+    const client = await env.DB.prepare('SELECT tenant_id FROM tenant_users WHERE lower(email) = ?').bind(email).first();
+    if (client) throw new HttpError(409, 'email_is_client');
+    try {
+      await env.DB.prepare('INSERT INTO admin_users (email, created_by, created_at) VALUES (?,?,?)')
+        .bind(email, actor, new Date().toISOString()).run();
+    } catch (e) {
+      if (/UNIQUE|PRIMARY KEY/i.test(String(e.message || ''))) throw new HttpError(409, 'already_admin');
+      throw e;
+    }
+    console.log(JSON.stringify({ level: 'info', code: 'admin_added', email, actor }));
+    ctx.waitUntil(sendTelegramText(env, `👑 <b>${escapeHtml(actor)}</b> dio de alta al ADMIN <code>${escapeHtml(email)}</code> (ve todos los clientes y leads).`).catch(() => {}));
+    const gate = await syncAdminGate(env, ctx);
+    return json({ ok: true, email, gate }, 201, NO_STORE);
+  }
+  const adminDelMatch = path.match(/^\/api\/admin\/admins\/([^/]+)$/);
+  if (adminDelMatch && request.method === 'DELETE') {
+    const email = decodeURIComponent(adminDelMatch[1]).trim().toLowerCase();
+    if (envAdmins(env).includes(email)) throw new HttpError(400, 'admin_is_root');
+    // Quitarse a uno mismo es la receta del cierre accidental: que lo haga otro admin.
+    if (email === String(actor).toLowerCase()) throw new HttpError(400, 'cannot_remove_self');
+    const result = await env.DB.prepare('DELETE FROM admin_users WHERE lower(email) = ?').bind(email).run();
+    if (!result.meta || !result.meta.changes) throw new HttpError(404, 'not_found');
+    console.log(JSON.stringify({ level: 'info', code: 'admin_removed', email, actor }));
+    ctx.waitUntil(sendTelegramText(env, `👑 <b>${escapeHtml(actor)}</b> quitó al ADMIN <code>${escapeHtml(email)}</code>.`).catch(() => {}));
+    const gate = await syncAdminGate(env, ctx);
+    return json({ ok: true, gate }, 200, NO_STORE);
+  }
+
   // ── Usuarios del cliente (SPEC-USUARIOS §B.2): solo rol velai (clienteAllowed es
   // lista blanca y no incluye estas rutas). resolveScope consulta tenant_users en cada
   // petición sin caché, así que alta y baja surten efecto inmediato.
@@ -1505,8 +1582,13 @@ async function adminRouter(request, env, ctx, path, url, config, scope) {
       if (!PANEL_EMAIL_RE.test(email) || email.length > 200) throw new HttpError(400, 'invalid_email');
       // Un admin de Velai en la tabla quedaría degradado a un solo tenant al entrar
       // (resolveScope mira ADMIN_EMAILS primero, pero el error sería silencioso).
-      const admins = clean(env.ADMIN_EMAILS, 500).split(',').map((x) => x.trim().toLowerCase()).filter(Boolean);
-      if (admins.includes(email)) throw new HttpError(400, 'email_is_admin');
+      if (envAdmins(env).includes(email)) throw new HttpError(400, 'email_is_admin');
+      // También los admins de D1 (migración 0009): resolveScope los mira ANTES que
+      // tenant_users, así que la fila de cliente quedaría muerta y confundiría.
+      try {
+        const adminRow = await env.DB.prepare('SELECT email FROM admin_users WHERE lower(email) = ?').bind(email).first();
+        if (adminRow) throw new HttpError(400, 'email_is_admin');
+      } catch (e) { if (e instanceof HttpError) throw e; }
       const tenant = await env.DB.prepare('SELECT id FROM tenants WHERE id=?').bind(tenantId).first();
       if (!tenant) throw new HttpError(404, 'not_found');
       try {
@@ -1808,4 +1890,4 @@ export function createWorker(config) {
   };
 }
 
-export const testing = { clean, normalizePhone, extractPhone, safeUtm, publicCors, validTwilioSignature, csvCell, expiryDate, leadFilters, isDemoKey, templateVar, leadTemplateVariables, readJson, deliver, drainQueuedLeads, verifyTurnstile, systemFor, validateTenant, invalidateTenantCache, tenantWriteError, assertNotActivePending, handleProvision, pollProvisioning, fillSeries, resolveScope, scopeClause, clienteAllowed, adminRouter, recordAuthFailure, handleAdmin, handleWidgetBoot, allowedOrigins, envOrigins, syncPanelGate };
+export const testing = { clean, normalizePhone, extractPhone, safeUtm, publicCors, validTwilioSignature, csvCell, expiryDate, leadFilters, isDemoKey, templateVar, leadTemplateVariables, readJson, deliver, drainQueuedLeads, verifyTurnstile, systemFor, validateTenant, invalidateTenantCache, tenantWriteError, assertNotActivePending, handleProvision, pollProvisioning, fillSeries, resolveScope, scopeClause, clienteAllowed, adminRouter, recordAuthFailure, handleAdmin, handleWidgetBoot, allowedOrigins, envOrigins, syncPanelGate, envAdmins, syncAdminGate };
