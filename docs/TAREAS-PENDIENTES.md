@@ -76,13 +76,9 @@ Sin esto, las campañas gastarían presupuesto a ciegas (sin medir conversiones)
 
 ### 2a-bis. Alta de usuarios desde el panel (SPEC-USUARIOS — desplegado, falta un paso manual)
 
-- [ ] ~~Política de Access a OTP-para-cualquier-correo~~ **SUSTITUIDO** por
-  [`SPEC-ACCESO-CLIENTES-POR-API.md`](./SPEC-ACCESO-CLIENTES-POR-API.md): OTP + grupo
-  `Clientes Velai` mantenido por el panel vía API (la puerta solo deja pasar correos
-  dados de alta, y queda automatizado). Diagnóstico confirmado por API el 2026-08-18:
-  la organización tiene CERO IdPs — sin OTP, el correo de Diálogos no puede entrar por
-  mucho que su fila en `tenant_users` exista. Pasos 1-2 de la spec (crear IdP OTP +
-  grupo en la política) desbloquean a Diálogos de inmediato.
+- [x] **Puerta de Access automatizada (2026-08-18)** — ver `IMPLEMENTADO.md` §Acceso:
+  IdP OTP + grupo «Clientes Velai» mantenido por el panel; login de Diálogos verificado.
+  Las altas/bajas de usuarios de cliente ya no tocan el dashboard de Cloudflare.
 
 ### 2b. De la revisión de seguridad de Johan (lo manual — el resto ya está aplicado)
 
@@ -90,6 +86,11 @@ Sin esto, las campañas gastarían presupuesto a ciegas (sin medir conversiones)
 - [ ] **Auditoría de la política de Access**: confirmar la lista exacta de correos, probar uno no autorizado, y documentar quién es el propietario/recuperación de la cuenta Zero Trust.
 - [ ] **CSP completa de recursos** empezando en `Report-Only` (la base con frame-ancestors ya está en `_headers`).
 - [ ] **Decisión legal**: retención escalonada de leads (hoy 24 meses renovados por actividad) — validar con asesoría.
+
+### 2g. Restos del sistema de orígenes/Turnstile (desplegado — ver `IMPLEMENTADO.md`)
+
+- [ ] **Adelgazar `ALLOWED_WEB_ORIGINS`** en `wrangler.toml`: los dominios de los 4 clientes ya viven en sus fichas (D1, verificado); se dejaron también en la var como red de seguridad. Tras unos días estables, retirar los de cliente de la var (+ deploy) y dejar solo los 3 de Velai.
+- [ ] **Nota de escala**: el widget de Turnstile admite 10 dominios (hoy 7 apex). Al acercarse al límite, pasar a un widget por cliente (alternativa §4 de la spec, resumida en IMPLEMENTADO.md): sitekey por tenant vía `/widget/boot` + secret cifrado por tenant en `verifyTurnstile`.
 
 ### 3. Verificar conversiones antes de invertir
 

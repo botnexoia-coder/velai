@@ -206,6 +206,42 @@ toda en null (recopilarla y cargarla), hostnames de Turnstile, nombre del asiste
 Diálogos, y la parte de Sebas (snippet `?v=7` en las 4 webs, quitar chats viejos solo
 tras ver la marca).
 
+## Orígenes en D1 + Turnstile por API (`SPEC-ORIGENES-Y-TURNSTILE-POR-API.md`)
+
+Desplegado y probado end-to-end el 2026-08-18. Los dominios de cliente dejaron de vivir
+en `wrangler.toml`: la migración 0008 añade `tenants.web_origins` (JSON, ≤6, https sin
+path), editable en la ficha («Dominios de la web»), y `allowedOrigins()` une el entorno
+(base de Velai, red de seguridad si D1 cae) con los tenants activos, cacheado en KV
+(`origins:all`, 5 min, invalidado con la fila). **Alta de dominio = fila en el panel,
+CORS al instante, sin deploy** — verificado con los 9 orígenes reales y la revocación
+inmediata del de prueba. El botón «Sincronizar Turnstile» (`POST /provision/domains`)
+reescribe los hostnames del widget desde D1 con GET-antes-de-PUT que preserva el `mode`
+`invisible` (el ejemplo original con `managed` habría roto el challenge de todas las
+webs) y ES la reconciliación (idempotente). Dos límites descubiertos y resueltos:
+`clean(…,1000)` truncaba la var en silencio (subido a 4000 CON log) y **Turnstile admite
+10 dominios por widget** — la API rechazó 12; como cubre subdominios automáticamente,
+se sincronizan solo apex (`www.` plegado; hoy 7 de 10; si se supera →
+`400 turnstile_domains_limit` → pasar a widget por cliente, alternativa §4 de la spec).
+
+## Acceso de clientes por API — Cloudflare Access (`SPEC-ACCESO-CLIENTES-POR-API.md`)
+
+Desplegado y probado el 2026-08-18 (login real de Diálogos con OTP ✓). Causa raíz
+confirmada por API: la organización de Zero Trust tenía CERO IdPs (Cloudflare cambió el
+default en junio de 2026 — OTP ya no se añade solo), así que ningún correo externo podía
+autenticarse por mucho que su fila en `tenant_users` existiera. Setup único hecho por
+API: IdP One-time PIN, grupo «Clientes Velai» (id en `CF_ACCESS_GROUP_ID`) y política
+nueva en la app `admin.hirevai.com` que incluye el grupo SIN tocar la regla de admins
+(`allowed_idps` vacío = el botón de OTP aparece solo). En runtime, `syncAccessGroup`
+(worker/cloudflare.js) reescribe el grupo ENTERO desde D1 tras cada alta/baja de usuario
+del panel — D1 primero: un PUT fallido no pierde la fila, devuelve `gate: pendiente` con
+log `access_group_desync` + alerta a Telegram; sin correos, centinela que cierra la
+puerta; los `ADMIN_EMAILS` jamás entran al grupo. El panel muestra el resultado en el
+toast («puerta de Access actualizada»). Secret `CF_API_TOKEN` (Turnstile Edit + Access
+cuenta Edit + Access zona Edit). Desviaciones conscientes: sin cerrojo KV (el PUT
+reescribe la lista completa post-escritura y converge) y sin botón de reconciliación
+aparte (cada alta/baja ES la reconciliación). También se añadió el botón **Salir** del
+panel (`/cdn-cgi/access/logout`), necesario para cambiar de cuenta.
+
 ## Contextos amplios — fase 1 (`CONTEXTOS-AMPLIOS.md`, el doc sigue vivo por las fases 2–4)
 
 `callAnthropic` envía el `system` como array de bloques con `cache_control: ephemeral`:

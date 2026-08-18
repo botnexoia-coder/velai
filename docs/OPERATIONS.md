@@ -126,13 +126,18 @@ efecto inmediato (sin caché); quitarla revoca de verdad. Choques: `409 email_ta
 correo pertenece a UN cliente) y `400 email_is_admin` (un admin de Velai no puede degradarse
 a un tenant). Cada alta/baja queda auditada en `tenant_versions` (field `users`, con rol).
 
-**Modelo de cerraduras:** Access **autentica** (política de la app en **OTP para cualquier
-correo** — cambio manual único en Zero Trust); el worker **autoriza** (`resolveScope`: sin
-`ADMIN_EMAILS` ni fila → 403). ⚠️ Si algún día se vuelve a restringir la política de Access,
-las altas desde el panel dejan de bastar y hay que tocar Cloudflare otra vez. Compensaciones
-por tener una sola cerradura de autorización: cada 403 se registra CON el correo (log
-`not_authorized`), a la 3ª en una hora sale alerta a Telegram, y el camino de administración
-tiene rate limit por correo (120/min).
+**Modelo de cerraduras (desde 2026-08-18, dos cerraduras automáticas):** Access
+**autentica y filtra** — el login ofrece One-time PIN (IdP creado por API) y la app
+`admin.hirevai.com` tiene dos políticas: «Equipo Velai» (correos admin) y «Clientes
+Velai» (un grupo de Access que **el propio panel reescribe desde D1 en cada alta/baja**
+de usuario, vía `CF_API_TOKEN` — solo los correos dados de alta pasan la puerta). El
+worker **autoriza** (`resolveScope`: sin `ADMIN_EMAILS` ni fila en `tenant_users` → 403).
+Si el PUT del grupo falla tras escribir en D1, el toast lo dice (`gate: pendiente`), se
+loguea `access_group_desync` y llega alerta a Telegram — repetir cualquier alta/baja
+resincroniza (la lista se reescribe entera desde D1). Defensas del worker que siguen
+activas: cada 403 se registra CON el correo (`not_authorized`), a la 3ª en una hora sale
+alerta, y el camino de administración tiene rate limit por correo (120/min). El botón
+**Salir** del panel cierra la sesión de Access (`/cdn-cgi/access/logout`).
 
 Los **admins de Velai** van en `ADMIN_EMAILS` (wrangler.toml), nunca en la tabla — quien
 edita `tenant_users` desde el panel no debe poder ascenderse a admin. Un cliente
