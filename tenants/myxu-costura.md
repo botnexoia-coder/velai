@@ -1,6 +1,6 @@
 # Prompt de negocio — tenant myxu-costura (MyXu Costura) — PROSPECTO
 
-> **PROSPECTO — negociación abierta.** Alta como prospecto según PLAN-ALTA-CLIENTES §3.6/§PR4:
+> **PROSPECTO — negociación abierta.** Alta como prospecto (ver docs/ALTACLIENTE.md §Prospectos):
 > fila con `channel_address = pending:myxu-costura` y `active = 0`, SIN subcuenta de Twilio
 > (se crea el día que se firme). Su worker `myxu-costura-bot` sigue funcionando igual.
 >

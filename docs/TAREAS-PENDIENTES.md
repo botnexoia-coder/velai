@@ -4,8 +4,8 @@
 > despliegues, datos reales). Marca las casillas a medida que las completes.
 > Última actualización: 2026-08-17.
 
-> Revisión técnica para validar antes de reutilizar esta arquitectura:
-> [`REVISION-SEGURIDAD-PENDIENTE.md`](./REVISION-SEGURIDAD-PENDIENTE.md).
+> Las specs ya implementadas están consolidadas en
+> [`IMPLEMENTADO.md`](./IMPLEMENTADO.md) (texto íntegro en el historial de git).
 
 ---
 
@@ -35,14 +35,14 @@ Sin esto, las campañas gastarían presupuesto a ciegas (sin medir conversiones)
 - [x] `admin.hirevai.com` como custom domain del Worker + app de Access con OTP.
 - [x] Desplegado y verificado end-to-end: lead de prueba en D1 y **aviso entregado en Telegram**.
 - [x] `.dev.vars` en `.gitignore` (los secretos de desarrollo local nunca se commitean).
-- [x] **`TEAM_WHATSAPP`, `TWILIO_FROM` y `TWILIO_LEAD_TEMPLATE_SID`** configurados; el aviso de WhatsApp va por plantilla (arreglo del `Undelivered 63016` — ver `docs/FASE0-TWILIO-PLANTILLA.md`).
+- [x] **`TEAM_WHATSAPP`, `TWILIO_FROM` y `TWILIO_LEAD_TEMPLATE_SID`** configurados; el aviso de WhatsApp va por plantilla (arreglo del `Undelivered 63016` — ver `IMPLEMENTADO.md` §FASE0).
 - [ ] **Duplicar la plantilla `velai_nuevo_lead` en categoría Utility** (Twilio Content Template Builder → Duplicate) y pasar el SID nuevo cuando esté aprobada (más barata y sin topes de Marketing).
 - [ ] Login de prueba en `admin.hirevai.com` con tu email + PIN, y verificar que ves el lead de prueba.
-- [ ] De FASE0 §6: status callback del sender (para ver `Undelivered` sin entrar a la consola), perfil de negocio del sender, webhook de voz, bundle +34.
+- [ ] Restos de FASE0 (ver `IMPLEMENTADO.md` §FASE0): status callback del sender (para ver `Undelivered` sin entrar a la consola), perfil de negocio del sender, webhook de voz, bundle +34.
 
-### 2c. Alta de los 4 clientes + 1 prospecto (PLAN-ALTA-CLIENTES, PRs 1-3 desplegados)
+### 2c. Alta de los 4 clientes + 1 prospecto (plan de alta aplicado — ver `IMPLEMENTADO.md`)
 
-- [ ] **Alta en el panel** de `hiredatavision`, `gogestion`, `zoe`, `dialogos` (contextos listos en `tenants/*.md` — pegar, Probar y guardar; SIDs de subcuenta en el propio plan) y `myxu-costura` como prospecto (`pending:myxu-costura`, inactivo).
+- [ ] **Alta en el panel** de `hiredatavision`, `gogestion`, `zoe`, `dialogos` (contextos listos en `tenants/*.md` — pegar, Probar y guardar; SIDs de subcuenta en Twilio → Subaccounts) y `myxu-costura` como prospecto (`pending:myxu-costura`, inactivo).
 - [ ] **Auth tokens de las 4 subcuentas** pegados en el panel (campo write-only; Twilio → subcuenta → Keys & Credentials).
 - [ ] **Verificación de negocio en Meta de cada cliente** (con su CIF; añaden a Velai como socio) — bloqueante para su WhatsApp.
 - [ ] **Tope de gasto por subcuenta** en Twilio.
@@ -58,6 +58,12 @@ Sin esto, las campañas gastarían presupuesto a ciegas (sin medir conversiones)
 - [ ] **Fase 3** (al pasar de ~20k car. o varios documentos): herramienta `consultar_base(tema)` con índice en el prompt base.
 - [ ] **Fase 4** (solo si el corpus se dispara): Vectorize. Hoy sería sobreingeniería.
 - Regla del doc que se mantiene: NO recortar la base de conocimiento de Zoe para ahorrar — el problema es cómo se entrega, no cuánto hay.
+
+### 2e. Restos del plan del chat web (código desplegado — ver `IMPLEMENTADO.md`)
+
+- [ ] Quitar el CSS muerto `.vai-fab` de `assets/styles.scss` (3 apariciones) y `assets/styles.css` (1).
+- [ ] En Cloudflare: `www.hirevai.com` figura "Inactivo (Error)", DMARC sigue en `p=none`, y el proyecto Pages legacy `hirevai` sin retirar.
+- [ ] Revisar las métricas del chat (eventos `chat_*` en GA4) a partir del ~2026-08-24, con una semana de datos.
 
 ### 2a-bis. Alta de usuarios desde el panel (SPEC-USUARIOS — desplegado, falta un paso manual)
 
@@ -96,6 +102,7 @@ Sin esto, las campañas gastarían presupuesto a ciegas (sin medir conversiones)
 
 - [ ] **Número de WhatsApp Business API para el bot demo** (un "Vai de restaurante ficticio"). Hace falta un número/sandbox y desplegar el worker parametrizado.
 - [ ] **Datos para casos de éxito reales**: en cuanto tengas 1–2 clientes con cifras (mensajes atendidos, reservas, no-shows), me los pasas y los meto en las landings (ahora hay un "ejemplo ilustrativo", no un testimonio real).
+- [ ] **Secuencia de nurturing post-diagnóstico** (email/WhatsApp) — del blueprint del funnel, sin empezar.
 
 ---
 
@@ -103,6 +110,8 @@ Sin esto, las campañas gastarían presupuesto a ciegas (sin medir conversiones)
 
 - [ ] **Colombia**: cuándo replicar el funnel (precios USD/COP, copy localizado). Hoy todo está en España (€).
 - [ ] **Calendario de demos**: ¿usamos Calendly / Cal.com para que el lead agende solo? (hoy el cierre es por WhatsApp con el equipo).
+- [ ] **Instagram en el prompt**: la web y el prompt de Vai prometen Instagram sin canal desplegado (`vai-worker.js` y `tenants/velai.md`). Decisión tomada el 2026-08-17 de mantenerlo por ahora — revisar antes de pauta.
+- [ ] **Demos grupales por vertical y programa de referidos/partners** (fase 2 del blueprint del funnel, mes 3+).
 
 ---
 

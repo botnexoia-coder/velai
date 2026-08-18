@@ -1,7 +1,7 @@
 # Prompt de negocio — tenant gogestion (GoGestión – Gestoría Administrativa)
 
 > Fuente de verdad: la columna `system_prompt` en D1. Esta copia versionada existe para
-> historial y revisión. El alta/edición real de la fila se hace desde el panel (PLAN-ALTA-CLIENTES §PR4).
+> historial y revisión. El alta/edición real de la fila se hace desde el panel (ver docs/ALTACLIENTE.md).
 > Los guardrails antiinyección NO van aquí: los añade el worker (GUARDRAILS, vai-worker.js).
 >
 > Materia prima: prompt maestro completo del worker `gogestion-bot` (repo `CronoSeb/gogestion-demo`,

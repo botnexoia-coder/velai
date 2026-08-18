@@ -1,7 +1,7 @@
 # Alta de un cliente — runbook operativo
 
-> Requiere los PR 1–3 de `docs/PLAN-ALTA-CLIENTES.md` (desplegados el 2026-08-17).
-> `window.VELAI_TENANT` funciona desde el PR 1 — no antes. El alta de la fila se hace
+> El plan de alta multi-cuenta está desplegado íntegro desde el 2026-08-17 (resumen en
+> `IMPLEMENTADO.md`). `window.VELAI_TENANT` ya funciona. El alta de la fila se hace
 > **desde el panel** (`admin.hirevai.com` → Clientes), nunca por SQL: así queda versionada.
 > Los contextos preparados viven en `tenants/<slug>.md` — copiar/pegar y "Probar" antes de guardar.
 

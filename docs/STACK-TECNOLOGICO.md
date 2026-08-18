@@ -126,9 +126,9 @@ panel) y `LEAD_RETENTION_MONTHS` (purga RGPD).
 - **Cloudflare KV** — almacén key-value para historial de conversaciones.
 - **Cloudflare D1** — persistencia de leads durante 24 meses desde la última actividad.
 - **Cloudflare Access** — acceso administrativo sin contraseñas propias.
-- **`_headers`** — políticas de caché y cabeceras de seguridad (HSTS no,
-  pero sí `X-Content-Type-Options`, `X-Frame-Options`, `Referrer-Policy`,
-  `Permissions-Policy`).
+- **`_headers`** — políticas de caché y cabeceras de seguridad (`X-Content-Type-Options`,
+  `X-Frame-Options`, `Referrer-Policy`, `Permissions-Policy`, HSTS con preload,
+  COOP y CSP base con `frame-ancestors`).
 - **Git** — control de versiones (rama `main`).
 - **Tooling** — `package.json` sin dependencias: `npm run check` = `node --check`
   de los JS + `scripts/check-site.mjs` (valida las 26 páginas, JSON-LD, recursos

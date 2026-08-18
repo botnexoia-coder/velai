@@ -4,9 +4,9 @@
 > Turnstile invisible activo (sitekey en los 26 HTML), secrets cargados, Worker
 > desplegado con cron, panel en `admin.hirevai.com` tras Access, y avisos de Telegram
 > verificados end-to-end (lead real → D1 → Telegram). Los pasos de abajo quedan como
-> referencia para recrear el entorno. **Pendiente**: variables `TEAM_WHATSAPP` y
-> `TWILIO_FROM` (el canal whatsapp queda en `skipped` y se activará solo al ponerlas)
-> y el riesgo legal del final.
+> referencia para recrear el entorno. `TEAM_WHATSAPP`, `TWILIO_FROM` y la plantilla
+> también están configurados (el aviso de WhatsApp sale por plantilla). **Pendiente**:
+> el riesgo legal del final.
 
 ## Recursos Cloudflare (orden de puesta en marcha — ya ejecutado)
 
@@ -15,7 +15,7 @@
 3. Crear un widget Turnstile de **tipo Invisible** (el tipo se elige en el dashboard; el código usa `execution:'execute'`) con los hostnames `hirevai.com`, `www.hirevai.com` **y** `velai-dey.pages.dev`. *(Hecho: widget `velai-web`.)*
 4. Sustituir `REPLACE_WITH_TURNSTILE_SITE_KEY` en los 26 HTML por la site key pública. `npm run check` falla mientras quede algún marcador (en CI de ramas puede saltarse con `CHECK_ALLOW_PLACEHOLDERS=1`; el deploy real nunca). *(Hecho.)*
 5. Guardar `TURNSTILE_SECRET_KEY`, `ANTHROPIC_API_KEY`, `TELEGRAM_TOKEN`, `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN` y `TELEGRAM_CHAT_ID` como secrets (`npx wrangler secret put <NOMBRE>`). *(Hechos.)*
-6. Configurar `TEAM_WHATSAPP`, `TWILIO_FROM` y `TWILIO_LEAD_TEMPLATE_SID` (formato `whatsapp:+E164`; el SID es de la plantilla aprobada `velai_nuevo_lead`). *(Hechos.)* **El aviso por WhatsApp va SIEMPRE por plantilla** (`ContentSid`) — texto libre fuera de la ventana de 24 h devuelve `Undelivered 63016`, que es lo que tuvo el canal roto desde junio (ver `docs/FASE0-TWILIO-PLANTILLA.md`). Pendiente: duplicar la plantilla en categoría **Utility** y actualizar el SID.
+6. Configurar `TEAM_WHATSAPP`, `TWILIO_FROM` y `TWILIO_LEAD_TEMPLATE_SID` (formato `whatsapp:+E164`; el SID es de la plantilla aprobada `velai_nuevo_lead`). *(Hechos.)* **El aviso por WhatsApp va SIEMPRE por plantilla** (`ContentSid`) — texto libre fuera de la ventana de 24 h devuelve `Undelivered 63016`, que es lo que tuvo el canal roto desde junio (ver `docs/IMPLEMENTADO.md` §FASE0). Pendiente: duplicar la plantilla en categoría **Utility** y actualizar el SID.
 7. Desplegar el Worker: `npx wrangler deploy`. Verificar en **Workers → vai-worker → Settings → Triggers** que el cron `*/5 * * * *` quedó registrado. *(Hecho.)*
 
 No desplegar con el UUID D1 de ceros ni con el marcador de Turnstile. **No quitar de `wrangler.toml` los bindings `KV` y `DB`**: un deploy sin ellos los elimina del Worker (sin `KV`, `/chat` responde 503 y el rate limit se desactiva).
@@ -77,7 +77,7 @@ Ejecutar `npm run check` antes de desplegar (sintaxis JS, validación de las 26 
 
 ## Multi-tenant: alta de un cliente
 
-El Worker es multi-tenant (Fase 1, `docs/FASE1-MULTITENANT.md`): un despliegue, N clientes,
+El Worker es multi-tenant (Fase 1 — ver `docs/IMPLEMENTADO.md`): un despliegue, N clientes,
 enrutado por el `To` de Twilio. Para dar de alta un cliente:
 
 1. **Desde el panel** (`admin.hirevai.com` → pestaña Clientes → "Nuevo cliente", Fase 2):
@@ -90,8 +90,8 @@ enrutado por el `To` de Twilio. Para dar de alta un cliente:
 3. En Twilio: sender bajo la misma WABA, display name del cliente, plantilla
    `nuevo_lead_<cliente>` en categoría **Utility**, webhook apuntando al mismo Worker.
 4. Para su widget web: script inline `window.VELAI_TENANT = '<slug>'` **antes** del
-   `<script src=…vai-widget.js>` en su página (el widget lo adjunta al payload desde el
-   PR 1 de PLAN-ALTA-CLIENTES), su dominio en `ALLOWED_WEB_ORIGINS` (wrangler.toml →
+   `<script src=…vai-widget.js>` en su página (el widget lo adjunta al payload), su
+   dominio en `ALLOWED_WEB_ORIGINS` (wrangler.toml →
    requiere deploy del Worker) **y** en los hostnames del widget de Turnstile.
 5. WhatsApp con WABA del cliente: subcuenta de Twilio por cliente (Twilio solo admite
    1 WABA por cuenta/subcuenta). El **auth token de la subcuenta** se pega en el panel
