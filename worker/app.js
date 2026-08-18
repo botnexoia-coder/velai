@@ -1169,7 +1169,11 @@ async function runProvisionStep(request, env, ctx, tenant, tenantId, step, actor
   // el mismo botón ES la reconciliación. No requiere subcuenta de Twilio.
   if (step === 'domains') {
     if (!cloudflareConfigured(env)) throw new HttpError(503, 'cloudflare_api_not_configured');
-    const hosts = [...new Set((await allowedOrigins(env)).map((o) => { try { return new URL(o).hostname; } catch (_) { return ''; } }).filter(Boolean))];
+    // Turnstile admite MÁXIMO 10 dominios por widget (verificado: la API rechazó 12 con
+    // "too many values") y cubre los subdominios de los listados automáticamente: se
+    // sincronizan solo los apex — www.x.com se pliega en x.com sin perder cobertura.
+    const hosts = [...new Set((await allowedOrigins(env)).map((o) => { try { return new URL(o).hostname.replace(/^www\./, ''); } catch (_) { return ''; } }).filter(Boolean))];
+    if (hosts.length > 10) throw new HttpError(400, 'turnstile_domains_limit');
     try {
       await syncTurnstileDomains(env, hosts);
     } catch (error) {

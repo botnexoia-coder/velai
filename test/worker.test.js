@@ -1117,7 +1117,8 @@ test('provision/domains reescribe Turnstile preservando el mode invisible y con 
     const row = { id: '00000000-0000-4000-8000-000000000001', slug: 'zoe', name: 'Zoe' };
     const env = {
       CF_API_TOKEN: 't', CF_ACCOUNT_ID: 'acc', TURNSTILE_SITEKEY: '0xKEY',
-      ALLOWED_WEB_ORIGINS: 'https://hirevai.com',
+      // el www se pliega en el apex: Turnstile cubre subdominios y solo admite 10 dominios
+      ALLOWED_WEB_ORIGINS: 'https://hirevai.com,https://www.hirevai.com',
       DB: { prepare: (sql) => ({
         all: async () => ({ results: sql.includes('active = 1') ? [{ web_origins: '["https://zoetravelspain.com"]' }] : [] }),
         bind: () => ({ first: async () => (sql.startsWith('SELECT * FROM tenants') ? row : null), run: async () => ({ meta: { changes: 1 } }), all: async () => ({ results: [] }) }),

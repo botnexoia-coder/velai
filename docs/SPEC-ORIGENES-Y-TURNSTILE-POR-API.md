@@ -92,6 +92,13 @@ Body (**los tres primeros son obligatorios**):
 **te quedas sin `hirevai.com`** y se cae el chat de nuestra propia web. Por eso la lista tiene que
 reconstruirse desde D1 en cada llamada, nunca a mano.
 
+⚠️ **Límite descubierto en la prueba real (2026-08-18): 10 dominios por widget.** La API
+rechazó 12 con `invalid value for domains, too many values (max: 10)`. Como Turnstile
+cubre los subdominios de los dominios listados automáticamente, la sincronización pliega
+`www.x.com` en `x.com` y solo envía apex (hoy: 7). Si algún día ni plegando se baja de
+10, la salida es la alternativa §4 (un widget por cliente) — el worker responde
+`400 turnstile_domains_limit` en vez de intentarlo.
+
 ⚠️ **Y `mode` también viaja entero**: es campo obligatorio del PUT y el nuestro es `invisible` —
 enviar `managed` (el default de los ejemplos de la doc de Cloudflare) convierte el widget en
 interactivo y rompe `execution:'execute'` en funnel.js y en el widget. Patrón seguro: `GET` del
