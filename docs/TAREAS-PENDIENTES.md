@@ -68,7 +68,7 @@ Sin esto, las campañas gastarían presupuesto a ciegas (sin medir conversiones)
 
 ### 2f. Widget con marca en las webs de los clientes (desplegado `?v=7` el 2026-08-18 — ver `IMPLEMENTADO.md`)
 
-- [ ] **Verificar los 8 hostnames en el widget de Turnstile** (sitekey `0x4AAAAAAESkAwvlDVJD9Z1l`): apex + `www` de los 4 dominios. `verifyTurnstile` cruza el hostname contra `ALLOWED_WEB_ORIGINS` — tiene que estar en las DOS listas. **Antes de que Sebas pruebe**, o su prueba falla con `human_verification_failed`.
+- [x] **Hostnames del widget de Turnstile verificados por API (2026-08-18)**: los 4 apex de los clientes + `hirevai.com`/`www` + `velai-dey.pages.dev` + `gogestion-demo.pages.dev` están en el widget `velai-web`. Los `www.` de los clientes quedan cubiertos: Turnstile permite automáticamente los subdominios de los dominios listados. Ojo servidor: `verifyTurnstile` cruza contra `ALLOWED_WEB_ORIGINS`, que sí lista los `www` explícitos — las dos listas alineadas.
 - [ ] **Recopilar y cargar la marca de cada cliente** en la ficha del panel (sección «Marca del widget»): logo https, 2 colores, nombre del bot, saludo (ES y EN para Zoe), chips, placeholder y WhatsApp de contacto. Hoy los 4 están en null → sus chats saldrían como `Vai · Velai`. Punto de partida documentado en `IMPLEMENTADO.md` §Widget (Zoe: `#1a4fd0`/`#f57a1f`, logo `/img/zoe-logo.png`; GOgestión: Faby, `#A6153A`/`#FDF8F0`, wa 34634167405).
 - [ ] **Decidir el nombre del asistente de Diálogos** (su prompt no le da ninguno; la cabecera del chat lo necesita).
 - [ ] **Acceso a los repos de HireDataVision y Diálogos** (404 con el token gh actual) o su marca por otra vía.
