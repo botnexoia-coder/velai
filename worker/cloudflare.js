@@ -9,6 +9,18 @@ export function cloudflareConfigured(env) {
   return Boolean(env.CF_API_TOKEN && env.CF_ACCOUNT_ID);
 }
 
+// Validación en vivo de un token (GET /user/tokens/verify): el panel la usa para
+// mostrar el estado y para RECHAZAR una rotación con un token roto antes de guardarlo.
+export async function verifyCfToken(token) {
+  const response = await fetch('https://api.cloudflare.com/client/v4/user/tokens/verify', {
+    headers: { Authorization: `Bearer ${token}` },
+    signal: AbortSignal.timeout(8000),
+  });
+  const data = await response.json().catch(() => ({}));
+  const result = data.result || {};
+  return { valid: Boolean(data.success && result.status === 'active'), status: result.status || `http_${response.status}` };
+}
+
 async function cfRaw(env, method, path, body) {
   const response = await fetch(`https://api.cloudflare.com/client/v4${path}`, {
     method,

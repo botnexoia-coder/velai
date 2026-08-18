@@ -1,6 +1,6 @@
 import { ADMIN_HEADERS, ADMIN_HTML } from './admin-page.js';
 import { encryptSecret, decryptSecret } from './crypto.js';
-import { cloudflareConfigured, syncTurnstileDomains, syncAccessGroup, syncAdminGroup } from './cloudflare.js';
+import { cloudflareConfigured, syncTurnstileDomains, syncAccessGroup, syncAdminGroup, verifyCfToken } from './cloudflare.js';
 import { createSubaccount, createLeadTemplate, submitTemplateApproval, fetchApprovalStatus, createWhatsAppSender, verifySender, fetchSenderStatus } from './twilio.js';
 
 const JSON_HEADERS = { 'Content-Type': 'application/json; charset=utf-8' };
@@ -425,6 +425,31 @@ async function handleWidgetBoot(request, env, url) {
     wa_number: tenant.wa_number || null,
     theme: THEMES.has(tenant.theme) ? tenant.theme : 'auto',
   }, 200, { ...cors, 'Cache-Control': 'public, max-age=300' });
+}
+
+// ── Ajustes cifrados en D1 (tabla settings, migración 0010) ──────────────────
+// Hoy solo 'cf_api_token': el token de API de Cloudflare rotable desde el panel
+// (solo admins raíz). El valor del panel tiene PRIORIDAD sobre el secret del worker
+// (withCfToken); el secret queda como respaldo raíz.
+async function getSetting(env, key) {
+  try {
+    const row = await env.DB.prepare('SELECT value_enc FROM settings WHERE key=?').bind(key).first();
+    if (!row) return null;
+    const out = await decryptSecret(env, `setting:${key}`, row.value_enc);
+    return out ? out.value : null;
+  } catch (_) { return null; }
+}
+
+async function setSetting(env, key, value, actor) {
+  const enc = await encryptSecret(env, `setting:${key}`, value);
+  await env.DB.prepare(`INSERT INTO settings (key, value_enc, updated_by, updated_at) VALUES (?,?,?,?)
+    ON CONFLICT(key) DO UPDATE SET value_enc=excluded.value_enc, updated_by=excluded.updated_by, updated_at=excluded.updated_at`)
+    .bind(key, enc, actor, new Date().toISOString()).run();
+}
+
+async function withCfToken(env) {
+  const stored = await getSetting(env, 'cf_api_token');
+  return stored ? { ...env, CF_API_TOKEN: stored } : env;
 }
 
 // Write-only: el auth token de la subcuenta entra en claro, se guarda cifrado y
@@ -1105,11 +1130,12 @@ const PANEL_EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 // «Equipo Velai» del dashboard, que el worker no toca) + admin_users. Un PUT fallido
 // no pierde la fila: gate 'pendiente' + log + alerta.
 async function syncAdminGate(env, ctx) {
-  if (!cloudflareConfigured(env) || !env.CF_ADMIN_GROUP_ID) return 'manual';
+  const cfEnv = await withCfToken(env);
+  if (!cloudflareConfigured(cfEnv) || !cfEnv.CF_ADMIN_GROUP_ID) return 'manual';
   try {
     const rows = (await env.DB.prepare('SELECT email FROM admin_users ORDER BY email').all()).results || [];
     const emails = [...new Set([...envAdmins(env), ...rows.map((r) => r.email)])];
-    await syncAdminGroup(env, emails);
+    await syncAdminGroup(cfEnv, emails);
     return 'sincronizado';
   } catch (error) {
     console.log(JSON.stringify({ level: 'error', code: 'admin_policy_desync', error: String(error.message || error) }));
@@ -1119,10 +1145,11 @@ async function syncAdminGate(env, ctx) {
 }
 
 async function syncPanelGate(env, ctx) {
-  if (!cloudflareConfigured(env) || !env.CF_ACCESS_GROUP_ID) return 'manual';
+  const cfEnv = await withCfToken(env);
+  if (!cloudflareConfigured(cfEnv) || !cfEnv.CF_ACCESS_GROUP_ID) return 'manual';
   try {
     const rows = (await env.DB.prepare('SELECT email FROM tenant_users ORDER BY email').all()).results || [];
-    await syncAccessGroup(env, rows.map((r) => r.email));
+    await syncAccessGroup(cfEnv, rows.map((r) => r.email));
     return 'sincronizado';
   } catch (error) {
     console.log(JSON.stringify({ level: 'error', code: 'access_group_desync', error: String(error.message || error) }));
@@ -1186,14 +1213,15 @@ async function runProvisionStep(request, env, ctx, tenant, tenantId, step, actor
   // web_origins de TODOS los tenants activos, reconstruida desde D1). Es idempotente:
   // el mismo botón ES la reconciliación. No requiere subcuenta de Twilio.
   if (step === 'domains') {
-    if (!cloudflareConfigured(env)) throw new HttpError(503, 'cloudflare_api_not_configured');
+    const cfEnv = await withCfToken(env);
+    if (!cloudflareConfigured(cfEnv)) throw new HttpError(503, 'cloudflare_api_not_configured');
     // Turnstile admite MÁXIMO 10 dominios por widget (verificado: la API rechazó 12 con
     // "too many values") y cubre los subdominios de los listados automáticamente: se
     // sincronizan solo los apex — www.x.com se pliega en x.com sin perder cobertura.
     const hosts = [...new Set((await allowedOrigins(env)).map((o) => { try { return new URL(o).hostname.replace(/^www\./, ''); } catch (_) { return ''; } }).filter(Boolean))];
     if (hosts.length > 10) throw new HttpError(400, 'turnstile_domains_limit');
     try {
-      await syncTurnstileDomains(env, hosts);
+      await syncTurnstileDomains(cfEnv, hosts);
     } catch (error) {
       // El estado incoherente peligroso: D1 ya acepta el origen pero Turnstile no
       // emitiría token para ese hostname («No pude verificar que eres humano»).
@@ -1516,6 +1544,45 @@ async function adminRouter(request, env, ctx, path, url, config, scope) {
     if (!UUID_RE.test(provMatch[1])) throw new HttpError(404, 'not_found');
     return await handleProvision(request, env, ctx, provMatch[1], provMatch[2] || '', actor);
   }
+  // ── Configuración (SOLO admins raíz): estado de integraciones y rotación del
+  // token de API de Cloudflare. Raíz = envAdmins (los del toml): ni siquiera un admin
+  // dado de alta en el panel puede tocar tokens — dos factores reales en vez de un PIN.
+  if (path === '/api/admin/config' || path === '/api/admin/config/cf-token') {
+    if (!envAdmins(env).includes(String(actor).toLowerCase())) throw new HttpError(403, 'root_only');
+  }
+  if (path === '/api/admin/config' && request.method === 'GET') {
+    const stored = await getSetting(env, 'cf_api_token');
+    const token = stored || clean(env.CF_API_TOKEN, 200) || '';
+    let verify = null;
+    if (token) { try { verify = await verifyCfToken(token); } catch (_) { verify = { valid: false, status: 'unreachable' }; } }
+    return json({
+      cf_token: { source: stored ? 'panel' : (env.CF_API_TOKEN ? 'worker' : 'none'), valid: verify ? verify.valid : null, status: verify ? verify.status : null },
+      account_id: clean(env.CF_ACCOUNT_ID, 40) || null,
+      turnstile_sitekey: clean(env.TURNSTILE_SITEKEY, 60) || null,
+      groups: { clientes: Boolean(env.CF_ACCESS_GROUP_ID), admins: Boolean(env.CF_ADMIN_GROUP_ID) },
+      d1: Boolean(env.DB), kv: Boolean(env.KV),
+    }, 200, NO_STORE);
+  }
+  if (path === '/api/admin/config/cf-token' && request.method === 'POST') {
+    const body = await readJson(request, 2000);
+    const token = clean(body.token, 200);
+    if (!/^[A-Za-z0-9_-]{40,120}$/.test(token)) throw new HttpError(400, 'invalid_token_format');
+    // Se valida contra Cloudflare ANTES de guardar: un token roto no puede sustituir
+    // a uno sano. Y es write-only: se cifra con la KEK y jamás se devuelve.
+    let verify;
+    try { verify = await verifyCfToken(token); } catch (_) { throw new HttpError(502, 'token_verify_unavailable'); }
+    if (!verify.valid) throw new HttpError(400, 'token_invalid');
+    await setSetting(env, 'cf_api_token', token, actor);
+    console.log(JSON.stringify({ level: 'info', code: 'cf_token_rotated', actor }));
+    ctx.waitUntil(sendTelegramText(env, `🔑 <b>${escapeHtml(actor)}</b> rotó el token de API de Cloudflare desde el panel (estado: ${escapeHtml(verify.status)}).`).catch(() => {}));
+    return json({ ok: true, source: 'panel', status: verify.status }, 200, NO_STORE);
+  }
+  if (path === '/api/admin/config/cf-token' && request.method === 'DELETE') {
+    try { await env.DB.prepare("DELETE FROM settings WHERE key='cf_api_token'").run(); } catch (_) {}
+    ctx.waitUntil(sendTelegramText(env, `🔑 <b>${escapeHtml(actor)}</b> retiró el token del panel: vuelve a usarse el secret del worker.`).catch(() => {}));
+    return json({ ok: true, source: env.CF_API_TOKEN ? 'worker' : 'none' }, 200, NO_STORE);
+  }
+
   // ── Admins de Velai gestionados desde el panel (migración 0009) ──────────────
   // Solo rol velai (clienteAllowed no incluye estas rutas). Los ADMIN_EMAILS del
   // entorno son RAÍZ: se listan pero no se pueden borrar desde aquí. La auditoría va
@@ -1891,4 +1958,4 @@ export function createWorker(config) {
   };
 }
 
-export const testing = { clean, normalizePhone, extractPhone, safeUtm, publicCors, validTwilioSignature, csvCell, expiryDate, leadFilters, isDemoKey, templateVar, leadTemplateVariables, readJson, deliver, drainQueuedLeads, verifyTurnstile, systemFor, validateTenant, invalidateTenantCache, tenantWriteError, assertNotActivePending, handleProvision, pollProvisioning, fillSeries, resolveScope, scopeClause, clienteAllowed, adminRouter, recordAuthFailure, handleAdmin, handleWidgetBoot, allowedOrigins, envOrigins, syncPanelGate, envAdmins, syncAdminGate };
+export const testing = { clean, normalizePhone, extractPhone, safeUtm, publicCors, validTwilioSignature, csvCell, expiryDate, leadFilters, isDemoKey, templateVar, leadTemplateVariables, readJson, deliver, drainQueuedLeads, verifyTurnstile, systemFor, validateTenant, invalidateTenantCache, tenantWriteError, assertNotActivePending, handleProvision, pollProvisioning, fillSeries, resolveScope, scopeClause, clienteAllowed, adminRouter, recordAuthFailure, handleAdmin, handleWidgetBoot, allowedOrigins, envOrigins, syncPanelGate, envAdmins, syncAdminGate, getSetting, setSetting, withCfToken };

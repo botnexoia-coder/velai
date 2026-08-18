@@ -695,7 +695,7 @@ test('el panel rediseñado: sin dominios externos salvo las fuentes, nonce y tod
   assert.deepEqual([...new Set(externals)], ['hirevai.com'], 'solo hirevai.com (fuentes)');
   assert.ok([...ADMIN_HTML.matchAll(/hirevai\.com\/([a-z]+)\//g)].every((m) => m[1] === 'fonts'), 'y solo su ruta /fonts/');
   assert.ok(ADMIN_HTML.includes('__NONCE__'));
-  for (const id of ['tName', 'tSlug', 'tAddress', 'tFrom', 'tTeam', 'tChat', 'tTpl', 'tSub', 'tWaba', 'tToken', 'tPartner', 'tActive', 'tPrompt', 'tNote', 'pSub', 'pTpl', 'pPhone', 'pSender', 'pCode', 'pVerify', 'tenantFilter', 'newTenant', 'export', 'tTokenState', 'tBotName', 'tBrandName', 'tLogo', 'tColor1', 'tColor2', 'tGreeting', 'tGreetingEn', 'tChips', 'tPlaceholder', 'tWa', 'tTheme', 'brandPrev', 'toasts', 'tOrigins', 'tSyncDomains', 'logout', 'adminsCard', 'adminsList', 'aEmail', 'aAdd']) {
+  for (const id of ['tName', 'tSlug', 'tAddress', 'tFrom', 'tTeam', 'tChat', 'tTpl', 'tSub', 'tWaba', 'tToken', 'tPartner', 'tActive', 'tPrompt', 'tNote', 'pSub', 'pTpl', 'pPhone', 'pSender', 'pCode', 'pVerify', 'tenantFilter', 'newTenant', 'export', 'tTokenState', 'tBotName', 'tBrandName', 'tLogo', 'tColor1', 'tColor2', 'tGreeting', 'tGreetingEn', 'tChips', 'tPlaceholder', 'tWa', 'tTheme', 'brandPrev', 'toasts', 'tOrigins', 'tSyncDomains', 'logout', 'adminsCard', 'adminsList', 'aEmail', 'aAdd', 'configCard', 'configState', 'cfgToken', 'cfgTokenSave', 'cfgTokenClear']) {
     assert.ok(ADMIN_HTML.includes(`id="${id}"`), `falta #${id}`);
   }
   assert.ok(!/localStorage/.test(ADMIN_HTML), 'sin localStorage');
@@ -1274,4 +1274,67 @@ test('admins: resolveScope reconoce a un admin de D1 y un admin de D1 no puede s
     testing.adminRouter(usersReq({ method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email: 'estivenrojas09@gmail.com' }) }),
       { DB: db, ADMIN_EMAILS: '' }, { waitUntil() {} }, usersPath(), new URL('https://x' + usersPath()), {}, VELAI),
     (e) => e.status === 400 && e.code === 'email_is_admin');
+});
+
+// ── Configuración (solo raíz): rotación del token de API de Cloudflare ──
+function settingsDb() {
+  const store = new Map();
+  return { store, prepare(sql) { return { bind: (...args) => ({
+    first: async () => (sql.includes('FROM settings') && store.has(args[0]) ? { value_enc: store.get(args[0]) } : null),
+    run: async () => { if (sql.includes('INSERT INTO settings')) store.set(args[0], args[1]); if (sql.includes('DELETE FROM settings')) store.clear(); return { meta: { changes: 1 } }; },
+    all: async () => ({ results: [] }),
+  }), run: async () => { if (sql.includes('DELETE FROM settings')) store.clear(); return { meta: { changes: 1 } }; } }; } };
+}
+const cfgCall = (env, init, path = '/api/admin/config') => testing.adminRouter(
+  new Request('https://admin.hirevai.com' + path, init), env, { waitUntil() {} }, path, new URL('https://x' + path), {}, VELAI);
+
+test('config: solo los admins RAÍZ (env) entran — un admin de D1 recibe 403 root_only', async () => {
+  // VELAI.email NO está en ADMIN_EMAILS → aunque su rol sea velai (vía admin_users), config es 403
+  await assert.rejects(
+    cfgCall({ ADMIN_EMAILS: 'otro@velai.ai', DB: settingsDb() }, { method: 'GET' }),
+    (e) => e.status === 403 && e.code === 'root_only');
+});
+
+test('config: el token se valida contra Cloudflare ANTES de guardarse, cifrado y write-only', async () => {
+  const verifies = [];
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = async (url, init) => {
+    if (String(url).includes('/user/tokens/verify')) {
+      verifies.push((init && init.headers && init.headers.Authorization) || '');
+      return new Response(JSON.stringify({ success: true, result: { status: 'active' } }), { status: 200 });
+    }
+    return new Response('{"success":true,"ok":true,"result":{}}', { status: 200 });
+  };
+  try {
+    const db = settingsDb();
+    const env = { ADMIN_EMAILS: VELAI.email, SECRETS_KEK: TEST_KEK, DB: db };
+    const goodToken = 'A'.repeat(53);
+    const res = await cfgCall(env, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ token: goodToken }) }, '/api/admin/config/cf-token');
+    const body = await res.json();
+    assert.equal(body.source, 'panel');
+    assert.ok(verifies[0].includes(goodToken), 'verificado con el token candidato');
+    const enc = db.store.get('cf_api_token');
+    assert.ok(enc && !enc.includes(goodToken), 'guardado CIFRADO, nunca en claro');
+    // y el worker lo resuelve con prioridad sobre el secret del entorno
+    const resolved = await testing.withCfToken(env);
+    assert.equal(resolved.CF_API_TOKEN, goodToken);
+    // la respuesta jamás devuelve el token
+    assert.equal(JSON.stringify(body).includes(goodToken), false);
+  } finally { globalThis.fetch = realFetch; }
+});
+
+test('config: un token que Cloudflare rechaza NO se guarda', async () => {
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = async (url) => {
+    if (String(url).includes('/user/tokens/verify')) return new Response(JSON.stringify({ success: false, errors: [{ code: 1000 }] }), { status: 401 });
+    return new Response('{"success":true,"result":{}}', { status: 200 });
+  };
+  try {
+    const db = settingsDb();
+    const env = { ADMIN_EMAILS: VELAI.email, SECRETS_KEK: TEST_KEK, DB: db };
+    await assert.rejects(
+      cfgCall(env, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ token: 'B'.repeat(53) }) }, '/api/admin/config/cf-token'),
+      (e) => e.status === 400 && e.code === 'token_invalid');
+    assert.equal(db.store.size, 0, 'nada escrito');
+  } finally { globalThis.fetch = realFetch; }
 });
