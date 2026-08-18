@@ -664,7 +664,7 @@ test('el panel rediseñado: sin dominios externos salvo las fuentes, nonce y tod
   assert.deepEqual([...new Set(externals)], ['hirevai.com'], 'solo hirevai.com (fuentes)');
   assert.ok([...ADMIN_HTML.matchAll(/hirevai\.com\/([a-z]+)\//g)].every((m) => m[1] === 'fonts'), 'y solo su ruta /fonts/');
   assert.ok(ADMIN_HTML.includes('__NONCE__'));
-  for (const id of ['tName', 'tSlug', 'tAddress', 'tFrom', 'tTeam', 'tChat', 'tTpl', 'tSub', 'tWaba', 'tToken', 'tPartner', 'tActive', 'tPrompt', 'tNote', 'pSub', 'pTpl', 'pPhone', 'pSender', 'pCode', 'pVerify', 'tenantFilter', 'newTenant', 'export', 'tTokenState']) {
+  for (const id of ['tName', 'tSlug', 'tAddress', 'tFrom', 'tTeam', 'tChat', 'tTpl', 'tSub', 'tWaba', 'tToken', 'tPartner', 'tActive', 'tPrompt', 'tNote', 'pSub', 'pTpl', 'pPhone', 'pSender', 'pCode', 'pVerify', 'tenantFilter', 'newTenant', 'export', 'tTokenState', 'tBotName', 'tBrandName', 'tLogo', 'tColor1', 'tColor2', 'tGreeting', 'tGreetingEn', 'tChips', 'tPlaceholder', 'tWa', 'tTheme', 'brandPrev']) {
     assert.ok(ADMIN_HTML.includes(`id="${id}"`), `falta #${id}`);
   }
   assert.ok(!/localStorage/.test(ADMIN_HTML), 'sin localStorage');
@@ -984,4 +984,85 @@ test('usuarios B4.6: el 403 desconocido queda registrado y a la 3ª en una hora 
   assert.equal(telegrams.length, 1, 'la alerta sale exactamente una vez (a la 3ª)');
   assert.ok(telegrams[0].text.includes('curioso@x.com'));
   assert.equal(kvStore.get('authfail:curioso@x.com'), '5');
+});
+
+// ── Widget de clientes: autosuficiencia (PR A) y marca por tenant (PR B) ──
+test('el widget es autosuficiente: Turnstile propio sin funnel.js y sitekey por defecto', async () => {
+  const widget = await readFile(new URL('../assets/vai-widget.js', import.meta.url), 'utf8');
+  // (a) sin VELAI_HUMAN, el widget carga y ejecuta Turnstile él mismo
+  assert.match(widget, /challenges\.cloudflare\.com\/turnstile\/v0\/api\.js\?render=explicit/);
+  assert.match(widget, /SITEKEY_FALLBACK = '0x4AAAAAAESkAwvlDVJD9Z1l'/);
+  // (b) con VELAI_HUMAN presente (hirevai.com) se usa el de funnel.js: no hay un 2º widget
+  assert.match(widget, /if \(window\.VELAI_HUMAN\) return window\.VELAI_HUMAN\.execute\(action\);/);
+  // (c) funnel.js ya no es un requisito: el error 'human_check_unavailable' desapareció
+  assert.equal(widget.includes('human_check_unavailable'), false);
+});
+
+test('el widget pinta la marca del tenant desde /widget/boot, no la de Velai', async () => {
+  const widget = await readFile(new URL('../assets/vai-widget.js', import.meta.url), 'utf8');
+  assert.match(widget, /\/widget\/boot/);
+  // colores por variables CSS aplicadas por CSSOM, nunca style="" (lección de la CSP del panel)
+  assert.match(widget, /setProperty\('--vai-c1'/);
+  // el WhatsApp de los mensajes de error sale de la marca del tenant
+  assert.match(widget, /BRAND && BRAND\.wa_number/);
+  // bilingüe: el saludo EN del tenant se usa cuando la página está en inglés
+  assert.match(widget, /BRAND\.greeting_en/);
+});
+
+test('GET /widget/boot devuelve la marca del tenant, con CORS, y 404 si el slug no existe', async () => {
+  const worker = createWorker({ SYSTEM: 's', DEMOS: {}, SUMMARY_PROMPT: '', GUARDRAILS: '' });
+  const row = {
+    id: 't1', slug: 'zoe', name: 'Zoe Travel', active: 1, bot_name: 'Zoe', brand_name: 'Zoe Travel Spain',
+    brand_color: '#1a4fd0', greeting: '¡Hola! Soy Zoe', chips_json: '["Vuelos","Hoteles"]', theme: 'dark',
+    twilio_auth_token_enc: 'v1:SECRETO', system_prompt: 'PROMPT-PRIVADO',
+  };
+  const env = {
+    ALLOWED_WEB_ORIGINS: 'https://zoetravelspain.com',
+    KV: { async get() { return null; }, async put() {}, async delete() {} },
+    DB: { prepare: (sql) => ({ bind: (...a) => ({ first: async () => (sql.includes('slug = ?') && a[0] === 'zoe' ? row : null), all: async () => ({ results: [] }), run: async () => ({ meta: { changes: 1 } }) }) }), batch: async () => [] },
+  };
+  const res = await worker.fetch(new Request('https://worker.test/widget/boot?tenant=zoe', { headers: { Origin: 'https://zoetravelspain.com' } }), env, { waitUntil() {} });
+  assert.equal(res.status, 200);
+  assert.equal(res.headers.get('Access-Control-Allow-Origin'), 'https://zoetravelspain.com');
+  const body = await res.json();
+  assert.equal(body.bot_name, 'Zoe');
+  assert.deepEqual(body.chips, ['Vuelos', 'Hoteles']);
+  assert.equal(body.theme, 'dark');
+  // NADA sensible sale del endpoint público: ni token cifrado ni system_prompt
+  const raw = JSON.stringify(body);
+  assert.equal(raw.includes('SECRETO'), false);
+  assert.equal(raw.includes('PROMPT-PRIVADO'), false);
+  // slug desconocido → 404 (no cae a la marca de Velai: el snippet mal puesto debe verse)
+  const miss = await worker.fetch(new Request('https://worker.test/widget/boot?tenant=nadie'), env, { waitUntil() {} });
+  assert.equal(miss.status, 404);
+  assert.equal((await miss.json()).error, 'invalid_tenant');
+});
+
+test('validateTenant: la marca del widget se valida campo a campo', () => {
+  const out = testing.validateTenant({
+    bot_name: 'Zoe', brand_color: '#1A4FD0', chips_json: ['Vuelos', 'Hoteles'],
+    wa_number: '34 644 280 183', theme: 'dark', logo_url: 'https://zoetravelspain.com/img/zoe-logo.png',
+  }, { partial: true });
+  assert.equal(out.chips_json, '["Vuelos","Hoteles"]');
+  assert.equal(out.wa_number, '34644280183');
+  assert.equal(out.theme, 'dark');
+  assert.throws(() => testing.validateTenant({ brand_color: 'rojo' }, { partial: true }), (e) => e.code === 'invalid_brand_color');
+  assert.throws(() => testing.validateTenant({ logo_url: 'http://inseguro.com/l.png' }, { partial: true }), (e) => e.code === 'invalid_logo_url', 'el logo exige https (mixed content)');
+  assert.throws(() => testing.validateTenant({ theme: 'neon' }, { partial: true }), (e) => e.code === 'invalid_theme');
+  assert.throws(() => testing.validateTenant({ chips_json: ['1', '2', '3', '4'] }, { partial: true }), (e) => e.code === 'invalid_chips_json');
+  // vacío = null: el widget cae a la marca de Velai
+  assert.equal(testing.validateTenant({ chips_json: [] }, { partial: true }).chips_json, null);
+  assert.equal(testing.validateTenant({ theme: '' }, { partial: true }).theme, null);
+});
+
+test('el listado de leads sin ?limit usa 50, no 1 (Number(null) es 0 y el clamp lo subía a 1)', async () => {
+  let boundArgs = null;
+  const env = { DB: { prepare: (sql) => ({ bind: (...args) => ({
+    all: async () => { if (sql.includes('FROM leads l')) boundArgs = args; return { results: [] }; },
+    first: async () => null, run: async () => ({ meta: { changes: 0 } }),
+  }) }), batch: async () => [] } };
+  const url = new URL('https://admin.hirevai.com/api/admin/leads');
+  const res = await testing.adminRouter(new Request(url), env, { waitUntil() {} }, '/api/admin/leads', url, {}, { role: 'velai', tenantId: null, email: 'a@velai' });
+  assert.equal(res.status, 200);
+  assert.equal(boundArgs.at(-1), 51, 'limit por defecto 50 (+1 para detectar nextCursor)');
 });

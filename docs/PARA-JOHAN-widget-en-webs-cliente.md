@@ -1,12 +1,13 @@
-# Sebas — activar el chat de Vai en las webs de los 4 clientes
+# Sebas — activar el chat de Vai en las webs de los 4 clientes (v2)
 
-> **Qué hay hecho y qué falta.** El worker multi-tenant ya está en producción y los cuatro clientes
-> están dados de alta con su contexto propio. Ya probamos los cuatro bots por API y responden en su
-> personaje y con sus datos. **Lo único que falta es poner el widget en cada web** — eso es tu parte.
+> **v2 (2026-08-18).** El widget ahora es **autosuficiente** (ya no depende de nada de
+> hirevai.com en la página) y **lleva la marca de cada cliente**: su logo, su nombre, su
+> saludo y sus colores, servidos desde nuestro panel. Tu parte sigue siendo la misma:
+> **pegar dos líneas en cada web**. La versión buena es **`?v=7`** — si en algún sitio
+> quedó `?v=5`, cámbialo.
 >
-> Todo lo de nuestro lado está listo: los cuatro dominios (apex y `www`) están en la allowlist del
-> worker y los apex en el widget de Turnstile. No hace falta que pidas nada ni que despliegues nada
-> del worker: en cuanto el snippet esté en la web, funciona.
+> Los cuatro dominios (apex y `www`) están en la allowlist del worker. No necesitas pedir
+> nada ni desplegar nada del worker: en cuanto el snippet esté en la web, funciona.
 
 ---
 
@@ -17,7 +18,7 @@ Dos líneas, **en este orden** (la primera declara el cliente, la segunda carga 
 
 ```html
 <script>window.VELAI_TENANT='<SLUG>';</script>
-<script src="https://hirevai.com/assets/vai-widget.js?v=5" defer></script>
+<script src="https://hirevai.com/assets/vai-widget.js?v=7" defer></script>
 ```
 
 El `<SLUG>` es distinto en cada web. **No los mezcles**: si te equivocas, el bot de un cliente
@@ -34,40 +35,54 @@ Ejemplo completo para Zoe:
 
 ```html
   <script>window.VELAI_TENANT='zoe';</script>
-  <script src="https://hirevai.com/assets/vai-widget.js?v=5" defer></script>
+  <script src="https://hirevai.com/assets/vai-widget.js?v=7" defer></script>
 </body>
 ```
 
 Va en **todas** las páginas de cada web, no solo en la home. Si la web tiene un footer o layout
-compartido, ese es el sitio; si son HTML independientes, hay que repetirlo en cada uno (así funciona
-hirevai.com, con las dos líneas en sus 26 páginas).
+compartido, ese es el sitio; si son HTML independientes, hay que repetirlo en cada uno (hirevai.com
+carga el widget así en sus 26 páginas; allí no lleva la línea del tenant porque el worker usa
+`velai` por defecto — en las webs de cliente la primera línea es **obligatoria**).
+
+Nada más: la marca (logo, colores, saludo, chips, WhatsApp de contacto) **no se toca en el HTML**
+— la editamos nosotros desde el panel y el widget la pide sola al cargar. Si un cliente quiere
+cambiar su saludo, no es un ticket para ti.
 
 ---
 
-## Antes de pegar: quita el chat viejo
+## Orden importante: no quites ningún chat viejo todavía
 
-`hiredatavision.com` y `gogestion.es` ya tenían su propio bot (`hiredatavision-bot` y
-`gogestion-bot`, workers aparte). **Busca en el HTML cualquier script de chat anterior y quítalo** —
-si dejas los dos, el visitante ve dos burbujas de chat y no sabe cuál usar.
+`gogestion.es`, `zoetravelspain.com` y `hiredatavision.com` tienen su propio chat con su marca
+(Faby granate, Zoe azul/naranja bilingüe…). **La regla es: el chat viejo no se quita hasta que el
+nuevo muestre la marca del cliente en esa web** — su logo y su nombre en la cabecera, no
+`Vai · Velai`. Mientras tanto pueden convivir un momento en una página de prueba, pero no
+sustituyas nada aún.
 
-Pistas de qué buscar: `<script>` que apunte a `*.workers.dev`, a un `chat.js`/`bot.js` propio, o un
-bloque de widget de chat embebido en la página.
+Cuando toque quitarlos, las pistas de qué buscar: `<script>` que apunte a `*.workers.dev`, a un
+`chat.js`/`bot.js`/`widget.js` propio, o un bloque de widget embebido en la página.
 
-**No apagues los workers viejos todavía.** Primero comprobamos que el tenant nuevo responde igual o
-mejor; el apagado lo hacemos después, con calma.
+**No apagues los workers viejos** (`hiredatavision-bot`, `gogestion-bot`): eso lo hacemos nosotros
+después, cuando el tenant nuevo responda igual o mejor **y con su marca**.
+
+En `zoetravelspain.com/prueba-vai/` quedó el snippet con `?v=5`: **cámbialo a `?v=7`** y vuelve a
+probar — con la v7 el chat ya funciona ahí (la v5 fallaba porque dependía de un script que solo
+existe en hirevai.com; era un defecto nuestro, tu snippet estaba bien puesto).
 
 ---
 
 ## Cómo comprobar que funciona (2 minutos por web)
 
 1. Abre la web y busca la burbuja de chat abajo a la derecha.
-2. Escribe algo propio del negocio. Cada bot debe responder **como su negocio**, no como Velai:
+2. **Mira la cabecera del chat**: debe mostrar el logo y el nombre del cliente
+   (`Zoe · Zoe Travel Spain`, `Faby · GOgestión`…). Si ves `Vai · Velai`, el slug está mal,
+   falta la primera línea del snippet, o aún no hemos cargado la marca de ese cliente en el
+   panel — dinos cuál de las webs es y lo miramos.
+3. Escribe algo propio del negocio. Cada bot debe responder **como su negocio**, no como Velai:
    - **HireDataVision** → se presenta como *Dara* y habla de datos, BI, pipelines.
    - **GOgestión** → se presenta como *Faby* y habla de trámites de extranjería.
-   - **Zoe Travel** → se presenta como *Zoe* y pregunta a dónde quieres viajar.
+   - **Zoe Travel** → se presenta como *Zoe* y pregunta a dónde quieres viajar (y contesta en
+     inglés si la página está en inglés).
    - **Diálogos que Enseñan** → tono cálido, podcast e historias de migrantes.
-3. Si te responde hablando de Velai, de asistentes de IA o de planes de 1.000 €/1.800 €:
-   **el slug está mal o falta la primera línea**.
 4. Sigue la conversación hasta que te pida el WhatsApp y dáselo: debe aparecer un lead nuevo en
    `admin.hirevai.com`, en la pestaña **Leads**, con el nombre del cliente en la columna *Cliente*.
 
@@ -80,35 +95,35 @@ Abre la consola del navegador (F12 → Console) y mira el error:
 | Lo que ves | Qué pasa | Cómo se arregla |
 |---|---|---|
 | El chat no aparece | El script no carga | Comprueba la ruta exacta y que las dos líneas estén antes de `</body>` |
-| Responde como Velai | Falta o está mal `window.VELAI_TENANT` | Debe ir **antes** del `<script src=…>`, con el slug exacto de la tabla |
+| Cabecera `Vai · Velai` o responde como Velai | Falta o está mal `window.VELAI_TENANT` | Debe ir **antes** del `<script src=…>`, con el slug exacto de la tabla |
 | `invalid_tenant` | El slug no existe en el panel | Revisa que no haya una errata (es `zoe`, no `zoe-travel`) |
-| Error de CORS / `origin_not_allowed` | El dominio no está en la allowlist | Nos lo dices: pasa si la web sirve desde un dominio distinto al de la tabla (por ejemplo un subdominio o un `.pages.dev`) |
-| `human_verification_failed` | Turnstile no reconoce el hostname | Igual: nos lo dices y lo añadimos. Solo están los apex y `www` |
+| Error de CORS / `origin_not_allowed` | El dominio no está en la allowlist del worker | Nos lo dices: pasa si la web sirve desde un dominio distinto al de la tabla (un subdominio, un `.pages.dev`…) |
+| `human_verification_failed` | Turnstile no reconoce el hostname | Igual: nos lo dices y lo añadimos. Solo están los apex y `www` de los 4 dominios |
 
-Los dos últimos **no los puedes arreglar tú**: son configuración nuestra. Mándanos el dominio exacto
-desde el que carga la web y lo añadimos en un minuto.
+Los tres últimos **no los puedes arreglar tú**: son configuración nuestra. Mándanos el dominio
+exacto desde el que carga la web y el error de consola, y lo añadimos en un minuto.
 
 ---
 
 ## Una cosa importante sobre los avisos
 
-Ahora mismo, cuando el bot de un cliente capta un lead, el aviso por WhatsApp sale **desde el número
-de Velai y con la plantilla de Velai** (dice "Nuevo lead – Velai"), porque estos clientes todavía no
-tienen su propio número ni su plantilla aprobada. El lead se guarda perfectamente y se ve en el panel
-con su cliente asignado; lo que aún no es "de marca blanca" es el mensaje de aviso.
-
-Eso se resuelve cuando cada cliente tenga su WhatsApp propio. **No es algo que tengas que tocar tú**
-— solo para que no te sorprenda si lo ves.
+Cuando el bot de un cliente capta un lead, el aviso por WhatsApp sale **desde el número de Velai y
+con la plantilla de Velai** (dice "Nuevo lead – Velai") hasta que ese cliente tenga su propio
+número y su plantilla aprobada. El lead se guarda perfectamente y se ve en el panel con su cliente
+asignado; lo que aún no es "de marca blanca" es el mensaje de aviso. **No es algo que tengas que
+tocar tú** — solo para que no te sorprenda si lo ves.
 
 ---
 
 ## Resumen
 
-- [ ] `hiredatavision.com` → slug `hiredatavision` + quitar chat viejo
-- [ ] `gogestion.es` → slug `gogestion` + quitar chat viejo
-- [ ] `zoetravelspain.com` → slug `zoe`
-- [ ] `dialogosqueensenan.com` → slug `dialogos`
-- [ ] Probar cada uno y ver el lead en `admin.hirevai.com`
+- [ ] `zoetravelspain.com/prueba-vai/` → subir a `?v=7` y probar (desbloqueada por la v7)
+- [ ] `hiredatavision.com` → snippet slug `hiredatavision` en todas las páginas
+- [ ] `gogestion.es` → snippet slug `gogestion` en todas las páginas
+- [ ] `zoetravelspain.com` → snippet slug `zoe` en todas las páginas
+- [ ] `dialogosqueensenan.com` → snippet slug `dialogos` en todas las páginas
+- [ ] Probar cada una: cabecera con la marca del cliente + lead de prueba en `admin.hirevai.com`
+- [ ] Solo DESPUÉS de ver la marca del cliente: quitar el chat viejo de esa web
 
-Cualquier duda o error de los dos últimos de la tabla, escríbenos con el dominio exacto y lo
-resolvemos desde nuestro lado.
+Cualquier duda o error de los de la tabla, escríbenos con el dominio exacto y lo resolvemos desde
+nuestro lado.

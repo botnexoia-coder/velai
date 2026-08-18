@@ -257,6 +257,10 @@ const CHAT_ID_RE = /^-?\d{5,20}$/;
 // El mínimo de 50 evita que un guardado accidental con el campo casi vacío deje
 // al bot de un cliente sin contexto contestando cualquier cosa.
 const PROMPT_MIN = 50, PROMPT_MAX = 20000;
+// Marca del widget (migración 0007): el chat en la web de un cliente lleva SU marca.
+const HEX_COLOR_RE = /^#[0-9a-f]{6}$/i;
+const WA_DIGITS_RE = /^[1-9]\d{5,14}$/;
+const THEMES = new Set(['auto', 'light', 'dark']);
 
 function validateTenant(body, { partial = false } = {}) {
   const out = {}; const bad = (f) => { throw new HttpError(400, `invalid_${f}`); };
@@ -306,8 +310,77 @@ function validateTenant(body, { partial = false } = {}) {
     out.meta_partner_status = clean(body.meta_partner_status, 20);
     if (!PARTNER_STATUS.has(out.meta_partner_status)) bad('meta_partner_status');
   }
+  if (has('bot_name')) out.bot_name = clean(body.bot_name, 40) || null;
+  if (has('brand_name')) out.brand_name = clean(body.brand_name, 80) || null;
+  if (has('logo_url')) {
+    out.logo_url = clean(body.logo_url, 300) || null;
+    // https obligatorio: un logo por http rompería las webs de los clientes (mixed content).
+    if (out.logo_url && !/^https:\/\/[^\s]+$/i.test(out.logo_url)) bad('logo_url');
+  }
+  if (has('brand_color')) {
+    out.brand_color = clean(body.brand_color, 10) || null;
+    if (out.brand_color && !HEX_COLOR_RE.test(out.brand_color)) bad('brand_color');
+  }
+  if (has('brand_color_2')) {
+    out.brand_color_2 = clean(body.brand_color_2, 10) || null;
+    if (out.brand_color_2 && !HEX_COLOR_RE.test(out.brand_color_2)) bad('brand_color_2');
+  }
+  if (has('greeting')) out.greeting = clean(body.greeting, 300) || null;
+  if (has('greeting_en')) out.greeting_en = clean(body.greeting_en, 300) || null;
+  if (has('chips_json')) {
+    // Acepta array o JSON string; se guarda normalizado. Máximo 3 chips de 60 car.
+    let chips = body.chips_json;
+    if (typeof chips === 'string' && chips.trim()) { try { chips = JSON.parse(chips); } catch (_) { bad('chips_json'); } }
+    if (chips == null || (typeof chips === 'string' && !chips.trim()) || (Array.isArray(chips) && !chips.length)) out.chips_json = null;
+    else {
+      if (!Array.isArray(chips) || chips.length > 3 || chips.some((c) => typeof c !== 'string' || !c.trim() || c.length > 60)) bad('chips_json');
+      out.chips_json = JSON.stringify(chips.map((c) => c.trim()));
+    }
+  }
+  if (has('placeholder')) out.placeholder = clean(body.placeholder, 60) || null;
+  if (has('wa_number')) {
+    out.wa_number = clean(body.wa_number, 20).replace(/\D/g, '') || null;
+    if (out.wa_number && !WA_DIGITS_RE.test(out.wa_number)) bad('wa_number');
+  }
+  if (has('theme')) {
+    out.theme = clean(body.theme, 10) || null;
+    if (out.theme && !THEMES.has(out.theme)) bad('theme');
+  }
   if (has('active')) out.active = body.active ? 1 : 0;
   return out;
+}
+
+// ── Marca del widget: GET /widget/boot?tenant=<slug> ─────────────────────────
+// Endpoint PÚBLICO de solo lectura: devuelve la marca del tenant (nunca nada sensible)
+// para que el widget en la web del cliente pinte su logo, nombre, saludo y colores.
+// Devuelve null en lo no configurado y el WIDGET aplica sus defaults de Velai: así
+// hirevai.com (fila velai sin marca) queda idéntico byte a byte. La caché es la misma
+// fila que tenantBySlug (KV 5 min) y se invalida con invalidateTenantCache.
+async function handleWidgetBoot(request, env, url) {
+  const origin = request.headers.get('Origin') || '';
+  // GET simple: el navegador no hace preflight, pero el Allow-Origin es obligatorio.
+  const cors = origin && allowedOrigins(env).includes(origin)
+    ? { 'Access-Control-Allow-Origin': origin, Vary: 'Origin' } : {};
+  const slug = clean(url.searchParams.get('tenant'), 40) || defaultTenantSlug(env);
+  const tenant = await tenantBySlug(env, slug);
+  // Un slug desconocido no cae a la marca de Velai: pintaría la marca equivocada en la
+  // web de un cliente con el snippet mal puesto — mejor que el error se vea en consola.
+  if (!tenant) throw new HttpError(404, 'invalid_tenant');
+  let chips = null;
+  if (tenant.chips_json) { try { const p = JSON.parse(tenant.chips_json); if (Array.isArray(p) && p.length) chips = p.slice(0, 3).map(String); } catch (_) {} }
+  return json({
+    bot_name: tenant.bot_name || null,
+    brand_name: tenant.brand_name || null,
+    logo_url: tenant.logo_url || null,
+    brand_color: tenant.brand_color || null,
+    brand_color_2: tenant.brand_color_2 || null,
+    greeting: tenant.greeting || null,
+    greeting_en: tenant.greeting_en || null,
+    chips,
+    placeholder: tenant.placeholder || null,
+    wa_number: tenant.wa_number || null,
+    theme: THEMES.has(tenant.theme) ? tenant.theme : 'auto',
+  }, 200, { ...cors, 'Cache-Control': 'public, max-age=300' });
 }
 
 // Write-only: el auth token de la subcuenta entra en claro, se guarda cifrado y
@@ -1219,8 +1292,9 @@ async function adminRouter(request, env, ctx, path, url, config, scope) {
 
   if (path === '/api/admin/leads' && request.method === 'GET') {
     const filters = leadFilters(url);
-    const rawLimit = Number(url.searchParams.get('limit'));
-    const limit = Number.isFinite(rawLimit) ? Math.min(100, Math.max(1, rawLimit)) : 50; // NaN en LIMIT = sin límite en SQLite
+    // Sin ?limit el default es 50: Number(null) es 0 (finito) y el clamp lo convertía
+    // en 1 — el panel paginaba de lead en lead. NaN/0/'' caen todos al default.
+    const limit = Math.min(100, Math.max(1, Number(url.searchParams.get('limit')) || 50)); // NaN en LIMIT = sin límite en SQLite
     // Cursor por tupla (created_at, id): un created_at repetido en el borde de página no salta leads.
     const cursor = clean(url.searchParams.get('cursor'), 80);
     if (cursor) {
@@ -1270,12 +1344,19 @@ async function adminRouter(request, env, ctx, path, url, config, scope) {
     const tokenColumn = await tenantTokenColumn(env, tenantId, body);
     try {
       await env.DB.prepare(`INSERT INTO tenants
-        (id,slug,name,channel_address,team_whatsapp,telegram_chat_id,lead_template_sid,twilio_from,twilio_subaccount_sid,waba_id,twilio_auth_token_enc,meta_partner_status,system_prompt,active,created_at,updated_at)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
+        (id,slug,name,channel_address,team_whatsapp,telegram_chat_id,lead_template_sid,twilio_from,twilio_subaccount_sid,waba_id,twilio_auth_token_enc,meta_partner_status,system_prompt,
+         bot_name,brand_name,logo_url,brand_color,brand_color_2,greeting,greeting_en,chips_json,placeholder,wa_number,theme,
+         active,created_at,updated_at)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
         .bind(tenantId, fields.slug, fields.name, fields.channel_address, fields.team_whatsapp ?? null,
           fields.telegram_chat_id ?? null, fields.lead_template_sid ?? null, fields.twilio_from ?? null,
           fields.twilio_subaccount_sid ?? null, fields.waba_id ?? null, tokenColumn,
-          fields.meta_partner_status ?? 'pendiente', fields.system_prompt, fields.active ?? 1, now, now).run();
+          fields.meta_partner_status ?? 'pendiente', fields.system_prompt,
+          fields.bot_name ?? null, fields.brand_name ?? null, fields.logo_url ?? null,
+          fields.brand_color ?? null, fields.brand_color_2 ?? null, fields.greeting ?? null,
+          fields.greeting_en ?? null, fields.chips_json ?? null, fields.placeholder ?? null,
+          fields.wa_number ?? null, fields.theme ?? null,
+          fields.active ?? 1, now, now).run();
     } catch (error) { throw tenantWriteError(error); }
     // Invalidar ANTES del versionado: si el INSERT de la versión fallara, la caché
     // no puede quedarse 5 minutos sirviendo el estado anterior.
@@ -1371,6 +1452,8 @@ async function adminRouter(request, env, ctx, path, url, config, scope) {
       // Columnas explícitas, NUNCA SELECT *: twilio_auth_token_enc no sale del worker.
       const tenant = await env.DB.prepare(`SELECT id, slug, name, channel_address, team_whatsapp, telegram_chat_id,
         lead_template_sid, twilio_from, twilio_subaccount_sid, waba_id, meta_partner_status, system_prompt,
+        bot_name, brand_name, logo_url, brand_color, brand_color_2, greeting, greeting_en, chips_json,
+        placeholder, wa_number, theme,
         active, created_at, updated_at, twilio_auth_token_enc IS NOT NULL AS has_twilio_token
         FROM tenants WHERE id=?`).bind(tenantId).first();
       if (!tenant) throw new HttpError(404, 'not_found');
@@ -1607,6 +1690,9 @@ export function createWorker(config) {
           if (await rateLimited(env, twilioIp, 'twilio', 120)) throw new HttpError(429, 'rate_limited');
           return await handleTwilio(request, env, ctx, config);
         }
+        if (path === '/widget/boot' && request.method === 'GET') {
+          return await handleWidgetBoot(request, env, url);
+        }
         if (path === '/lead' || path === '/chat') {
           const cors = publicCors(request, env);
           if (!cors) throw new HttpError(403, 'origin_not_allowed');
@@ -1629,4 +1715,4 @@ export function createWorker(config) {
   };
 }
 
-export const testing = { clean, normalizePhone, extractPhone, safeUtm, publicCors, validTwilioSignature, csvCell, expiryDate, leadFilters, isDemoKey, templateVar, leadTemplateVariables, readJson, deliver, drainQueuedLeads, verifyTurnstile, systemFor, validateTenant, invalidateTenantCache, tenantWriteError, assertNotActivePending, handleProvision, pollProvisioning, fillSeries, resolveScope, scopeClause, clienteAllowed, adminRouter, recordAuthFailure, handleAdmin };
+export const testing = { clean, normalizePhone, extractPhone, safeUtm, publicCors, validTwilioSignature, csvCell, expiryDate, leadFilters, isDemoKey, templateVar, leadTemplateVariables, readJson, deliver, drainQueuedLeads, verifyTurnstile, systemFor, validateTenant, invalidateTenantCache, tenantWriteError, assertNotActivePending, handleProvision, pollProvisioning, fillSeries, resolveScope, scopeClause, clienteAllowed, adminRouter, recordAuthFailure, handleAdmin, handleWidgetBoot };

@@ -1,24 +1,38 @@
 /* ══════════════════════════════════════════════════════════════════════════
-   VAI CHAT WIDGET — autocontenido (CSS + markup + lógica)
+   VAI CHAT WIDGET — autocontenido (CSS + markup + lógica) · v7
    ──────────────────────────────────────────────────────────────────────────
    Se carga en TODAS las páginas con una sola línea:
-     <script src="/assets/vai-widget.js?v=2" defer></script>
+     <script src="/assets/vai-widget.js?v=7" defer></script>
+
+   En la web de un CLIENTE van dos líneas (la primera declara el tenant):
+     <script>window.VELAI_TENANT='zoe';</script>
+     <script src="https://hirevai.com/assets/vai-widget.js?v=7" defer></script>
 
    Autocontenido a propósito: solo index.html carga /assets/styles.css, el
    resto de páginas llevan CSS inline. Por eso este archivo inyecta su propio
    CSS y no depende de styles.css ni de variables CSS del tema.
+
+   AUTOSUFICIENTE fuera de hirevai.com (v6): si funnel.js no está en la página
+   (webs de clientes), el widget carga Turnstile y ejecuta el challenge él
+   mismo, con la sitekey pública de Velai por defecto (overridable con
+   window.VELAI_TURNSTILE_SITEKEY). Si window.VELAI_HUMAN existe (hirevai.com)
+   se usa tal cual: un solo widget de Turnstile por página, cero cambios aquí.
+
+   MARCA POR TENANT (v7): al montar se pide GET /widget/boot?tenant=<slug> y
+   el chat pinta el logo, nombre, saludo, chips, placeholder, colores, tema y
+   WhatsApp DEL CLIENTE. Sin marca configurada (o sin tenant): marca de Velai,
+   idéntica a la de siempre. Bilingüe ES/EN por <html lang> o navigator.language.
 
    Config opcional (antes de cargar este script):
      window.VELAI_WORKER = 'https://vai-worker.botnexo-ia.workers.dev';
      window.VELAI_CHAT   = { teaserDelay: 18000, disabled: false };
 
    MODO DEMO (rol-play). El worker YA lo soporta en el chat web
-   (`vai-worker.js:299` → `if (body.demo && DEMOS[body.demo])`), pero hasta
-   ahora ninguna página enviaba el campo. Tres formas de activarlo:
+   (`vai-worker.js:299` → `if (body.demo && DEMOS[body.demo])`). Tres formas:
      1. Query string:  /restaurantes/?chat=1&demo=restaurante
      2. Atributo HTML: <button data-vai-demo="clinica">Prueba la demo</button>
      3. API pública:   window.VaiChat.open({ demo: 'taller' })
-   Por defecto está DESACTIVADO: el FAB abre a Vai normal (comercial de Velai).
+   Por defecto está DESACTIVADO: el FAB abre el asistente normal del tenant.
 
    Eventos que emite (vía window.velaiTrack de funnel.js, si existe):
      chat_view          — el widget se ha pintado
@@ -41,7 +55,36 @@
   var SS_OPENED = 'velai-chat-opened';
   var SS_STATE = 'velai-chat-state'; // conversación persistida entre páginas (muere al cerrar la pestaña)
 
-  var ORANGE = '#FF6B1A';
+  // Sitekey pública de Velai (la misma que va inline en el HTML de hirevai.com):
+  // las webs de los clientes no tienen que declarar nada para que el chequeo funcione.
+  var SITEKEY_FALLBACK = '0x4AAAAAAESkAwvlDVJD9Z1l';
+
+  var TENANT = (typeof window.VELAI_TENANT === 'string' && window.VELAI_TENANT)
+    ? window.VELAI_TENANT.slice(0, 40) : '';
+
+  /* ── i18n: <html lang> manda; si no, el idioma del navegador ─────────── */
+  var LANG = /^en/i.test(document.documentElement.lang || navigator.language || '') ? 'en' : 'es';
+  var T = LANG === 'en' ? {
+    online: 'Online now',
+    placeholder: 'Type a message...',
+    greeting: "Hi! I'm Vai 👋 I'm the same assistant we build for our clients. Ask me anything — or tap one of these options:",
+    chips: ['How much does it cost?', 'Show me a demo', 'Will it work for my business?'],
+    teaser: 'Questions? Ask me anything — I reply instantly.',
+    open: 'Open chat with ', close: 'Close chat with ', closeBtn: 'Close chat',
+    chat: 'Chat with ', send: 'Send', msg: 'Message', dismiss: 'Dismiss',
+    errHuman: "I couldn't verify you're human (an unstable network or a blocker can cause this). Reload the page and try again, or message us on WhatsApp: https://wa.me/",
+    errGeneric: "Oops, I can't reply right now. Message us on WhatsApp and we'll answer in minutes: https://wa.me/"
+  } : {
+    online: 'En línea ahora',
+    placeholder: 'Escribe un mensaje...',
+    greeting: '¡Hola! Soy Vai 👋 Soy el mismo asistente que montamos para nuestros clientes. Pregúntame lo que quieras — o toca una de estas opciones:',
+    chips: ['¿Cuánto cuesta?', 'Enséñame una demo', '¿Sirve para mi negocio?'],
+    teaser: '¿Dudas? Pregúntame lo que quieras — respondo al momento.',
+    open: 'Abrir chat con ', close: 'Cerrar chat con ', closeBtn: 'Cerrar chat',
+    chat: 'Chat con ', send: 'Enviar', msg: 'Mensaje', dismiss: 'Cerrar',
+    errHuman: 'No pude verificar que eres humano (a veces lo causa una red inestable o un bloqueador). Recarga la página e inténtalo de nuevo, o escríbenos por WhatsApp: https://wa.me/',
+    errGeneric: 'Ups, ahora mismo no puedo responder. Escríbenos por WhatsApp y te contestamos en minutos: https://wa.me/'
+  };
 
   function track(name, params) {
     try { if (window.velaiTrack) window.velaiTrack(name, params || {}); } catch (e) {}
@@ -52,18 +95,49 @@
     return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
   }
 
+  /* ── Marca del tenant (GET /widget/boot) ────────────────────────────────
+     El endpoint devuelve null en lo no configurado; los defaults de Velai
+     viven AQUÍ, así hirevai.com queda idéntico aunque el fetch falle.      */
+  var BRAND = null;
+  var bootPromise = fetch(WORKER + '/widget/boot' + (TENANT ? '?tenant=' + encodeURIComponent(TENANT) : ''))
+    .then(function (r) { return r.ok ? r.json() : null; })
+    .then(function (b) { BRAND = b; applyBrand(); return b; })
+    .catch(function () { return null; });
+  // Espera acotada a la marca antes de pintar textos: sin red, defaults a los 1500 ms.
+  function withBrand(cb) { Promise.race([bootPromise, new Promise(function (r) { setTimeout(r, 1500); })]).then(cb, cb); }
+
+  function botName() { return (BRAND && BRAND.bot_name) || 'Vai'; }
+  function headerName() { return botName() + ' · ' + ((BRAND && BRAND.brand_name) || 'Velai'); }
+  function waNumber() { return (BRAND && BRAND.wa_number) || window.VELAI_WA || '15706160059'; }
+  function brandGreeting() {
+    if (!BRAND) return T.greeting;
+    if (LANG === 'en') return BRAND.greeting_en || BRAND.greeting || T.greeting;
+    return BRAND.greeting || T.greeting;
+  }
+
   /* ── 1. CSS ─────────────────────────────────────────────────────────────
      z-index 10000: el banner de consentimiento de funnel.js usa 9999 y se
      inserta después en el DOM, así que con z-index empatado ganaba él y
      tapaba el botón en móvil. Además desplazamos el FAB hacia arriba
-     mientras el banner esté visible (--vai-lift).                        */
+     mientras el banner esté visible (--vai-lift).
+     Colores en variables CSS sobre #vaiWidget: la marca del tenant se aplica
+     por CSSOM (setProperty), nunca con style="" (lección de la CSP del panel).
+     Defaults = la marca de Velai de siempre; .vai-dark = tema oscuro.       */
   var CSS = '' +
     '#vaiWidget{position:fixed;bottom:calc(24px + var(--vai-lift,0px));right:24px;z-index:10000;' +
       'font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Satoshi,system-ui,sans-serif;' +
-      'transition:bottom .25s ease}' +
-    '#vaiBubble{width:60px;height:60px;border-radius:50%;background:' + ORANGE + ';display:flex;' +
+      'transition:bottom .25s ease;' +
+      '--vai-c1:#FF6B1A;--vai-head:#075e54;--vai-send:#00a884;' +
+      '--vai-srf:#fff;--vai-msgbg:#ece5dd;--vai-bot:#fff;--vai-user:#dcf8c6;' +
+      '--vai-text:#111;--vai-in:#f0f2f5;--vai-inshell:#fff;' +
+      '--vai-chipb:rgba(7,94,84,.25);--vai-chipc:#075e54;--vai-chiph:#f0f7f5}' +
+    '#vaiWidget.vai-dark{--vai-srf:#141a1f;--vai-msgbg:#0b141a;--vai-bot:#1f2c34;--vai-user:#134d37;' +
+      '--vai-text:#e9edef;--vai-in:#1f2c34;--vai-inshell:#2a3942;' +
+      '--vai-chipb:rgba(233,237,239,.3);--vai-chipc:#e9edef;--vai-chiph:#2a3942}' +
+    '#vaiBubble{width:60px;height:60px;border-radius:50%;background:var(--vai-c1);display:flex;' +
       'align-items:center;justify-content:center;cursor:pointer;border:none;padding:0;' +
-      'box-shadow:0 4px 20px rgba(255,107,26,.5);transition:transform .2s;position:relative}' +
+      'box-shadow:0 4px 20px rgba(0,0,0,.35);transition:transform .2s;position:relative}' +
+    '#vaiBubble{box-shadow:0 4px 20px color-mix(in srgb,var(--vai-c1) 50%,transparent)}' +
     '#vaiBubble:hover{transform:scale(1.08)}' +
     '#vaiBubble:focus-visible{outline:3px solid #fff;outline-offset:3px}' +
     '#vaiPulse{position:absolute;top:-2px;right:-2px;width:16px;height:16px;border-radius:50%;' +
@@ -71,7 +145,7 @@
     '@keyframes vaiPulse{0%{box-shadow:0 0 0 0 rgba(37,211,102,.7)}70%{box-shadow:0 0 0 10px rgba(37,211,102,0)}100%{box-shadow:0 0 0 0 rgba(37,211,102,0)}}' +
     '@keyframes vaiDot{0%,60%,100%{transform:translateY(0);opacity:.4}30%{transform:translateY(-5px);opacity:1}}' +
     /* teaser */
-    '#vaiTeaser{position:absolute;bottom:74px;right:0;width:250px;background:#fff;color:#111;' +
+    '#vaiTeaser{position:absolute;bottom:74px;right:0;width:250px;background:var(--vai-srf);color:var(--vai-text);' +
       'border-radius:14px 14px 4px 14px;padding:12px 34px 12px 14px;font-size:13.5px;line-height:1.45;' +
       'box-shadow:0 10px 34px rgba(0,0,0,.22);cursor:pointer;opacity:0;transform:translateY(8px);' +
       'transition:opacity .3s ease,transform .3s ease}' +
@@ -81,43 +155,44 @@
     /* panel */
     '#vaiWindow{display:none;position:absolute;bottom:72px;right:0;width:340px;height:500px;' +
       'border-radius:16px;overflow:hidden;box-shadow:0 20px 60px rgba(0,0,0,.3);' +
-      'flex-direction:column;background:#fff}' +
+      'flex-direction:column;background:var(--vai-srf)}' +
     '#vaiWindow.is-open{display:flex}' +
-    '.vai-h{background:#075e54;padding:12px 16px;display:flex;align-items:center;gap:10px;flex-shrink:0}' +
-    '.vai-h-av{width:38px;height:38px;border-radius:50%;background:' + ORANGE + ';display:flex;' +
-      'align-items:center;justify-content:center;font-size:18px;flex-shrink:0}' +
+    '.vai-h{background:var(--vai-head);padding:12px 16px;display:flex;align-items:center;gap:10px;flex-shrink:0}' +
+    '.vai-h-av{width:38px;height:38px;border-radius:50%;background:var(--vai-c1);display:flex;overflow:hidden;' +
+      'align-items:center;justify-content:center;font-size:18px;flex-shrink:0;color:#fff;font-weight:700}' +
+    '.vai-h-av img{width:100%;height:100%;object-fit:cover;border-radius:50%}' +
     '.vai-h-id{flex:1}' +
     '.vai-h-name{color:#fff;font-size:14px;font-weight:600}' +
     '.vai-h-st{color:hsla(0,0%,100%,.75);font-size:12px;display:flex;align-items:center;gap:4px}' +
     '.vai-h-dot{width:6px;height:6px;border-radius:50%;background:#25d366}' +
     '.vai-h-x{color:hsla(0,0%,100%,.7);cursor:pointer;font-size:20px;line-height:1;background:none;border:none;padding:0 2px}' +
-    '#vaiMessages{flex:1;overflow-y:auto;padding:12px;background:#ece5dd;display:flex;' +
+    '#vaiMessages{flex:1;overflow-y:auto;padding:12px;background:var(--vai-msgbg);display:flex;' +
       'flex-direction:column;gap:6px;scroll-behavior:smooth}' +
-    '#vaiTyping{display:none;padding:0 12px 6px;background:#ece5dd}' +
+    '#vaiTyping{display:none;padding:0 12px 6px;background:var(--vai-msgbg)}' +
     '#vaiTyping.is-on{display:block}' +
-    '.vai-tb{background:#fff;border-radius:0 8px 8px 8px;padding:8px 12px;display:inline-flex;gap:4px;' +
+    '.vai-tb{background:var(--vai-bot);border-radius:0 8px 8px 8px;padding:8px 12px;display:inline-flex;gap:4px;' +
       'align-items:center;box-shadow:0 1px 2px rgba(0,0,0,.1)}' +
     '.vai-td{width:7px;height:7px;background:#8696a0;border-radius:50%;animation:vaiDot 1.2s infinite}' +
     '.vai-td:nth-child(2){animation-delay:.2s}.vai-td:nth-child(3){animation-delay:.4s}' +
     /* chips de respuesta rápida */
-    '#vaiChips{display:flex;flex-wrap:wrap;gap:6px;padding:0 12px 10px;background:#ece5dd}' +
+    '#vaiChips{display:flex;flex-wrap:wrap;gap:6px;padding:0 12px 10px;background:var(--vai-msgbg)}' +
     '#vaiChips.is-off{display:none}' +
-    '.vai-chip{background:#fff;border:1px solid rgba(7,94,84,.25);color:#075e54;border-radius:16px;' +
+    '.vai-chip{background:var(--vai-bot);border:1px solid var(--vai-chipb);color:var(--vai-chipc);border-radius:16px;' +
       'padding:7px 12px;font-size:12.5px;font-family:inherit;cursor:pointer;line-height:1.2}' +
-    '.vai-chip:hover{background:#f0f7f5}' +
+    '.vai-chip:hover{background:var(--vai-chiph)}' +
     /* input */
-    '.vai-in-wrap{background:#f0f2f5;padding:8px 10px;display:flex;align-items:center;gap:8px;flex-shrink:0}' +
-    '.vai-in-shell{flex:1;background:#fff;border-radius:22px;display:flex;align-items:center;padding:8px 14px}' +
-    '#vaiInput{flex:1;border:none;outline:none;font-size:16px;font-family:inherit;color:#111;' +
+    '.vai-in-wrap{background:var(--vai-in);padding:8px 10px;display:flex;align-items:center;gap:8px;flex-shrink:0}' +
+    '.vai-in-shell{flex:1;background:var(--vai-inshell);border-radius:22px;display:flex;align-items:center;padding:8px 14px}' +
+    '#vaiInput{flex:1;border:none;outline:none;font-size:16px;font-family:inherit;color:var(--vai-text);' +
       'background:transparent;resize:none;max-height:80px;line-height:1.4}' +
-    '#vaiSend{width:42px;height:42px;border-radius:50%;background:#00a884;border:none;cursor:pointer;' +
+    '#vaiSend{width:42px;height:42px;border-radius:50%;background:var(--vai-send);border:none;cursor:pointer;' +
       'display:flex;align-items:center;justify-content:center;flex-shrink:0}' +
     /* burbujas */
     '.vai-row{display:flex}.vai-row.is-bot{justify-content:flex-start}.vai-row.is-user{justify-content:flex-end}' +
     '.vai-b{max-width:80%;padding:8px 10px 5px;box-shadow:0 1px 2px rgba(0,0,0,.1)}' +
-    '.vai-b.is-bot{background:#fff;border-radius:0 8px 8px 8px}' +
-    '.vai-b.is-user{background:#dcf8c6;border-radius:8px 8px 0 8px}' +
-    '.vai-b-t{font-size:13.5px;color:#111;line-height:1.5;white-space:pre-wrap;word-break:break-word}' +
+    '.vai-b.is-bot{background:var(--vai-bot);border-radius:0 8px 8px 8px}' +
+    '.vai-b.is-user{background:var(--vai-user);border-radius:8px 8px 0 8px}' +
+    '.vai-b-t{font-size:13.5px;color:var(--vai-text);line-height:1.5;white-space:pre-wrap;word-break:break-word}' +
     '.vai-b-h{font-size:11px;color:#8696a0;text-align:right;margin-top:2px}' +
     /* móvil: panel a pantalla casi completa */
     '@media(max-width:480px){' +
@@ -128,43 +203,76 @@
 
   /* ── 2. Markup ──────────────────────────────────────────────────────── */
   var HTML = '' +
-    '<button id="vaiBubble" type="button" aria-label="Abrir chat con Vai">' +
+    '<button id="vaiBubble" type="button" aria-label="' + esc(T.open + 'Vai') + '">' +
       '<svg id="vaiIconChat" width="28" height="28" viewBox="0 0 24 24" fill="white" aria-hidden="true">' +
         '<path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 14H9V8h2v8zm4 0h-2V8h2v8z"/></svg>' +
       '<svg id="vaiIconClose" width="24" height="24" viewBox="0 0 24 24" fill="white" style="display:none" aria-hidden="true">' +
         '<path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>' +
       '<span id="vaiPulse"></span>' +
     '</button>' +
-    '<div id="vaiWindow" role="dialog" aria-label="Chat con Vai">' +
+    '<div id="vaiWindow" role="dialog" aria-label="' + esc(T.chat + 'Vai') + '">' +
       '<div class="vai-h">' +
-        '<div class="vai-h-av">🤖</div>' +
+        '<div class="vai-h-av" id="vaiAvatar">🤖</div>' +
         '<div class="vai-h-id">' +
-          '<div class="vai-h-name">Vai · Velai</div>' +
-          '<div class="vai-h-st"><span class="vai-h-dot"></span>En línea ahora</div>' +
+          '<div class="vai-h-name" id="vaiName">Vai · Velai</div>' +
+          '<div class="vai-h-st"><span class="vai-h-dot"></span>' + esc(T.online) + '</div>' +
         '</div>' +
-        '<button class="vai-h-x" type="button" aria-label="Cerrar chat">✕</button>' +
+        '<button class="vai-h-x" type="button" aria-label="' + esc(T.closeBtn) + '">✕</button>' +
       '</div>' +
       '<div id="vaiMessages"></div>' +
       '<div id="vaiTyping"><div class="vai-tb"><span class="vai-td"></span><span class="vai-td"></span><span class="vai-td"></span></div></div>' +
       '<div id="vaiChips"></div>' +
       '<div class="vai-in-wrap">' +
         '<div class="vai-in-shell">' +
-          '<textarea id="vaiInput" placeholder="Escribe un mensaje..." rows="1" maxlength="2000" aria-label="Mensaje"></textarea>' +
+          '<textarea id="vaiInput" placeholder="' + esc(T.placeholder) + '" rows="1" maxlength="2000" aria-label="' + esc(T.msg) + '"></textarea>' +
         '</div>' +
-        '<button id="vaiSend" type="button" aria-label="Enviar">' +
+        '<button id="vaiSend" type="button" aria-label="' + esc(T.send) + '">' +
           '<svg width="20" height="20" viewBox="0 0 24 24" fill="white" aria-hidden="true">' +
             '<path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/></svg>' +
         '</button>' +
       '</div>' +
     '</div>';
 
-  /* ── 3. Guiones de apertura ─────────────────────────────────────────── */
-  var DEFAULT_SCRIPT = {
-    greeting: '¡Hola! Soy Vai 👋 Soy el mismo asistente que montamos para nuestros clientes. Pregúntame lo que quieras — o toca una de estas opciones:',
-    chips: ['¿Cuánto cuesta?', 'Enséñame una demo', '¿Sirve para mi negocio?']
-  };
+  /* Pinta la marca del tenant en el DOM y las variables CSS por CSSOM.
+     Idempotente: se llama al llegar el boot y también al montar (por si el
+     fetch resolvió antes que el DOMContentLoaded). */
+  function applyBrand() {
+    if (!el.root || !BRAND) return;
+    if (BRAND.brand_color) {
+      var c1 = BRAND.brand_color, c2 = BRAND.brand_color_2 || BRAND.brand_color;
+      el.root.style.setProperty('--vai-c1', c1);
+      el.root.style.setProperty('--vai-send', c1);
+      el.root.style.setProperty('--vai-chipc', c1);
+      el.root.style.setProperty('--vai-head', 'linear-gradient(135deg,' + c1 + ',' + c2 + ')');
+    }
+    var dark = BRAND.theme === 'dark' ||
+      (BRAND.theme !== 'light' && window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches);
+    el.root.classList.toggle('vai-dark', !!dark);
+    document.getElementById('vaiName').textContent = headerName();
+    var av = document.getElementById('vaiAvatar');
+    if (BRAND.logo_url && /^https:\/\//i.test(BRAND.logo_url)) {
+      var img = document.createElement('img');
+      img.src = BRAND.logo_url; img.alt = '';
+      img.onerror = function () { av.textContent = avatarFallback(); };
+      av.textContent = ''; av.appendChild(img);
+    } else if (BRAND.bot_name) {
+      av.textContent = avatarFallback();
+    }
+    if (BRAND.placeholder) el.input.placeholder = BRAND.placeholder;
+    el.win.setAttribute('aria-label', T.chat + botName());
+    el.bubble.setAttribute('aria-label', (open ? T.close : T.open) + botName());
+  }
+  function avatarFallback() { return (BRAND && BRAND.bot_name ? BRAND.bot_name : 'V').charAt(0).toUpperCase(); }
 
-  // Guiones de modo demo. La clave debe coincidir con DEMOS en vai-worker.js.
+  /* ── 3. Guiones de apertura ─────────────────────────────────────────── */
+  // El saludo y los chips por defecto salen de la marca del tenant (boot);
+  // sin marca, los de Velai en el idioma de la página.
+  function defaultScript() {
+    return { greeting: brandGreeting(), chips: (BRAND && BRAND.chips) || T.chips };
+  }
+
+  // Guiones de modo demo (material comercial de Velai, solo en hirevai.com).
+  // La clave debe coincidir con DEMOS en vai-worker.js.
   var DEMO_SCRIPTS = {
     restaurante: {
       greeting: 'Estás hablando con la Vai de "La Parrilla del Puerto", un restaurante ficticio. Trátala como tratarías al WhatsApp de tu negocio 👇',
@@ -235,7 +343,7 @@
     return typeof key === 'string' && key !== '' && Object.prototype.hasOwnProperty.call(DEMO_SCRIPTS, key);
   }
 
-  function script() { return (isDemo(demo) && DEMO_SCRIPTS[demo]) || DEFAULT_SCRIPT; }
+  function script() { return (isDemo(demo) && DEMO_SCRIPTS[demo]) || defaultScript(); }
 
   function demoFromQuery() {
     try {
@@ -282,6 +390,7 @@
       if (e.key === 'Escape' && open) toggle(false);
     });
 
+    applyBrand(); // por si el boot resolvió antes que el DOM
     wireDemoTriggers();
     watchConsentBanner();
     track('chat_view', { page: location.pathname });
@@ -305,7 +414,7 @@
   }
 
   /* Cualquier elemento con data-vai-demo="clinica" abre el chat en esa demo.
-     Con data-vai-demo="" (vacío) abre a Vai normal. Sin JS en las páginas. */
+     Con data-vai-demo="" (vacío) abre el asistente normal. Sin JS en las páginas. */
   function wireDemoTriggers() {
     document.addEventListener('click', function (e) {
       var t = e.target && e.target.closest ? e.target.closest('[data-vai-demo]') : null;
@@ -341,8 +450,8 @@
       ssSet(SS_TEASER, '1');
       var t = document.createElement('div');
       t.id = 'vaiTeaser';
-      t.innerHTML = '<button id="vaiTeaserX" type="button" aria-label="Cerrar">✕</button>' +
-        '¿Dudas? Pregúntame lo que quieras — respondo al momento.';
+      t.innerHTML = '<button id="vaiTeaserX" type="button" aria-label="' + esc(T.dismiss) + '">✕</button>' +
+        esc(T.teaser);
       el.root.appendChild(t);
       requestAnimationFrame(function () { t.classList.add('is-on'); });
       t.addEventListener('click', function () { t.remove(); toggle(true, 'teaser'); });
@@ -366,7 +475,7 @@
     el.win.classList.toggle('is-open', open);
     el.iconChat.style.display = open ? 'none' : 'block';
     el.iconClose.style.display = open ? 'block' : 'none';
-    el.bubble.setAttribute('aria-label', open ? 'Cerrar chat con Vai' : 'Abrir chat con Vai');
+    el.bubble.setAttribute('aria-label', (open ? T.close : T.open) + botName());
     var teaser = document.getElementById('vaiTeaser');
     if (open && teaser) teaser.remove();
 
@@ -376,12 +485,17 @@
       track('chat_open', { source: source || 'bubble', page: location.pathname, demo: demo || 'none' });
       if (history.length) {
         // conversación restaurada de otra página: repintar sin saludo demorado
-        renderHistory();
-        if (!sent) renderChips();
+        // (con la marca cargada: el saludo del tenant, no el de Velai)
+        withBrand(function () {
+          renderHistory();
+          if (!sent) renderChips();
+        });
       } else {
         setTimeout(function () {
-          addMsg('bot', script().greeting);
-          renderChips();
+          withBrand(function () {
+            addMsg('bot', script().greeting);
+            renderChips();
+          });
         }, 500);
       }
     }
@@ -460,15 +574,79 @@
       saveState();
       el.typing.classList.remove('is-on');
       // Si el fallo es de la verificación humana (script de Turnstile bloqueado/red),
-      // recargar la página sí lo arregla — decírselo al usuario.
+      // recargar la página sí lo arregla — decírselo al usuario. El WhatsApp de los
+      // mensajes de error es el DEL TENANT (marca), nunca el de Velai en la web de un cliente.
       var code = String(err && (err.code || err.message) || err);
-      addMsg('bot', /turnstile|human/i.test(code)
-        ? 'No pude verificar que eres humano (a veces lo causa una red inestable o un bloqueador). Recarga la página e inténtalo de nuevo, o escríbenos por WhatsApp: https://wa.me/' + (window.VELAI_WA || '15706160059')
-        : 'Ups, ahora mismo no puedo responder. Escríbenos por WhatsApp y te contestamos en minutos: https://wa.me/' + (window.VELAI_WA || '15706160059'));
+      addMsg('bot', (/turnstile|human/i.test(code) ? T.errHuman : T.errGeneric) + waNumber());
       track('chat_error', { msg: code });
     } finally {
       busy = false;
     }
+  }
+
+  /* ── 8b. Verificación humana autosuficiente ─────────────────────────────
+     En hirevai.com existe window.VELAI_HUMAN (funnel.js) y se usa tal cual:
+     un solo widget de Turnstile por página. Fuera (webs de clientes, donde
+     funnel.js NO debe cargarse: cookies/GA4/pixel son de Velai), el widget
+     carga Turnstile y ejecuta el challenge él mismo — misma mecánica que
+     funnel.js: render explícito, execution:'execute', cola serializada.    */
+  var ownLoader = null;
+  var ownWidget = null;
+  var ownQueue = Promise.resolve();
+  function humanToken(action) {
+    if (window.VELAI_HUMAN) return window.VELAI_HUMAN.execute(action);
+    var run = function () { return ownExecute(action); };
+    ownQueue = ownQueue.then(run, run);
+    return ownQueue;
+  }
+  function loadTurnstile() {
+    if (window.turnstile) return Promise.resolve();
+    if (ownLoader) return ownLoader;
+    ownLoader = new Promise(function (resolve, reject) {
+      var script = document.createElement('script');
+      script.src = 'https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit';
+      script.async = true; script.defer = true;
+      script.onload = resolve;
+      script.onerror = function () {
+        ownLoader = null;   // no cachear el fallo: el siguiente intento reinserta el script
+        script.remove();
+        reject(new Error('turnstile_load_failed'));
+      };
+      document.head.appendChild(script);
+    });
+    return ownLoader;
+  }
+  function ownExecute(action) {
+    var sitekey = window.VELAI_TURNSTILE_SITEKEY || '';
+    // El marcador del repo cuenta como "sin configurar".
+    if (/^REPLACE_WITH/.test(sitekey)) sitekey = '';
+    if (!sitekey) {
+      sitekey = /^(localhost|127\.0\.0\.1)$/.test(location.hostname)
+        ? '1x00000000000000000000AA'   // test key oficial: siempre valida en local
+        : SITEKEY_FALLBACK;            // sitekey pública de Velai: cero config en la web del cliente
+    }
+    return loadTurnstile().then(function () {
+      return new Promise(function (resolve, reject) {
+        var host = document.getElementById('vai-turnstile');
+        if (!host) {
+          host = document.createElement('div'); host.id = 'vai-turnstile';
+          host.style.cssText = 'position:fixed;left:-9999px;bottom:0';
+          document.body.appendChild(host);
+        }
+        if (ownWidget != null) window.turnstile.remove(ownWidget);
+        var timer = setTimeout(function () { reject(new Error('turnstile_timeout')); }, 12000);
+        // El modo invisible lo define el TIPO de widget creado en el dashboard de
+        // Turnstile ('size' no admite 'invisible' en el API); execution:'execute'
+        // difiere el challenge hasta este punto.
+        ownWidget = window.turnstile.render(host, {
+          sitekey: sitekey, execution: 'execute', action: action,
+          callback: function (token) { clearTimeout(timer); resolve(token); },
+          'error-callback': function () { clearTimeout(timer); reject(new Error('turnstile_failed')); },
+          'expired-callback': function () { clearTimeout(timer); reject(new Error('turnstile_expired')); }
+        });
+        window.turnstile.execute(ownWidget);
+      });
+    });
   }
 
   async function postChat(text) {
@@ -476,6 +654,8 @@
       conversationId: conversationId,
       message: text,
       pageUrl: location.href.slice(0, 500),
+      // VELAI_getUTM es de funnel.js: en la web de un cliente no existe y el utm va
+      // vacío — correcto, la medición de Velai no pinta nada fuera de hirevai.com.
       utm: (window.VELAI_getUTM && window.VELAI_getUTM()) || {}
     };
     // Canal web multi-tenant: la web de un cliente declara su slug antes de cargar el
@@ -485,8 +665,7 @@
     }
     if (demo) payload.demo = demo;
     if (!humanVerified) {
-      if (!window.VELAI_HUMAN) throw new Error('human_check_unavailable');
-      payload.turnstileToken = await window.VELAI_HUMAN.execute('chat');
+      payload.turnstileToken = await humanToken('chat');
     }
     var res = await fetch(WORKER + '/chat', {
       method: 'POST',

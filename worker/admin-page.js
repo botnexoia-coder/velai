@@ -120,6 +120,18 @@ dialog::backdrop{background:rgba(5,3,6,.78);backdrop-filter:blur(3px)}
 .inpill{background:var(--bg);border:1px solid var(--border2);border-radius:var(--r-sm);padding:9px 12px}
 .mt6{margin-top:6px}.okmsg{color:var(--ok)}.mb6{margin:6px 0}.actions0{margin:4px 0 0;align-items:center}
 .legend .d-new{background:var(--st-new)}.legend .d-contacted{background:var(--st-contacted)}.legend .d-qualified{background:var(--st-qualified)}.legend .d-won{background:var(--st-won)}.legend .d-lost{background:var(--st-lost)}
+/* Previsualización de la marca del widget: mini-mock del chat con los valores del form */
+#brandPrev{margin-top:8px;max-width:300px;border-radius:12px;overflow:hidden;border:1px solid var(--border2);background:#ece5dd}
+#brandPrev .bp-h{display:flex;align-items:center;gap:8px;padding:8px 10px;color:#fff;background:#075e54}
+#brandPrev .bp-av{width:26px;height:26px;border-radius:50%;overflow:hidden;display:flex;align-items:center;justify-content:center;background:#FF6B1A;color:#fff;font-weight:700;font-size:12px;flex-shrink:0}
+#brandPrev .bp-av img{width:100%;height:100%;object-fit:cover}
+#brandPrev .bp-n{font-size:12px;font-weight:600}
+#brandPrev .bp-g{margin:8px;background:#fff;color:#111;border-radius:0 8px 8px 8px;padding:6px 8px;font-size:12px;width:fit-content;max-width:85%}
+#brandPrev .bp-c{display:flex;flex-wrap:wrap;gap:4px;margin:0 8px 8px}
+#brandPrev .bp-c span{border:1px solid rgba(0,0,0,.2);border-radius:10px;padding:3px 8px;font-size:10.5px;background:#fff;color:#075e54}
+#brandPrev.bp-dark{background:#0b141a}
+#brandPrev.bp-dark .bp-g{background:#1f2c34;color:#e9edef}
+#brandPrev.bp-dark .bp-c span{background:#1f2c34;color:#e9edef;border-color:rgba(255,255,255,.2)}
 #tVersions article{margin-bottom:10px}
 #tVersions pre{white-space:pre-wrap;background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:8px;font-size:11.5px;max-height:220px;overflow:auto}
 @media(max-width:1000px){.metrics{grid-template-columns:1fr 1fr}.chartcard{grid-column:1/-1}}
@@ -169,7 +181,22 @@ dialog::backdrop{background:rgba(5,3,6,.78);backdrop-filter:blur(3px)}
 <textarea id="tPrompt" rows="14" class="promptbox"></textarea>
 <small class="muted field-err" data-f="system_prompt"></small></div>
 <div class="actions"><input id="tNote" placeholder="Nota del cambio (opcional)" class="grow inpill"><button class="btn" id="tenantSave" type="button">Guardar</button></div>
-<div class="card"><b>Probar el borrador (no guarda nada)</b>
+<div class="card mt12"><b>Marca del widget (chat en la web del cliente)</b>
+<p class="muted mt6">Lo que ve el visitante: logo, nombre, saludo, colores. Vacío = marca de Velai (hirevai.com no cambia). Se sirve por <code>/widget/boot</code> y se aplica sin deploy (caché 5 min).</p>
+<div class="grid mt6">
+<div class="card"><b>Nombre del bot</b><input id="tBotName" placeholder="Zoe"><small class="muted field-err" data-f="bot_name"></small></div>
+<div class="card"><b>Nombre de marca</b><input id="tBrandName" placeholder="Zoe Travel Spain"><small class="muted field-err" data-f="brand_name"></small></div>
+<div class="card"><b>Logo (URL https)</b><input id="tLogo" placeholder="https://… (el logo que ya usa su web)"><small class="muted field-err" data-f="logo_url"></small></div>
+<div class="card"><b>Colores (#rrggbb · el 2º opcional, degradado)</b><div class="note mt6"><input id="tColor1" placeholder="#1a4fd0" class="w150"><input id="tColor2" placeholder="#f57a1f" class="w150"></div><small class="muted field-err" data-f="brand_color"></small><small class="muted field-err" data-f="brand_color_2"></small></div>
+<div class="card"><b>Saludo (ES)</b><textarea id="tGreeting" rows="2" placeholder="¡Hola! Soy Zoe 🐱 ¿A dónde sueñas viajar?"></textarea><small class="muted field-err" data-f="greeting"></small></div>
+<div class="card"><b>Saludo (EN, opcional)</b><textarea id="tGreetingEn" rows="2" placeholder="Hi! I'm Zoe 🐱 Where do you dream of travelling?"></textarea><small class="muted field-err" data-f="greeting_en"></small></div>
+<div class="card"><b>Sugerencias (hasta 3, una por línea)</b><textarea id="tChips" rows="3" placeholder="Vuelos a Colombia&#10;Paquetes con hotel"></textarea><small class="muted field-err" data-f="chips_json"></small></div>
+<div class="card"><b>Placeholder del input</b><input id="tPlaceholder" placeholder="Escribe tu mensaje..."><small class="muted field-err" data-f="placeholder"></small></div>
+<div class="card"><b>WhatsApp de contacto (wa.me, solo dígitos)</b><input id="tWa" placeholder="34644280183"><small class="muted field-err" data-f="wa_number"></small></div>
+<div class="card"><b>Tema del chat</b><select id="tTheme"><option value="">auto (según el visitante)</option><option value="light">light</option><option value="dark">dark</option></select></div>
+</div>
+<div class="mt12"><b class="muted">Previsualización</b><div id="brandPrev"></div></div></div>
+<div class="card mt12"><b>Probar el borrador (no guarda nada)</b>
 <div class="note mt6"><input id="tTestMsg" placeholder="Mensaje de prueba, p. ej. «hola, ¿tenéis hueco mañana?»" class="grow"><button class="btn alt" id="tenantPreview" type="button">Probar</button></div>
 <article id="tPreviewOut" class="muted prewrap"></article></div>
 <div class="card" id="tProv" hidden><b>Aprovisionamiento Twilio (automático)</b>
@@ -190,7 +217,7 @@ dialog::backdrop{background:rgba(5,3,6,.78);backdrop-filter:blur(3px)}
 <div class="timeline"><h3>Historial</h3><div id="tVersions" class="muted">—</div></div>
 </div></dialog>
 <script nonce="__NONCE__">
-function paint(root){(root||document).querySelectorAll('[data-w]').forEach(e=>{e.style.width=e.dataset.w+'%'});(root||document).querySelectorAll('[data-h]').forEach(e=>{e.style.height=e.dataset.h+'%'});(root||document).querySelectorAll('[data-c]').forEach(e=>{e.style.background=e.dataset.c})}
+function paint(root){(root||document).querySelectorAll('[data-w]').forEach(e=>{e.style.width=e.dataset.w+'%'});(root||document).querySelectorAll('[data-h]').forEach(e=>{e.style.height=e.dataset.h+'%'});(root||document).querySelectorAll('[data-c]').forEach(e=>{e.style.background=e.dataset.c});(root||document).querySelectorAll('[data-fg]').forEach(e=>{e.style.color=e.dataset.fg})}
 const $=s=>document.querySelector(s), esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));let cursor=null,current=null,loadedCount=0;
 const ST_LABEL={new:'nuevo',contacted:'contactado',qualified:'cualificado',won:'ganado',lost:'perdido',spam:'spam'};
 const TENANT_COLORS=['#3987e5','#9085e9','#199e70','#c98500','#2aa8b8','#c96bb4','#8ba03f','#e66767'];
@@ -238,18 +265,32 @@ async function loadTenantList(){try{const d=await api('/api/admin/tenants');tena
 $('#tenantRows').onclick=e=>{const tr=e.target.closest('[data-tid]');if(tr)openTenant(tr.dataset.tid)};
 $('#newTenant').onclick=()=>openTenant(null);
 $('#tenantClose').onclick=()=>$('#tenantModal').close();
-const TF={name:'#tName',slug:'#tSlug',channel_address:'#tAddress',twilio_from:'#tFrom',team_whatsapp:'#tTeam',telegram_chat_id:'#tChat',lead_template_sid:'#tTpl',twilio_subaccount_sid:'#tSub',waba_id:'#tWaba',meta_partner_status:'#tPartner',system_prompt:'#tPrompt'};
+const TF={name:'#tName',slug:'#tSlug',channel_address:'#tAddress',twilio_from:'#tFrom',team_whatsapp:'#tTeam',telegram_chat_id:'#tChat',lead_template_sid:'#tTpl',twilio_subaccount_sid:'#tSub',waba_id:'#tWaba',meta_partner_status:'#tPartner',system_prompt:'#tPrompt',bot_name:'#tBotName',brand_name:'#tBrandName',logo_url:'#tLogo',brand_color:'#tColor1',brand_color_2:'#tColor2',greeting:'#tGreeting',greeting_en:'#tGreetingEn',placeholder:'#tPlaceholder',wa_number:'#tWa',theme:'#tTheme'};
+// chips_json va aparte: en el form es una línea por chip; al worker viaja como array.
+function chipsToLines(json){try{const a=JSON.parse(json||'[]');return Array.isArray(a)?a.join('\\n'):''}catch(e){return ''}}
+function chipsFromLines(){return $('#tChips').value.split('\\n').map(s=>s.trim()).filter(Boolean).slice(0,3)}
+// Previsualización de la marca: mini-mock del chat con los valores actuales del form.
+function brandPreview(){
+ const c1=$('#tColor1').value.trim()||'#FF6B1A',c2=$('#tColor2').value.trim()||c1;
+ const bot=$('#tBotName').value.trim()||'Vai',brand=$('#tBrandName').value.trim()||'Velai';
+ const logo=$('#tLogo').value.trim();
+ const greet=$('#tGreeting').value.trim()||'¡Hola! Soy '+bot+' 👋 ¿En qué te puedo ayudar?';
+ const chips=chipsFromLines();
+ $('#brandPrev').classList.toggle('bp-dark',$('#tTheme').value==='dark');
+ $('#brandPrev').innerHTML='<div class="bp-h" data-c="linear-gradient(135deg,'+esc(c1)+','+esc(c2)+')"><span class="bp-av" data-c="'+esc(c1)+'">'+(/^https:\\/\\//i.test(logo)?'<img src="'+esc(logo)+'" alt="">':esc(bot.charAt(0).toUpperCase()))+'</span><span class="bp-n">'+esc(bot)+' · '+esc(brand)+'</span></div><div class="bp-g">'+esc(greet)+'</div>'+(chips.length?'<div class="bp-c">'+chips.map(c=>'<span data-fg="'+esc(c1)+'">'+esc(c)+'</span>').join('')+'</div>':'');
+ paint($('#brandPrev'))}
+['#tBotName','#tBrandName','#tLogo','#tColor1','#tColor2','#tGreeting','#tChips','#tTheme'].forEach(s=>{$(s).addEventListener('input',brandPreview);$(s).addEventListener('change',brandPreview)});
 function clearTenantErrs(){document.querySelectorAll('.field-err').forEach(x=>x.textContent='');$('#tenantMsg').innerHTML=''}
 function updateCount(){const n=$('#tPrompt').value.length;$('#tCount').textContent=n+' caracteres · ≈'+Math.round(n/4)+' tokens en CADA mensaje'}
 $('#tPrompt').oninput=updateCount;
 async function openTenant(id){clearTenantErrs();$('#tPreviewOut').textContent='';$('#tTestMsg').value='';$('#tNote').value='';
  $('#tToken').value='';
- if(id){const d=await api('/api/admin/tenants/'+id);const t=d.tenant;editing={id:t.id,updated_at:t.updated_at};$('#tenantTitle').textContent=t.name;$('#tDup').hidden=true;for(const[k,sel]of Object.entries(TF))$(sel).value=t[k]??'';$('#tActive').checked=!!t.active;$('#tTokenState').textContent=t.has_twilio_token?'configurado ✓ (escribe solo para sustituirlo)':'sin configurar';$('#tProv').hidden=false;$('#tUsersCard').hidden=false;loadProv(id);loadVersions(id);loadUsers(id)}
- else{editing=null;$('#tenantTitle').textContent='Nuevo cliente';$('#tDup').hidden=false;$('#tDupSel').innerHTML='<option value="">— empezar de cero —</option>'+tenantList.map(t=>'<option value="'+t.id+'">'+esc(t.name)+'</option>').join('');for(const sel of Object.values(TF))$(sel).value='';$('#tPartner').value='pendiente';$('#tActive').checked=true;$('#tTokenState').textContent='sin configurar';$('#tProv').hidden=true;$('#tUsersCard').hidden=true;$('#tVersions').textContent='—'}
- updateCount();$('#tenantModal').showModal()}
+ if(id){const d=await api('/api/admin/tenants/'+id);const t=d.tenant;editing={id:t.id,updated_at:t.updated_at};$('#tenantTitle').textContent=t.name;$('#tDup').hidden=true;for(const[k,sel]of Object.entries(TF))$(sel).value=t[k]??'';$('#tChips').value=chipsToLines(t.chips_json);$('#tActive').checked=!!t.active;$('#tTokenState').textContent=t.has_twilio_token?'configurado ✓ (escribe solo para sustituirlo)':'sin configurar';$('#tProv').hidden=false;$('#tUsersCard').hidden=false;loadProv(id);loadVersions(id);loadUsers(id)}
+ else{editing=null;$('#tenantTitle').textContent='Nuevo cliente';$('#tDup').hidden=false;$('#tDupSel').innerHTML='<option value="">— empezar de cero —</option>'+tenantList.map(t=>'<option value="'+t.id+'">'+esc(t.name)+'</option>').join('');for(const sel of Object.values(TF))$(sel).value='';$('#tChips').value='';$('#tPartner').value='pendiente';$('#tActive').checked=true;$('#tTokenState').textContent='sin configurar';$('#tProv').hidden=true;$('#tUsersCard').hidden=true;$('#tVersions').textContent='—'}
+ updateCount();brandPreview();$('#tenantModal').showModal()}
 $('#tDupSel').onchange=async e=>{if(!e.target.value)return;const d=await api('/api/admin/tenants/'+e.target.value);$('#tPrompt').value=d.tenant.system_prompt||'';updateCount()};
 $('#tenantSave').onclick=async()=>{clearTenantErrs();
- const body={};for(const[k,sel]of Object.entries(TF))body[k]=$(sel).value;body.active=$('#tActive').checked;body.note=$('#tNote').value;
+ const body={};for(const[k,sel]of Object.entries(TF))body[k]=$(sel).value;body.chips_json=chipsFromLines();body.active=$('#tActive').checked;body.note=$('#tNote').value;
  if($('#tToken').value)body.twilio_auth_token=$('#tToken').value; // write-only: solo si se escribe
  try{
   if(editing){body.expected_updated_at=editing.updated_at;const r=await api('/api/admin/tenants/'+editing.id,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});editing.updated_at=r.updated_at;loadVersions(editing.id)}
