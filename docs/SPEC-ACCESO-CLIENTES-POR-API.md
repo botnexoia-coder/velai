@@ -1,6 +1,17 @@
 # Spec — alta de usuarios de cliente en Cloudflare Access, por API
 
-> Responde a: *«guardé el correo de Diálogos en el panel pero al entrar sale “Cloudflare sign-in is
+> **Estado (2026-08-18): CÓDIGO IMPLEMENTADO** (`worker/cloudflare.js`:
+> `syncAccessGroup` reescribe el grupo ENTERO desde D1 tras cada alta/baja — con
+> centinela si la lista queda vacía —, respuesta con `gate:
+> sincronizado|pendiente|manual`, toasts en el panel, log `access_group_desync` +
+> alerta Telegram si el PUT falla tras escribir en D1; suite 65/65). Desviación
+> consciente: sin cerrojo KV — el PUT reescribe la lista completa leída tras la
+> propia escritura, así que dos operaciones simultáneas convergen en la siguiente
+> sincronización; el estado `pendiente` + alerta cubre el resto. **Falta para
+> activarlo (manual/una vez)**: token `CF_API_TOKEN` (el OAuth de wrangler es
+> solo-lectura para Access: los POST de IdP y grupo devolvieron `auth.forbidden`),
+> crear el IdP OTP + grupo «Clientes Velai» + meterlo en la política de la app
+> (la app vive a NIVEL DE ZONA, no de cuenta), y `CF_ACCESS_GROUP_ID` en wrangler.toml.
 > restricted to members of the account”; la idea es que eso quede guardado también vía API»*.
 > Verificado el 2026-08-18 contra la API y la documentación de Cloudflare Zero Trust.
 > Complementa `SPEC-ORIGENES-Y-TURNSTILE-POR-API.md` (mismo token, mismo patrón).

@@ -91,11 +91,41 @@ test('limita atribución a claves conocidas y longitudes seguras', () => {
   assert.equal(value.gclid.length, 300);
 });
 
-test('CORS solo autoriza orígenes configurados de forma exacta', () => {
+test('CORS solo autoriza orígenes configurados de forma exacta', async () => {
   const env = { ALLOWED_WEB_ORIGINS: 'https://hirevai.com,https://www.hirevai.com' };
-  assert.equal(testing.publicCors(new Request('https://worker.test', { headers: { Origin: 'https://hirevai.com' } }), env)['Access-Control-Allow-Origin'], 'https://hirevai.com');
-  assert.equal(testing.publicCors(new Request('https://worker.test', { headers: { Origin: 'https://evil.pages.dev' } }), env), null);
-  assert.equal(testing.publicCors(new Request('https://worker.test'), env), null);
+  assert.equal((await testing.publicCors(new Request('https://worker.test', { headers: { Origin: 'https://hirevai.com' } }), env))['Access-Control-Allow-Origin'], 'https://hirevai.com');
+  assert.equal(await testing.publicCors(new Request('https://worker.test', { headers: { Origin: 'https://evil.pages.dev' } }), env), null);
+  assert.equal(await testing.publicCors(new Request('https://worker.test'), env), null);
+});
+
+test('allowedOrigins une la base del entorno con los web_origins de tenants ACTIVOS y cachea en KV', async () => {
+  const kv = new Map();
+  const env = {
+    ALLOWED_WEB_ORIGINS: 'https://hirevai.com',
+    KV: { async get(k, t) { const v = kv.get(k); return v == null ? null : (t === 'json' ? JSON.parse(v) : v); }, async put(k, v) { kv.set(k, v); }, async delete(k) { kv.delete(k); } },
+    DB: { prepare: (sql) => ({
+      all: async () => ({ results: sql.includes('active = 1') ? [{ web_origins: '["https://zoetravelspain.com","https://www.zoetravelspain.com"]' }, { web_origins: 'json-roto' }] : [] }),
+      bind: () => ({ all: async () => ({ results: [] }), first: async () => null, run: async () => ({ meta: { changes: 0 } }) }),
+    }) },
+  };
+  const list = await testing.allowedOrigins(env);
+  assert.deepEqual(list.sort(), ['https://hirevai.com', 'https://www.zoetravelspain.com', 'https://zoetravelspain.com']);
+  assert.ok(kv.has('origins:all'), 'la unión queda cacheada');
+  // segunda llamada: sale de la caché aunque D1 explote
+  env.DB.prepare = () => { throw new Error('boom'); };
+  assert.deepEqual((await testing.allowedOrigins(env)).sort(), list.sort());
+  // sin caché y con D1 caída: la base del entorno sostiene nuestro sitio
+  kv.clear();
+  assert.deepEqual(await testing.allowedOrigins(env), ['https://hirevai.com']);
+});
+
+test('validateTenant: web_origins exige https sin path, máximo 6 y normaliza', () => {
+  const out = testing.validateTenant({ web_origins: [' https://Zoe.COM/ ', 'https://www.zoe.com'] }, { partial: true });
+  assert.equal(out.web_origins, '["https://zoe.com","https://www.zoe.com"]');
+  assert.throws(() => testing.validateTenant({ web_origins: ['http://inseguro.com'] }, { partial: true }), (e) => e.code === 'invalid_web_origins');
+  assert.throws(() => testing.validateTenant({ web_origins: ['https://con.path/ruta'] }, { partial: true }), (e) => e.code === 'invalid_web_origins');
+  assert.throws(() => testing.validateTenant({ web_origins: Array(7).fill('https://a.com') }, { partial: true }), (e) => e.code === 'invalid_web_origins');
+  assert.equal(testing.validateTenant({ web_origins: [] }, { partial: true }).web_origins, null);
 });
 
 test('valida una firma Twilio y rechaza una firma alterada', async () => {
@@ -398,7 +428,8 @@ test('la invalidación de caché borra las claves viejas Y las nuevas (addr y sl
     { channel_address: 'whatsapp:+1000', slug: 'viejo' },
     { channel_address: 'whatsapp:+2000', slug: 'nuevo' },
   ]);
-  assert.deepEqual(deleted.sort(), ['tenant:addr:whatsapp:+1000', 'tenant:addr:whatsapp:+2000', 'tenant:slug:nuevo', 'tenant:slug:viejo']);
+  // 'origins:all' cae con CUALQUIER edición: la allowlist de CORS depende de las filas.
+  assert.deepEqual(deleted.sort(), ['origins:all', 'tenant:addr:whatsapp:+1000', 'tenant:addr:whatsapp:+2000', 'tenant:slug:nuevo', 'tenant:slug:viejo']);
 });
 
 function adminEnvWithSpies() {
@@ -664,7 +695,7 @@ test('el panel rediseñado: sin dominios externos salvo las fuentes, nonce y tod
   assert.deepEqual([...new Set(externals)], ['hirevai.com'], 'solo hirevai.com (fuentes)');
   assert.ok([...ADMIN_HTML.matchAll(/hirevai\.com\/([a-z]+)\//g)].every((m) => m[1] === 'fonts'), 'y solo su ruta /fonts/');
   assert.ok(ADMIN_HTML.includes('__NONCE__'));
-  for (const id of ['tName', 'tSlug', 'tAddress', 'tFrom', 'tTeam', 'tChat', 'tTpl', 'tSub', 'tWaba', 'tToken', 'tPartner', 'tActive', 'tPrompt', 'tNote', 'pSub', 'pTpl', 'pPhone', 'pSender', 'pCode', 'pVerify', 'tenantFilter', 'newTenant', 'export', 'tTokenState', 'tBotName', 'tBrandName', 'tLogo', 'tColor1', 'tColor2', 'tGreeting', 'tGreetingEn', 'tChips', 'tPlaceholder', 'tWa', 'tTheme', 'brandPrev', 'toasts']) {
+  for (const id of ['tName', 'tSlug', 'tAddress', 'tFrom', 'tTeam', 'tChat', 'tTpl', 'tSub', 'tWaba', 'tToken', 'tPartner', 'tActive', 'tPrompt', 'tNote', 'pSub', 'pTpl', 'pPhone', 'pSender', 'pCode', 'pVerify', 'tenantFilter', 'newTenant', 'export', 'tTokenState', 'tBotName', 'tBrandName', 'tLogo', 'tColor1', 'tColor2', 'tGreeting', 'tGreetingEn', 'tChips', 'tPlaceholder', 'tWa', 'tTheme', 'brandPrev', 'toasts', 'tOrigins', 'tSyncDomains']) {
     assert.ok(ADMIN_HTML.includes(`id="${id}"`), `falta #${id}`);
   }
   assert.ok(!/localStorage/.test(ADMIN_HTML), 'sin localStorage');
@@ -1065,4 +1096,104 @@ test('el listado de leads sin ?limit usa 50, no 1 (Number(null) es 0 y el clamp 
   const res = await testing.adminRouter(new Request(url), env, { waitUntil() {} }, '/api/admin/leads', url, {}, { role: 'velai', tenantId: null, email: 'a@velai' });
   assert.equal(res.status, 200);
   assert.equal(boundArgs.at(-1), 51, 'limit por defecto 50 (+1 para detectar nextCursor)');
+});
+
+// ── SPEC-ORIGENES-Y-TURNSTILE + SPEC-ACCESO: sincronización con la API de Cloudflare ──
+test('provision/domains reescribe Turnstile preservando el mode invisible y con la lista de D1', async () => {
+  const calls = [];
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = async (url, init) => {
+    const u = String(url);
+    if (u.includes('/challenges/widgets/')) {
+      calls.push({ method: (init && init.method) || 'GET', body: init && init.body ? JSON.parse(init.body) : null });
+      if (!init || !init.method || init.method === 'GET') {
+        return new Response(JSON.stringify({ success: true, result: { name: 'velai-web', mode: 'invisible', bot_fight_mode: false, offlabel: false, clearance_level: 'no_clearance', domains: ['hirevai.com'] } }), { status: 200 });
+      }
+      return new Response('{"success":true,"result":{}}', { status: 200 });
+    }
+    return new Response('{"success":true,"ok":true,"result":{}}', { status: 200 });
+  };
+  try {
+    const row = { id: '00000000-0000-4000-8000-000000000001', slug: 'zoe', name: 'Zoe' };
+    const env = {
+      CF_API_TOKEN: 't', CF_ACCOUNT_ID: 'acc', TURNSTILE_SITEKEY: '0xKEY',
+      ALLOWED_WEB_ORIGINS: 'https://hirevai.com',
+      DB: { prepare: (sql) => ({
+        all: async () => ({ results: sql.includes('active = 1') ? [{ web_origins: '["https://zoetravelspain.com"]' }] : [] }),
+        bind: () => ({ first: async () => (sql.startsWith('SELECT * FROM tenants') ? row : null), run: async () => ({ meta: { changes: 1 } }), all: async () => ({ results: [] }) }),
+      }) },
+    };
+    const res = await testing.handleProvision(new Request('https://admin.hirevai.com/x', { method: 'POST' }), env, { waitUntil() {} }, row.id, 'domains', 'juan@x');
+    assert.equal(res.status, 200);
+    const put = calls.find((c) => c.method === 'PUT');
+    assert.equal(put.body.mode, 'invisible', 'el tipo del widget se preserva (NUNCA managed)');
+    assert.deepEqual(put.body.domains.sort(), ['hirevai.com', 'zoetravelspain.com'], 'la lista se reconstruye desde D1 + entorno');
+  } finally { globalThis.fetch = realFetch; }
+});
+
+test('sin CF_API_TOKEN, provision/domains devuelve 503 y no llama a Cloudflare', async () => {
+  const calls = [];
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = async (url) => { calls.push(String(url)); return new Response('{"success":true,"result":{}}', { status: 200 }); };
+  try {
+    const row = { id: '00000000-0000-4000-8000-000000000001', slug: 'zoe', name: 'Zoe' };
+    const env = { ALLOWED_WEB_ORIGINS: '', DB: { prepare: (sql) => ({ all: async () => ({ results: [] }), bind: () => ({ first: async () => (sql.startsWith('SELECT * FROM tenants') ? row : null), run: async () => ({ meta: { changes: 1 } }), all: async () => ({ results: [] }) }) }) } };
+    await assert.rejects(
+      testing.handleProvision(new Request('https://x', { method: 'POST' }), env, { waitUntil() {} }, row.id, 'domains', 'juan@x'),
+      (e) => e.status === 503 && e.code === 'cloudflare_api_not_configured');
+    assert.equal(calls.filter((u) => u.includes('cloudflare.com')).length, 0);
+  } finally { globalThis.fetch = realFetch; }
+});
+
+test('la puerta de Access se reescribe ENTERA desde D1 tras un alta, y un PUT fallido no rompe el alta', async () => {
+  const puts = [];
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = async (url, init) => {
+    if (String(url).includes('/access/groups/')) { puts.push(JSON.parse(init.body)); return new Response('{"success":true,"result":{}}', { status: 200 }); }
+    return new Response('{"success":true,"ok":true,"result":{}}', { status: 200 });
+  };
+  const gateDb = (emails) => ({ prepare: (sql) => ({
+    all: async () => ({ results: emails.map((e) => ({ email: e })) }),
+    bind: (...args) => ({
+      first: async () => (sql.includes('SELECT id FROM tenants') ? { id: args[0] } : sql.includes('COUNT(*)') ? { n: emails.length } : null),
+      all: async () => ({ results: [] }),
+      run: async () => ({ meta: { changes: 1 } }),
+    }),
+  }) });
+  try {
+    const env = { CF_API_TOKEN: 't', CF_ACCOUNT_ID: 'acc', CF_ACCESS_GROUP_ID: 'g1', DB: gateDb(['a@x.com', 'b@y.com']) };
+    const res = await testing.adminRouter(
+      usersReq({ method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email: 'b@y.com' }) }),
+      env, { waitUntil() {} }, usersPath(), new URL('https://x' + usersPath()), {}, VELAI);
+    const body = await res.json();
+    assert.equal(body.gate, 'sincronizado');
+    assert.deepEqual(puts[0].include, [{ email: { email: 'a@x.com' } }, { email: { email: 'b@y.com' } }], 'lista COMPLETA desde D1, no incremental');
+    // PUT fallido: la fila queda, el alta responde ok y el estado es 'pendiente'
+    globalThis.fetch = async (url, init) => {
+      if (String(url).includes('/access/groups/')) return new Response('{"success":false,"errors":[{"code":10000}]}', { status: 403 });
+      return new Response('{"success":true,"ok":true,"result":{}}', { status: 200 });
+    };
+    const realLog = console.log; const logs = []; console.log = (l) => logs.push(l);
+    let res2;
+    try {
+      res2 = await testing.adminRouter(
+        usersReq({ method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email: 'c@z.com' }) }),
+        env, { waitUntil() {} }, usersPath(), new URL('https://x' + usersPath()), {}, VELAI);
+    } finally { console.log = realLog; }
+    const body2 = await res2.json();
+    assert.equal(res2.status, 201, 'D1 primero: el alta no se pierde por Cloudflare');
+    assert.equal(body2.gate, 'pendiente');
+    assert.ok(logs.some((l) => l.includes('access_group_desync')), 'la desincronía queda logueada');
+  } finally { globalThis.fetch = realFetch; }
+});
+
+test('sin usuarios, el grupo de Access se cierra con un centinela (include vacío no es válido)', async () => {
+  const { syncAccessGroup } = await import('../worker/cloudflare.js');
+  const puts = [];
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = async (url, init) => { puts.push(JSON.parse(init.body)); return new Response('{"success":true,"result":{}}', { status: 200 }); };
+  try {
+    await syncAccessGroup({ CF_API_TOKEN: 't', CF_ACCOUNT_ID: 'a', CF_ACCESS_GROUP_ID: 'g' }, []);
+    assert.deepEqual(puts[0].include, [{ email: { email: 'nadie@velai.invalid' } }]);
+  } finally { globalThis.fetch = realFetch; }
 });

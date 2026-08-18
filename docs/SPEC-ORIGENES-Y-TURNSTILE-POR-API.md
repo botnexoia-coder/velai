@@ -1,5 +1,14 @@
 # Spec — allowlist de orígenes y hostnames de Turnstile sin deploy
 
+> **Estado (2026-08-18): CÓDIGO IMPLEMENTADO** (migración 0008 `web_origins`,
+> `allowedOrigins()` async = entorno + tenants activos con caché KV `origins:all`,
+> campo «Dominios de la web» y botón «Sincronizar Turnstile» en la ficha,
+> `POST /provision/domains` con GET-antes-de-PUT para preservar el `mode` invisible,
+> tope de la var subido a 4000 con log si se alcanza; suite 65/65). El botón de
+> reconciliación aparte NO se hizo: el propio Sincronizar ES la reconciliación
+> (reescribe todo desde D1, idempotente). **Falta para activarlo**: aplicar la
+> migración 0008 en remoto, deploy del worker, y el secret `CF_API_TOKEN`.
+
 > Responde a: *«¿los allowed web origins los podemos manejar por API en Cloudflare?»*
 > Verificado el 2026-08-18 contra la API de Cloudflare y el código en `a3c0627`.
 >

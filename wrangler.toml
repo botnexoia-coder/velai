@@ -18,10 +18,11 @@ routes = [
 ]
 
 [vars]
-# El alias de Pages permite validar chat/formularios en preview antes de mergear.
-# Cualquier hostname añadido aquí debe añadirse TAMBIÉN al widget de Turnstile.
-# Incluye los dominios de los 4 clientes solo-web (SPEC-CANAL-WEB §7): su chat y su
-# formulario llaman al worker desde SU origen.
+# BASE de la allowlist (los orígenes de Velai). Desde la migración 0008 los dominios de
+# cliente viven en tenants.web_origins (D1, editables en el panel) y se UNEN a esta
+# lista en allowedOrigins() — esta var sostiene nuestro sitio si D1 cae. Los de cliente
+# de aquí abajo pueden migrarse a sus fichas y retirarse de esta línea con calma.
+# El botón «Sincronizar Turnstile» del panel reescribe los hostnames del widget desde D1.
 ALLOWED_WEB_ORIGINS = "https://hirevai.com,https://www.hirevai.com,https://velai-dey.pages.dev,https://hiredatavision.com,https://www.hiredatavision.com,https://gogestion.es,https://www.gogestion.es,https://zoetravelspain.com,https://www.zoetravelspain.com,https://dialogosqueensenan.com,https://www.dialogosqueensenan.com,https://gogestion-demo.pages.dev"
 ADMIN_ORIGIN = "https://admin.hirevai.com"
 LEAD_RETENTION_MONTHS = "24"
@@ -32,6 +33,15 @@ DEFAULT_TENANT_SLUG = "velai"
 # Admins de Velai en el panel (rol completo). Fuera de D1 a propósito: una fila
 # borrada en tenant_users no puede dejar a Velai fuera de su propio panel.
 ADMIN_EMAILS = "botnexo.ia@gmail.com"
+# API de Cloudflare desde el worker (SPEC-ORIGENES-Y-TURNSTILE + SPEC-ACCESO):
+# el token va como SECRET (wrangler secret put CF_API_TOKEN) con permisos mínimos:
+# Account→Turnstile→Edit, Account→Access: Organizations/IdPs/Groups→Edit y
+# Zone(hirevai.com)→Access: Apps and Policies→Edit. Estos tres son públicos/ids.
+CF_ACCOUNT_ID = "6a5877b5637ec5fa28d05af46e894542"
+TURNSTILE_SITEKEY = "0x4AAAAAAESkAwvlDVJD9Z1l"
+# Id del grupo de Access «Clientes Velai» (se crea una vez — SPEC-ACCESO paso 2).
+# Vacío = la sincronización de la puerta queda en 'manual' y el panel lo avisa.
+CF_ACCESS_GROUP_ID = ""
 
 # Workers Logs: sin este bloque cada deploy lo deja APAGADO y los logs operativos
 # (tenant_token_undecryptable, provision_orphan, lead_d1_fallback…) no se ven en

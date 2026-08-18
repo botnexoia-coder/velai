@@ -1,5 +1,6 @@
 import { ADMIN_HEADERS, ADMIN_HTML } from './admin-page.js';
 import { encryptSecret, decryptSecret } from './crypto.js';
+import { cloudflareConfigured, syncTurnstileDomains, syncAccessGroup } from './cloudflare.js';
 import { createSubaccount, createLeadTemplate, submitTemplateApproval, fetchApprovalStatus, createWhatsAppSender, verifySender, fetchSenderStatus } from './twilio.js';
 
 const JSON_HEADERS = { 'Content-Type': 'application/json; charset=utf-8' };
@@ -47,13 +48,40 @@ function extractPhone(text) {
   return '';
 }
 
-function allowedOrigins(env) {
-  return clean(env.ALLOWED_WEB_ORIGINS, 1000).split(',').map((x) => x.trim()).filter(Boolean);
+// Base del entorno (los orígenes de Velai). El tope sube de 1000 a 4000 y, si algún
+// día se alcanza, se loguea: clean() truncaba EN SILENCIO y hacia el cliente ~15 el
+// último dominio dejaba de funcionar con un origin_not_allowed inexplicable.
+function envOrigins(env) {
+  const raw = String(env.ALLOWED_WEB_ORIGINS || '');
+  if (raw.length > 4000) console.log(JSON.stringify({ level: 'error', code: 'allowed_origins_truncated', length: raw.length }));
+  return raw.slice(0, 4000).split(',').map((x) => x.trim()).filter(Boolean);
 }
 
-function publicCors(request, env) {
+// Orígenes permitidos = los del entorno + los `web_origins` de los tenants ACTIVOS
+// (D1, migración 0008). Caché en KV 5 min bajo 'origins:all', invalidada por
+// invalidateTenantCache. Si D1 o KV fallan, la base del entorno sostiene nuestro sitio.
+async function allowedOrigins(env) {
+  const base = envOrigins(env);
+  if (!env.DB) return base;
+  if (env.KV) {
+    try { const cached = await env.KV.get('origins:all', 'json'); if (Array.isArray(cached)) return cached; } catch (_) {}
+  }
+  let rows = [];
+  try {
+    rows = (await env.DB.prepare('SELECT web_origins FROM tenants WHERE active = 1 AND web_origins IS NOT NULL').all()).results || [];
+  } catch (_) { return base; }
+  const set = new Set(base);
+  for (const row of rows) {
+    try { for (const o of JSON.parse(row.web_origins)) if (ORIGIN_RE.test(o)) set.add(o); } catch (_) {}
+  }
+  const list = [...set];
+  if (env.KV) { try { await env.KV.put('origins:all', JSON.stringify(list), { expirationTtl: TENANT_TTL }); } catch (_) {} }
+  return list;
+}
+
+async function publicCors(request, env) {
   const origin = request.headers.get('Origin') || '';
-  if (!origin || !allowedOrigins(env).includes(origin)) return null;
+  if (!origin || !(await allowedOrigins(env)).includes(origin)) return null;
   return {
     'Access-Control-Allow-Origin': origin,
     'Access-Control-Allow-Methods': 'POST, OPTIONS',
@@ -113,7 +141,7 @@ async function verifyTurnstile(env, token, request, expectedAction) {
   // Un token emitido para un hostname ajeno no vale aunque sea "success": la lista
   // sale de ALLOWED_WEB_ORIGINS (config del servidor), nunca del Origin del cliente.
   if (result.hostname) {
-    const okHosts = new Set(allowedOrigins(env).map((o) => { try { return new URL(o).hostname; } catch (_) { return ''; } }));
+    const okHosts = new Set((await allowedOrigins(env)).map((o) => { try { return new URL(o).hostname; } catch (_) { return ''; } }));
     okHosts.add('localhost'); okHosts.add('127.0.0.1');
     if (!okHosts.has(result.hostname)) throw new HttpError(403, 'human_verification_failed');
   }
@@ -259,6 +287,8 @@ const CHAT_ID_RE = /^-?\d{5,20}$/;
 const PROMPT_MIN = 50, PROMPT_MAX = 20000;
 // Marca del widget (migración 0007): el chat en la web de un cliente lleva SU marca.
 const HEX_COLOR_RE = /^#[0-9a-f]{6}$/i;
+// Orígenes web del tenant (migración 0008): https, sin path ni barra final.
+const ORIGIN_RE = /^https:\/\/[a-z0-9-]+(\.[a-z0-9-]+)+$/;
 const WA_DIGITS_RE = /^[1-9]\d{5,14}$/;
 const THEMES = new Set(['auto', 'light', 'dark']);
 
@@ -346,6 +376,20 @@ function validateTenant(body, { partial = false } = {}) {
     out.theme = clean(body.theme, 10) || null;
     if (out.theme && !THEMES.has(out.theme)) bad('theme');
   }
+  if (has('web_origins')) {
+    // Acepta array o JSON string; normaliza (minúsculas, sin barra final) y guarda
+    // JSON. Máximo 6 por tenant. Estos orígenes entran en la allowlist de CORS y en
+    // el cruce de hostname de Turnstile: solo https y sin path.
+    let origins = body.web_origins;
+    if (typeof origins === 'string' && origins.trim()) { try { origins = JSON.parse(origins); } catch (_) { bad('web_origins'); } }
+    if (origins == null || (typeof origins === 'string' && !origins.trim()) || (Array.isArray(origins) && !origins.length)) out.web_origins = null;
+    else {
+      if (!Array.isArray(origins) || origins.length > 6) bad('web_origins');
+      const normalized = origins.map((o) => String(o).trim().toLowerCase().replace(/\/$/, ''));
+      if (normalized.some((o) => !ORIGIN_RE.test(o))) bad('web_origins');
+      out.web_origins = JSON.stringify([...new Set(normalized)]);
+    }
+  }
   if (has('active')) out.active = body.active ? 1 : 0;
   return out;
 }
@@ -359,7 +403,7 @@ function validateTenant(body, { partial = false } = {}) {
 async function handleWidgetBoot(request, env, url) {
   const origin = request.headers.get('Origin') || '';
   // GET simple: el navegador no hace preflight, pero el Allow-Origin es obligatorio.
-  const cors = origin && allowedOrigins(env).includes(origin)
+  const cors = origin && (await allowedOrigins(env)).includes(origin)
     ? { 'Access-Control-Allow-Origin': origin, Vary: 'Origin' } : {};
   const slug = clean(url.searchParams.get('tenant'), 40) || defaultTenantSlug(env);
   const tenant = await tenantBySlug(env, slug);
@@ -416,7 +460,9 @@ function tenantWriteError(error) {
 // viejas Y las nuevas. También tras un alta: los fallos de lookup se cachean.
 async function invalidateTenantCache(env, tenants) {
   if (!env.KV) return;
-  const keys = new Set();
+  // 'origins:all' cae con CUALQUIER edición: activar/desactivar un tenant o tocar sus
+  // web_origins cambia la allowlist de CORS y no puede esperar 5 minutos.
+  const keys = new Set(['origins:all']);
   for (const t of tenants) {
     if (!t) continue;
     if (t.channel_address) keys.add(`tenant:addr:${t.channel_address}`);
@@ -1047,6 +1093,26 @@ const PANEL_EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 // Cada alta y baja de usuario deja rastro con actor Y rol (SPEC-USUARIOS §B.2): un
 // cliente tocando su acceso tiene que poder distinguirse de Velai haciéndolo.
+// La puerta de Access (grupo «Clientes Velai») se reconstruye desde D1 tras CADA
+// alta/baja: el include del grupo es sustitución completa. D1 primero, Cloudflare
+// después — si el PUT falla, la fila ya está y el estado devuelto es 'pendiente' con
+// log + alerta: el único estado incoherente tiene que verse, no adivinarse. Sin
+// CF_API_TOKEN o sin grupo, 'manual' (la puerta se gestiona en el dashboard).
+// No hay cerrojo: el PUT reescribe la lista COMPLETA leída tras la escritura propia,
+// así que dos operaciones simultáneas convergen con la siguiente sincronización.
+async function syncPanelGate(env, ctx) {
+  if (!cloudflareConfigured(env) || !env.CF_ACCESS_GROUP_ID) return 'manual';
+  try {
+    const rows = (await env.DB.prepare('SELECT email FROM tenant_users ORDER BY email').all()).results || [];
+    await syncAccessGroup(env, rows.map((r) => r.email));
+    return 'sincronizado';
+  } catch (error) {
+    console.log(JSON.stringify({ level: 'error', code: 'access_group_desync', error: String(error.message || error) }));
+    ctx.waitUntil(sendTelegramText(env, '⚠️ <b>Velai</b>: el grupo de Access «Clientes Velai» no se pudo sincronizar tras un alta/baja de usuario. La fila en D1 está bien; repetir la operación o revisar CF_API_TOKEN.').catch(() => {}));
+    return 'pendiente';
+  }
+}
+
 async function panelUserAudit(env, ctx, tenantId, actor, role, note) {
   await env.DB.prepare('INSERT INTO tenant_versions (tenant_id,actor_email,field,previous_value,note,created_at) VALUES (?,?,?,?,?,?)')
     .bind(tenantId, actor, 'users', null, `${note} (rol ${role})`, new Date().toISOString()).run();
@@ -1097,6 +1163,25 @@ async function handleProvision(request, env, ctx, tenantId, step, actor) {
 
 async function runProvisionStep(request, env, ctx, tenant, tenantId, step, actor) {
   const now = new Date().toISOString();
+
+  // Sincroniza los hostnames del widget de Turnstile con la allowlist real (entorno +
+  // web_origins de TODOS los tenants activos, reconstruida desde D1). Es idempotente:
+  // el mismo botón ES la reconciliación. No requiere subcuenta de Twilio.
+  if (step === 'domains') {
+    if (!cloudflareConfigured(env)) throw new HttpError(503, 'cloudflare_api_not_configured');
+    const hosts = [...new Set((await allowedOrigins(env)).map((o) => { try { return new URL(o).hostname; } catch (_) { return ''; } }).filter(Boolean))];
+    try {
+      await syncTurnstileDomains(env, hosts);
+    } catch (error) {
+      // El estado incoherente peligroso: D1 ya acepta el origen pero Turnstile no
+      // emitiría token para ese hostname («No pude verificar que eres humano»).
+      console.log(JSON.stringify({ level: 'error', code: 'turnstile_sync_failed', error: String(error.message || error) }));
+      ctx.waitUntil(sendTelegramText(env, `⚠️ <b>Velai</b>: el PUT a Turnstile falló al sincronizar dominios para <b>${escapeHtml(tenant.name)}</b>. D1 acepta el origen pero Turnstile no emitirá token: reintentar «Sincronizar Turnstile» o revisar CF_API_TOKEN.`).catch(() => {}));
+      throw new HttpError(502, 'turnstile_sync_failed');
+    }
+    await provisionAudit(env, ctx, tenantId, actor, `Turnstile sincronizado desde D1: ${hosts.length} hostnames`);
+    return json({ ok: true, hostnames: hosts.length }, 200, NO_STORE);
+  }
 
   if (step === 'subaccount') {
     if (tenant.twilio_subaccount_sid) throw new HttpError(409, 'already_provisioned');
@@ -1345,9 +1430,9 @@ async function adminRouter(request, env, ctx, path, url, config, scope) {
     try {
       await env.DB.prepare(`INSERT INTO tenants
         (id,slug,name,channel_address,team_whatsapp,telegram_chat_id,lead_template_sid,twilio_from,twilio_subaccount_sid,waba_id,twilio_auth_token_enc,meta_partner_status,system_prompt,
-         bot_name,brand_name,logo_url,brand_color,brand_color_2,greeting,greeting_en,chips_json,placeholder,wa_number,theme,
+         bot_name,brand_name,logo_url,brand_color,brand_color_2,greeting,greeting_en,chips_json,placeholder,wa_number,theme,web_origins,
          active,created_at,updated_at)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
         .bind(tenantId, fields.slug, fields.name, fields.channel_address, fields.team_whatsapp ?? null,
           fields.telegram_chat_id ?? null, fields.lead_template_sid ?? null, fields.twilio_from ?? null,
           fields.twilio_subaccount_sid ?? null, fields.waba_id ?? null, tokenColumn,
@@ -1355,7 +1440,7 @@ async function adminRouter(request, env, ctx, path, url, config, scope) {
           fields.bot_name ?? null, fields.brand_name ?? null, fields.logo_url ?? null,
           fields.brand_color ?? null, fields.brand_color_2 ?? null, fields.greeting ?? null,
           fields.greeting_en ?? null, fields.chips_json ?? null, fields.placeholder ?? null,
-          fields.wa_number ?? null, fields.theme ?? null,
+          fields.wa_number ?? null, fields.theme ?? null, fields.web_origins ?? null,
           fields.active ?? 1, now, now).run();
     } catch (error) { throw tenantWriteError(error); }
     // Invalidar ANTES del versionado: si el INSERT de la versión fallara, la caché
@@ -1393,7 +1478,7 @@ async function adminRouter(request, env, ctx, path, url, config, scope) {
       porDia: fillSeries(serieRows.results || [], 14),
     }, 200, NO_STORE);
   }
-  const provMatch = path.match(/^\/api\/admin\/tenants\/([0-9a-f-]+)\/provision(?:\/(subaccount|template|sender\/verify|sender))?$/i);
+  const provMatch = path.match(/^\/api\/admin\/tenants\/([0-9a-f-]+)\/provision(?:\/(subaccount|template|sender\/verify|sender|domains))?$/i);
   if (provMatch) {
     if (!UUID_RE.test(provMatch[1])) throw new HttpError(404, 'not_found');
     return await handleProvision(request, env, ctx, provMatch[1], provMatch[2] || '', actor);
@@ -1429,7 +1514,8 @@ async function adminRouter(request, env, ctx, path, url, config, scope) {
         throw e;
       }
       await panelUserAudit(env, ctx, tenantId, actor, scope.role, `alta usuario ${email}`);
-      return json({ ok: true, email }, 201, NO_STORE);
+      const gate = await syncPanelGate(env, ctx);
+      return json({ ok: true, email, gate }, 201, NO_STORE);
     }
     if (usersMatch[2] && request.method === 'DELETE') {
       const email = decodeURIComponent(usersMatch[2]).trim().toLowerCase();
@@ -1437,9 +1523,12 @@ async function adminRouter(request, env, ctx, path, url, config, scope) {
         .bind(tenantId, email).run();
       if (!result.meta || !result.meta.changes) throw new HttpError(404, 'not_found');
       await panelUserAudit(env, ctx, tenantId, actor, scope.role, `baja usuario ${email}`);
+      // La baja TAMBIÉN sincroniza la puerta: si no, un correo revocado sigue pudiendo
+      // autenticarse en Access (el worker le daría 403, pero la puerta debe cerrarse).
+      const gate = await syncPanelGate(env, ctx);
       // `remaining` permite a la interfaz avisar de "este cliente se queda sin acceso".
       const left = await env.DB.prepare('SELECT COUNT(*) AS n FROM tenant_users WHERE tenant_id=?').bind(tenantId).first();
-      return json({ ok: true, remaining: left ? left.n : 0 }, 200, NO_STORE);
+      return json({ ok: true, remaining: left ? left.n : 0, gate }, 200, NO_STORE);
     }
     throw new HttpError(404, 'not_found');
   }
@@ -1453,7 +1542,7 @@ async function adminRouter(request, env, ctx, path, url, config, scope) {
       const tenant = await env.DB.prepare(`SELECT id, slug, name, channel_address, team_whatsapp, telegram_chat_id,
         lead_template_sid, twilio_from, twilio_subaccount_sid, waba_id, meta_partner_status, system_prompt,
         bot_name, brand_name, logo_url, brand_color, brand_color_2, greeting, greeting_en, chips_json,
-        placeholder, wa_number, theme,
+        placeholder, wa_number, theme, web_origins,
         active, created_at, updated_at, twilio_auth_token_enc IS NOT NULL AS has_twilio_token
         FROM tenants WHERE id=?`).bind(tenantId).first();
       if (!tenant) throw new HttpError(404, 'not_found');
@@ -1694,7 +1783,7 @@ export function createWorker(config) {
           return await handleWidgetBoot(request, env, url);
         }
         if (path === '/lead' || path === '/chat') {
-          const cors = publicCors(request, env);
+          const cors = await publicCors(request, env);
           if (!cors) throw new HttpError(403, 'origin_not_allowed');
           if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers: cors });
           if (request.method !== 'POST') throw new HttpError(405, 'method_not_allowed');
@@ -1708,11 +1797,11 @@ export function createWorker(config) {
         const status = error instanceof HttpError ? error.status : 500;
         const code = error instanceof HttpError ? error.code : 'server_error';
         console.log(JSON.stringify({ level: status >= 500 ? 'error' : 'warn', code, status, path, requestId: request.headers.get('cf-ray') || crypto.randomUUID() }));
-        return json({ ok: false, error: code }, status, publicCors(request, env) || {});
+        return json({ ok: false, error: code }, status, (await publicCors(request, env).catch(() => null)) || {});
       }
     },
     async scheduled(_event, env, ctx) { ctx.waitUntil(scheduled(env)); },
   };
 }
 
-export const testing = { clean, normalizePhone, extractPhone, safeUtm, publicCors, validTwilioSignature, csvCell, expiryDate, leadFilters, isDemoKey, templateVar, leadTemplateVariables, readJson, deliver, drainQueuedLeads, verifyTurnstile, systemFor, validateTenant, invalidateTenantCache, tenantWriteError, assertNotActivePending, handleProvision, pollProvisioning, fillSeries, resolveScope, scopeClause, clienteAllowed, adminRouter, recordAuthFailure, handleAdmin, handleWidgetBoot };
+export const testing = { clean, normalizePhone, extractPhone, safeUtm, publicCors, validTwilioSignature, csvCell, expiryDate, leadFilters, isDemoKey, templateVar, leadTemplateVariables, readJson, deliver, drainQueuedLeads, verifyTurnstile, systemFor, validateTenant, invalidateTenantCache, tenantWriteError, assertNotActivePending, handleProvision, pollProvisioning, fillSeries, resolveScope, scopeClause, clienteAllowed, adminRouter, recordAuthFailure, handleAdmin, handleWidgetBoot, allowedOrigins, envOrigins, syncPanelGate };

@@ -200,8 +200,10 @@ dialog::backdrop{background:rgba(5,3,6,.78);backdrop-filter:blur(3px)}
 <div class="card"><b>Placeholder del input</b><input id="tPlaceholder" placeholder="Escribe tu mensaje..."><small class="muted field-err" data-f="placeholder"></small></div>
 <div class="card"><b>WhatsApp de contacto (wa.me, solo dígitos)</b><input id="tWa" placeholder="34644280183"><small class="muted field-err" data-f="wa_number"></small></div>
 <div class="card"><b>Tema del chat</b><select id="tTheme"><option value="">auto (según el visitante)</option><option value="light">light</option><option value="dark">dark</option></select></div>
+<div class="card"><b>Dominios de la web (https, uno por línea, máx. 6)</b><textarea id="tOrigins" rows="2" placeholder="https://… (apex y su www, uno por línea)"></textarea><small class="muted">Entran en la allowlist de CORS al Guardar (sin deploy). Después pulsa Sincronizar Turnstile.</small><small class="muted field-err" data-f="web_origins"></small></div>
 </div>
-<div class="mt12"><b class="muted">Previsualización</b><div id="brandPrev"></div></div></div>
+<div class="mt12"><b class="muted">Previsualización</b><div id="brandPrev"></div></div>
+<div class="actions actions0"><button class="btn alt" id="tSyncDomains" type="button">Sincronizar Turnstile</button><span class="muted">Reescribe los hostnames del widget de Turnstile desde D1 (idempotente: también reconcilia).</span></div></div>
 <div class="actions"><input id="tNote" placeholder="Nota del cambio (opcional)" class="grow inpill"><button class="btn" id="tenantSave" type="button">Guardar</button></div>
 <div class="card mt12"><b>Probar el borrador (no guarda nada)</b>
 <div class="note mt6"><input id="tTestMsg" placeholder="Mensaje de prueba, p. ej. «hola, ¿tenéis hueco mañana?»" class="grow"><button class="btn alt" id="tenantPreview" type="button">Probar</button></div>
@@ -268,7 +270,7 @@ async function openLead(id){try{const d=await api('/api/admin/leads/'+id);curren
 // (la promesa moría sin aviso y el usuario creía que había guardado).
 function wireDetail(){$('#saveStatus').onclick=async()=>{try{await api('/api/admin/leads/'+current.id,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({status:$('#status').value})});toast('Estado guardado ✓ («'+$('#status').value+'»)');$('#detail').close();load();loadStats()}catch(e){toast('Estado NO guardado: '+e.message,false)}};if($('#retry'))$('#retry').onclick=async()=>{try{await api('/api/admin/leads/'+current.id+'/retry',{method:'POST'});toast('Reintento de avisos lanzado ✓');openLead(current.id)}catch(e){toast('Reintento fallido: '+e.message,false)}};$('#addNote').onclick=async()=>{const text=$('#note').value.trim();if(!text)return;try{await api('/api/admin/leads/'+current.id+'/notes',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text})});toast('Nota guardada ✓');openLead(current.id)}catch(e){toast('Nota NO guardada: '+e.message,false)}};if($('#delete'))$('#delete').onclick=async()=>{if(!confirm('¿Borrar definitivamente este lead y todos sus datos?'))return;try{await api('/api/admin/leads/'+current.id,{method:'DELETE'});toast('Lead borrado ✓');$('#detail').close();load();loadStats()}catch(e){toast('Lead NO borrado: '+e.message,false)}}}
 // ── Pestaña Clientes ──
-const TERRS={already_provisioned:'Ese paso ya está hecho (idempotente: un doble clic no crea recursos duplicados).',provision_in_progress:'Ese paso ya está en curso, espera unos segundos.',waba_required:'Rellena y guarda primero la WABA del cliente.',subaccount_required:'Crea primero la subcuenta (paso 1).',twilio_auth_token_missing:'La subcuenta no tiene auth token guardado.',provision_orphan:'Twilio creó el recurso pero D1 no lo guardó: revisa Telegram y reconcilia a mano.',invalid_code:'El OTP son 4-8 dígitos.',slug_taken:'Ese slug ya existe.',address_taken:'Ese canal ya está asignado a otro cliente: guardarlo desviaría sus conversaciones.',subaccount_taken:'Esa subcuenta de Twilio ya está asignada a otro cliente.',pending_tenant_cannot_be_active:'Un prospecto (canal pending:) no puede activarse: ponle primero su canal real.',invalid_twilio_auth_token:'El auth token debe ser 32 caracteres hexadecimales (Twilio → Keys & Credentials).',stale_tenant:'Alguien modificó este cliente mientras editabas. Recarga la ficha y vuelve a aplicar tus cambios.',nothing_to_update:'No hay cambios que guardar.',invalid_preview:'Escribe un mensaje de prueba y un contexto de al menos 50 caracteres.',rate_limited:'Demasiadas pruebas seguidas: espera un minuto.',email_taken:'Ese correo ya tiene acceso al panel de OTRO cliente (un correo pertenece a un solo cliente).',email_is_admin:'Ese correo es admin de Velai (ADMIN_EMAILS): ya ve todo, no puede ser usuario de un cliente.',invalid_email:'Eso no parece un correo válido.'};
+const TERRS={already_provisioned:'Ese paso ya está hecho (idempotente: un doble clic no crea recursos duplicados).',provision_in_progress:'Ese paso ya está en curso, espera unos segundos.',waba_required:'Rellena y guarda primero la WABA del cliente.',subaccount_required:'Crea primero la subcuenta (paso 1).',twilio_auth_token_missing:'La subcuenta no tiene auth token guardado.',provision_orphan:'Twilio creó el recurso pero D1 no lo guardó: revisa Telegram y reconcilia a mano.',invalid_code:'El OTP son 4-8 dígitos.',slug_taken:'Ese slug ya existe.',address_taken:'Ese canal ya está asignado a otro cliente: guardarlo desviaría sus conversaciones.',subaccount_taken:'Esa subcuenta de Twilio ya está asignada a otro cliente.',pending_tenant_cannot_be_active:'Un prospecto (canal pending:) no puede activarse: ponle primero su canal real.',invalid_twilio_auth_token:'El auth token debe ser 32 caracteres hexadecimales (Twilio → Keys & Credentials).',stale_tenant:'Alguien modificó este cliente mientras editabas. Recarga la ficha y vuelve a aplicar tus cambios.',nothing_to_update:'No hay cambios que guardar.',invalid_preview:'Escribe un mensaje de prueba y un contexto de al menos 50 caracteres.',rate_limited:'Demasiadas pruebas seguidas: espera un minuto.',email_taken:'Ese correo ya tiene acceso al panel de OTRO cliente (un correo pertenece a un solo cliente).',email_is_admin:'Ese correo es admin de Velai (ADMIN_EMAILS): ya ve todo, no puede ser usuario de un cliente.',invalid_email:'Eso no parece un correo válido.',cloudflare_api_not_configured:'Falta CF_API_TOKEN (secret) o CF_ACCOUNT_ID en el worker: la sincronización con Cloudflare no está activa.',turnstile_sync_failed:'El PUT a Turnstile falló DESPUÉS de guardar en D1: el worker acepta el origen pero Turnstile no emitirá token. Reintenta Sincronizar Turnstile.'};
 let tenantList=[],editing=null;
 document.querySelectorAll('.tab').forEach(b=>b.onclick=()=>{document.querySelectorAll('.tab').forEach(x=>{x.classList.toggle('is-on',x===b);x.setAttribute('aria-selected',x===b?'true':'false')});const v=b.dataset.view;$('#viewLeads').hidden=v!=='leads';$('#viewTenants').hidden=v!=='tenants';$('#export').hidden=v!=='leads';$('#newTenant').hidden=v!=='tenants';if(v==='tenants')loadTenantList();else loadStats()});
 function flags(list,cls){return list.map(f=>'<span class="flag'+(cls?' '+cls:'')+'">'+esc(f)+'</span>').join('')}
@@ -287,9 +289,12 @@ function confirmDiscard(){return !tenantDirty||confirm('Hay cambios sin guardar 
 $('#tenantClose').onclick=()=>{if(confirmDiscard()){tenantDirty=false;$('#tenantModal').close()}};
 $('#tenantModal').addEventListener('cancel',e=>{if(!confirmDiscard())e.preventDefault();else tenantDirty=false});
 const TF={name:'#tName',slug:'#tSlug',channel_address:'#tAddress',twilio_from:'#tFrom',team_whatsapp:'#tTeam',telegram_chat_id:'#tChat',lead_template_sid:'#tTpl',twilio_subaccount_sid:'#tSub',waba_id:'#tWaba',meta_partner_status:'#tPartner',system_prompt:'#tPrompt',bot_name:'#tBotName',brand_name:'#tBrandName',logo_url:'#tLogo',brand_color:'#tColor1',brand_color_2:'#tColor2',greeting:'#tGreeting',greeting_en:'#tGreetingEn',placeholder:'#tPlaceholder',wa_number:'#tWa',theme:'#tTheme'};
-// chips_json va aparte: en el form es una línea por chip; al worker viaja como array.
-function chipsToLines(json){try{const a=JSON.parse(json||'[]');return Array.isArray(a)?a.join('\\n'):''}catch(e){return ''}}
-function chipsFromLines(){return $('#tChips').value.split('\\n').map(s=>s.trim()).filter(Boolean).slice(0,3)}
+// chips_json y web_origins van aparte: en el form son una línea por valor; al worker
+// viajan como array (el servidor valida y guarda JSON).
+function jsonToLines(json){try{const a=JSON.parse(json||'[]');return Array.isArray(a)?a.join('\\n'):''}catch(e){return ''}}
+function linesFrom(sel,max){return $(sel).value.split('\\n').map(s=>s.trim()).filter(Boolean).slice(0,max)}
+function chipsToLines(json){return jsonToLines(json)}
+function chipsFromLines(){return linesFrom('#tChips',3)}
 // Previsualización de la marca: mini-mock del chat con los valores actuales del form.
 function brandPreview(){
  const c1=$('#tColor1').value.trim()||'#FF6B1A',c2=$('#tColor2').value.trim()||c1;
@@ -306,12 +311,12 @@ function updateCount(){const n=$('#tPrompt').value.length;$('#tCount').textConte
 $('#tPrompt').oninput=updateCount;
 async function openTenant(id){clearTenantErrs();$('#tPreviewOut').textContent='';$('#tTestMsg').value='';$('#tNote').value='';
  $('#tToken').value='';
- if(id){const d=await api('/api/admin/tenants/'+id);const t=d.tenant;editing={id:t.id,updated_at:t.updated_at};$('#tenantTitle').textContent=t.name;$('#tDup').hidden=true;for(const[k,sel]of Object.entries(TF))$(sel).value=t[k]??'';$('#tChips').value=chipsToLines(t.chips_json);$('#tActive').checked=!!t.active;$('#tTokenState').textContent=t.has_twilio_token?'configurado ✓ (escribe solo para sustituirlo)':'sin configurar';$('#tProv').hidden=false;$('#tUsersCard').hidden=false;loadProv(id);loadVersions(id);loadUsers(id)}
- else{editing=null;$('#tenantTitle').textContent='Nuevo cliente';$('#tDup').hidden=false;$('#tDupSel').innerHTML='<option value="">— empezar de cero —</option>'+tenantList.map(t=>'<option value="'+t.id+'">'+esc(t.name)+'</option>').join('');for(const sel of Object.values(TF))$(sel).value='';$('#tChips').value='';$('#tPartner').value='pendiente';$('#tActive').checked=true;$('#tTokenState').textContent='sin configurar';$('#tProv').hidden=true;$('#tUsersCard').hidden=true;$('#tVersions').textContent='—'}
+ if(id){const d=await api('/api/admin/tenants/'+id);const t=d.tenant;editing={id:t.id,updated_at:t.updated_at};$('#tenantTitle').textContent=t.name;$('#tDup').hidden=true;for(const[k,sel]of Object.entries(TF))$(sel).value=t[k]??'';$('#tChips').value=chipsToLines(t.chips_json);$('#tOrigins').value=jsonToLines(t.web_origins);$('#tActive').checked=!!t.active;$('#tTokenState').textContent=t.has_twilio_token?'configurado ✓ (escribe solo para sustituirlo)':'sin configurar';$('#tProv').hidden=false;$('#tUsersCard').hidden=false;loadProv(id);loadVersions(id);loadUsers(id)}
+ else{editing=null;$('#tenantTitle').textContent='Nuevo cliente';$('#tDup').hidden=false;$('#tDupSel').innerHTML='<option value="">— empezar de cero —</option>'+tenantList.map(t=>'<option value="'+t.id+'">'+esc(t.name)+'</option>').join('');for(const sel of Object.values(TF))$(sel).value='';$('#tChips').value='';$('#tOrigins').value='';$('#tPartner').value='pendiente';$('#tActive').checked=true;$('#tTokenState').textContent='sin configurar';$('#tProv').hidden=true;$('#tUsersCard').hidden=true;$('#tVersions').textContent='—'}
  updateCount();brandPreview();tenantDirty=false;$('#tenantModal').showModal()}
 $('#tDupSel').onchange=async e=>{if(!e.target.value)return;const d=await api('/api/admin/tenants/'+e.target.value);$('#tPrompt').value=d.tenant.system_prompt||'';updateCount()};
 $('#tenantSave').onclick=async()=>{clearTenantErrs();
- const body={};for(const[k,sel]of Object.entries(TF))body[k]=$(sel).value;body.chips_json=chipsFromLines();body.active=$('#tActive').checked;body.note=$('#tNote').value;
+ const body={};for(const[k,sel]of Object.entries(TF))body[k]=$(sel).value;body.chips_json=chipsFromLines();body.web_origins=linesFrom('#tOrigins',6);body.active=$('#tActive').checked;body.note=$('#tNote').value;
  if($('#tToken').value)body.twilio_auth_token=$('#tToken').value; // write-only: solo si se escribe
  try{
   if(editing){body.expected_updated_at=editing.updated_at;const r=await api('/api/admin/tenants/'+editing.id,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});editing.updated_at=r.updated_at;loadVersions(editing.id)}
@@ -343,17 +348,24 @@ async function loadUsers(id){try{const d=await api('/api/admin/tenants/'+id+'/us
  $('#tUsersList').innerHTML=d.users.map(u=>'<span class="flag off">'+esc(u.email)+' <a href="#" data-udel="'+esc(u.email)+'" title="Quitar acceso">✕</a></span>').join(' ')||'Sin usuarios: este cliente no tiene acceso al panel.'}
  catch(e){$('#tUsersList').textContent=e.message}}
 $('#uAdd').onclick=async()=>{clearTenantErrs();const email=$('#uEmail').value.trim();if(!email)return;
- try{await api('/api/admin/tenants/'+editing.id+'/users',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email})});
-  $('#uEmail').value='';toast('Acceso concedido ✓ a '+email);loadUsers(editing.id)}
+ try{const r=await api('/api/admin/tenants/'+editing.id+'/users',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email})});
+  $('#uEmail').value='';
+  if(r.gate==='sincronizado')toast('Acceso concedido ✓ a '+email+' — puerta de Access actualizada');
+  else if(r.gate==='pendiente')toast('Fila guardada, pero la puerta de Access NO se sincronizó (reintenta con otra alta/baja o revisa Telegram)',false);
+  else toast('Acceso concedido ✓ a '+email+' — la puerta de Access se gestiona a mano (sin CF_API_TOKEN)');
+  loadUsers(editing.id)}
  catch(e){const c=e.message;const el=document.querySelector('.field-err[data-f="panel_email"]');
   if(el&&TERRS[c])el.textContent=TERRS[c];
   toast('Acceso NO concedido: '+(TERRS[c]||c),false)}};
 $('#tUsersList').onclick=async e=>{const email=e.target&&e.target.dataset&&e.target.dataset.udel;if(!email)return;e.preventDefault();
  // Quitar al último se permite (a veces es lo que se quiere) pero avisando: sin filas, ese cliente no entra.
  if(panelUsers.length===1&&!confirm('Es el ÚNICO usuario: este cliente se queda sin acceso al panel. ¿Quitarlo igualmente?'))return;
- clearTenantErrs();try{await api('/api/admin/tenants/'+editing.id+'/users/'+encodeURIComponent(email),{method:'DELETE'});
-  toast('Acceso revocado ✓ a '+email);loadUsers(editing.id)}
+ clearTenantErrs();try{const r=await api('/api/admin/tenants/'+editing.id+'/users/'+encodeURIComponent(email),{method:'DELETE'});
+  if(r.gate==='pendiente')toast('Fila borrada, pero la puerta de Access NO se sincronizó: ese correo aún puede autenticarse (el worker le da 403). Revisa Telegram.',false);
+  else toast('Acceso revocado ✓ a '+email+(r.gate==='sincronizado'?' — puerta de Access actualizada':''));
+  loadUsers(editing.id)}
  catch(e2){toast('Acceso NO revocado: '+(TERRS[e2.message]||e2.message),false)}};
+$('#tSyncDomains').onclick=()=>{if(!editing){toast('Guarda primero el cliente: los dominios se leen de D1.',false);return}provPost('domains')};
 $('#pSub').onclick=()=>provPost('subaccount');
 $('#pTpl').onclick=()=>provPost('template');
 $('#pSender').onclick=()=>provPost('sender',{phone:$('#pPhone').value.trim()});
