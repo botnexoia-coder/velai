@@ -128,10 +128,20 @@ a un tenant). Cada alta/baja queda auditada en `tenant_versions` (field `users`,
 
 **Modelo de cerraduras (desde 2026-08-18, dos cerraduras automáticas):** Access
 **autentica y filtra** — el login ofrece One-time PIN (IdP creado por API) y la app
-`admin.hirevai.com` tiene dos políticas: «Equipo Velai» (correos admin) y «Clientes
-Velai» (un grupo de Access que **el propio panel reescribe desde D1 en cada alta/baja**
-de usuario, vía `CF_API_TOKEN` — solo los correos dados de alta pasan la puerta). El
-worker **autoriza** (`resolveScope`: sin `ADMIN_EMAILS` ni fila en `tenant_users` → 403).
+`admin.hirevai.com` tiene tres políticas: «Equipo Velai» (reutilizable, del dashboard:
+los admins RAÍZ del toml — el worker no puede ni quiere editarla), «Admins Velai» y
+«Clientes Velai» (dos grupos de Access que **el propio panel reescribe desde D1 en cada
+alta/baja**, vía `CF_API_TOKEN` — solo los correos dados de alta pasan la puerta). El
+worker **autoriza** (`resolveScope`: `ADMIN_EMAILS` → `admin_users` → `tenant_users`;
+sin coincidencia → 403).
+
+**Admins de Velai**: se gestionan desde la pestaña Clientes → «Admins de Velai» (fila en
+`admin_users` + grupo de Access, todo en un clic; aviso 👑 a Telegram). Los del toml son
+raíz: no se pueden quitar desde el panel y van SIEMPRE incluidos en cada escritura del
+grupo. **Configuración (solo raíz)**: estado en vivo de las integraciones y rotación
+write-only del `CF_API_TOKEN` (validado contra Cloudflare antes de guardarse, cifrado
+con la KEK en `settings`; prioridad sobre el secret del worker, «Volver al secret»
+deshace). Copia local del token en `.dev.vars` (gitignorado).
 Si el PUT del grupo falla tras escribir en D1, el toast lo dice (`gate: pendiente`), se
 loguea `access_group_desync` y llega alerta a Telegram — repetir cualquier alta/baja
 resincroniza (la lista se reescribe entera desde D1). Defensas del worker que siguen

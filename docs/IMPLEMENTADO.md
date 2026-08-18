@@ -242,6 +242,29 @@ reescribe la lista completa post-escritura y converge) y sin botón de reconcili
 aparte (cada alta/baja ES la reconciliación). También se añadió el botón **Salir** del
 panel (`/cdn-cgi/access/logout`), necesario para cambiar de cuenta.
 
+## Admins de Velai desde el panel + sección Configuración (2026-08-18, sin MD previo)
+
+Pedido por Juan en sesión: gestionar admins y tokens sin CLI ni dashboard. **Admins**:
+tabla `admin_users` (migración 0009) + sección «Admins de Velai» en la pestaña Clientes
+— el alta/baja escribe la fila y reescribe el grupo de Access «Admins Velai»
+(`CF_ADMIN_GROUP_ID`) con los raíz del entorno SIEMPRE dentro. Los `ADMIN_EMAILS` del
+toml quedan como raíz indestructibles y además pasan por la política reutilizable
+«Equipo Velai» del dashboard, que el worker NO puede editar (el intento dio
+`cf_api_12130`: las políticas reutilizables no se tocan por el endpoint por-app — se
+convirtió en garantía externa). Guardas: un correo de cliente no asciende
+(`email_is_client`), el inverso tampoco (`email_is_admin` mira también `admin_users`),
+un raíz no se borra (`admin_is_root`), nadie se quita a sí mismo (`cannot_remove_self`);
+auditoría por Telegram (👑) + logs. Probado: alta de `estivenrojas09@gmail.com` con
+puerta actualizada y login real con OTP. **Configuración (solo admins raíz — dos
+factores reales en vez de un PIN)**: estado en vivo de integraciones (token verificado
+contra `/user/tokens/verify` en cada carga, cuenta, sitekey, grupos, bindings) y
+rotación write-only del `CF_API_TOKEN` — se valida contra Cloudflare ANTES de guardarse,
+se cifra con la KEK en la tabla `settings` (migración 0010), tiene prioridad sobre el
+secret del worker (`withCfToken`) y nunca se devuelve. La KEK, Anthropic y las
+credenciales maestras de Twilio quedan fuera a propósito (secrets del worker). También:
+botón **Salir** (`/cdn-cgi/access/logout`). Copia local del token en `.dev.vars`
+(gitignorado). Suite 72/72.
+
 ## Contextos amplios — fase 1 (`CONTEXTOS-AMPLIOS.md`, el doc sigue vivo por las fases 2–4)
 
 `callAnthropic` envía el `system` como array de bloques con `cache_control: ephemeral`:
