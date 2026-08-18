@@ -69,10 +69,10 @@ Sin esto, las campañas gastarían presupuesto a ciegas (sin medir conversiones)
 ### 2f. Widget con marca en las webs de los clientes (desplegado `?v=7` el 2026-08-18 — ver `IMPLEMENTADO.md`)
 
 - [x] **Hostnames del widget de Turnstile verificados por API (2026-08-18)**: los 4 apex de los clientes + `hirevai.com`/`www` + `velai-dey.pages.dev` + `gogestion-demo.pages.dev` están en el widget `velai-web`. Los `www.` de los clientes quedan cubiertos: Turnstile permite automáticamente los subdominios de los dominios listados. Ojo servidor: `verifyTurnstile` cruza contra `ALLOWED_WEB_ORIGINS`, que sí lista los `www` explícitos — las dos listas alineadas.
-- [ ] **Recopilar y cargar la marca de cada cliente** en la ficha del panel (sección «Marca del widget»): logo https, 2 colores, nombre del bot, saludo (ES y EN para Zoe), chips, placeholder y WhatsApp de contacto. Hoy los 4 están en null → sus chats saldrían como `Vai · Velai`. Punto de partida documentado en `IMPLEMENTADO.md` §Widget (Zoe: `#1a4fd0`/`#f57a1f`, logo `/img/zoe-logo.png`; GOgestión: Faby, `#A6153A`/`#FDF8F0`, wa 34634167405).
-- [ ] **Decidir el nombre del asistente de Diálogos** (su prompt no le da ninguno; la cabecera del chat lo necesita).
-- [ ] **Acceso a los repos de HireDataVision y Diálogos** (404 con el token gh actual) o su marca por otra vía.
-- [ ] **Sebas** (su checklist es `PARA-JOHAN-widget-en-webs-cliente.md` v2): subir `/prueba-vai/` de Zoe a `?v=7`, snippet en las 4 webs, y quitar chats viejos SOLO cuando la cabecera muestre la marca del cliente. Los workers viejos no se apagan hasta que el tenant iguale al bot viejo en marca Y respuestas.
+- [x] **Marca de los 4 clientes cargada y verificada por `/widget/boot` (2026-08-18)**: Zoe 🐱, Faby (GOgestión), Dara (HireDataVision) y **Alma** (Diálogos — nombre decidido), con logo, colores, saludo y chips. Los repos externos ya no hacen falta: la marca se sacó por otra vía.
+- [x] **Snippet `?v=7` en producción y chats viejos retirados** (verificado por curl 2026-08-18): zoetravelspain.com, hiredatavision.com y dialogosqueensenan.com con tenant correcto y `vai-widget.js?v=7` como único chat.
+- [ ] **GOgestión — dos flecos**: (a) su `wa_number` está vacío en la ficha → los mensajes de error de su chat caen al WhatsApp de Velai (candidato: 34634167405, el de su bot viejo); (b) el snippet está en `gogestion-demo.pages.dev` pero **no en `gogestion.es` producción** (web Next.js — les toca desplegarlo allí).
+- [ ] **Apagar los workers viejos** (`hiredatavision-bot`, `gogestion-bot`): los chats ya no se cargan en ninguna web; queda validar unos días que los tenants responden igual o mejor y apagarlos. Anotar en OPERATIONS al hacerlo.
 
 ### 2a-bis. Alta de usuarios desde el panel (SPEC-USUARIOS — desplegado, falta un paso manual)
 
