@@ -51,21 +51,18 @@ export async function syncTurnstileDomains(env, hostnames) {
 // escribe un centinela inalcanzable — la puerta queda cerrada para todos, que es lo
 // correcto cuando no hay usuarios de cliente. Los ADMIN_EMAILS NUNCA entran aquí:
 // los admins pasan por su propia regla de la política.
-// La política «Equipo Velai» de la app admin.hirevai.com (nivel de ZONA) se reescribe
-// con la lista de admins reconstruida desde env + D1. La lista que llega aquí incluye
-// SIEMPRE los ADMIN_EMAILS del entorno (los raíz): ningún PUT puede dejar a Velai
-// fuera de su propio panel. GET antes de PUT: se preservan decision/precedence/nombre.
-export async function syncAdminPolicy(env, emails) {
-  if (!env.CF_ZONE_ID || !env.CF_ACCESS_APP_ID || !env.CF_ADMIN_POLICY_ID) throw new Error('admin_policy_missing');
-  if (!emails.length) throw new Error('admin_policy_empty'); // jamás una política de admins vacía
-  const base = `/zones/${env.CF_ZONE_ID}/access/apps/${env.CF_ACCESS_APP_ID}/policies/${env.CF_ADMIN_POLICY_ID}`;
-  const policy = await cfRaw(env, 'GET', base);
-  await cfRaw(env, 'PUT', base, {
-    name: policy.name,
-    decision: policy.decision,
-    precedence: policy.precedence,
-    include: emails.map((email) => ({ email: { email } })),
-  });
+// La puerta de los admins: grupo «Admins Velai» reescrito con env (raíz) + admin_users.
+// NO se toca la política «Equipo Velai» del dashboard: es REUTILIZABLE (reusable:true)
+// y el endpoint por-app no puede editarla (error 12130) — y mejor así: los admins raíz
+// pasan por una política que el worker ni siquiera puede modificar. El grupo va en una
+// política por-app aparte («Admins Velai», creada una vez). Mismo patrón que el grupo
+// de clientes: sustitución completa reconstruida desde la fuente de verdad.
+export async function syncAdminGroup(env, emails) {
+  if (!env.CF_ADMIN_GROUP_ID) throw new Error('admin_group_missing');
+  const include = emails.length
+    ? emails.map((email) => ({ email: { email } }))
+    : [{ email: { email: 'nadie@velai.invalid' } }];
+  await cfFetch(env, 'PUT', `/access/groups/${env.CF_ADMIN_GROUP_ID}`, { name: 'Admins Velai', include });
   return emails.length;
 }
 

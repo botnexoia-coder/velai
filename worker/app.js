@@ -1,6 +1,6 @@
 import { ADMIN_HEADERS, ADMIN_HTML } from './admin-page.js';
 import { encryptSecret, decryptSecret } from './crypto.js';
-import { cloudflareConfigured, syncTurnstileDomains, syncAccessGroup, syncAdminPolicy } from './cloudflare.js';
+import { cloudflareConfigured, syncTurnstileDomains, syncAccessGroup, syncAdminGroup } from './cloudflare.js';
 import { createSubaccount, createLeadTemplate, submitTemplateApproval, fetchApprovalStatus, createWhatsAppSender, verifySender, fetchSenderStatus } from './twilio.js';
 
 const JSON_HEADERS = { 'Content-Type': 'application/json; charset=utf-8' };
@@ -1100,15 +1100,16 @@ const PANEL_EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 // CF_API_TOKEN o sin grupo, 'manual' (la puerta se gestiona en el dashboard).
 // No hay cerrojo: el PUT reescribe la lista COMPLETA leída tras la escritura propia,
 // así que dos operaciones simultáneas convergen con la siguiente sincronización.
-// Igual que la puerta de clientes, pero para la política «Equipo Velai»: la lista se
-// reconstruye desde env (raíz, SIEMPRE presentes) + admin_users. Un PUT fallido no
-// pierde la fila: gate 'pendiente' + log + alerta.
+// Igual que la puerta de clientes, pero para el grupo «Admins Velai»: la lista se
+// reconstruye desde env (raíz, SIEMPRE presentes — redundancia sobre la política
+// «Equipo Velai» del dashboard, que el worker no toca) + admin_users. Un PUT fallido
+// no pierde la fila: gate 'pendiente' + log + alerta.
 async function syncAdminGate(env, ctx) {
-  if (!cloudflareConfigured(env) || !env.CF_ADMIN_POLICY_ID) return 'manual';
+  if (!cloudflareConfigured(env) || !env.CF_ADMIN_GROUP_ID) return 'manual';
   try {
     const rows = (await env.DB.prepare('SELECT email FROM admin_users ORDER BY email').all()).results || [];
     const emails = [...new Set([...envAdmins(env), ...rows.map((r) => r.email)])];
-    await syncAdminPolicy(env, emails);
+    await syncAdminGroup(env, emails);
     return 'sincronizado';
   } catch (error) {
     console.log(JSON.stringify({ level: 'error', code: 'admin_policy_desync', error: String(error.message || error) }));

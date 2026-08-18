@@ -1229,24 +1229,21 @@ test('admins: el rol cliente no toca /api/admin/admins (403 antes de datos)', as
     (e) => e.status === 403 && e.code === 'not_authorized');
 });
 
-test('admins: alta reescribe la política de Access con los RAÍZ siempre dentro', async () => {
+test('admins: alta reescribe el grupo «Admins Velai» con los RAÍZ siempre dentro', async () => {
   const puts = [];
   const realFetch = globalThis.fetch;
   globalThis.fetch = async (url, init) => {
-    if (String(url).includes('/access/apps/')) {
-      if (init && init.method === 'PUT') { puts.push(JSON.parse(init.body)); return new Response('{"success":true,"result":{}}', { status: 200 }); }
-      return new Response(JSON.stringify({ success: true, result: { name: 'Equipo Velai', decision: 'allow', precedence: 1 } }), { status: 200 });
-    }
+    if (String(url).includes('/access/groups/')) { puts.push(JSON.parse(init.body)); return new Response('{"success":true,"result":{}}', { status: 200 }); }
     return new Response('{"success":true,"ok":true,"result":{}}', { status: 200 });
   };
   try {
-    const env = { CF_API_TOKEN: 't', CF_ACCOUNT_ID: 'a', CF_ZONE_ID: 'z', CF_ACCESS_APP_ID: 'app', CF_ADMIN_POLICY_ID: 'pol', ADMIN_EMAILS: 'juan@velai.ai', DB: adminsDb({ admins: ['estivenrojas09@gmail.com'] }) };
+    const env = { CF_API_TOKEN: 't', CF_ACCOUNT_ID: 'a', CF_ADMIN_GROUP_ID: 'g-admins', ADMIN_EMAILS: 'juan@velai.ai', DB: adminsDb({ admins: ['estivenrojas09@gmail.com'] }) };
     const res = await adminsCall(env, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email: ' Nuevo@Admin.com ' }) });
     const body = await res.json();
     assert.equal(res.status, 201);
     assert.equal(body.email, 'nuevo@admin.com', 'normalizado a minúsculas');
     assert.equal(body.gate, 'sincronizado');
-    assert.equal(puts[0].name, 'Equipo Velai', 'GET antes de PUT: nombre/decisión preservados');
+    assert.equal(puts[0].name, 'Admins Velai');
     const included = puts[0].include.map((i) => i.email.email);
     assert.ok(included.includes('juan@velai.ai'), 'los admins raíz del entorno SIEMPRE van en el PUT');
     assert.ok(included.includes('estivenrojas09@gmail.com'));
