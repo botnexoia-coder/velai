@@ -59,6 +59,16 @@ Sin esto, las campañas gastarían presupuesto a ciegas (sin medir conversiones)
 - [ ] **Fase 4** (solo si el corpus se dispara): Vectorize. Hoy sería sobreingeniería.
 - Regla del doc que se mantiene: NO recortar la base de conocimiento de Zoe para ahorrar — el problema es cómo se entrega, no cuánto hay.
 
+### 2a-bis. Alta de usuarios desde el panel (SPEC-USUARIOS — desplegado, falta un paso manual)
+
+- [ ] **Cambiar la política de Access a OTP-para-cualquier-correo** (Zero Trust → Access →
+  Applications → Velai Leads Panel → política Allow con include *Everyone* + One-time PIN).
+  Es UNA vez y es lo único en Cloudflare: a partir de ahí las altas/bajas de usuarios de
+  cliente se hacen enteras desde la ficha del panel (el worker autoriza con `tenant_users`;
+  un desconocido autenticado recibe 403, queda logueado y a la 3ª/hora avisa a Telegram).
+  Hasta hacerlo, el alta del panel escribe la fila pero el correo nuevo sigue necesitando
+  estar también en la política de Access.
+
 ### 2b. De la revisión de seguridad de Johan (lo manual — el resto ya está aplicado)
 
 - [ ] **Reglas WAF/Rate Limiting de borde** para `/chat` y `/lead` (dashboard → Security → WAF; el worker ya limita por IP y por conversación como segunda capa).

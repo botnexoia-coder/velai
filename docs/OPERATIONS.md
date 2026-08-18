@@ -120,15 +120,22 @@ Un mensaje entrante a un sender sin fila responde `404 unknown_tenant` y avisa a
 
 ## Usuarios del panel y handoff
 
-**Dar de alta a un usuario de CLIENTE son dos pasos, a propósito (defensa en profundidad):**
+**Dar de alta a un usuario de CLIENTE se hace desde el panel** (SPEC-USUARIOS §B): ficha del
+cliente → sección "Usuarios del panel" → añadir su correo. La fila en `tenant_users` surte
+efecto inmediato (sin caché); quitarla revoca de verdad. Choques: `409 email_taken` (un
+correo pertenece a UN cliente) y `400 email_is_admin` (un admin de Velai no puede degradarse
+a un tenant). Cada alta/baja queda auditada en `tenant_versions` (field `users`, con rol).
 
-1. Su correo en la política de Cloudflare Access (Zero Trust → Applications → Velai Leads
-   Panel). Con OTP no necesita contraseña.
-2. Su fila en `tenant_users`:
-   `INSERT INTO tenant_users (email, tenant_id, role, created_at) VALUES ('correo', '<tenant_id>', 'cliente', datetime('now'));`
+**Modelo de cerraduras:** Access **autentica** (política de la app en **OTP para cualquier
+correo** — cambio manual único en Zero Trust); el worker **autoriza** (`resolveScope`: sin
+`ADMIN_EMAILS` ni fila → 403). ⚠️ Si algún día se vuelve a restringir la política de Access,
+las altas desde el panel dejan de bastar y hay que tocar Cloudflare otra vez. Compensaciones
+por tener una sola cerradura de autorización: cada 403 se registra CON el correo (log
+`not_authorized`), a la 3ª en una hora sale alerta a Telegram, y el camino de administración
+tiene rate limit por correo (120/min).
 
-Solo Access no da acceso a nada (403 del worker); solo la fila tampoco (no pasa de Access).
-Los **admins de Velai** van en `ADMIN_EMAILS` (wrangler.toml), nunca en la tabla. Un cliente
+Los **admins de Velai** van en `ADMIN_EMAILS` (wrangler.toml), nunca en la tabla — quien
+edita `tenant_users` desde el panel no debe poder ascenderse a admin. Un cliente
 ve SOLO sus leads (aislamiento validado por tests de fuga), puede cambiar estado y anotar,
 y no puede reintentar avisos, borrar, ni ver nada de otros tenants.
 

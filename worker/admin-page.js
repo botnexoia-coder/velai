@@ -46,7 +46,7 @@ main{position:relative;padding:22px max(20px,3vw) 60px;max-width:1360px;margin:0
 .stat.alerta .n{color:var(--bad)}
 .chartcard{background:var(--bg2);border:1px solid var(--border);border-radius:var(--r);padding:14px 18px 10px;display:flex;flex-direction:column}
 .chartcard b{font-size:11px;font-weight:500;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
-#chart{flex:1;display:flex;align-items:flex-end;gap:3px;min-height:64px;margin-top:8px}
+#chart{height:74px;display:flex;align-items:flex-end;gap:3px;margin-top:8px}
 #chart .bar{flex:1;min-height:2px;background:var(--orange);opacity:.75;border-radius:4px 4px 0 0;transition:opacity .12s}
 #chart .bar:hover{opacity:1}
 .chartlabels{display:flex;justify-content:space-between;color:var(--muted2);font-size:10.5px;margin-top:4px}
@@ -79,6 +79,8 @@ tr[data-id]:hover,tr[data-tid]:hover{background:rgba(255,107,26,.05)}
 .flag.ok{background:rgba(25,158,112,.12);color:#7fd7b2;border-color:rgba(25,158,112,.3)}
 .flag.off{background:rgba(255,248,244,.06);color:var(--muted);border-color:rgba(255,248,244,.12)}
 .flag.web{background:rgba(57,135,229,.12);color:#9cc4ee;border-color:rgba(57,135,229,.3)}
+.flag a{color:inherit;text-decoration:none;margin-left:4px;font-weight:700}
+.flag a:hover{color:var(--bad)}
 .meter{display:inline-block;width:64px;height:6px;background:rgba(255,248,244,.08);border-radius:3px;overflow:hidden;vertical-align:middle;margin-right:7px}
 .meter i{display:block;height:100%;background:var(--orange);border-radius:3px}
 /* Rol cliente: la interfaz oculta lo que no le aplica, pero la DEFENSA es del worker
@@ -91,7 +93,7 @@ body.cliente th:nth-child(2),body.cliente td:nth-child(2){display:none}
 .esc button{border:0;border-radius:999px;background:var(--bg2);color:var(--white);padding:3px 10px;cursor:pointer;font-size:11.5px}
 .legend{display:flex;gap:16px;flex-wrap:wrap;margin:12px 4px 0;color:var(--muted);font-size:12px}
 .legend span{display:inline-flex;align-items:center;gap:6px}
-.legend i{width:7px;height:7px;border-radius:50%}
+.legend i{display:inline-block;width:7px;height:7px;border-radius:50%;flex-shrink:0}
 .muted{color:var(--muted)}.error{color:var(--bad)}
 .pager{text-align:center;margin:18px}
 .empty{text-align:center;padding:36px;color:var(--muted)}
@@ -110,6 +112,14 @@ dialog::backdrop{background:rgba(5,3,6,.78);backdrop-filter:blur(3px)}
 .timeline h3{font-family:var(--font-d);font-weight:900;letter-spacing:-.01em}
 .timeline article{border-left:2px solid var(--border2);padding:0 0 14px 12px}
 .field-err{display:block;margin-top:4px;color:var(--bad)}.field-err:empty{display:none}
+/* La CSP (style-src con nonce) BLOQUEA los atributos style="" inline: todo estilo
+   estático va en clases y todo valor dinámico se aplica por CSSOM (paint()). */
+.mt12{margin-top:12px}.grow{flex:1}.w150{max-width:150px}.w80{max-width:80px}
+.prewrap{white-space:pre-wrap;margin-top:8px}.preline{margin:8px 0;white-space:pre-line}
+.promptbox{width:100%;font-family:ui-monospace,monospace;font-size:12.5px}
+.inpill{background:var(--bg);border:1px solid var(--border2);border-radius:var(--r-sm);padding:9px 12px}
+.mt6{margin-top:6px}.okmsg{color:var(--ok)}.mb6{margin:6px 0}.actions0{margin:4px 0 0;align-items:center}
+.legend .d-new{background:var(--st-new)}.legend .d-contacted{background:var(--st-contacted)}.legend .d-qualified{background:var(--st-qualified)}.legend .d-won{background:var(--st-won)}.legend .d-lost{background:var(--st-lost)}
 #tVersions article{margin-bottom:10px}
 #tVersions pre{white-space:pre-wrap;background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:8px;font-size:11.5px;max-height:220px;overflow:auto}
 @media(max-width:1000px){.metrics{grid-template-columns:1fr 1fr}.chartcard{grid-column:1/-1}}
@@ -133,7 +143,7 @@ dialog::backdrop{background:rgba(5,3,6,.78);backdrop-filter:blur(3px)}
 <div id="escalations"></div>
 <form class="filters" id="filters"><input name="q" placeholder="Buscar nombre, teléfono, sector…"><select name="tenant" id="tenantFilter"><option value="">Todos los clientes</option></select><select name="status"><option value="">Todos los estados</option><option>new</option><option>contacted</option><option>qualified</option><option>won</option><option>lost</option><option>spam</option></select><select name="notification"><option value="">Todos los avisos</option><option>pending</option><option>sent</option><option>failed</option><option>skipped</option></select><input name="source" placeholder="Fuente"><input name="from" type="date"><input name="to" type="date"><button class="btn">Filtrar</button><span id="resultCount"></span></form>
 <div id="message"></div><div class="table"><table><thead><tr><th>Fecha</th><th>Cliente</th><th>Estado</th><th>Nombre</th><th>WhatsApp</th><th>Sector</th><th>Fuente</th><th>Avisos</th></tr></thead><tbody id="rows"></tbody></table></div>
-<div class="legend"><span><i style="background:var(--st-new)"></i>nuevo</span><span><i style="background:var(--st-contacted)"></i>contactado</span><span><i style="background:var(--st-qualified)"></i>cualificado</span><span><i style="background:var(--st-won)"></i>ganado</span><span><i style="background:var(--st-lost)"></i>perdido</span></div>
+<div class="legend"><span><i class="d-new"></i>nuevo</span><span><i class="d-contacted"></i>contactado</span><span><i class="d-qualified"></i>cualificado</span><span><i class="d-won"></i>ganado</span><span><i class="d-lost"></i>perdido</span></div>
 <div class="pager"><button class="btn alt" id="more" hidden>Cargar más</button></div></div>
 <div id="viewTenants" hidden>
 <div class="table"><table><thead><tr><th>Nombre</th><th>Canal</th><th>Leads</th><th>Contexto</th><th>Configuración</th><th>Estado</th></tr></thead><tbody id="tenantRows"></tbody></table></div></div></main>
@@ -154,33 +164,39 @@ dialog::backdrop{background:rgba(5,3,6,.78);backdrop-filter:blur(3px)}
 <div class="card"><b>Socio en Meta</b><select id="tPartner"><option>pendiente</option><option>concedido</option><option>revocado</option></select></div>
 <div class="card"><b>Estado</b><label><input type="checkbox" id="tActive" checked> Activo (enruta y atiende)</label></div>
 </div>
-<div class="card" style="margin-top:12px"><b>Contexto del negocio (system prompt) · <span id="tCount" class="muted"></span></b>
-<div id="tDup" hidden style="margin:6px 0"><label class="muted">Duplicar de… <select id="tDupSel"><option value="">— empezar de cero —</option></select></label></div>
-<textarea id="tPrompt" rows="14" style="width:100%;font-family:ui-monospace,monospace;font-size:12.5px"></textarea>
+<div class="card mt12"><b>Contexto del negocio (system prompt) · <span id="tCount" class="muted"></span></b>
+<div id="tDup" hidden class="mb6"><label class="muted">Duplicar de… <select id="tDupSel"><option value="">— empezar de cero —</option></select></label></div>
+<textarea id="tPrompt" rows="14" class="promptbox"></textarea>
 <small class="muted field-err" data-f="system_prompt"></small></div>
-<div class="actions"><input id="tNote" placeholder="Nota del cambio (opcional)" style="flex:1;background:var(--bg);border:1px solid var(--border2);border-radius:var(--r-sm);padding:9px 12px"><button class="btn" id="tenantSave" type="button">Guardar</button></div>
+<div class="actions"><input id="tNote" placeholder="Nota del cambio (opcional)" class="grow inpill"><button class="btn" id="tenantSave" type="button">Guardar</button></div>
 <div class="card"><b>Probar el borrador (no guarda nada)</b>
-<div class="note" style="margin-top:6px"><input id="tTestMsg" placeholder="Mensaje de prueba, p. ej. «hola, ¿tenéis hueco mañana?»" style="flex:1"><button class="btn alt" id="tenantPreview" type="button">Probar</button></div>
-<article id="tPreviewOut" class="muted" style="white-space:pre-wrap;margin-top:8px"></article></div>
+<div class="note mt6"><input id="tTestMsg" placeholder="Mensaje de prueba, p. ej. «hola, ¿tenéis hueco mañana?»" class="grow"><button class="btn alt" id="tenantPreview" type="button">Probar</button></div>
+<article id="tPreviewOut" class="muted prewrap"></article></div>
 <div class="card" id="tProv" hidden><b>Aprovisionamiento Twilio (automático)</b>
-<div id="tProvState" class="muted" style="margin:8px 0;white-space:pre-line"></div>
-<div class="actions" style="margin:4px 0 0;align-items:center">
+<div id="tProvState" class="muted preline"></div>
+<div class="actions actions0">
 <button class="btn alt" id="pSub" type="button">1· Crear subcuenta</button>
 <button class="btn alt" id="pTpl" type="button">2· Plantilla → aprobación</button>
-<input id="pPhone" placeholder="+34910000000" style="max-width:150px">
+<input id="pPhone" placeholder="+34910000000" class="w150">
 <button class="btn alt" id="pSender" type="button">3· Crear sender</button>
-<input id="pCode" placeholder="OTP" style="max-width:80px">
+<input id="pCode" placeholder="OTP" class="w80">
 <button class="btn alt" id="pVerify" type="button">4· Verificar OTP</button>
 </div></div>
+<div class="card" id="tUsersCard" hidden><b>Usuarios del panel</b>
+<p class="muted mt6">Correos con acceso a los leads de ESTE cliente (entran con OTP en admin.hirevai.com). Alta y baja surten efecto inmediato.</p>
+<div id="tUsersList" class="mt6 muted">—</div>
+<div class="actions actions0"><input id="uEmail" type="email" placeholder="gestora@cliente.com" class="grow inpill"><button class="btn alt" id="uAdd" type="button">Añadir</button></div>
+<small class="muted field-err" data-f="panel_email"></small></div>
 <div class="timeline"><h3>Historial</h3><div id="tVersions" class="muted">—</div></div>
 </div></dialog>
 <script nonce="__NONCE__">
+function paint(root){(root||document).querySelectorAll('[data-w]').forEach(e=>{e.style.width=e.dataset.w+'%'});(root||document).querySelectorAll('[data-h]').forEach(e=>{e.style.height=e.dataset.h+'%'});(root||document).querySelectorAll('[data-c]').forEach(e=>{e.style.background=e.dataset.c})}
 const $=s=>document.querySelector(s), esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));let cursor=null,current=null,loadedCount=0;
 const ST_LABEL={new:'nuevo',contacted:'contactado',qualified:'cualificado',won:'ganado',lost:'perdido',spam:'spam'};
 const TENANT_COLORS=['#3987e5','#9085e9','#199e70','#c98500','#2aa8b8','#c96bb4','#8ba03f','#e66767'];
 function tenantColor(id){let h=0;for(const c of String(id||''))h=(h*31+c.charCodeAt(0))>>>0;return TENANT_COLORS[h%TENANT_COLORS.length]}
 function statusPill(s){return '<span class="pill s-'+esc(s)+'"><b></b>'+esc(ST_LABEL[s]||s)+'</span>'}
-function tenantChip(id,name){return name?'<span class="tenant"><i style="background:'+tenantColor(id)+'"></i>'+esc(name)+'</span>':'<span class="muted">—</span>'}
+function tenantChip(id,name){return name?'<span class="tenant"><i data-c="'+tenantColor(id)+'"></i>'+esc(name)+'</span>':'<span class="muted">—</span>'}
 function nbChips(summary){if(!summary)return '<span class="muted">—</span>';
  return String(summary).split(',').map(p=>{const[ch,st]=p.split(':');const cls=st==='sent'?'ok':st==='failed'?'bad':'wait';
   return '<span class="nb '+cls+'"><i></i>'+esc(ch==='telegram'?'Telegram':'WhatsApp')+'</span>'}).join('')}
@@ -193,22 +209,23 @@ async function loadStats(){try{const s=await api('/api/admin/stats');
  $('#mFail').textContent=s.fallidos7;$('#mFailCard').classList.toggle('alerta',s.fallidos7>0);
  $('#mTenants').textContent=s.tenantsActivos;
  const max=Math.max(1,...s.porDia.map(x=>x.n));
- $('#chart').innerHTML=s.porDia.map(x=>'<div class="bar" style="height:'+Math.max(3,Math.round(x.n/max*100))+'%" title="'+esc(x.d)+': '+x.n+'"></div>').join('');
+ $('#chart').innerHTML=s.porDia.map(x=>'<div class="bar" data-h="'+(x.n===0?6:Math.max(12,Math.round(x.n/max*100)))+'" title="'+esc(x.d)+': '+x.n+'"></div>').join('');paint($('#chart'));
  $('#chartFrom').textContent=s.porDia[0]?s.porDia[0].d.slice(5):'';$('#chartTo').textContent=s.porDia.at(-1)?s.porDia.at(-1).d.slice(5):''}
  catch(e){/* las métricas no bloquean el listado */}}
 async function load(append=false){try{const p=params();if(append&&cursor)p.set('cursor',cursor);const d=await api('/api/admin/leads?'+p);if(!append){$('#rows').innerHTML='';loadedCount=0}
  if(!d.leads.length&&!append)$('#rows').innerHTML='<tr><td colspan="8" class="empty">No hay leads con estos filtros.</td></tr>';
  for(const l of d.leads)$('#rows').insertAdjacentHTML('beforeend','<tr data-id="'+l.id+'"><td>'+fmt(l.created_at)+'</td><td>'+tenantChip(l.tenant_id,l.tenant_name)+'</td><td>'+statusPill(l.status)+'</td><td>'+esc(l.name||'—')+'</td><td class="tel">'+esc(l.whatsapp||'—')+'</td><td>'+esc(l.sector||'—')+'</td><td>'+esc(l.source)+'</td><td>'+nbChips(l.notification_summary)+'</td></tr>');
+ paint($('#rows'));
  loadedCount+=d.leads.length;cursor=d.nextCursor;$('#more').hidden=!cursor;
- $('#resultCount').textContent=loadedCount+(cursor?'+':'')+' resultado'+(loadedCount===1?'':'s');
+ $('#resultCount').textContent=loadedCount+(cursor?'+':'')+' resultado'+((loadedCount===1&&!cursor)?'':'s');
  $('#message').textContent=''}catch(e){$('#message').innerHTML='<p class="error">'+esc(e.message)+'</p>'}}
 async function loadTenants(){try{const d=await api('/api/admin/tenants');for(const t of d.tenants)$('#tenantFilter').insertAdjacentHTML('beforeend','<option value="'+esc(t.id)+'">'+esc(t.name)+'</option>')}catch(e){/* sin tenants: el filtro queda en Todos */}}
 $('#filters').onsubmit=e=>{e.preventDefault();cursor=null;load()};$('#more').onclick=()=>load(true);$('#export').onclick=()=>location.href='/api/admin/leads/export.csv?'+params();$('#close').onclick=()=>$('#detail').close();
 $('#rows').onclick=e=>{const tr=e.target.closest('[data-id]');if(tr)openLead(tr.dataset.id)};
-async function openLead(id){try{const d=await api('/api/admin/leads/'+id);current=d.lead;const l=d.lead;const cards=[['Fecha',fmt(l.created_at)],['Cliente',l.tenant_name],['Nombre',l.name],['WhatsApp',l.whatsapp],['Sector',l.sector],['Fuente',l.source],['Mensajes/día',l.messages_per_day],['Canal',l.channel],['Puntuación',l.score],['Nota',l.note],['Página',l.page_url]].map(x=>'<div class="card"><b>'+x[0]+'</b>'+esc(x[1]??'—')+'</div>').join('');const options=['new','contacted','qualified','won','lost','spam'].map(s=>'<option '+(s===l.status?'selected':'')+'>'+s+'</option>').join('');const notices=d.notifications.map(n=>'<article><b>Aviso '+esc(n.channel)+': '+esc(n.status)+'</b><div class="muted">Intentos: '+n.attempts+(n.last_error?' · '+esc(n.last_error):'')+'</div></article>').join('');const notes=d.notes.map(n=>'<article><b>'+esc(n.author_email)+'</b><div>'+esc(n.text)+'</div><small class="muted">'+fmt(n.created_at)+'</small></article>').join('');const events=d.events.map(n=>'<article><b>'+esc(n.event_type)+'</b><div>'+esc(n.detail||'')+'</div><small class="muted">'+fmt(n.created_at)+' · '+esc(n.actor_email)+'</small></article>').join('');const velaiBtns=ME.role==='velai'?'<button class="btn alt" id="retry">Reintentar avisos</button><button class="btn bad" id="delete">Borrar lead</button>':'';$('#detailBody').innerHTML='<div class="grid">'+cards+'</div><div class="actions"><select id="status" style="background:var(--bg);border:1px solid var(--border2);border-radius:var(--r-sm);padding:9px 12px">'+options+'</select><button class="btn" id="saveStatus">Guardar estado</button>'+velaiBtns+'</div><div class="note"><textarea id="note" rows="3" placeholder="Añadir nota…"></textarea><button class="btn" id="addNote">Añadir</button></div><div class="timeline"><h3>Actividad</h3>'+notices+notes+events+'</div>';wireDetail();$('#detail').showModal()}catch(e){alert(e.message)}}
+async function openLead(id){try{const d=await api('/api/admin/leads/'+id);current=d.lead;const l=d.lead;const cards=[['Fecha',fmt(l.created_at)],['Cliente',l.tenant_name],['Nombre',l.name],['WhatsApp',l.whatsapp],['Sector',l.sector],['Fuente',l.source],['Mensajes/día',l.messages_per_day],['Canal',l.channel],['Puntuación',l.score],['Nota',l.note],['Página',l.page_url]].map(x=>'<div class="card"><b>'+x[0]+'</b>'+esc(x[1]??'—')+'</div>').join('');const options=['new','contacted','qualified','won','lost','spam'].map(s=>'<option '+(s===l.status?'selected':'')+'>'+s+'</option>').join('');const notices=d.notifications.map(n=>'<article><b>Aviso '+esc(n.channel)+': '+esc(n.status)+'</b><div class="muted">Intentos: '+n.attempts+(n.last_error?' · '+esc(n.last_error):'')+'</div></article>').join('');const notes=d.notes.map(n=>'<article><b>'+esc(n.author_email)+'</b><div>'+esc(n.text)+'</div><small class="muted">'+fmt(n.created_at)+'</small></article>').join('');const events=d.events.map(n=>'<article><b>'+esc(n.event_type)+'</b><div>'+esc(n.detail||'')+'</div><small class="muted">'+fmt(n.created_at)+' · '+esc(n.actor_email)+'</small></article>').join('');const velaiBtns=ME.role==='velai'?'<button class="btn alt" id="retry">Reintentar avisos</button><button class="btn bad" id="delete">Borrar lead</button>':'';$('#detailBody').innerHTML='<div class="grid">'+cards+'</div><div class="actions"><select id="status" class="inpill">'+options+'</select><button class="btn" id="saveStatus">Guardar estado</button>'+velaiBtns+'</div><div class="note"><textarea id="note" rows="3" placeholder="Añadir nota…"></textarea><button class="btn" id="addNote">Añadir</button></div><div class="timeline"><h3>Actividad</h3>'+notices+notes+events+'</div>';wireDetail();$('#detail').showModal()}catch(e){alert(e.message)}}
 function wireDetail(){$('#saveStatus').onclick=async()=>{await api('/api/admin/leads/'+current.id,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({status:$('#status').value})});$('#detail').close();load();loadStats()};if($('#retry'))$('#retry').onclick=async()=>{await api('/api/admin/leads/'+current.id+'/retry',{method:'POST'});openLead(current.id)};$('#addNote').onclick=async()=>{const text=$('#note').value.trim();if(!text)return;await api('/api/admin/leads/'+current.id+'/notes',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text})});openLead(current.id)};if($('#delete'))$('#delete').onclick=async()=>{if(!confirm('¿Borrar definitivamente este lead y todos sus datos?'))return;await api('/api/admin/leads/'+current.id,{method:'DELETE'});$('#detail').close();load();loadStats()}}
 // ── Pestaña Clientes ──
-const TERRS={already_provisioned:'Ese paso ya está hecho (idempotente: un doble clic no crea recursos duplicados).',provision_in_progress:'Ese paso ya está en curso, espera unos segundos.',waba_required:'Rellena y guarda primero la WABA del cliente.',subaccount_required:'Crea primero la subcuenta (paso 1).',twilio_auth_token_missing:'La subcuenta no tiene auth token guardado.',provision_orphan:'Twilio creó el recurso pero D1 no lo guardó: revisa Telegram y reconcilia a mano.',invalid_code:'El OTP son 4-8 dígitos.',slug_taken:'Ese slug ya existe.',address_taken:'Ese canal ya está asignado a otro cliente: guardarlo desviaría sus conversaciones.',subaccount_taken:'Esa subcuenta de Twilio ya está asignada a otro cliente.',pending_tenant_cannot_be_active:'Un prospecto (canal pending:) no puede activarse: ponle primero su canal real.',invalid_twilio_auth_token:'El auth token debe ser 32 caracteres hexadecimales (Twilio → Keys & Credentials).',stale_tenant:'Alguien modificó este cliente mientras editabas. Recarga la ficha y vuelve a aplicar tus cambios.',nothing_to_update:'No hay cambios que guardar.',invalid_preview:'Escribe un mensaje de prueba y un contexto de al menos 50 caracteres.',rate_limited:'Demasiadas pruebas seguidas: espera un minuto.'};
+const TERRS={already_provisioned:'Ese paso ya está hecho (idempotente: un doble clic no crea recursos duplicados).',provision_in_progress:'Ese paso ya está en curso, espera unos segundos.',waba_required:'Rellena y guarda primero la WABA del cliente.',subaccount_required:'Crea primero la subcuenta (paso 1).',twilio_auth_token_missing:'La subcuenta no tiene auth token guardado.',provision_orphan:'Twilio creó el recurso pero D1 no lo guardó: revisa Telegram y reconcilia a mano.',invalid_code:'El OTP son 4-8 dígitos.',slug_taken:'Ese slug ya existe.',address_taken:'Ese canal ya está asignado a otro cliente: guardarlo desviaría sus conversaciones.',subaccount_taken:'Esa subcuenta de Twilio ya está asignada a otro cliente.',pending_tenant_cannot_be_active:'Un prospecto (canal pending:) no puede activarse: ponle primero su canal real.',invalid_twilio_auth_token:'El auth token debe ser 32 caracteres hexadecimales (Twilio → Keys & Credentials).',stale_tenant:'Alguien modificó este cliente mientras editabas. Recarga la ficha y vuelve a aplicar tus cambios.',nothing_to_update:'No hay cambios que guardar.',invalid_preview:'Escribe un mensaje de prueba y un contexto de al menos 50 caracteres.',rate_limited:'Demasiadas pruebas seguidas: espera un minuto.',email_taken:'Ese correo ya tiene acceso al panel de OTRO cliente (un correo pertenece a un solo cliente).',email_is_admin:'Ese correo es admin de Velai (ADMIN_EMAILS): ya ve todo, no puede ser usuario de un cliente.',invalid_email:'Eso no parece un correo válido.'};
 let tenantList=[],editing=null;
 document.querySelectorAll('.tab').forEach(b=>b.onclick=()=>{document.querySelectorAll('.tab').forEach(x=>{x.classList.toggle('is-on',x===b);x.setAttribute('aria-selected',x===b?'true':'false')});const v=b.dataset.view;$('#viewLeads').hidden=v!=='leads';$('#viewTenants').hidden=v!=='tenants';$('#export').hidden=v!=='leads';$('#newTenant').hidden=v!=='tenants';if(v==='tenants')loadTenantList();else loadStats()});
 function flags(list,cls){return list.map(f=>'<span class="flag'+(cls?' '+cls:'')+'">'+esc(f)+'</span>').join('')}
@@ -216,8 +233,8 @@ function semaforo(t){if(!t.active&&String(t.channel_address).startsWith('pending
  const long=t.prompt_len>8000?['contexto muy largo']:[];
  if(String(t.channel_address).startsWith('web:')){const f=[...long];if(t.prompt_len<200)f.push('contexto corto');if(!t.has_team&&!t.has_telegram)f.push('sin canal de aviso');return '<span class="flag web">solo web</span>'+(f.length?flags(f):' <span class="flag ok">listo</span>')}
  const f=[...long];if(!t.has_template)f.push('sin plantilla');if(!t.has_team)f.push('sin equipo');if(t.prompt_len<200)f.push('contexto corto');if(t.has_subaccount&&!t.has_twilio_token)f.push('sin token');if(t.has_subaccount&&!t.has_from)f.push('sin From');if(t.meta_partner_status==='pendiente'&&t.has_subaccount)f.push('socio pendiente');return f.length?flags(f):'<span class="flag ok">listo</span>'}
-function meter(chars){const w=Math.min(100,Math.round(chars/12000*100));return '<span class="meter" title="El contexto viaja al modelo en CADA mensaje"><i style="width:'+w+'%"></i></span><span class="muted">'+chars+' car.</span>'}
-async function loadTenantList(){try{const d=await api('/api/admin/tenants');tenantList=d.tenants;$('#tenantRows').innerHTML=d.tenants.map(t=>'<tr data-tid="'+t.id+'"><td>'+tenantChip(t.id,t.name)+'</td><td class="muted">'+esc(t.channel_address)+'</td><td>'+t.lead_count+'</td><td>'+meter(t.prompt_len)+'</td><td>'+semaforo(t)+'</td><td>'+(t.active?'<span class="flag ok">activo</span>':'<span class="flag off">inactivo</span>')+'</td></tr>').join('')||'<tr><td colspan="6" class="empty">Sin clientes.</td></tr>'}catch(e){alert(e.message)}}
+function meter(chars){const w=Math.min(100,Math.round(chars/12000*100));return '<span class="meter" title="El contexto viaja al modelo en CADA mensaje"><i data-w="'+w+'"></i></span><span class="muted">'+chars+' car.</span>'}
+async function loadTenantList(){try{const d=await api('/api/admin/tenants');tenantList=d.tenants;$('#tenantRows').innerHTML=d.tenants.map(t=>'<tr data-tid="'+t.id+'"><td>'+tenantChip(t.id,t.name)+'</td><td class="muted">'+esc(t.channel_address)+'</td><td>'+t.lead_count+'</td><td>'+meter(t.prompt_len)+'</td><td>'+semaforo(t)+'</td><td>'+(t.active?'<span class="flag ok">activo</span>':'<span class="flag off">inactivo</span>')+'</td></tr>').join('')||'<tr><td colspan="6" class="empty">Sin clientes.</td></tr>';paint($('#tenantRows'))}catch(e){alert(e.message)}}
 $('#tenantRows').onclick=e=>{const tr=e.target.closest('[data-tid]');if(tr)openTenant(tr.dataset.tid)};
 $('#newTenant').onclick=()=>openTenant(null);
 $('#tenantClose').onclick=()=>$('#tenantModal').close();
@@ -227,8 +244,8 @@ function updateCount(){const n=$('#tPrompt').value.length;$('#tCount').textConte
 $('#tPrompt').oninput=updateCount;
 async function openTenant(id){clearTenantErrs();$('#tPreviewOut').textContent='';$('#tTestMsg').value='';$('#tNote').value='';
  $('#tToken').value='';
- if(id){const d=await api('/api/admin/tenants/'+id);const t=d.tenant;editing={id:t.id,updated_at:t.updated_at};$('#tenantTitle').textContent=t.name;$('#tDup').hidden=true;for(const[k,sel]of Object.entries(TF))$(sel).value=t[k]??'';$('#tActive').checked=!!t.active;$('#tTokenState').textContent=t.has_twilio_token?'configurado ✓ (escribe solo para sustituirlo)':'sin configurar';$('#tProv').hidden=false;loadProv(id);loadVersions(id)}
- else{editing=null;$('#tenantTitle').textContent='Nuevo cliente';$('#tDup').hidden=false;$('#tDupSel').innerHTML='<option value="">— empezar de cero —</option>'+tenantList.map(t=>'<option value="'+t.id+'">'+esc(t.name)+'</option>').join('');for(const sel of Object.values(TF))$(sel).value='';$('#tPartner').value='pendiente';$('#tActive').checked=true;$('#tTokenState').textContent='sin configurar';$('#tProv').hidden=true;$('#tVersions').textContent='—'}
+ if(id){const d=await api('/api/admin/tenants/'+id);const t=d.tenant;editing={id:t.id,updated_at:t.updated_at};$('#tenantTitle').textContent=t.name;$('#tDup').hidden=true;for(const[k,sel]of Object.entries(TF))$(sel).value=t[k]??'';$('#tActive').checked=!!t.active;$('#tTokenState').textContent=t.has_twilio_token?'configurado ✓ (escribe solo para sustituirlo)':'sin configurar';$('#tProv').hidden=false;$('#tUsersCard').hidden=false;loadProv(id);loadVersions(id);loadUsers(id)}
+ else{editing=null;$('#tenantTitle').textContent='Nuevo cliente';$('#tDup').hidden=false;$('#tDupSel').innerHTML='<option value="">— empezar de cero —</option>'+tenantList.map(t=>'<option value="'+t.id+'">'+esc(t.name)+'</option>').join('');for(const sel of Object.values(TF))$(sel).value='';$('#tPartner').value='pendiente';$('#tActive').checked=true;$('#tTokenState').textContent='sin configurar';$('#tProv').hidden=true;$('#tUsersCard').hidden=true;$('#tVersions').textContent='—'}
  updateCount();$('#tenantModal').showModal()}
 $('#tDupSel').onchange=async e=>{if(!e.target.value)return;const d=await api('/api/admin/tenants/'+e.target.value);$('#tPrompt').value=d.tenant.system_prompt||'';updateCount()};
 $('#tenantSave').onclick=async()=>{clearTenantErrs();
@@ -237,7 +254,7 @@ $('#tenantSave').onclick=async()=>{clearTenantErrs();
  try{
   if(editing){body.expected_updated_at=editing.updated_at;const r=await api('/api/admin/tenants/'+editing.id,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});editing.updated_at=r.updated_at;loadVersions(editing.id)}
   else{const r=await api('/api/admin/tenants',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});editing={id:r.id,updated_at:r.updated_at};$('#tenantTitle').textContent=body.name;$('#tDup').hidden=true}
-  $('#tenantMsg').innerHTML='<p style="color:var(--ok)">Guardado.</p>';loadTenantList()
+  $('#tenantMsg').innerHTML='<p class="okmsg">Guardado.</p>';loadTenantList()
  }catch(e){const c=e.message;const m=c.match(/^invalid_(.+)$/);
   if(m&&document.querySelector('.field-err[data-f="'+m[1]+'"]'))document.querySelector('.field-err[data-f="'+m[1]+'"]').textContent='Formato inválido — revisa el ejemplo del campo.';
   else $('#tenantMsg').innerHTML='<p class="error">'+esc(TERRS[c]||c)+'</p>'}};
@@ -257,8 +274,23 @@ async function provPost(step,body){clearTenantErrs();
   // Recargar la ficha ENTERA: refresca updated_at (evita stale_tenant en el siguiente
   // Guardar) y repuebla los inputs con el SID recién creado (un input vacío guardado
   // habría borrado la subcuenta de la fila).
-  const keep=editing.id;await openTenant(keep);$('#tenantMsg').innerHTML='<p style="color:var(--ok)">Hecho.</p>';loadTenantList()}
+  const keep=editing.id;await openTenant(keep);$('#tenantMsg').innerHTML='<p class="okmsg">Hecho.</p>';loadTenantList()}
  catch(e){$('#tenantMsg').innerHTML='<p class="error">'+esc(TERRS[e.message]||e.message)+'</p>'}}
+let panelUsers=[];
+async function loadUsers(id){try{const d=await api('/api/admin/tenants/'+id+'/users');panelUsers=d.users;
+ $('#tUsersList').innerHTML=d.users.map(u=>'<span class="flag off">'+esc(u.email)+' <a href="#" data-udel="'+esc(u.email)+'" title="Quitar acceso">✕</a></span>').join(' ')||'Sin usuarios: este cliente no tiene acceso al panel.'}
+ catch(e){$('#tUsersList').textContent=e.message}}
+$('#uAdd').onclick=async()=>{clearTenantErrs();const email=$('#uEmail').value.trim();if(!email)return;
+ try{await api('/api/admin/tenants/'+editing.id+'/users',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email})});
+  $('#uEmail').value='';$('#tenantMsg').innerHTML='<p class="okmsg">Acceso concedido.</p>';loadUsers(editing.id)}
+ catch(e){const c=e.message;const el=document.querySelector('.field-err[data-f="panel_email"]');
+  if(el&&TERRS[c])el.textContent=TERRS[c];else $('#tenantMsg').innerHTML='<p class="error">'+esc(TERRS[c]||c)+'</p>'}};
+$('#tUsersList').onclick=async e=>{const email=e.target&&e.target.dataset&&e.target.dataset.udel;if(!email)return;e.preventDefault();
+ // Quitar al último se permite (a veces es lo que se quiere) pero avisando: sin filas, ese cliente no entra.
+ if(panelUsers.length===1&&!confirm('Es el ÚNICO usuario: este cliente se queda sin acceso al panel. ¿Quitarlo igualmente?'))return;
+ clearTenantErrs();try{await api('/api/admin/tenants/'+editing.id+'/users/'+encodeURIComponent(email),{method:'DELETE'});
+  $('#tenantMsg').innerHTML='<p class="okmsg">Acceso revocado.</p>';loadUsers(editing.id)}
+ catch(e2){$('#tenantMsg').innerHTML='<p class="error">'+esc(TERRS[e2.message]||e2.message)+'</p>'}};
 $('#pSub').onclick=()=>provPost('subaccount');
 $('#pTpl').onclick=()=>provPost('template');
 $('#pSender').onclick=()=>provPost('sender',{phone:$('#pPhone').value.trim()});

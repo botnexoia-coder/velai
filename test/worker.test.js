@@ -871,3 +871,117 @@ test('el Worker rechaza CORS desconocido y exige Access en administración', asy
   const publicOk = await worker.fetch(new Request('https://worker.test/lead', { method: 'POST', headers: { Origin: 'https://hirevai.com' } }), { ALLOWED_WEB_ORIGINS: 'https://hirevai.com' }, ctx);
   assert.notEqual(publicOk.status, 503);
 });
+
+// ── SPEC-USUARIOS parte B: usuarios del cliente desde el panel ──
+const TID = '00000000-0000-4000-8000-00000000000b';
+function usersDb({ takenEmail = null, users = [] } = {}) {
+  const queries = []; const writes = [];
+  return {
+    queries, writes,
+    prepare(sql) {
+      return { bind: (...args) => ({
+        first: async () => {
+          queries.push({ sql, args });
+          if (sql.includes('SELECT id FROM tenants')) return { id: args[0] };
+          if (sql.includes('COUNT(*)')) return { n: users.length };
+          return null;
+        },
+        all: async () => { queries.push({ sql, args }); return { results: users }; },
+        run: async () => {
+          queries.push({ sql, args });
+          if (sql.includes('INSERT INTO tenant_users')) {
+            if (args[0] === takenEmail) throw new Error('D1_ERROR: UNIQUE constraint failed: tenant_users.email');
+            writes.push({ sql, args });
+            return { meta: { changes: 1 } };
+          }
+          if (sql.includes('DELETE FROM tenant_users')) {
+            const hit = users.some((u) => u.email === args[1]);
+            if (hit) writes.push({ sql, args });
+            return { meta: { changes: hit ? 1 : 0 } };
+          }
+          writes.push({ sql, args });
+          return { meta: { changes: 1 } };
+        },
+      }) };
+    },
+  };
+}
+const usersPath = (suffix = '') => `/api/admin/tenants/${TID}/users${suffix}`;
+const usersReq = (init, suffix = '') => new Request('https://admin.hirevai.com' + usersPath(suffix), init);
+const postUser = (db, email, adminEmails = '') => testing.adminRouter(
+  usersReq({ method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email }) }),
+  { DB: db, ADMIN_EMAILS: adminEmails }, { waitUntil() {} }, usersPath(), new URL('https://x' + usersPath()), {}, VELAI);
+
+test('usuarios B4.1: correo ya usado por otro cliente → 409 email_taken, sin escribir', async () => {
+  const db = usersDb({ takenEmail: 'gestora@otro.com' });
+  await assert.rejects(postUser(db, 'gestora@otro.com'), (e) => e.status === 409 && e.code === 'email_taken');
+  assert.equal(db.writes.length, 0, 'ni fila ni auditoría tras el 409');
+});
+
+test('usuarios B4.2: correo de ADMIN_EMAILS → 400 email_is_admin antes de tocar D1', async () => {
+  const db = usersDb({});
+  await assert.rejects(postUser(db, 'admin@velai.ai', 'admin@velai.ai, otro@velai.ai'),
+    (e) => e.status === 400 && e.code === 'email_is_admin');
+  assert.equal(db.queries.length, 0, 'la comprobación de admin no consulta D1');
+});
+
+test('usuarios B4.3: rol cliente en los tres endpoints → 403 y cero consultas', async () => {
+  const db = usersDb({});
+  const cases = [
+    ['GET', ''], ['POST', ''], ['DELETE', '/x%40y.com'],
+  ];
+  for (const [method, suffix] of cases) {
+    await assert.rejects(
+      testing.adminRouter(usersReq({ method }, suffix), { DB: db }, { waitUntil() {} }, usersPath(suffix), new URL('https://x' + usersPath(suffix)), {}, CLIENTE),
+      (e) => e.status === 403 && e.code === 'not_authorized', `${method} ${suffix || '(lista)'}`);
+  }
+  assert.equal(db.queries.length, 0);
+});
+
+test('usuarios B4.4: mayúsculas se guardan en minúsculas y resolveScope las encuentra', async () => {
+  const db = usersDb({});
+  const res = await postUser(db, '  Gestora@Cliente.COM ');
+  assert.equal(res.status, 201);
+  const insert = db.writes.find((w) => w.sql.includes('INSERT INTO tenant_users'));
+  assert.equal(insert.args[0], 'gestora@cliente.com');
+  // resolveScope normaliza también al leer: entra aunque Access reporte el correo con mayúsculas
+  const env = { DB: scopedDb({ tenantUser: { tenant_id: TID, role: 'cliente' } }), ADMIN_EMAILS: '' };
+  const scope = await testing.resolveScope(env, 'GESTORA@Cliente.com');
+  assert.equal(scope.tenantId, TID);
+  const lookup = env.DB.queries.find((q) => q.sql.includes('tenant_users'));
+  assert.equal(lookup.args[0], 'gestora@cliente.com');
+});
+
+test('usuarios B4.5: tras DELETE el correo pasa Access pero recibe 403 (revocación real)', async () => {
+  const db = usersDb({ users: [{ email: 'gestora@cliente.com', created_at: '2026-08-18T00:00:00Z' }] });
+  const del = await testing.adminRouter(
+    usersReq({ method: 'DELETE' }, '/gestora%40cliente.com'),
+    { DB: db }, { waitUntil() {} }, usersPath('/gestora%40cliente.com'), new URL('https://x/'), {}, VELAI);
+  assert.equal((await del.json()).ok, true);
+  // sin fila, resolveScope cierra la puerta aunque Access deje pasar
+  await assert.rejects(
+    testing.resolveScope({ DB: scopedDb({ tenantUser: null }), ADMIN_EMAILS: '' }, 'gestora@cliente.com'),
+    (e) => e.status === 403 && e.code === 'not_authorized');
+});
+
+test('usuarios B4.6: el 403 desconocido queda registrado y a la 3ª en una hora sale UNA alerta', async () => {
+  const kvStore = new Map();
+  const env = {
+    TELEGRAM_TOKEN: 'tok', TELEGRAM_CHAT_ID: '1',
+    KV: {
+      async get(k) { return kvStore.get(k) ?? null; },
+      async put(k, v) { kvStore.set(k, v); },
+    },
+  };
+  const telegrams = []; const logs = [];
+  const realFetch = globalThis.fetch; const realLog = console.log;
+  globalThis.fetch = async (url, init) => { telegrams.push(JSON.parse(init.body)); return new Response('{"ok":true}', { status: 200 }); };
+  console.log = (line) => logs.push(line);
+  try {
+    for (let i = 0; i < 5; i++) await testing.recordAuthFailure(env, 'Curioso@X.com');
+  } finally { globalThis.fetch = realFetch; console.log = realLog; }
+  assert.equal(logs.filter((l) => l.includes('"not_authorized"') && l.includes('curioso@x.com')).length, 5, 'cada intento queda en el log con el correo');
+  assert.equal(telegrams.length, 1, 'la alerta sale exactamente una vez (a la 3ª)');
+  assert.ok(telegrams[0].text.includes('curioso@x.com'));
+  assert.equal(kvStore.get('authfail:curioso@x.com'), '5');
+});

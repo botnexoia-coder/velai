@@ -970,6 +970,16 @@ async function provisionLock(env, tenantId, step) {
   return true;
 }
 
+const PANEL_EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+// Cada alta y baja de usuario deja rastro con actor Y rol (SPEC-USUARIOS §B.2): un
+// cliente tocando su acceso tiene que poder distinguirse de Velai haciéndolo.
+async function panelUserAudit(env, ctx, tenantId, actor, role, note) {
+  await env.DB.prepare('INSERT INTO tenant_versions (tenant_id,actor_email,field,previous_value,note,created_at) VALUES (?,?,?,?,?,?)')
+    .bind(tenantId, actor, 'users', null, `${note} (rol ${role})`, new Date().toISOString()).run();
+  ctx.waitUntil(sendTelegramText(env, `👤 <b>${escapeHtml(actor)}</b> · ${escapeHtml(note)}`).catch(() => {}));
+}
+
 async function provisionAudit(env, ctx, tenantId, actor, note) {
   const now = new Date().toISOString();
   await env.DB.prepare('INSERT INTO tenant_versions (tenant_id,actor_email,field,previous_value,note,created_at) VALUES (?,?,?,?,?,?)')
@@ -1136,11 +1146,38 @@ function clienteAllowed(path, method) {
   return false;
 }
 
+// Con la política de Access en OTP-para-cualquier-correo (SPEC-USUARIOS §B.1), el 403
+// de resolveScope pasa a ser la única cerradura. Tres compensaciones: registrar cada
+// intento CON el correo (excepción deliberada a la regla de no-PII en logs — sin el
+// correo no hay forense), alertar a la 3ª en una hora, y rate limit por correo.
+async function recordAuthFailure(env, email) {
+  const who = String(email || '').toLowerCase().slice(0, 200);
+  console.log(JSON.stringify({ level: 'warn', code: 'not_authorized', email: who }));
+  if (!env.KV) return;
+  try {
+    const key = `authfail:${who}`;
+    const attempts = Number(await env.KV.get(key) || 0) + 1;
+    await env.KV.put(key, String(attempts), { expirationTtl: 3600 });
+    // Solo en el tercer intento: ni al primero (ruido de altas a medias) ni en cada
+    // uno posterior (el contador sigue subiendo pero la alerta ya salió esta hora).
+    if (attempts === 3) {
+      await sendTelegramText(env, `🔐 <b>Velai</b>: el correo <code>${escapeHtml(who)}</code> pasó Access pero acumula ${attempts} intentos sin autorización en la última hora.`);
+    }
+  } catch (_) {}
+}
+
 async function handleAdmin(request, env, ctx, path, url, config) {
   adminCorsGuard(request, env);
   const identity = await adminIdentity(request, env);
   if (!env.DB) throw new HttpError(503, 'lead_storage_not_configured');
-  const scope = await resolveScope(env, identity);
+  if (await rateLimited(env, String(identity).toLowerCase(), 'admin', 120)) throw new HttpError(429, 'rate_limited');
+  let scope;
+  try {
+    scope = await resolveScope(env, identity);
+  } catch (e) {
+    if (e instanceof HttpError && e.code === 'not_authorized') ctx.waitUntil(recordAuthFailure(env, identity));
+    throw e;
+  }
   return adminRouter(request, env, ctx, path, url, config, scope);
 }
 
@@ -1280,6 +1317,52 @@ async function adminRouter(request, env, ctx, path, url, config, scope) {
     if (!UUID_RE.test(provMatch[1])) throw new HttpError(404, 'not_found');
     return await handleProvision(request, env, ctx, provMatch[1], provMatch[2] || '', actor);
   }
+  // ── Usuarios del cliente (SPEC-USUARIOS §B.2): solo rol velai (clienteAllowed es
+  // lista blanca y no incluye estas rutas). resolveScope consulta tenant_users en cada
+  // petición sin caché, así que alta y baja surten efecto inmediato.
+  const usersMatch = path.match(/^\/api\/admin\/tenants\/([0-9a-f-]+)\/users(?:\/([^/]+))?$/i);
+  if (usersMatch) {
+    if (!UUID_RE.test(usersMatch[1])) throw new HttpError(404, 'not_found');
+    const tenantId = usersMatch[1];
+    if (!usersMatch[2] && request.method === 'GET') {
+      const rows = await env.DB.prepare('SELECT email, created_at FROM tenant_users WHERE tenant_id=? ORDER BY created_at')
+        .bind(tenantId).all();
+      return json({ users: rows.results || [] }, 200, NO_STORE);
+    }
+    if (!usersMatch[2] && request.method === 'POST') {
+      const body = await readJson(request, 2000);
+      const email = String(body.email || '').trim().toLowerCase();
+      if (!PANEL_EMAIL_RE.test(email) || email.length > 200) throw new HttpError(400, 'invalid_email');
+      // Un admin de Velai en la tabla quedaría degradado a un solo tenant al entrar
+      // (resolveScope mira ADMIN_EMAILS primero, pero el error sería silencioso).
+      const admins = clean(env.ADMIN_EMAILS, 500).split(',').map((x) => x.trim().toLowerCase()).filter(Boolean);
+      if (admins.includes(email)) throw new HttpError(400, 'email_is_admin');
+      const tenant = await env.DB.prepare('SELECT id FROM tenants WHERE id=?').bind(tenantId).first();
+      if (!tenant) throw new HttpError(404, 'not_found');
+      try {
+        await env.DB.prepare('INSERT INTO tenant_users (email, tenant_id, role, created_at) VALUES (?,?,?,?)')
+          .bind(email, tenantId, 'cliente', new Date().toISOString()).run();
+      } catch (e) {
+        // email es PK: el caso real es un gestor que ya trabaja con otro cliente vuestro.
+        if (/UNIQUE|PRIMARY KEY/i.test(String(e.message || ''))) throw new HttpError(409, 'email_taken');
+        throw e;
+      }
+      await panelUserAudit(env, ctx, tenantId, actor, scope.role, `alta usuario ${email}`);
+      return json({ ok: true, email }, 201, NO_STORE);
+    }
+    if (usersMatch[2] && request.method === 'DELETE') {
+      const email = decodeURIComponent(usersMatch[2]).trim().toLowerCase();
+      const result = await env.DB.prepare('DELETE FROM tenant_users WHERE tenant_id=? AND lower(email)=?')
+        .bind(tenantId, email).run();
+      if (!result.meta || !result.meta.changes) throw new HttpError(404, 'not_found');
+      await panelUserAudit(env, ctx, tenantId, actor, scope.role, `baja usuario ${email}`);
+      // `remaining` permite a la interfaz avisar de "este cliente se queda sin acceso".
+      const left = await env.DB.prepare('SELECT COUNT(*) AS n FROM tenant_users WHERE tenant_id=?').bind(tenantId).first();
+      return json({ ok: true, remaining: left ? left.n : 0 }, 200, NO_STORE);
+    }
+    throw new HttpError(404, 'not_found');
+  }
+
   const tenantMatch = path.match(/^\/api\/admin\/tenants\/([0-9a-f-]+)(?:\/(preview|versions))?(?:\/(\d+)\/restore)?$/i);
   if (tenantMatch) {
     if (!UUID_RE.test(tenantMatch[1])) throw new HttpError(404, 'not_found');
@@ -1546,4 +1629,4 @@ export function createWorker(config) {
   };
 }
 
-export const testing = { clean, normalizePhone, extractPhone, safeUtm, publicCors, validTwilioSignature, csvCell, expiryDate, leadFilters, isDemoKey, templateVar, leadTemplateVariables, readJson, deliver, drainQueuedLeads, verifyTurnstile, systemFor, validateTenant, invalidateTenantCache, tenantWriteError, assertNotActivePending, handleProvision, pollProvisioning, fillSeries, resolveScope, scopeClause, clienteAllowed, adminRouter };
+export const testing = { clean, normalizePhone, extractPhone, safeUtm, publicCors, validTwilioSignature, csvCell, expiryDate, leadFilters, isDemoKey, templateVar, leadTemplateVariables, readJson, deliver, drainQueuedLeads, verifyTurnstile, systemFor, validateTenant, invalidateTenantCache, tenantWriteError, assertNotActivePending, handleProvision, pollProvisioning, fillSeries, resolveScope, scopeClause, clienteAllowed, adminRouter, recordAuthFailure, handleAdmin };
