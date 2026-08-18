@@ -118,6 +118,25 @@ Un mensaje entrante a un sender sin fila responde `404 unknown_tenant` y avisa a
 (antirebote 1 h). El caché de tenants es de 5 min: un `UPDATE` tarda eso en verse.
 **Orden en cambios de esquema: migración D1 primero, deploy del Worker después.**
 
+## Usuarios del panel y handoff
+
+**Dar de alta a un usuario de CLIENTE son dos pasos, a propósito (defensa en profundidad):**
+
+1. Su correo en la política de Cloudflare Access (Zero Trust → Applications → Velai Leads
+   Panel). Con OTP no necesita contraseña.
+2. Su fila en `tenant_users`:
+   `INSERT INTO tenant_users (email, tenant_id, role, created_at) VALUES ('correo', '<tenant_id>', 'cliente', datetime('now'));`
+
+Solo Access no da acceso a nada (403 del worker); solo la fila tampoco (no pasa de Access).
+Los **admins de Velai** van en `ADMIN_EMAILS` (wrangler.toml), nunca en la tabla. Un cliente
+ve SOLO sus leads (aislamiento validado por tests de fuga), puede cambiar estado y anotar,
+y no puede reintentar avisos, borrar, ni ver nada de otros tenants.
+
+**Handoff a humano:** si el cliente final pide hablar con una persona, el bot confirma, avisa
+a Telegram y se pausa 4 h para esa conversación (clave `pause:<tenant>:<from>` en KV). Las
+escaladas activas se ven en el panel como chips ⏸ con botón "Reanudar bot". Mientras no haya
+bandeja, el equipo del cliente responde desde SU WhatsApp (número distinto al del bot).
+
 ## Alertas operativas
 
 Automáticas (llegan al Telegram del equipo, con antirebote de 1 h):

@@ -29,6 +29,9 @@ LEAD_RETENTION_MONTHS = "24"
 AI_DAILY_LIMIT = "1000"
 # Tenant del canal web cuando el payload no trae `tenant` (el widget de hirevai.com).
 DEFAULT_TENANT_SLUG = "velai"
+# Admins de Velai en el panel (rol completo). Fuera de D1 a propósito: una fila
+# borrada en tenant_users no puede dejar a Velai fuera de su propio panel.
+ADMIN_EMAILS = "botnexo.ia@gmail.com"
 
 # Workers Logs: sin este bloque cada deploy lo deja APAGADO y los logs operativos
 # (tenant_token_undecryptable, provision_orphan, lead_d1_fallback…) no se ven en

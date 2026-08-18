@@ -352,6 +352,21 @@ async function invalidateTenantCache(env, tenants) {
   await Promise.all([...keys].map((k) => env.KV.delete(k).catch(() => {})));
 }
 
+// ── Handoff a humano (SPEC-HANDOFF §A) ───────────────────────────────────────
+// El modelo termina con [[HUMANO]] SOLO cuando la persona pide hablar con alguien
+// del equipo (instrucción en GUARDRAILS). El centinela se quita SIEMPRE del texto:
+// jamás debe llegar al cliente final.
+const WANTS_HUMAN = /\[\[HUMANO\]\]/;
+const EMPTY_TWIML = '<?xml version="1.0" encoding="UTF-8"?><Response></Response>';
+
+// Pausa por tenant + cliente final (nunca global): crear la clave ES el antirebote —
+// con el bot pausado no hay modelo, no hay centinela y no hay aviso repetido.
+// TTL 4 h: si nadie atendió, mejor que el bot vuelva a un silencio indefinido.
+async function escalateToHuman(env, tenant, from, lastMessage) {
+  if (env.KV) { try { await env.KV.put(`pause:${tenant.id}:${from}`, '1', { expirationTtl: 4 * 3600 }); } catch (_) {} }
+  await sendTelegramText(env, `🙋 <b>Handoff</b> — <b>${escapeHtml(tenant.name)}</b>: <code>${escapeHtml(from)}</code> pide hablar con una persona.\nÚltimo mensaje: «${escapeHtml(String(lastMessage).slice(0, 300))}»\nEl bot queda en pausa 4 h (o hasta Reanudar en el panel).`);
+}
+
 // prompt efectivo = negocio del tenant (D1) + guardrails (código, innegociables).
 // Si el prompt sigue en 'PENDIENTE' (entre migración y seed) cae al SYSTEM de código:
 // el bot nunca contesta vacío.
@@ -695,11 +710,14 @@ async function handleChat(request, env, cors, ctx, config) {
   if (body.demo && state.demo !== body.demo) throw new HttpError(409, 'conversation_mode_mismatch');
   state.messages.push({ role: 'user', content: message });
   state.messages = state.messages.slice(-20);
-  const reply = await callAnthropic(env, {
+  let reply = await callAnthropic(env, {
     model: 'claude-sonnet-4-6', max_tokens: 300,
     // Las DEMOS son material comercial de Velai, no de un tenant: van tal cual.
     system: isDemoKey(config, state.demo) ? config.DEMOS[state.demo] : systemFor(config, tenant), messages: state.messages,
   });
+  // El centinela de handoff jamás llega al usuario, tampoco en el canal web
+  // (la pausa v1 es solo del canal WhatsApp — SPEC-HANDOFF §A.1).
+  reply = reply.replace(WANTS_HUMAN, '').trim() || 'De acuerdo, aviso al equipo para que te contacten.';
   state.messages.push({ role: 'assistant', content: reply });
   state.messages = state.messages.slice(-20);
   await env.KV.put(key, JSON.stringify(state), { expirationTtl: 86400 });
@@ -799,8 +817,22 @@ async function handleTwilio(request, env, ctx, config) {
   const key = `conv:wa:${tenant.id}:${from}`;
   let history = env.KV ? await env.KV.get(key, 'json') || [] : [];
   history.push({ role: 'user', content: message }); history = history.slice(-20);
-  const reply = await callAnthropic(env, { model: 'claude-sonnet-4-6', max_tokens: 300, system: systemFor(config, tenant), messages: history });
-  history.push({ role: 'assistant', content: reply }); history = history.slice(-20);
+  // Conversación escalada a humano: el mensaje se guarda pero NO se contesta ni se
+  // llama al modelo — hay una persona en la conversación y dos voces es peor que ninguna.
+  if (env.KV && await env.KV.get(`pause:${tenant.id}:${from}`)) {
+    await env.KV.put(key, JSON.stringify(history), { expirationTtl: 86400 });
+    console.log(JSON.stringify({ level: 'info', code: 'bot_paused', tenant: tenant.slug }));
+    return new Response(EMPTY_TWIML, { headers: { 'Content-Type': 'text/xml; charset=utf-8' } });
+  }
+  let reply = await callAnthropic(env, { model: 'claude-sonnet-4-6', max_tokens: 300, system: systemFor(config, tenant), messages: history });
+  const wantsHuman = WANTS_HUMAN.test(reply);
+  reply = reply.replace(WANTS_HUMAN, '').trim();
+  if (wantsHuman) {
+    ctx.waitUntil(escalateToHuman(env, tenant, from, message).catch((error) => {
+      console.log(JSON.stringify({ level: 'error', code: 'handoff_alert_failed', tenant: tenant.slug, error: error.name }));
+    }));
+  }
+  if (reply) { history.push({ role: 'assistant', content: reply }); history = history.slice(-20); }
   if (env.KV) await env.KV.put(key, JSON.stringify(history), { expirationTtl: 86400 });
   const phone = normalizePhone(from.replace(/^whatsapp:/i, ''));
   if (phone) {
@@ -1069,10 +1101,85 @@ async function runProvisionStep(request, env, ctx, tenant, tenantId, step, actor
   throw new HttpError(404, 'not_found');
 }
 
+// ── Identidad → alcance (SPEC-HANDOFF §B) ────────────────────────────────────
+// Access dice QUIÉN eres; esto dice QUÉ puedes ver. Sin coincidencia no se entra:
+// que Access te deje pasar no te autoriza a ver leads de nadie. Los admins van en
+// ADMIN_EMAILS (var), nunca en la tabla: una fila borrada no deja a Velai fuera.
+async function resolveScope(env, email) {
+  const admins = clean(env.ADMIN_EMAILS, 500).split(',').map((x) => x.trim().toLowerCase()).filter(Boolean);
+  if (admins.includes(String(email).toLowerCase())) return { role: 'velai', tenantId: null, email };
+  const row = await env.DB.prepare('SELECT tenant_id, role FROM tenant_users WHERE lower(email) = ?')
+    .bind(String(email).toLowerCase()).first();
+  if (!row) throw new HttpError(403, 'not_authorized');
+  return { role: 'cliente', tenantId: row.tenant_id, email };
+}
+
+// Único punto de paso del aislamiento (NO NEGOCIABLE): con tenantId la condición
+// filtra; con null (Velai) se anula. Ningún endpoint construye SQL de leads sin esto.
+function scopeClause(scope) {
+  return scope.tenantId
+    ? { sql: ' AND l.tenant_id = ?', args: [scope.tenantId] }
+    : { sql: '', args: [] };
+}
+
+// Rutas que el rol cliente SÍ puede usar. Todo lo demás — tenants, provisioning,
+// preview, versiones, retry, borrado RGPD — es 403 ANTES de tocar datos.
+function clienteAllowed(path, method) {
+  if (path === '/api/admin/leads' && method === 'GET') return true;
+  if (path === '/api/admin/leads/export.csv' && method === 'GET') return true;
+  if (path === '/api/admin/stats' && method === 'GET') return true;
+  if (path === '/api/admin/me' && method === 'GET') return true;
+  if (path === '/api/admin/escalations' && method === 'GET') return true;
+  if (path === '/api/admin/escalations/resume' && method === 'POST') return true;
+  if (/^\/api\/admin\/leads\/[0-9a-f-]+$/i.test(path) && (method === 'GET' || method === 'PATCH')) return true;
+  if (/^\/api\/admin\/leads\/[0-9a-f-]+\/notes$/i.test(path) && method === 'POST') return true;
+  return false;
+}
+
 async function handleAdmin(request, env, ctx, path, url, config) {
   adminCorsGuard(request, env);
-  const actor = await adminIdentity(request, env);
+  const identity = await adminIdentity(request, env);
   if (!env.DB) throw new HttpError(503, 'lead_storage_not_configured');
+  const scope = await resolveScope(env, identity);
+  return adminRouter(request, env, ctx, path, url, config, scope);
+}
+
+async function adminRouter(request, env, ctx, path, url, config, scope) {
+  const actor = scope.email;
+  if (scope.role !== 'velai' && !clienteAllowed(path, request.method)) throw new HttpError(403, 'not_authorized');
+  const sc = scopeClause(scope);
+
+  if (path === '/api/admin/me' && request.method === 'GET') {
+    let tenantName = null;
+    if (scope.tenantId) {
+      const row = await env.DB.prepare('SELECT name FROM tenants WHERE id=?').bind(scope.tenantId).first();
+      tenantName = row ? row.name : null;
+    }
+    return json({ role: scope.role, tenantName }, 200, NO_STORE);
+  }
+
+  if (path === '/api/admin/escalations' && request.method === 'GET') {
+    if (!env.KV) return json({ escalations: [] }, 200, NO_STORE);
+    const prefix = scope.tenantId ? `pause:${scope.tenantId}:` : 'pause:';
+    const list = await env.KV.list({ prefix, limit: 100 });
+    const escalations = list.keys.map((k) => {
+      const rest = k.name.slice('pause:'.length);
+      const cut = rest.indexOf(':');
+      return { tenantId: rest.slice(0, cut), from: rest.slice(cut + 1) };
+    });
+    return json({ escalations }, 200, NO_STORE);
+  }
+  if (path === '/api/admin/escalations/resume' && request.method === 'POST') {
+    const body = await readJson(request, 2000);
+    // Un cliente solo puede reanudar SUS conversaciones: su tenantId manda.
+    const tenantId = scope.tenantId || clean(body.tenantId, 40);
+    const from = clean(body.from, 80);
+    if (!tenantId || !from) throw new HttpError(400, 'invalid_resume');
+    if (env.KV) { try { await env.KV.delete(`pause:${tenantId}:${from}`); } catch (_) {} }
+    console.log(JSON.stringify({ level: 'info', code: 'bot_resumed', actor_role: scope.role }));
+    return json({ ok: true }, 200, NO_STORE);
+  }
+
   if (path === '/api/admin/leads' && request.method === 'GET') {
     const filters = leadFilters(url);
     const rawLimit = Number(url.searchParams.get('limit'));
@@ -1084,14 +1191,18 @@ async function handleAdmin(request, env, ctx, path, url, config) {
       if (cId) { filters.sql += ' AND (l.created_at < ? OR (l.created_at = ? AND l.id < ?))'; filters.values.push(cAt, cAt, cId); }
       else { filters.sql += ' AND l.created_at < ?'; filters.values.push(cAt); }
     }
-    const result = await env.DB.prepare(`SELECT l.*, t.name AS tenant_name, GROUP_CONCAT(n.channel || ':' || n.status) notification_summary FROM leads l LEFT JOIN tenants t ON t.id=l.tenant_id LEFT JOIN lead_notifications n ON n.lead_id=l.id WHERE ${filters.sql} GROUP BY l.id ORDER BY l.created_at DESC, l.id DESC LIMIT ?`).bind(...filters.values, limit + 1).all();
+    const result = await env.DB.prepare(`SELECT l.*, t.name AS tenant_name, GROUP_CONCAT(n.channel || ':' || n.status) notification_summary FROM leads l LEFT JOIN tenants t ON t.id=l.tenant_id LEFT JOIN lead_notifications n ON n.lead_id=l.id WHERE ${filters.sql}${sc.sql} GROUP BY l.id ORDER BY l.created_at DESC, l.id DESC LIMIT ?`).bind(...filters.values, ...sc.args, limit + 1).all();
     const rows = result.results; const more = rows.length > limit; if (more) rows.pop();
+    // Un cliente nunca recibe nombres de tenant (el suyo va en su cabecera).
+    if (scope.role !== 'velai') for (const row of rows) { delete row.tenant_name; delete row.tenant_id; }
     return json({ leads: rows, nextCursor: more ? `${rows.at(-1).created_at}|${rows.at(-1).id}` : null }, 200, NO_STORE);
   }
   if (path === '/api/admin/leads/export.csv' && request.method === 'GET') {
     const filters = leadFilters(url);
-    const rows = (await env.DB.prepare(`SELECT l.created_at,l.status,t.name AS tenant_name,l.source,l.name,l.whatsapp,l.sector,l.messages_per_day,l.channel,l.score,l.note,l.page_url FROM leads l LEFT JOIN tenants t ON t.id=l.tenant_id WHERE ${filters.sql} ORDER BY l.created_at DESC LIMIT 5000`).bind(...filters.values).all()).results;
-    const keys = ['created_at','status','tenant_name','source','name','whatsapp','sector','messages_per_day','channel','score','note','page_url'];
+    const rows = (await env.DB.prepare(`SELECT l.created_at,l.status,t.name AS tenant_name,l.source,l.name,l.whatsapp,l.sector,l.messages_per_day,l.channel,l.score,l.note,l.page_url FROM leads l LEFT JOIN tenants t ON t.id=l.tenant_id WHERE ${filters.sql}${sc.sql} ORDER BY l.created_at DESC LIMIT 5000`).bind(...filters.values, ...sc.args).all()).results;
+    const keys = scope.role === 'velai'
+      ? ['created_at','status','tenant_name','source','name','whatsapp','sector','messages_per_day','channel','score','note','page_url']
+      : ['created_at','status','source','name','whatsapp','sector','messages_per_day','channel','score','note','page_url'];
     const csv = [keys.join(','), ...rows.map((row) => keys.map((key) => csvCell(row[key])).join(','))].join('\r\n');
     return new Response('\uFEFF' + csv, { headers: { 'Content-Type': 'text/csv; charset=utf-8', 'Content-Disposition': 'attachment; filename="velai-leads.csv"', 'Cache-Control': 'no-store' } });
   }
@@ -1139,20 +1250,28 @@ async function handleAdmin(request, env, ctx, path, url, config) {
   if (path === '/api/admin/stats' && request.method === 'GET') {
     // Métricas para la cabecera del panel: solo recuentos y fechas, nunca PII.
     // El listado está paginado — contar en cliente daría números falsos.
-    const [total30, nuevos, fallidos7, tenantsRows, serieRows] = await env.DB.batch([
-      env.DB.prepare("SELECT COUNT(*) AS n FROM leads WHERE created_at >= datetime('now','-30 days')"),
-      env.DB.prepare("SELECT COUNT(*) AS n, MIN(created_at) AS oldest FROM leads WHERE status = 'new'"),
-      env.DB.prepare("SELECT COUNT(*) AS n FROM lead_notifications WHERE status = 'failed' AND updated_at >= datetime('now','-7 days')"),
-      env.DB.prepare('SELECT active, COUNT(*) AS n FROM tenants GROUP BY active'),
-      env.DB.prepare("SELECT date(created_at) AS d, COUNT(*) AS n FROM leads WHERE created_at >= datetime('now','-14 days') GROUP BY d ORDER BY d"),
-    ]);
-    const activos = (tenantsRows.results || []).find((r) => Number(r.active) === 1);
+    // Para el rol cliente, TODAS las cuentas van filtradas a su tenant.
+    const t = scope.tenantId;
+    const leadW = t ? ' AND tenant_id = ?' : '';
+    const leadArgs = t ? [t] : [];
+    const statements = [
+      env.DB.prepare(`SELECT COUNT(*) AS n FROM leads WHERE created_at >= datetime('now','-30 days')${leadW}`).bind(...leadArgs),
+      env.DB.prepare(`SELECT COUNT(*) AS n, MIN(created_at) AS oldest FROM leads WHERE status = 'new'${leadW}`).bind(...leadArgs),
+      t
+        ? env.DB.prepare("SELECT COUNT(*) AS n FROM lead_notifications ln JOIN leads l ON l.id = ln.lead_id WHERE ln.status = 'failed' AND ln.updated_at >= datetime('now','-7 days') AND l.tenant_id = ?").bind(t)
+        : env.DB.prepare("SELECT COUNT(*) AS n FROM lead_notifications WHERE status = 'failed' AND updated_at >= datetime('now','-7 days')"),
+      env.DB.prepare(`SELECT date(created_at) AS d, COUNT(*) AS n FROM leads WHERE created_at >= datetime('now','-14 days')${leadW} GROUP BY d ORDER BY d`).bind(...leadArgs),
+    ];
+    if (!t) statements.push(env.DB.prepare('SELECT active, COUNT(*) AS n FROM tenants GROUP BY active'));
+    const results = await env.DB.batch(statements);
+    const [total30, nuevos, fallidos7, serieRows, tenantsRows] = results;
+    const activos = tenantsRows ? (tenantsRows.results || []).find((r) => Number(r.active) === 1) : null;
     return json({
       total30: total30.results[0].n,
       sinContactar: nuevos.results[0].n,
       sinContactarDesde: nuevos.results[0].oldest || null,
       fallidos7: fallidos7.results[0].n,
-      tenantsActivos: activos ? activos.n : 0,
+      tenantsActivos: t ? null : (activos ? activos.n : 0),
       porDia: fillSeries(serieRows.results || [], 14),
     }, 200, NO_STORE);
   }
@@ -1251,8 +1370,10 @@ async function handleAdmin(request, env, ctx, path, url, config) {
   if (!match || !UUID_RE.test(match[1])) throw new HttpError(404, 'not_found');
   const id = match[1]; const action = match[2];
   if (!action && request.method === 'GET') {
-    const lead = await env.DB.prepare('SELECT l.*, t.name AS tenant_name FROM leads l LEFT JOIN tenants t ON t.id=l.tenant_id WHERE l.id=?').bind(id).first();
+    // Fuera de alcance = 404, no 403: un 403 confirmaría que el lead existe.
+    const lead = await env.DB.prepare(`SELECT l.*, t.name AS tenant_name FROM leads l LEFT JOIN tenants t ON t.id=l.tenant_id WHERE l.id=?${sc.sql}`).bind(id, ...sc.args).first();
     if (!lead) throw new HttpError(404, 'not_found');
+    if (scope.role !== 'velai') { delete lead.tenant_name; delete lead.tenant_id; }
     const [notes, events, notifications] = await Promise.all([
       env.DB.prepare('SELECT * FROM lead_notes WHERE lead_id=? ORDER BY created_at DESC').bind(id).all(),
       env.DB.prepare('SELECT * FROM lead_events WHERE lead_id=? ORDER BY created_at DESC').bind(id).all(),
@@ -1262,28 +1383,33 @@ async function handleAdmin(request, env, ctx, path, url, config) {
   }
   if (!action && request.method === 'PATCH') {
     const body = await readJson(request, 2000); if (!STATUSES.has(body.status)) throw new HttpError(400, 'invalid_status');
+    // Propiedad primero: el UPDATE lleva el scope y 0 cambios = 404 (no existe para ti).
     const now = new Date().toISOString();
-    await env.DB.batch([
-      env.DB.prepare('UPDATE leads SET status=?,updated_at=?,expires_at=? WHERE id=?').bind(body.status, now, expiryDate(env), id),
-      env.DB.prepare("INSERT INTO lead_events (lead_id,actor_email,event_type,detail,created_at) VALUES (?,?,'status_changed',?,?)").bind(id, actor, body.status, now),
-    ]);
+    const updated = await env.DB.prepare(`UPDATE leads SET status=?,updated_at=?,expires_at=? WHERE id=?${sc.sql.replace('l.', '')}`).bind(body.status, now, expiryDate(env), id, ...sc.args).run();
+    if (!updated.meta.changes) throw new HttpError(404, 'not_found');
+    await env.DB.prepare("INSERT INTO lead_events (lead_id,actor_email,actor_role,event_type,detail,created_at) VALUES (?,?,?,'status_changed',?,?)").bind(id, actor, scope.role, body.status, now).run();
     return json({ ok: true }, 200, NO_STORE);
   }
   if (action === 'notes' && request.method === 'POST') {
     const body = await readJson(request, 3000); const text = clean(body.text, 2000); if (!text) throw new HttpError(400, 'invalid_note');
     const now = new Date().toISOString();
+    const owned = await env.DB.prepare(`SELECT l.id FROM leads l WHERE l.id=?${sc.sql}`).bind(id, ...sc.args).first();
+    if (!owned) throw new HttpError(404, 'not_found');
     await env.DB.batch([
-      env.DB.prepare('INSERT INTO lead_notes (lead_id,author_email,text,created_at) VALUES (?,?,?,?)').bind(id, actor, text, now),
+      env.DB.prepare('INSERT INTO lead_notes (lead_id,author_email,author_role,text,created_at) VALUES (?,?,?,?,?)').bind(id, actor, scope.role, text, now),
       env.DB.prepare('UPDATE leads SET updated_at=?,expires_at=? WHERE id=?').bind(now, expiryDate(env), id),
     ]);
     return json({ ok: true }, 201, NO_STORE);
   }
   if (action === 'retry' && request.method === 'POST') {
+    // Defensa en profundidad: el router ya lo bloquea, pero el endpoint valida igual.
+    if (scope.role !== 'velai') throw new HttpError(403, 'not_authorized');
     const now = new Date().toISOString();
     await env.DB.prepare("UPDATE lead_notifications SET status='pending',attempts=0,next_attempt_at=NULL,last_error=NULL,updated_at=? WHERE lead_id=? AND status!='sent'").bind(now, id).run();
     ctx.waitUntil(processNotifications(env, id, true)); return json({ ok: true }, 202, NO_STORE);
   }
   if (!action && request.method === 'DELETE') {
+    if (scope.role !== 'velai') throw new HttpError(403, 'not_authorized'); // borrado RGPD: solo Velai
     await env.DB.prepare('DELETE FROM leads WHERE id=?').bind(id).run(); return new Response(null, { status: 204 });
   }
   throw new HttpError(405, 'method_not_allowed');
@@ -1420,4 +1546,4 @@ export function createWorker(config) {
   };
 }
 
-export const testing = { clean, normalizePhone, extractPhone, safeUtm, publicCors, validTwilioSignature, csvCell, expiryDate, leadFilters, isDemoKey, templateVar, leadTemplateVariables, readJson, deliver, drainQueuedLeads, verifyTurnstile, systemFor, validateTenant, invalidateTenantCache, tenantWriteError, assertNotActivePending, handleProvision, pollProvisioning, fillSeries };
+export const testing = { clean, normalizePhone, extractPhone, safeUtm, publicCors, validTwilioSignature, csvCell, expiryDate, leadFilters, isDemoKey, templateVar, leadTemplateVariables, readJson, deliver, drainQueuedLeads, verifyTurnstile, systemFor, validateTenant, invalidateTenantCache, tenantWriteError, assertNotActivePending, handleProvision, pollProvisioning, fillSeries, resolveScope, scopeClause, clienteAllowed, adminRouter };

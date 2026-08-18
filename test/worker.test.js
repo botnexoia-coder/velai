@@ -683,6 +683,177 @@ test('la serie de 14 días devuelve 14 entradas incluso sin leads y la respuesta
   assert.equal(res.status, 401);
 });
 
+// ── SPEC-HANDOFF parte A: el bot se calla cuando entra un humano ──
+function handoffHarness() {
+  const kvStore = new Map();
+  const telegram = [];
+  let modelCalls = 0;
+  const tenant = { id: 't-h', slug: 'barberia', name: 'Barbería', channel_address: 'whatsapp:+34910000001', system_prompt: 'x'.repeat(60) };
+  const tenantB = { id: 't-i', slug: 'clinica', name: 'Clínica', channel_address: 'whatsapp:+34910000002', system_prompt: 'y'.repeat(60) };
+  const env = {
+    TWILIO_ACCOUNT_SID: 'AC' + 'p'.repeat(32), TWILIO_AUTH_TOKEN: 'tok', ANTHROPIC_API_KEY: 'k',
+    TELEGRAM_TOKEN: 'tg', TELEGRAM_CHAT_ID: '-1',
+    KV: {
+      async get(k, type) { const v = kvStore.get(k); return v == null ? null : (type === 'json' ? JSON.parse(v) : v); },
+      async put(k, v) { kvStore.set(k, typeof v === 'string' ? v : JSON.stringify(v)); },
+      async delete(k) { kvStore.delete(k); },
+    },
+    DB: { prepare: (sql) => ({ bind: (...args) => ({
+      first: async () => sql.includes('channel_address') ? ([tenant, tenantB].find((t) => t.channel_address === args[0]) || null) : null,
+      all: async () => ({ results: [] }), run: async () => ({ meta: { changes: 1 } }),
+    }) }), batch: async () => [] },
+  };
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = async (url, init) => {
+    if (String(url).includes('api.anthropic.com')) {
+      modelCalls++;
+      const msg = JSON.parse(init.body).messages.at(-1).content;
+      const text = /persona|humano/i.test(msg) ? 'Claro, aviso al equipo. [[HUMANO]]' : 'hola, ¿en qué te ayudo?';
+      return new Response(JSON.stringify({ content: [{ text }] }), { status: 200 });
+    }
+    if (String(url).includes('api.telegram.org')) { telegram.push(String(init.body)); return new Response(JSON.stringify({ ok: true }), { status: 200 }); }
+    return new Response('{}', { status: 200 });
+  };
+  return { env, kvStore, telegram, modelCalls: () => modelCalls, restore: () => { globalThis.fetch = realFetch; },
+    send: async (worker, ctx, to, body) => worker.fetch(await twilioRequest('https://worker.test/', { AccountSid: env.TWILIO_ACCOUNT_SID, From: 'whatsapp:+34600000000', To: to, Body: body }, 'tok'), env, ctx) };
+}
+
+test('handoff: el centinela pausa por tenant+remitente, avisa una vez y nunca llega al cliente', async () => {
+  const worker = createWorker({ SYSTEM: 's', DEMOS: {}, SUMMARY_PROMPT: '', GUARDRAILS: 'REGLA' });
+  const promises = []; const ctx = { waitUntil(p) { promises.push(p); } };
+  const h = handoffHarness();
+  try {
+    // 1) conversación normal: contesta
+    const ok = await h.send(worker, ctx, 'whatsapp:+34910000001', 'hola');
+    assert.match(await ok.text(), /en qué te ayudo/);
+    // 2) pide humano: responde SIN el centinela, crea la pausa y avisa UNA vez
+    const esc = await h.send(worker, ctx, 'whatsapp:+34910000001', 'quiero hablar con una persona');
+    const twiml = await esc.text();
+    assert.ok(!twiml.includes('[[HUMANO]]'), 'el centinela jamás llega al cliente final');
+    assert.match(twiml, /aviso al equipo/);
+    await Promise.allSettled(promises);
+    assert.ok(h.kvStore.has('pause:t-h:whatsapp:+34600000000'), 'clave de pausa creada');
+    assert.equal(h.telegram.length, 1, 'un aviso de escalada');
+    // 3) pausado: 200 TwiML vacío, sin modelo, sin aviso nuevo, mensaje guardado
+    const before = h.modelCalls();
+    const paused = await h.send(worker, ctx, 'whatsapp:+34910000001', '¿hola?');
+    assert.equal(paused.status, 200);
+    assert.match(await paused.text(), /<Response><\/Response>/);
+    assert.equal(h.modelCalls(), before, 'cero llamadas al modelo en pausa');
+    assert.equal(h.telegram.length, 1, 'sin aviso repetido');
+    const hist = JSON.parse(h.kvStore.get('conv:wa:t-h:whatsapp:+34600000000'));
+    assert.equal(hist.at(-1).content, '¿hola?', 'el mensaje queda en el historial');
+    // 4) la pausa NO es global: el mismo remitente con OTRO tenant recibe respuesta
+    const other = await h.send(worker, ctx, 'whatsapp:+34910000002', 'hola');
+    assert.match(await other.text(), /en qué te ayudo/);
+    // 5) expirada la pausa (TTL): vuelve a contestar
+    h.kvStore.delete('pause:t-h:whatsapp:+34600000000');
+    const back = await h.send(worker, ctx, 'whatsapp:+34910000001', 'hola de nuevo');
+    assert.match(await back.text(), /en qué te ayudo/);
+  } finally { h.restore(); }
+});
+
+// ── SPEC-HANDOFF parte B: aislamiento por tenant — tests de fuga ──
+function scopedDb({ leads = [], tenantUser = null } = {}) {
+  const queries = [];
+  return {
+    queries,
+    prepare(sql) {
+      return { bind: (...args) => ({
+        first: async () => {
+          queries.push({ sql, args });
+          if (sql.includes('tenant_users')) return tenantUser;
+          if (/SELECT l\.\*.*WHERE l\.id=\?/.test(sql) || /SELECT l\.id FROM leads/.test(sql)) {
+            return leads.find((l) => l.id === args[0] && (!sql.includes('tenant_id') || l.tenant_id === args[1])) || null;
+          }
+          if (sql.includes('SELECT name FROM tenants')) return { name: 'Mi Negocio' };
+          return null;
+        },
+        all: async () => {
+          queries.push({ sql, args });
+          if (sql.includes('FROM leads l')) {
+            const scoped = sql.includes('l.tenant_id = ?') ? leads.filter((l) => l.tenant_id === args.at(sql.includes('LIMIT ?') ? -2 : -1)) : leads;
+            return { results: scoped.map((l) => ({ ...l })) };
+          }
+          return { results: [] };
+        },
+        run: async () => { queries.push({ sql, args }); return { meta: { changes: sql.includes('tenant_id') ? (leads.some((l) => l.id === args[3] && l.tenant_id === args[4]) ? 1 : 0) : 1 } }; },
+      }) };
+    },
+    batch: async (stmts) => stmts.map(() => ({ results: [{ n: 0, oldest: null }] })),
+  };
+}
+const CLIENTE = { role: 'cliente', tenantId: 't-mio', email: 'cliente@x.com' };
+const VELAI = { role: 'velai', tenantId: null, email: 'admin@velai' };
+const LEADS = [
+  { id: '00000000-0000-4000-8000-0000000000a1', tenant_id: 't-mio', name: 'Mío', whatsapp: '+34600000001', tenant_name: 'Mi Negocio', status: 'new', created_at: '2026-08-18T00:00:00Z' },
+  { id: '00000000-0000-4000-8000-0000000000a2', tenant_id: 't-otro', name: 'Ajeno', whatsapp: '+34600000002', tenant_name: 'Otro Negocio', status: 'new', created_at: '2026-08-18T00:00:00Z' },
+];
+const adminReq = (path, init) => new Request('https://admin.hirevai.com' + path, init);
+
+test('fuga B1/B2/B8: un cliente solo ve sus leads; el lead ajeno es 404; sin nombres de otros', async () => {
+  const db = scopedDb({ leads: LEADS });
+  const env = { KV: { async get() { return null; }, async put() {}, async delete() {}, async list() { return { keys: [] }; } }, DB: db };
+  const ctx = { waitUntil() {} };
+  // listado: solo los suyos, sin tenant_name
+  const list = await testing.adminRouter(adminReq('/api/admin/leads'), env, ctx, '/api/admin/leads', new URL('https://x/api/admin/leads'), {}, CLIENTE);
+  const data = await list.json();
+  assert.deepEqual(data.leads.map((l) => l.id), ['00000000-0000-4000-8000-0000000000a1']);
+  const raw = JSON.stringify(data);
+  assert.ok(!raw.includes('Otro Negocio') && !raw.includes('tenant_name') && !raw.includes('twilio_auth_token_enc'));
+  // lead ajeno por id → 404, no 403
+  await assert.rejects(
+    testing.adminRouter(adminReq('/api/admin/leads/' + LEADS[1].id), env, ctx, '/api/admin/leads/' + LEADS[1].id, new URL('https://x/'), {}, CLIENTE),
+    (e) => e.status === 404, 'ajeno = 404');
+  // el suyo sí
+  const mine = await testing.adminRouter(adminReq('/api/admin/leads/' + LEADS[0].id), env, ctx, '/api/admin/leads/' + LEADS[0].id, new URL('https://x/'), {}, CLIENTE);
+  assert.equal((await mine.json()).lead.id, LEADS[0].id);
+});
+
+test('fuga B3: rutas prohibidas para cliente → 403 sin tocar datos', async () => {
+  const db = scopedDb({ leads: LEADS });
+  const env = { KV: { async get() { return null; } }, DB: db };
+  const ctx = { waitUntil() {} };
+  const forbidden = [
+    ['/api/admin/tenants', 'GET'],
+    ['/api/admin/tenants/00000000-0000-4000-8000-000000000001/provision/subaccount', 'POST'],
+    ['/api/admin/leads/' + LEADS[0].id, 'DELETE'],
+    ['/api/admin/leads/' + LEADS[0].id + '/retry', 'POST'],
+    ['/api/admin/tenants/00000000-0000-4000-8000-000000000001/preview', 'POST'],
+  ];
+  for (const [path, method] of forbidden) {
+    const before = db.queries.length;
+    await assert.rejects(
+      testing.adminRouter(adminReq(path, { method }), env, ctx, path, new URL('https://x' + path), {}, CLIENTE),
+      (e) => e.status === 403 && e.code === 'not_authorized', `${method} ${path}`);
+    assert.equal(db.queries.length, before, `sin consultas a D1 para ${path}`);
+  }
+});
+
+test('fuga B4/B5: CSV y métricas de un cliente, solo lo suyo y sin columna de tenants', async () => {
+  const db = scopedDb({ leads: LEADS });
+  const env = { KV: { async get() { return null; } }, DB: db };
+  const csv = await testing.adminRouter(adminReq('/api/admin/leads/export.csv'), env, { waitUntil() {} }, '/api/admin/leads/export.csv', new URL('https://x/api/admin/leads/export.csv'), {}, CLIENTE);
+  const text = await csv.text();
+  assert.ok(!text.includes('tenant_name') && !text.includes('Otro Negocio') && !text.includes('+34600000002'));
+  // stats: la consulta de leads lleva el filtro del tenant
+  await testing.adminRouter(adminReq('/api/admin/stats'), env, { waitUntil() {} }, '/api/admin/stats', new URL('https://x/api/admin/stats'), {}, CLIENTE);
+  const statsQueries = db.queries.filter((q) => q.sql.includes('FROM leads') && q.sql.includes('-30 days'));
+  assert.ok(statsQueries.every((q) => q.sql.includes('tenant_id = ?')), 'métricas filtradas por tenant');
+});
+
+test('fuga B6/B7: sin fila ni ADMIN_EMAILS → 403; ADMIN_EMAILS vacío no rompe a los clientes', async () => {
+  const noUser = { DB: scopedDb({ tenantUser: null }), ADMIN_EMAILS: 'admin@velai' };
+  await assert.rejects(testing.resolveScope(noUser, 'extraño@x.com'), (e) => e.status === 403);
+  // admin por variable
+  assert.equal((await testing.resolveScope(noUser, 'ADMIN@velai')).role, 'velai');
+  // ADMIN_EMAILS vacío: nadie escala a admin, el cliente sigue entrando con su fila
+  const cliente = { DB: scopedDb({ tenantUser: { tenant_id: 't-mio', role: 'cliente' } }), ADMIN_EMAILS: '' };
+  const scope = await testing.resolveScope(cliente, 'cliente@x.com');
+  assert.deepEqual({ role: scope.role, tenantId: scope.tenantId }, { role: 'cliente', tenantId: 't-mio' });
+  await assert.rejects(testing.resolveScope({ DB: scopedDb({}), ADMIN_EMAILS: '' }, 'nadie@x.com'), (e) => e.status === 403);
+});
+
 test('el Worker rechaza CORS desconocido y exige Access en administración', async () => {
   const worker = createWorker({ SYSTEM: '', DEMOS: {}, SUMMARY_PROMPT: '' });
   const ctx = { waitUntil() {} };
