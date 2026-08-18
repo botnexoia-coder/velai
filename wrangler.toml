@@ -39,9 +39,9 @@ ADMIN_EMAILS = "botnexo.ia@gmail.com"
 # Zone(hirevai.com)→Access: Apps and Policies→Edit. Estos tres son públicos/ids.
 CF_ACCOUNT_ID = "6a5877b5637ec5fa28d05af46e894542"
 TURNSTILE_SITEKEY = "0x4AAAAAAESkAwvlDVJD9Z1l"
-# Id del grupo de Access «Clientes Velai» (se crea una vez — SPEC-ACCESO paso 2).
-# Vacío = la sincronización de la puerta queda en 'manual' y el panel lo avisa.
-CF_ACCESS_GROUP_ID = ""
+# Id del grupo de Access «Clientes Velai» (creado el 2026-08-18 vía API; la política
+# «Clientes Velai» de la app admin.hirevai.com lo incluye, aparte de la de admins).
+CF_ACCESS_GROUP_ID = "e08705f9-5d71-457e-9628-13bdaf034435"
 
 # Workers Logs: sin este bloque cada deploy lo deja APAGADO y los logs operativos
 # (tenant_token_undecryptable, provision_orphan, lead_d1_fallback…) no se ven en
