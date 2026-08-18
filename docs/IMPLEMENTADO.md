@@ -182,6 +182,30 @@ honesta, blog con artículos comparativos, generador de link/QR de WhatsApp, tes
 secuencia de nurturing post-diagnóstico, demos grupales, programa de referidos y KPIs del
 funnel (baseline sin establecer).
 
+## Widget de clientes: marca propia + Turnstile autosuficiente (`PLAN-CORREGIDO-WIDGET-CLIENTES.md`)
+
+Desplegado el 2026-08-18 (worker `df2e680d`, Pages `847d4b19`, migración 0007 aplicada,
+suite 59/59). El widget dejó de depender de `funnel.js` — sin `VELAI_HUMAN` carga
+Turnstile y ejecuta el challenge él mismo, con la sitekey pública de Velai por defecto —
+lo que desbloquea las 4 webs de clientes (el chat de `zoetravelspain.com/prueba-vai/` no
+funcionaba por esa dependencia no declarada, no por el snippet de Sebas). La marca de
+cada cliente vive en D1 (11 columnas de la migración 0007), se edita desde la sección
+«Marca del widget» de la ficha (con previsualización) y se sirve por `GET /widget/boot`
+(público, CORS, caché = la fila de `tenantBySlug`, slug desconocido → 404): el chat pinta
+logo, `bot · marca`, saludo ES/EN, chips, colores (variables CSS por CSSOM), tema
+claro/oscuro y el WhatsApp del cliente en los errores. Los defaults de Velai viven en el
+widget: hirevai.com quedó idéntico. Las 26 páginas pasaron de `?v=5` a `?v=7` (v6 se
+saltó: todo salió en un deploy). De paso se corrigió la paginación del panel (sin
+`?limit` el listado devolvía 1 lead, no 50). Decisiones de Juan: marca desde el panel
+(no inline en el HTML del cliente) y el widget sustituye al chat propio de Zoe.
+Verificado en producción: los 4 slugs de clientes responden 200 en `/widget/boot` —
+las altas del panel estaban hechas.
+
+**Sobrevive como pendiente** (TAREAS-PENDIENTES §2f): la marca de cada cliente está
+toda en null (recopilarla y cargarla), hostnames de Turnstile, nombre del asistente de
+Diálogos, y la parte de Sebas (snippet `?v=7` en las 4 webs, quitar chats viejos solo
+tras ver la marca).
+
 ## Contextos amplios — fase 1 (`CONTEXTOS-AMPLIOS.md`, el doc sigue vivo por las fases 2–4)
 
 `callAnthropic` envía el `system` como array de bloques con `cache_control: ephemeral`:

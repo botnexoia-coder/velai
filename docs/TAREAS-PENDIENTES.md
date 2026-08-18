@@ -42,7 +42,8 @@ Sin esto, las campañas gastarían presupuesto a ciegas (sin medir conversiones)
 
 ### 2c. Alta de los 4 clientes + 1 prospecto (plan de alta aplicado — ver `IMPLEMENTADO.md`)
 
-- [ ] **Alta en el panel** de `hiredatavision`, `gogestion`, `zoe`, `dialogos` (contextos listos en `tenants/*.md` — pegar, Probar y guardar; SIDs de subcuenta en Twilio → Subaccounts) y `myxu-costura` como prospecto (`pending:myxu-costura`, inactivo).
+- [x] **Alta en el panel** de `hiredatavision`, `gogestion`, `zoe`, `dialogos` — verificado el 2026-08-18: los 4 slugs responden 200 en `/widget/boot` (filas activas).
+- [ ] `myxu-costura` como prospecto (`pending:myxu-costura`, inactivo) — sin verificar (un prospecto inactivo no responde en `/widget/boot`; mirar en el panel).
 - [ ] **Auth tokens de las 4 subcuentas** pegados en el panel (campo write-only; Twilio → subcuenta → Keys & Credentials).
 - [ ] **Verificación de negocio en Meta de cada cliente** (con su CIF; añaden a Velai como socio) — bloqueante para su WhatsApp.
 - [ ] **Tope de gasto por subcuenta** en Twilio.
@@ -64,6 +65,14 @@ Sin esto, las campañas gastarían presupuesto a ciegas (sin medir conversiones)
 - [ ] Quitar el CSS muerto `.vai-fab` de `assets/styles.scss` (3 apariciones) y `assets/styles.css` (1).
 - [ ] En Cloudflare: `www.hirevai.com` figura "Inactivo (Error)", DMARC sigue en `p=none`, y el proyecto Pages legacy `hirevai` sin retirar.
 - [ ] Revisar las métricas del chat (eventos `chat_*` en GA4) a partir del ~2026-08-24, con una semana de datos.
+
+### 2f. Widget con marca en las webs de los clientes (desplegado `?v=7` el 2026-08-18 — ver `IMPLEMENTADO.md`)
+
+- [ ] **Verificar los 8 hostnames en el widget de Turnstile** (sitekey `0x4AAAAAAESkAwvlDVJD9Z1l`): apex + `www` de los 4 dominios. `verifyTurnstile` cruza el hostname contra `ALLOWED_WEB_ORIGINS` — tiene que estar en las DOS listas. **Antes de que Sebas pruebe**, o su prueba falla con `human_verification_failed`.
+- [ ] **Recopilar y cargar la marca de cada cliente** en la ficha del panel (sección «Marca del widget»): logo https, 2 colores, nombre del bot, saludo (ES y EN para Zoe), chips, placeholder y WhatsApp de contacto. Hoy los 4 están en null → sus chats saldrían como `Vai · Velai`. Punto de partida documentado en `IMPLEMENTADO.md` §Widget (Zoe: `#1a4fd0`/`#f57a1f`, logo `/img/zoe-logo.png`; GOgestión: Faby, `#A6153A`/`#FDF8F0`, wa 34634167405).
+- [ ] **Decidir el nombre del asistente de Diálogos** (su prompt no le da ninguno; la cabecera del chat lo necesita).
+- [ ] **Acceso a los repos de HireDataVision y Diálogos** (404 con el token gh actual) o su marca por otra vía.
+- [ ] **Sebas** (su checklist es `PARA-JOHAN-widget-en-webs-cliente.md` v2): subir `/prueba-vai/` de Zoe a `?v=7`, snippet en las 4 webs, y quitar chats viejos SOLO cuando la cabecera muestre la marca del cliente. Los workers viejos no se apagan hasta que el tenant iguale al bot viejo en marca Y respuestas.
 
 ### 2a-bis. Alta de usuarios desde el panel (SPEC-USUARIOS — desplegado, falta un paso manual)
 
