@@ -180,7 +180,6 @@ dialog::backdrop{background:rgba(5,3,6,.78);backdrop-filter:blur(3px)}
 <div id="tDup" hidden class="mb6"><label class="muted">Duplicar de… <select id="tDupSel"><option value="">— empezar de cero —</option></select></label></div>
 <textarea id="tPrompt" rows="14" class="promptbox"></textarea>
 <small class="muted field-err" data-f="system_prompt"></small></div>
-<div class="actions"><input id="tNote" placeholder="Nota del cambio (opcional)" class="grow inpill"><button class="btn" id="tenantSave" type="button">Guardar</button></div>
 <div class="card mt12"><b>Marca del widget (chat en la web del cliente)</b>
 <p class="muted mt6">Lo que ve el visitante: logo, nombre, saludo, colores. Vacío = marca de Velai (hirevai.com no cambia). Se sirve por <code>/widget/boot</code> y se aplica sin deploy (caché 5 min).</p>
 <div class="grid mt6">
@@ -196,6 +195,7 @@ dialog::backdrop{background:rgba(5,3,6,.78);backdrop-filter:blur(3px)}
 <div class="card"><b>Tema del chat</b><select id="tTheme"><option value="">auto (según el visitante)</option><option value="light">light</option><option value="dark">dark</option></select></div>
 </div>
 <div class="mt12"><b class="muted">Previsualización</b><div id="brandPrev"></div></div></div>
+<div class="actions"><input id="tNote" placeholder="Nota del cambio (opcional)" class="grow inpill"><button class="btn" id="tenantSave" type="button">Guardar</button></div>
 <div class="card mt12"><b>Probar el borrador (no guarda nada)</b>
 <div class="note mt6"><input id="tTestMsg" placeholder="Mensaje de prueba, p. ej. «hola, ¿tenéis hueco mañana?»" class="grow"><button class="btn alt" id="tenantPreview" type="button">Probar</button></div>
 <article id="tPreviewOut" class="muted prewrap"></article></div>
@@ -264,7 +264,12 @@ function meter(chars){const w=Math.min(100,Math.round(chars/12000*100));return '
 async function loadTenantList(){try{const d=await api('/api/admin/tenants');tenantList=d.tenants;$('#tenantRows').innerHTML=d.tenants.map(t=>'<tr data-tid="'+t.id+'"><td>'+tenantChip(t.id,t.name)+'</td><td class="muted">'+esc(t.channel_address)+'</td><td>'+t.lead_count+'</td><td>'+meter(t.prompt_len)+'</td><td>'+semaforo(t)+'</td><td>'+(t.active?'<span class="flag ok">activo</span>':'<span class="flag off">inactivo</span>')+'</td></tr>').join('')||'<tr><td colspan="6" class="empty">Sin clientes.</td></tr>';paint($('#tenantRows'))}catch(e){alert(e.message)}}
 $('#tenantRows').onclick=e=>{const tr=e.target.closest('[data-tid]');if(tr)openTenant(tr.dataset.tid)};
 $('#newTenant').onclick=()=>openTenant(null);
-$('#tenantClose').onclick=()=>$('#tenantModal').close();
+// Cambios sin guardar: cerrar el modal (botón o ESC) pide confirmación antes de descartar.
+let tenantDirty=false;
+$('#tenantModal').addEventListener('input',e=>{if(e.target.id!=='tTestMsg')tenantDirty=true});
+function confirmDiscard(){return !tenantDirty||confirm('Hay cambios sin guardar en esta ficha. ¿Cerrar y descartarlos?')}
+$('#tenantClose').onclick=()=>{if(confirmDiscard()){tenantDirty=false;$('#tenantModal').close()}};
+$('#tenantModal').addEventListener('cancel',e=>{if(!confirmDiscard())e.preventDefault();else tenantDirty=false});
 const TF={name:'#tName',slug:'#tSlug',channel_address:'#tAddress',twilio_from:'#tFrom',team_whatsapp:'#tTeam',telegram_chat_id:'#tChat',lead_template_sid:'#tTpl',twilio_subaccount_sid:'#tSub',waba_id:'#tWaba',meta_partner_status:'#tPartner',system_prompt:'#tPrompt',bot_name:'#tBotName',brand_name:'#tBrandName',logo_url:'#tLogo',brand_color:'#tColor1',brand_color_2:'#tColor2',greeting:'#tGreeting',greeting_en:'#tGreetingEn',placeholder:'#tPlaceholder',wa_number:'#tWa',theme:'#tTheme'};
 // chips_json va aparte: en el form es una línea por chip; al worker viaja como array.
 function chipsToLines(json){try{const a=JSON.parse(json||'[]');return Array.isArray(a)?a.join('\\n'):''}catch(e){return ''}}
@@ -287,7 +292,7 @@ async function openTenant(id){clearTenantErrs();$('#tPreviewOut').textContent=''
  $('#tToken').value='';
  if(id){const d=await api('/api/admin/tenants/'+id);const t=d.tenant;editing={id:t.id,updated_at:t.updated_at};$('#tenantTitle').textContent=t.name;$('#tDup').hidden=true;for(const[k,sel]of Object.entries(TF))$(sel).value=t[k]??'';$('#tChips').value=chipsToLines(t.chips_json);$('#tActive').checked=!!t.active;$('#tTokenState').textContent=t.has_twilio_token?'configurado ✓ (escribe solo para sustituirlo)':'sin configurar';$('#tProv').hidden=false;$('#tUsersCard').hidden=false;loadProv(id);loadVersions(id);loadUsers(id)}
  else{editing=null;$('#tenantTitle').textContent='Nuevo cliente';$('#tDup').hidden=false;$('#tDupSel').innerHTML='<option value="">— empezar de cero —</option>'+tenantList.map(t=>'<option value="'+t.id+'">'+esc(t.name)+'</option>').join('');for(const sel of Object.values(TF))$(sel).value='';$('#tChips').value='';$('#tPartner').value='pendiente';$('#tActive').checked=true;$('#tTokenState').textContent='sin configurar';$('#tProv').hidden=true;$('#tUsersCard').hidden=true;$('#tVersions').textContent='—'}
- updateCount();brandPreview();$('#tenantModal').showModal()}
+ updateCount();brandPreview();tenantDirty=false;$('#tenantModal').showModal()}
 $('#tDupSel').onchange=async e=>{if(!e.target.value)return;const d=await api('/api/admin/tenants/'+e.target.value);$('#tPrompt').value=d.tenant.system_prompt||'';updateCount()};
 $('#tenantSave').onclick=async()=>{clearTenantErrs();
  const body={};for(const[k,sel]of Object.entries(TF))body[k]=$(sel).value;body.chips_json=chipsFromLines();body.active=$('#tActive').checked;body.note=$('#tNote').value;
@@ -295,7 +300,7 @@ $('#tenantSave').onclick=async()=>{clearTenantErrs();
  try{
   if(editing){body.expected_updated_at=editing.updated_at;const r=await api('/api/admin/tenants/'+editing.id,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});editing.updated_at=r.updated_at;loadVersions(editing.id)}
   else{const r=await api('/api/admin/tenants',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});editing={id:r.id,updated_at:r.updated_at};$('#tenantTitle').textContent=body.name;$('#tDup').hidden=true}
-  $('#tenantMsg').innerHTML='<p class="okmsg">Guardado.</p>';loadTenantList()
+  $('#tenantMsg').innerHTML='<p class="okmsg">Guardado.</p>';tenantDirty=false;loadTenantList()
  }catch(e){const c=e.message;const m=c.match(/^invalid_(.+)$/);
   if(m&&document.querySelector('.field-err[data-f="'+m[1]+'"]'))document.querySelector('.field-err[data-f="'+m[1]+'"]').textContent='Formato inválido — revisa el ejemplo del campo.';
   else $('#tenantMsg').innerHTML='<p class="error">'+esc(TERRS[c]||c)+'</p>'}};
