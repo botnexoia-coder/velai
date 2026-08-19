@@ -1,4 +1,6 @@
-// Panel admin — presentación alineada con hirevai.com (SPEC-REDISENO-PANEL.md).
+// Panel admin — rediseño 2026-08 (aprobado en el canvas «Panel Velai — Rediseño»):
+// navegación lateral, ficha de cliente con pestañas y UN solo Guardar, alta guiada
+// por pasos (el borrador queda como prospecto sin enrutar hasta activarlo).
 // Reglas que NO se rompen (§7 de la spec): token write-only, provPost recarga la
 // ficha entera, nada sensible en el DOM, sin recursos externos salvo las fuentes
 // de hirevai.com, y los mismos id/TERRS que traducen los códigos del worker.
@@ -11,113 +13,146 @@ export const ADMIN_HTML = `<!doctype html>
 @font-face{font-family:'Satoshi';src:url('https://hirevai.com/fonts/satoshi-500.woff2?v=2') format('woff2');font-weight:500;font-display:swap}
 :root{color-scheme:dark;
 --orange:#FF6B1A;--orange2:#FF8C40;--amber:#FFAA00;
---bg:#09070A;--bg2:#110D13;--surface:#181220;
---border:rgba(255,107,26,.12);--border2:rgba(255,107,26,.22);
---white:#FFF8F4;--muted:rgba(255,248,244,.62);--muted2:rgba(255,248,244,.40);
+--bg:#09070A;--bg2:#110D13;--bg3:#0C0A0E;--side:#0D0A10;--surface:#181220;
+--border:rgba(255,107,26,.10);--border2:rgba(255,248,244,.14);--line:rgba(255,248,244,.06);
+--white:#FFF8F4;--muted:rgba(255,248,244,.62);--muted2:rgba(255,248,244,.48);
 --font-d:'Cabinet Grotesk',system-ui,sans-serif;--font-b:'Satoshi',system-ui,sans-serif;
---r:14px;--r-sm:9px;--header-h:57px;
+--r:16px;--r-sm:10px;
 --ok:#199e70;--bad:#e66767;
 --st-new:#3987e5;--st-contacted:#c98500;--st-qualified:#9085e9;--st-won:#199e70;--st-lost:#e66767;--st-spam:#8b8b95}
 *{box-sizing:border-box}
-body{margin:0;background:var(--bg);color:var(--white);font:14px/1.5 var(--font-b)}
+body{margin:0;display:flex;min-height:100vh;background:var(--bg);color:var(--white);font:14px/1.5 var(--font-b)}
 body::before{content:'';position:fixed;inset:0;pointer-events:none;background:linear-gradient(rgba(255,248,244,.04) 1px,transparent 1px),linear-gradient(90deg,rgba(255,248,244,.04) 1px,transparent 1px);background-size:64px 64px;-webkit-mask-image:radial-gradient(ellipse 80% 60% at 50% 0%,#000 40%,transparent 100%);mask-image:radial-gradient(ellipse 80% 60% at 50% 0%,#000 40%,transparent 100%)}
 button,input,select,textarea{font:inherit;color:var(--white)}
 button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible,[tabindex]:focus-visible{outline:2px solid var(--orange);outline-offset:2px}
-header{position:sticky;top:0;z-index:20;height:var(--header-h);padding:0 max(20px,3vw);display:flex;align-items:center;gap:18px;background:rgba(9,7,10,.92);backdrop-filter:blur(10px);border-bottom:1px solid var(--border)}
-.brand{display:flex;align-items:center;gap:9px;font-family:var(--font-d);font-weight:900;font-size:19px;letter-spacing:-.02em}
+/* ── Barra lateral ── */
+.side{position:sticky;top:0;height:100vh;width:230px;flex-shrink:0;display:flex;flex-direction:column;background:var(--side);border-right:1px solid var(--border);padding:24px 14px 16px;z-index:20}
+.brand{display:flex;align-items:center;gap:9px;font-family:var(--font-d);font-weight:900;font-size:19px;letter-spacing:-.02em;padding:0 10px}
 .brand i{width:9px;height:9px;border-radius:50%;background:var(--orange);box-shadow:0 0 10px rgba(255,107,26,.7)}
-.brand small{font-family:var(--font-b);font-weight:500;font-size:10px;letter-spacing:.18em;color:var(--muted);text-transform:uppercase;margin-top:3px}
-.tabs{display:flex;background:var(--bg2);border:1px solid var(--border);border-radius:999px;padding:3px;gap:2px}
-.tab{border:0;background:none;border-radius:999px;padding:6px 16px;color:var(--muted);cursor:pointer;font-weight:500}
-.tab.is-on{background:var(--orange);color:#fff;font-weight:700}
+.brand small{font-family:var(--font-b);font-weight:500;font-size:10.5px;letter-spacing:.18em;color:var(--muted);text-transform:uppercase;margin-top:3px}
+.sep{height:1px;background:var(--line);margin:18px 4px}
+.navlabel{font-size:11px;font-weight:500;letter-spacing:.14em;text-transform:uppercase;color:rgba(255,248,244,.42);padding:6px 12px 8px}
+.tabs{display:flex;flex-direction:column;gap:3px}
+.tab{display:flex;align-items:center;gap:11px;border:0;background:none;border-radius:var(--r-sm);padding:10px 12px;color:var(--muted);cursor:pointer;font-weight:500;font-size:14px;text-align:left}
+.tab svg{width:18px;height:18px;flex-shrink:0}
+.tab:hover{color:var(--white);background:rgba(255,248,244,.04)}
+.tab.is-on{background:rgba(255,107,26,.12);color:var(--orange2);font-weight:700}
 .spacer{flex:1}
-.btn{border:0;border-radius:var(--r-sm);padding:9px 15px;background:var(--orange);color:#fff;cursor:pointer;font-weight:700;transition:background .15s ease}
+.sidefoot{border-top:1px solid var(--line);padding-top:10px}
+.sidefoot .tab{width:100%}
+/* ── Botones ── */
+.btn{border:0;border-radius:var(--r-sm);padding:10px 17px;background:var(--orange);color:#fff;cursor:pointer;font-weight:700;transition:background .15s ease;box-shadow:0 4px 18px rgba(255,107,26,.22)}
 .btn:hover{background:var(--orange2)}
-.btn.alt{background:var(--bg2);border:1px solid var(--border2);color:var(--white);font-weight:500}
+.btn.alt{background:var(--bg2);border:1px solid var(--border2);color:var(--white);font-weight:500;box-shadow:none}
 .btn.alt:hover{border-color:var(--orange);color:var(--orange2)}
-.btn.bad{background:#5d2626;border:1px solid rgba(230,103,103,.4)}
-main{position:relative;padding:22px max(20px,3vw) 60px;max-width:1360px;margin:0 auto}
-.metrics{display:grid;grid-template-columns:repeat(4,minmax(150px,1fr)) minmax(260px,1.6fr);gap:12px;margin-bottom:18px}
-.stat{background:var(--bg2);border:1px solid var(--border);border-radius:var(--r);padding:16px 18px}
-.stat b{display:block;font-size:11px;font-weight:500;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin-bottom:6px}
-.stat .n{font-family:var(--font-d);font-weight:900;font-size:38px;line-height:1;letter-spacing:-.02em}
-.stat small{display:block;margin-top:5px;color:var(--muted2);font-size:11.5px}
+.btn.bad{background:#5d2626;border:1px solid rgba(230,103,103,.4);box-shadow:none}
+/* ── Contenido ── */
+main{flex:1;min-width:0;position:relative;padding:30px clamp(20px,3vw,42px) 60px}
+.vhead{display:flex;align-items:flex-end;justify-content:space-between;gap:16px;flex-wrap:wrap;margin:0 0 22px}
+.vhead h1{margin:0;font-family:var(--font-d);font-weight:900;font-size:27px;letter-spacing:-.02em}
+.vhead p{margin:6px 0 0;color:var(--muted);font-size:13.5px}
+.metrics{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:16px;margin-bottom:16px}
+.stat{background:var(--bg2);border:1px solid var(--border);border-radius:var(--r);padding:20px 22px}
+.stat b{display:block;font-size:11px;font-weight:500;letter-spacing:.09em;text-transform:uppercase;color:var(--muted);margin-bottom:10px}
+.stat .n{font-family:var(--font-d);font-weight:900;font-size:36px;line-height:1;letter-spacing:-.02em}
+.stat small{display:block;margin-top:7px;color:var(--muted2);font-size:11.5px}
 .stat.alerta{border-color:rgba(230,103,103,.45);background:linear-gradient(180deg,rgba(230,103,103,.10),var(--bg2))}
 .stat.alerta .n{color:var(--bad)}
-.chartcard{background:var(--bg2);border:1px solid var(--border);border-radius:var(--r);padding:14px 18px 10px;display:flex;flex-direction:column}
-.chartcard b{font-size:11px;font-weight:500;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
-#chart{height:74px;display:flex;align-items:flex-end;gap:3px;margin-top:8px}
-#chart .bar{flex:1;min-height:2px;background:var(--orange);opacity:.75;border-radius:4px 4px 0 0;transition:opacity .12s}
+.chartcard{background:var(--bg2);border:1px solid var(--border);border-radius:var(--r);padding:16px 22px 12px;display:flex;flex-direction:column;margin-bottom:22px}
+.chartcard b{font-size:11px;font-weight:500;letter-spacing:.09em;text-transform:uppercase;color:var(--muted)}
+#chart{height:74px;display:flex;align-items:flex-end;gap:5px;margin-top:12px}
+#chart .bar{flex:1;min-height:2px;background:linear-gradient(180deg,var(--orange2),var(--orange));opacity:.65;border-radius:4px 4px 0 0;transition:opacity .12s}
 #chart .bar:hover{opacity:1}
-.chartlabels{display:flex;justify-content:space-between;color:var(--muted2);font-size:10.5px;margin-top:4px}
-.filters{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin-bottom:14px}
-.filters input,.filters select,.note textarea{background:var(--bg2);color:var(--white);border:1px solid var(--border2);border-radius:var(--r-sm);padding:9px 12px}
+.chartlabels{display:flex;justify-content:space-between;color:var(--muted2);font-size:11px;margin-top:6px}
+/* ── Filtros ── */
+.filters{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin-bottom:16px}
+.filters input,.filters select,.note textarea{background:var(--bg2);color:var(--white);border:1px solid rgba(255,248,244,.10);border-radius:var(--r-sm);padding:10px 13px}
 .filters input:hover,.filters select:hover{border-color:var(--orange)}
 .filters input[name=q]{flex:1;min-width:220px}
 #resultCount{margin-left:auto;color:var(--muted);font-size:12.5px;white-space:nowrap}
+/* ── Tablas ── */
 .table{border:1px solid var(--border);border-radius:var(--r);overflow:auto;background:var(--bg2)}
 table{width:100%;border-collapse:collapse;min-width:960px}
-th{position:sticky;top:0;background:var(--bg2);z-index:5;color:var(--muted);font-size:11px;font-weight:500;letter-spacing:.07em;text-transform:uppercase}
-th,td{padding:14px;text-align:left;border-bottom:1px solid var(--border)}
+th{position:sticky;top:0;background:var(--bg2);z-index:5;color:rgba(255,248,244,.50);font-size:11px;font-weight:500;letter-spacing:.08em;text-transform:uppercase;box-shadow:inset 0 0 0 999px rgba(255,248,244,.02)}
+th,td{padding:15px 16px;text-align:left;border-bottom:1px solid var(--line)}
+tr:last-child td{border-bottom:0}
 td.tel{font-variant-numeric:tabular-nums}
 tr[data-id],tr[data-tid]{cursor:pointer}
 tr[data-id]:hover,tr[data-tid]:hover{background:rgba(255,107,26,.05)}
-.pill{display:inline-flex;align-items:center;gap:6px;background:var(--bg2);border:1px solid var(--border);border-radius:999px;padding:3px 10px;font-size:12.5px;white-space:nowrap}
-.pill b{width:7px;height:7px;border-radius:50%;flex-shrink:0}
+.pill{display:inline-flex;align-items:center;gap:7px;background:rgba(255,248,244,.03);border:1px solid rgba(255,248,244,.08);border-radius:999px;padding:4px 11px;font-size:12px;font-weight:500;white-space:nowrap}
+.pill b{width:6px;height:6px;border-radius:50%;flex-shrink:0}
 .s-new b{background:var(--st-new)}.s-new{color:#9cc4ee}
 .s-contacted b{background:var(--st-contacted)}.s-contacted{color:#ecc27c}
 .s-qualified b{background:var(--st-qualified)}.s-qualified{color:#c3bdf5}
 .s-won b{background:var(--st-won)}.s-won{color:#7fd7b2}
 .s-lost b{background:var(--st-lost)}.s-lost{color:#f2a4a4}
 .s-spam b{background:var(--st-spam)}.s-spam{color:#b9b9c2}
-.tenant{display:inline-flex;align-items:center;gap:8px;white-space:nowrap}
-.tenant i{width:6px;height:22px;border-radius:3px;flex-shrink:0}
+.tenant{display:inline-flex;align-items:center;gap:9px;white-space:nowrap}
+.tenant i{width:4px;height:20px;border-radius:3px;flex-shrink:0}
 .nb{display:inline-flex;align-items:center;gap:5px;font-size:12px;color:var(--muted);margin-right:8px;white-space:nowrap}
 .nb i{width:7px;height:7px;border-radius:50%}
 .nb.ok i{background:var(--ok)}.nb.wait i{background:var(--amber)}.nb.bad i{background:var(--bad)}
-.flag{display:inline-block;border-radius:6px;padding:2px 8px;font-size:11.5px;margin:1px 3px 1px 0;background:rgba(255,170,0,.12);color:#ffce7a;border:1px solid rgba(255,170,0,.25)}
-.flag.ok{background:rgba(25,158,112,.12);color:#7fd7b2;border-color:rgba(25,158,112,.3)}
-.flag.off{background:rgba(255,248,244,.06);color:var(--muted);border-color:rgba(255,248,244,.12)}
-.flag.web{background:rgba(57,135,229,.12);color:#9cc4ee;border-color:rgba(57,135,229,.3)}
+.flag{display:inline-block;border-radius:7px;padding:3px 9px;font-size:11.5px;margin:1px 4px 1px 0;background:rgba(255,170,0,.10);color:#ffce7a;border:1px solid rgba(255,170,0,.22)}
+.flag.ok{background:rgba(25,158,112,.10);color:#7fd7b2;border-color:rgba(25,158,112,.25)}
+.flag.off{background:rgba(255,248,244,.05);color:var(--muted);border-color:rgba(255,248,244,.10)}
+.flag.web{background:rgba(57,135,229,.10);color:#9cc4ee;border-color:rgba(57,135,229,.25)}
 .flag a{color:inherit;text-decoration:none;margin-left:4px;font-weight:700}
 .flag a:hover{color:var(--bad)}
-.meter{display:inline-block;width:64px;height:6px;background:rgba(255,248,244,.08);border-radius:3px;overflow:hidden;vertical-align:middle;margin-right:7px}
-.meter i{display:block;height:100%;background:var(--orange);border-radius:3px}
+.meter{display:inline-block;width:64px;height:5px;background:rgba(255,248,244,.08);border-radius:3px;overflow:hidden;vertical-align:middle;margin-right:8px}
+.meter i{display:block;height:100%;background:linear-gradient(90deg,var(--orange),var(--orange2));border-radius:3px}
 /* Rol cliente: la interfaz oculta lo que no le aplica, pero la DEFENSA es del worker
    (cada endpoint valida el scope por su cuenta — SPEC-HANDOFF §B.3.5). */
-body.cliente .tabs,body.cliente #tenantFilter,body.cliente #mTenantsCard{display:none}
+body.cliente .velai-only{display:none}
+body.cliente #tenantFilter,body.cliente #mTenantsCard{display:none}
 body.cliente th:nth-child(2),body.cliente td:nth-child(2){display:none}
-#escalations{display:flex;gap:8px;flex-wrap:wrap;margin:0 0 12px}
+#escalations{display:flex;gap:8px;flex-wrap:wrap;margin:0 0 14px}
 #escalations:empty{display:none}
 .esc{display:inline-flex;align-items:center;gap:8px;background:rgba(255,170,0,.1);border:1px solid rgba(255,170,0,.3);border-radius:999px;padding:5px 6px 5px 12px;font-size:12.5px;color:#ffce7a}
 .esc button{border:0;border-radius:999px;background:var(--bg2);color:var(--white);padding:3px 10px;cursor:pointer;font-size:11.5px}
-.legend{display:flex;gap:16px;flex-wrap:wrap;margin:12px 4px 0;color:var(--muted);font-size:12px}
+.legend{display:flex;gap:16px;flex-wrap:wrap;margin:14px 4px 0;color:var(--muted);font-size:12px}
 .legend span{display:inline-flex;align-items:center;gap:6px}
 .legend i{display:inline-block;width:7px;height:7px;border-radius:50%;flex-shrink:0}
 .muted{color:var(--muted)}.error{color:var(--bad)}
 .pager{text-align:center;margin:18px}
 .empty{text-align:center;padding:36px;color:var(--muted)}
-dialog{width:min(780px,calc(100% - 24px));max-height:92vh;overflow:auto;background:var(--bg2);color:var(--white);border:1px solid var(--border2);border-radius:var(--r);padding:0}
+/* ── Modales ── */
+dialog{width:min(820px,calc(100% - 24px));max-height:92vh;overflow:auto;background:var(--bg2);color:var(--white);border:1px solid var(--border2);border-radius:var(--r);padding:0}
+dialog#tenantModal{width:min(1120px,calc(100% - 24px))}
 dialog::backdrop{background:rgba(5,3,6,.78);backdrop-filter:blur(3px)}
-.modal-h{position:sticky;top:0;z-index:5;background:var(--bg2);display:flex;justify-content:space-between;align-items:center;padding:16px 20px;border-bottom:1px solid var(--border)}
-.modal-h strong{font-family:var(--font-d);font-weight:900;font-size:18px;letter-spacing:-.01em}
-.modal-b{padding:20px}
-.grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}
-.card{background:var(--surface);border:1px solid var(--border);border-radius:calc(var(--r) - 4px);padding:12px}
-.card b{display:block;color:var(--muted);font-size:11px;font-weight:500;letter-spacing:.06em;text-transform:uppercase;margin-bottom:5px}
-.card input,.card textarea,.card select{width:100%;background:var(--bg);color:var(--white);border:1px solid var(--border2);border-radius:8px;padding:8px;margin-top:4px}
+.modal-top{position:sticky;top:0;z-index:5;background:var(--bg2)}
+.modal-h{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:16px 22px;border-bottom:1px solid var(--line)}
+#detail .modal-h{position:sticky;top:0;z-index:5;background:var(--bg2)}
+.modal-top .modal-h{border-bottom:0}
+.modal-h strong{font-family:var(--font-d);font-weight:900;font-size:18px;letter-spacing:-.01em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.mh-r{display:flex;gap:10px;align-items:center;flex:1;justify-content:flex-end;min-width:0}
+#tNote{width:min(320px,38vw)}
+.modal-b{padding:20px 22px}
+/* Pestañas de la ficha: un solo Guardar arriba; el punto ámbar marca pestañas con cambios sin guardar */
+.ttabs{display:flex;flex-wrap:wrap;padding:0 22px;border-bottom:1px solid rgba(255,248,244,.08)}
+.ttab{display:inline-flex;align-items:center;gap:7px;border:0;background:none;cursor:pointer;padding:11px 2px;margin-right:22px;color:var(--muted);font-size:13.5px;font-weight:500;border-bottom:2px solid transparent;margin-bottom:-1px}
+.ttab.is-on{color:var(--orange2);font-weight:700;border-bottom-color:var(--orange)}
+.ttab .dot{display:none;width:6px;height:6px;border-radius:50%;background:var(--amber)}
+.ttab.dirty .dot{display:inline-block}
+.wizbar{display:flex;align-items:center;gap:12px;margin-top:18px;padding-top:16px;border-top:1px solid var(--line)}
+#wizHint{flex:1;font-size:12px}
+.grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px}
+.card{background:var(--surface);border:1px solid var(--border);border-radius:calc(var(--r) - 4px);padding:14px 16px}
+.card b{display:block;color:var(--muted);font-size:11px;font-weight:500;letter-spacing:.07em;text-transform:uppercase;margin-bottom:5px}
+.card input,.card textarea,.card select{width:100%;background:var(--bg3);color:var(--white);border:1px solid rgba(255,248,244,.10);border-radius:8px;padding:9px 12px;margin-top:4px}
+.panelcard{background:var(--bg2);border:1px solid var(--border);border-radius:var(--r);padding:22px 24px}
+.panelcard>b{display:block;font-family:var(--font-d);font-weight:900;font-size:15px;letter-spacing:-.01em;margin-bottom:2px}
+.panelcard input{background:var(--bg3)}
 .actions{display:flex;gap:8px;flex-wrap:wrap;margin:18px 0}
 .note{display:flex;gap:8px}
-.timeline{margin-top:20px}
 .timeline h3{font-family:var(--font-d);font-weight:900;letter-spacing:-.01em}
-.timeline article{border-left:2px solid var(--border2);padding:0 0 14px 12px}
+.timeline article{border-left:2px solid rgba(255,107,26,.25);padding:0 0 14px 14px}
 .field-err{display:block;margin-top:4px;color:var(--bad)}.field-err:empty{display:none}
 /* La CSP (style-src con nonce) BLOQUEA los atributos style="" inline: todo estilo
    estático va en clases y todo valor dinámico se aplica por CSSOM (paint()). */
 .mt12{margin-top:12px}.grow{flex:1}.w150{max-width:150px}.w80{max-width:80px}
 .prewrap{white-space:pre-wrap;margin-top:8px}.preline{margin:8px 0;white-space:pre-line}
 .promptbox{width:100%;font-family:ui-monospace,monospace;font-size:12.5px}
-.inpill{background:var(--bg);border:1px solid var(--border2);border-radius:var(--r-sm);padding:9px 12px}
+.inpill{background:var(--bg3);border:1px solid rgba(255,248,244,.10);border-radius:var(--r-sm);padding:9px 12px}
 .mt6{margin-top:6px}.okmsg{color:var(--ok)}.mb6{margin:6px 0}.actions0{margin:4px 0 0;align-items:center}
 .legend .d-new{background:var(--st-new)}.legend .d-contacted{background:var(--st-contacted)}.legend .d-qualified{background:var(--st-qualified)}.legend .d-won{background:var(--st-won)}.legend .d-lost{background:var(--st-lost)}
 /* Previsualización de la marca del widget: mini-mock del chat con los valores del form */
@@ -140,44 +175,68 @@ dialog::backdrop{background:rgba(5,3,6,.78);backdrop-filter:blur(3px)}
 .toast.on{opacity:1;transform:none}
 .toast.err{border-color:var(--bad);background:linear-gradient(180deg,rgba(230,103,103,.12),var(--bg2))}
 #tVersions article{margin-bottom:10px}
-#tVersions pre{white-space:pre-wrap;background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:8px;font-size:11.5px;max-height:220px;overflow:auto}
-@media(max-width:1000px){.metrics{grid-template-columns:1fr 1fr}.chartcard{grid-column:1/-1}}
-@media(max-width:700px){.grid{grid-template-columns:1fr}header{gap:10px}.brand small{display:none}}
+#tVersions pre{white-space:pre-wrap;background:var(--bg3);border:1px solid var(--border);border-radius:8px;padding:8px;font-size:11.5px;max-height:220px;overflow:auto}
+@media(max-width:1100px){.grid{grid-template-columns:1fr 1fr}}
+@media(max-width:900px){body{flex-direction:column}.side{position:static;height:auto;width:auto;flex-direction:row;align-items:center;gap:6px;padding:10px 16px;border-right:0;border-bottom:1px solid var(--border)}.sep,.navlabel{display:none}.tabs{flex-direction:row}.sidefoot{border:0;padding:0;margin-left:auto}.brand small{display:none}}
+@media(max-width:700px){.grid{grid-template-columns:1fr}#tNote{display:none}}
 </style></head><body>
-<header>
+<aside class="side">
 <div class="brand"><i></i>Velai <small>Panel</small></div>
-<nav class="tabs" role="tablist"><button class="tab is-on" role="tab" aria-selected="true" data-view="leads" type="button">Leads</button><button class="tab" role="tab" aria-selected="false" data-view="tenants" type="button">Clientes</button></nav>
+<div class="sep"></div>
+<div class="navlabel velai-only">Gestión</div>
+<nav class="tabs" role="tablist">
+<button class="tab is-on" role="tab" aria-selected="true" data-view="leads" type="button"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M17 21v-2a4 4 0 0 0-4-4H7a4 4 0 0 0-4 4v2"></path><circle cx="10" cy="7" r="4"></circle><path d="M21 21v-2a4 4 0 0 0-3-3.87"></path><path d="M16 3.13a4 4 0 0 1 0 7.75"></path></svg>Leads</button>
+<button class="tab velai-only" role="tab" aria-selected="false" data-view="tenants" type="button"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="7" width="18" height="13" rx="2"></rect><path d="M8 7V5a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>Clientes</button>
+</nav>
+<div class="navlabel velai-only">Sistema</div>
+<nav class="tabs">
+<button class="tab velai-only" role="tab" aria-selected="false" data-view="config" type="button"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="4" y1="7" x2="20" y2="7"></line><circle cx="9" cy="7" r="2.4"></circle><line x1="4" y1="17" x2="20" y2="17"></line><circle cx="15" cy="17" r="2.4"></circle></svg>Configuración</button>
+</nav>
 <span class="spacer"></span>
-<button class="btn alt" id="export" type="button">Exportar CSV</button>
-<button class="btn" id="newTenant" type="button" hidden>Nuevo cliente</button>
-<button class="btn alt" id="logout" type="button" title="Cerrar la sesión de Cloudflare Access">Salir</button>
-</header>
+<div class="sidefoot">
+<button class="tab" id="logout" type="button" title="Cerrar la sesión de Cloudflare Access"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path><path d="M16 17l5-5-5-5"></path><path d="M21 12H9"></path></svg>Salir</button>
+</div>
+</aside>
 <main><div id="viewLeads">
+<div class="vhead"><div><h1>Leads</h1><p>Últimos 30 días</p></div><button class="btn alt" id="export" type="button">Exportar CSV</button></div>
 <div class="metrics">
 <div class="stat"><b>Leads · 30 días</b><span class="n" id="mTotal">—</span></div>
 <div class="stat"><b>Sin contactar</b><span class="n" id="mNew">—</span><small id="mNewSub"></small></div>
 <div class="stat" id="mFailCard"><b>Avisos fallidos · 7 días</b><span class="n" id="mFail">—</span></div>
 <div class="stat" id="mTenantsCard"><b>Clientes activos</b><span class="n" id="mTenants">—</span></div>
-<div class="chartcard"><b>Leads por día · 14 días</b><div id="chart"></div><div class="chartlabels"><span id="chartFrom"></span><span id="chartTo"></span></div></div>
 </div>
+<div class="chartcard"><b>Leads por día · 14 días</b><div id="chart"></div><div class="chartlabels"><span id="chartFrom"></span><span id="chartTo"></span></div></div>
 <div id="escalations"></div>
 <form class="filters" id="filters"><input name="q" placeholder="Buscar nombre, teléfono, sector…"><select name="tenant" id="tenantFilter"><option value="">Todos los clientes</option></select><select name="status"><option value="">Todos los estados</option><option>new</option><option>contacted</option><option>qualified</option><option>won</option><option>lost</option><option>spam</option></select><select name="notification"><option value="">Todos los avisos</option><option>pending</option><option>sent</option><option>failed</option><option>skipped</option></select><input name="source" placeholder="Fuente"><input name="from" type="date"><input name="to" type="date"><button class="btn">Filtrar</button><span id="resultCount"></span></form>
 <div id="message"></div><div class="table"><table><thead><tr><th>Fecha</th><th>Cliente</th><th>Estado</th><th>Nombre</th><th>WhatsApp</th><th>Sector</th><th>Fuente</th><th>Avisos</th></tr></thead><tbody id="rows"></tbody></table></div>
 <div class="legend"><span><i class="d-new"></i>nuevo</span><span><i class="d-contacted"></i>contactado</span><span><i class="d-qualified"></i>cualificado</span><span><i class="d-won"></i>ganado</span><span><i class="d-lost"></i>perdido</span></div>
 <div class="pager"><button class="btn alt" id="more" hidden>Cargar más</button></div></div>
 <div id="viewTenants" hidden>
+<div class="vhead"><div><h1>Clientes</h1><p>Canal, contexto y estado de cada cliente</p></div><button class="btn" id="newTenant" type="button">Nuevo cliente</button></div>
 <div class="table"><table><thead><tr><th>Nombre</th><th>Canal</th><th>Leads</th><th>Contexto</th><th>Configuración</th><th>Estado</th></tr></thead><tbody id="tenantRows"></tbody></table></div>
-<div class="card mt12" id="adminsCard"><b>Admins de Velai (ven TODO)</b>
+<div class="panelcard mt12" id="adminsCard"><b>Admins de Velai (ven TODO)</b>
 <p class="muted mt6">Entran en admin.hirevai.com con código por correo (One-time PIN). El alta y la baja actualizan también la puerta de Cloudflare Access — sin CLI ni dashboard. Los marcados «raíz» viven en la configuración del worker y no se pueden quitar desde aquí (a propósito: nada del panel puede dejar a Velai fuera de su propio panel).</p>
 <div id="adminsList" class="mt6 muted">—</div>
-<div class="actions actions0"><input id="aEmail" type="email" placeholder="nuevo-admin@correo.com" class="grow inpill"><button class="btn alt" id="aAdd" type="button">Añadir admin</button></div></div>
-<div class="card mt12" id="configCard" hidden><b>Configuración (solo admins raíz)</b>
+<div class="actions actions0"><input id="aEmail" type="email" placeholder="nuevo-admin@correo.com" class="grow inpill"><button class="btn alt" id="aAdd" type="button">Añadir admin</button></div></div></div>
+<div id="viewConfig" hidden>
+<div class="vhead"><div><h1>Configuración</h1><p>Estado de las integraciones · solo admins raíz</p></div></div>
+<p class="muted" id="configOnly" hidden>Solo los admins raíz (los de la configuración del worker) pueden ver y tocar la configuración.</p>
+<div class="panelcard" id="configCard" hidden><b>Integraciones y token de Cloudflare</b>
 <p class="muted mt6">Estado de las integraciones y rotación del token de API de Cloudflare. El token nuevo se valida contra Cloudflare ANTES de guardarse, se cifra con la KEK y nunca se vuelve a mostrar (write-only). La KEK, la API key de Anthropic y las credenciales maestras de Twilio no se gestionan aquí a propósito: viven como secrets del worker.</p>
 <div id="configState" class="mt6 muted preline">—</div>
 <div class="actions actions0"><input id="cfgToken" type="password" autocomplete="new-password" placeholder="nuevo token de API de Cloudflare" class="grow inpill"><button class="btn alt" id="cfgTokenSave" type="button">Validar y guardar</button><button class="btn alt" id="cfgTokenClear" type="button">Volver al secret del worker</button></div></div></div></main>
 <dialog id="detail"><div class="modal-h"><strong>Detalle del lead</strong><button class="btn alt" id="close">Cerrar</button></div><div class="modal-b" id="detailBody"></div></dialog>
-<dialog id="tenantModal"><div class="modal-h"><strong id="tenantTitle">Cliente</strong><button class="btn alt" id="tenantClose" type="button">Cerrar</button></div><div class="modal-b">
+<dialog id="tenantModal"><div class="modal-top"><div class="modal-h"><strong id="tenantTitle">Cliente</strong><div class="mh-r"><input id="tNote" placeholder="Nota del cambio (opcional)" class="inpill"><button class="btn" id="tenantSave" type="button">Guardar</button><button class="btn alt" id="tenantClose" type="button">Cerrar</button></div></div>
+<nav class="ttabs" id="ttabs">
+<button type="button" class="ttab is-on" data-tt="identidad">Identidad y canal<i class="dot"></i></button>
+<button type="button" class="ttab" data-tt="contexto">Contexto<i class="dot"></i></button>
+<button type="button" class="ttab" data-tt="marca">Marca del widget<i class="dot"></i></button>
+<button type="button" class="ttab" data-tt="prov" id="ttabProv">Aprovisionamiento<i class="dot"></i></button>
+<button type="button" class="ttab" data-tt="usuarios" id="ttabUsers">Usuarios<i class="dot"></i></button>
+<button type="button" class="ttab" data-tt="historial" id="ttabHist">Historial</button>
+</nav></div><div class="modal-b">
 <div id="tenantMsg"></div>
+<section class="tpane" data-tp="identidad">
 <div class="grid">
 <div class="card"><b>Nombre</b><input id="tName" placeholder="Barbería López"><small class="muted field-err" data-f="name"></small></div>
 <div class="card"><b>Slug</b><input id="tSlug" placeholder="barberia-lopez"><small class="muted field-err" data-f="slug"></small></div>
@@ -191,12 +250,17 @@ dialog::backdrop{background:rgba(5,3,6,.78);backdrop-filter:blur(3px)}
 <div class="card"><b>Auth token de la subcuenta</b><input id="tToken" type="password" autocomplete="new-password" placeholder="solo para cambiarlo"><small class="muted" id="tTokenState"></small><small class="muted field-err" data-f="twilio_auth_token"></small></div>
 <div class="card"><b>Socio en Meta</b><select id="tPartner"><option>pendiente</option><option>concedido</option><option>revocado</option></select></div>
 <div class="card"><b>Estado</b><label><input type="checkbox" id="tActive" checked> Activo (enruta y atiende)</label></div>
-</div>
-<div class="card mt12"><b>Contexto del negocio (system prompt) · <span id="tCount" class="muted"></span></b>
+</div></section>
+<section class="tpane" data-tp="contexto" hidden>
+<div class="card"><b>Contexto del negocio (system prompt) · <span id="tCount" class="muted"></span></b>
 <div id="tDup" hidden class="mb6"><label class="muted">Duplicar de… <select id="tDupSel"><option value="">— empezar de cero —</option></select></label></div>
 <textarea id="tPrompt" rows="14" class="promptbox"></textarea>
 <small class="muted field-err" data-f="system_prompt"></small></div>
-<div class="card mt12"><b>Marca del widget (chat en la web del cliente)</b>
+<div class="card mt12"><b>Probar el borrador (no guarda nada)</b>
+<div class="note mt6"><input id="tTestMsg" placeholder="Mensaje de prueba, p. ej. «hola, ¿tenéis hueco mañana?»" class="grow"><button class="btn alt" id="tenantPreview" type="button">Probar</button></div>
+<article id="tPreviewOut" class="muted prewrap"></article></div></section>
+<section class="tpane" data-tp="marca" hidden>
+<div class="card"><b>Marca del widget (chat en la web del cliente)</b>
 <p class="muted mt6">Lo que ve el visitante: logo, nombre, saludo, colores. Vacío = marca de Velai (hirevai.com no cambia). Se sirve por <code>/widget/boot</code> y se aplica sin deploy (caché 5 min).</p>
 <div class="grid mt6">
 <div class="card"><b>Nombre del bot</b><input id="tBotName" placeholder="Zoe"><small class="muted field-err" data-f="bot_name"></small></div>
@@ -212,11 +276,8 @@ dialog::backdrop{background:rgba(5,3,6,.78);backdrop-filter:blur(3px)}
 <div class="card"><b>Dominios de la web (https, uno por línea, máx. 6)</b><textarea id="tOrigins" rows="2" placeholder="https://… (apex y su www, uno por línea)"></textarea><small class="muted">Entran en la allowlist de CORS al Guardar (sin deploy). Después pulsa Sincronizar Turnstile.</small><small class="muted field-err" data-f="web_origins"></small></div>
 </div>
 <div class="mt12"><b class="muted">Previsualización</b><div id="brandPrev"></div></div>
-<div class="actions actions0"><button class="btn alt" id="tSyncDomains" type="button">Sincronizar Turnstile</button><span class="muted">Reescribe los hostnames del widget de Turnstile desde D1 (idempotente: también reconcilia).</span></div></div>
-<div class="actions"><input id="tNote" placeholder="Nota del cambio (opcional)" class="grow inpill"><button class="btn" id="tenantSave" type="button">Guardar</button></div>
-<div class="card mt12"><b>Probar el borrador (no guarda nada)</b>
-<div class="note mt6"><input id="tTestMsg" placeholder="Mensaje de prueba, p. ej. «hola, ¿tenéis hueco mañana?»" class="grow"><button class="btn alt" id="tenantPreview" type="button">Probar</button></div>
-<article id="tPreviewOut" class="muted prewrap"></article></div>
+<div class="actions actions0"><button class="btn alt" id="tSyncDomains" type="button">Sincronizar Turnstile</button><span class="muted">Reescribe los hostnames del widget de Turnstile desde D1 (idempotente: también reconcilia).</span></div></div></section>
+<section class="tpane" data-tp="prov" hidden>
 <div class="card" id="tProv" hidden><b>Aprovisionamiento Twilio (automático)</b>
 <div id="tProvState" class="muted preline"></div>
 <div class="actions actions0">
@@ -226,13 +287,16 @@ dialog::backdrop{background:rgba(5,3,6,.78);backdrop-filter:blur(3px)}
 <button class="btn alt" id="pSender" type="button">3· Crear sender</button>
 <input id="pCode" placeholder="OTP" class="w80">
 <button class="btn alt" id="pVerify" type="button">4· Verificar OTP</button>
-</div></div>
+</div></div></section>
+<section class="tpane" data-tp="usuarios" hidden>
 <div class="card" id="tUsersCard" hidden><b>Usuarios del panel</b>
 <p class="muted mt6">Correos con acceso a los leads de ESTE cliente (entran con OTP en admin.hirevai.com). Alta y baja surten efecto inmediato.</p>
 <div id="tUsersList" class="mt6 muted">—</div>
 <div class="actions actions0"><input id="uEmail" type="email" placeholder="gestora@cliente.com" class="grow inpill"><button class="btn alt" id="uAdd" type="button">Añadir</button></div>
-<small class="muted field-err" data-f="panel_email"></small></div>
-<div class="timeline"><h3>Historial</h3><div id="tVersions" class="muted">—</div></div>
+<small class="muted field-err" data-f="panel_email"></small></div></section>
+<section class="tpane" data-tp="historial" hidden>
+<div class="timeline"><div id="tVersions" class="muted">—</div></div></section>
+<div class="wizbar" id="wizBar" hidden><button class="btn alt" id="wizBack" type="button">Atrás</button><span class="muted" id="wizHint">El borrador se guarda al pasar de paso, sin activar nada hasta el final.</span><button class="btn" id="wizNext" type="button">Guardar y continuar</button></div>
 </div></dialog>
 <div id="toasts" popover="manual"></div>
 <script nonce="__NONCE__">
@@ -281,19 +345,19 @@ async function openLead(id){try{const d=await api('/api/admin/leads/'+id);curren
 // Cada acción confirma con toast; sin el try/catch un fallo del PATCH era INVISIBLE
 // (la promesa moría sin aviso y el usuario creía que había guardado).
 function wireDetail(){$('#saveStatus').onclick=async()=>{try{await api('/api/admin/leads/'+current.id,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({status:$('#status').value})});toast('Estado guardado ✓ («'+$('#status').value+'»)');$('#detail').close();load();loadStats()}catch(e){toast('Estado NO guardado: '+e.message,false)}};if($('#retry'))$('#retry').onclick=async()=>{try{await api('/api/admin/leads/'+current.id+'/retry',{method:'POST'});toast('Reintento de avisos lanzado ✓');openLead(current.id)}catch(e){toast('Reintento fallido: '+e.message,false)}};$('#addNote').onclick=async()=>{const text=$('#note').value.trim();if(!text)return;try{await api('/api/admin/leads/'+current.id+'/notes',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text})});toast('Nota guardada ✓');openLead(current.id)}catch(e){toast('Nota NO guardada: '+e.message,false)}};if($('#delete'))$('#delete').onclick=async()=>{if(!confirm('¿Borrar definitivamente este lead y todos sus datos?'))return;try{await api('/api/admin/leads/'+current.id,{method:'DELETE'});toast('Lead borrado ✓');$('#detail').close();load();loadStats()}catch(e){toast('Lead NO borrado: '+e.message,false)}}}
-// ── Pestaña Clientes ──
+// ── Vistas (barra lateral) ──
 const TERRS={already_provisioned:'Ese paso ya está hecho (idempotente: un doble clic no crea recursos duplicados).',provision_in_progress:'Ese paso ya está en curso, espera unos segundos.',waba_required:'Rellena y guarda primero la WABA del cliente.',subaccount_required:'Crea primero la subcuenta (paso 1).',twilio_auth_token_missing:'La subcuenta no tiene auth token guardado.',provision_orphan:'Twilio creó el recurso pero D1 no lo guardó: revisa Telegram y reconcilia a mano.',invalid_code:'El OTP son 4-8 dígitos.',slug_taken:'Ese slug ya existe.',address_taken:'Ese canal ya está asignado a otro cliente: guardarlo desviaría sus conversaciones.',subaccount_taken:'Esa subcuenta de Twilio ya está asignada a otro cliente.',pending_tenant_cannot_be_active:'Un prospecto (canal pending:) no puede activarse: ponle primero su canal real.',invalid_twilio_auth_token:'El auth token debe ser 32 caracteres hexadecimales (Twilio → Keys & Credentials).',stale_tenant:'Alguien modificó este cliente mientras editabas. Recarga la ficha y vuelve a aplicar tus cambios.',nothing_to_update:'No hay cambios que guardar.',invalid_preview:'Escribe un mensaje de prueba y un contexto de al menos 50 caracteres.',rate_limited:'Demasiadas pruebas seguidas: espera un minuto.',email_taken:'Ese correo ya tiene acceso al panel de OTRO cliente (un correo pertenece a un solo cliente).',email_is_admin:'Ese correo es admin de Velai (ADMIN_EMAILS): ya ve todo, no puede ser usuario de un cliente.',invalid_email:'Eso no parece un correo válido.',cloudflare_api_not_configured:'Falta CF_API_TOKEN (secret) o CF_ACCOUNT_ID en el worker: la sincronización con Cloudflare no está activa.',turnstile_sync_failed:'El PUT a Turnstile falló DESPUÉS de guardar en D1: el worker acepta el origen pero Turnstile no emitirá token. Reintenta Sincronizar Turnstile.',turnstile_domains_limit:'Turnstile admite 10 dominios por widget y ya se superan incluso plegando los www: toca pasar a un widget por cliente (alternativa §4 de la spec).',already_admin:'Ese correo ya es admin.',email_is_client:'Ese correo es usuario de un CLIENTE: primero quítalo de la ficha del cliente y luego dale admin.',admin_is_root:'Ese admin es raíz (vive en la configuración del worker): no se puede quitar desde el panel.',cannot_remove_self:'No puedes quitarte a ti mismo (que lo haga otro admin): evita el cierre accidental.',root_only:'Solo los admins raíz (los de la configuración del worker) pueden tocar la configuración.',invalid_token_format:'Eso no parece un token de API de Cloudflare.',token_invalid:'Cloudflare rechazó el token (no está activo): NO se guardó.',token_verify_unavailable:'No se pudo validar contra Cloudflare (red): NO se guardó.'};
 let tenantList=[],editing=null;
-document.querySelectorAll('.tab').forEach(b=>b.onclick=()=>{document.querySelectorAll('.tab').forEach(x=>{x.classList.toggle('is-on',x===b);x.setAttribute('aria-selected',x===b?'true':'false')});const v=b.dataset.view;$('#viewLeads').hidden=v!=='leads';$('#viewTenants').hidden=v!=='tenants';$('#export').hidden=v!=='leads';$('#newTenant').hidden=v!=='tenants';if(v==='tenants'){loadTenantList();loadAdmins();loadConfig()}else loadStats()});
+document.querySelectorAll('.tab[data-view]').forEach(b=>b.onclick=()=>{document.querySelectorAll('.tab[data-view]').forEach(x=>{x.classList.toggle('is-on',x===b);x.setAttribute('aria-selected',x===b?'true':'false')});const v=b.dataset.view;$('#viewLeads').hidden=v!=='leads';$('#viewTenants').hidden=v!=='tenants';$('#viewConfig').hidden=v!=='config';if(v==='tenants'){loadTenantList();loadAdmins()}else if(v==='config')loadConfig();else loadStats()});
 // ── Configuración (solo raíz): el servidor decide con 403 root_only; el panel solo oculta ──
-async function loadConfig(){try{const c=await api('/api/admin/config');$('#configCard').hidden=false;
+async function loadConfig(){try{const c=await api('/api/admin/config');$('#configCard').hidden=false;$('#configOnly').hidden=true;
  const t=c.cf_token;
  $('#configState').textContent=[
   'Token de API de Cloudflare: '+(t.source==='none'?'— sin configurar':('origen '+(t.source==='panel'?'PANEL (cifrado en D1)':'secret del worker')+' · '+(t.valid===true?'válido ✓ ('+t.status+')':'NO VÁLIDO ✗ ('+(t.status||'?')+')'))),
   'Cuenta: '+(c.account_id||'—')+' · Sitekey de Turnstile: '+(c.turnstile_sitekey?'✓':'—'),
   'Grupos de Access: clientes '+(c.groups.clientes?'✓':'—')+' · admins '+(c.groups.admins?'✓':'—'),
   'Bindings: D1 '+(c.d1?'✓':'✗')+' · KV '+(c.kv?'✓':'✗')].join('\\n')}
- catch(e){if(e.message==='root_only')$('#configCard').hidden=true;else{$('#configCard').hidden=false;$('#configState').textContent=TERRS[e.message]||e.message}}}
+ catch(e){if(e.message==='root_only'){$('#configCard').hidden=true;$('#configOnly').hidden=false}else{$('#configCard').hidden=false;$('#configOnly').hidden=true;$('#configState').textContent=TERRS[e.message]||e.message}}}
 $('#cfgTokenSave').onclick=async()=>{const token=$('#cfgToken').value.trim();if(!token)return;
  if(!confirm('El token se validará contra Cloudflare y pasará a usarse para TODAS las sincronizaciones (Turnstile y puertas de Access). ¿Continuar?'))return;
  try{const r=await api('/api/admin/config/cf-token',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token})});
@@ -331,9 +395,14 @@ function meter(chars){const w=Math.min(100,Math.round(chars/12000*100));return '
 async function loadTenantList(){try{const d=await api('/api/admin/tenants');tenantList=d.tenants;$('#tenantRows').innerHTML=d.tenants.map(t=>'<tr data-tid="'+t.id+'"><td>'+tenantChip(t.id,t.name)+'</td><td class="muted">'+esc(t.channel_address)+'</td><td>'+t.lead_count+'</td><td>'+meter(t.prompt_len)+'</td><td>'+semaforo(t)+'</td><td>'+(t.active?'<span class="flag ok">activo</span>':'<span class="flag off">inactivo</span>')+'</td></tr>').join('')||'<tr><td colspan="6" class="empty">Sin clientes.</td></tr>';paint($('#tenantRows'))}catch(e){toast('No se pudo cargar la lista de clientes: '+e.message,false)}}
 $('#tenantRows').onclick=e=>{const tr=e.target.closest('[data-tid]');if(tr)openTenant(tr.dataset.tid)};
 $('#newTenant').onclick=()=>openTenant(null);
+// ── Pestañas de la ficha: un solo Guardar; el punto ámbar marca cambios sin guardar por pestaña ──
+function showPane(k){document.querySelectorAll('.ttab').forEach(x=>x.classList.toggle('is-on',x.dataset.tt===k));document.querySelectorAll('.tpane').forEach(p=>{p.hidden=p.dataset.tp!==k})}
+function clearDirtyDots(){document.querySelectorAll('.ttab').forEach(x=>x.classList.remove('dirty'))}
+$('#ttabs').onclick=e=>{const b=e.target.closest('.ttab');if(!b||wizard)return;showPane(b.dataset.tt)};
 // Cambios sin guardar: cerrar el modal (botón o ESC) pide confirmación antes de descartar.
 let tenantDirty=false;
-$('#tenantModal').addEventListener('input',e=>{if(e.target.id!=='tTestMsg')tenantDirty=true});
+$('#tenantModal').addEventListener('input',e=>{if(e.target.id==='tTestMsg')return;tenantDirty=true;
+ const p=e.target.closest('.tpane');if(p){const t=document.querySelector('.ttab[data-tt="'+p.dataset.tp+'"]');if(t)t.classList.add('dirty')}});
 function confirmDiscard(){return !tenantDirty||confirm('Hay cambios sin guardar en esta ficha. ¿Cerrar y descartarlos?')}
 $('#tenantClose').onclick=()=>{if(confirmDiscard()){tenantDirty=false;$('#tenantModal').close()}};
 $('#tenantModal').addEventListener('cancel',e=>{if(!confirmDiscard())e.preventDefault();else tenantDirty=false});
@@ -358,22 +427,39 @@ function brandPreview(){
 function clearTenantErrs(){document.querySelectorAll('.field-err').forEach(x=>x.textContent='');$('#tenantMsg').innerHTML=''}
 function updateCount(){const n=$('#tPrompt').value.length;$('#tCount').textContent=n+' caracteres · ≈'+Math.round(n/4)+' tokens en CADA mensaje'}
 $('#tPrompt').oninput=updateCount;
+// ── Alta guiada (stepper): el borrador se guarda al pasar de paso; se activa al final ──
+const WIZ=['identidad','contexto','marca','prov','usuarios'];let wizard=false,wizStep=0;
+function wizShow(){showPane(WIZ[wizStep]);$('#wizBack').hidden=wizStep===0;$('#wizNext').textContent=wizStep===WIZ.length-1?'Finalizar':'Guardar y continuar';
+ $('#wizHint').textContent=wizStep===WIZ.length-1?'Al finalizar, revisa la pestaña «Identidad y canal» y márcalo Activo cuando su canal real esté listo.':'El borrador se guarda al pasar de paso, sin activar nada hasta el final.'}
+function setWizard(on){wizard=on;$('#wizBar').hidden=!on;$('#tenantSave').hidden=on;$('#tNote').hidden=on;if(on){wizStep=0;wizShow()}}
+$('#wizBack').onclick=()=>{if(wizStep>0){wizStep--;wizShow()}};
+$('#wizNext').onclick=async()=>{
+ // Paso 1 sin canal: se rellena pending:<slug> — un prospecto que no enruta (y no puede activarse).
+ if(wizStep===0&&!$('#tAddress').value.trim()&&$('#tSlug').value.trim())$('#tAddress').value='pending:'+$('#tSlug').value.trim();
+ const wasNew=!editing;
+ if(tenantDirty||wasNew){const ok=await saveTenant();if(!ok)return}
+ if(wasNew&&editing){$('#ttabProv').hidden=false;$('#ttabUsers').hidden=false;$('#ttabHist').hidden=false;$('#tProv').hidden=false;$('#tUsersCard').hidden=false;$('#tDup').hidden=true;loadProv(editing.id);loadUsers(editing.id);loadVersions(editing.id)}
+ if(wizStep===WIZ.length-1){setWizard(false);showPane('identidad');toast('Alta completada ✓ — actívalo en «Identidad y canal» cuando su canal esté listo');return}
+ wizStep++;wizShow()};
 async function openTenant(id){clearTenantErrs();$('#tPreviewOut').textContent='';$('#tTestMsg').value='';$('#tNote').value='';
- $('#tToken').value='';
- if(id){const d=await api('/api/admin/tenants/'+id);const t=d.tenant;editing={id:t.id,updated_at:t.updated_at};$('#tenantTitle').textContent=t.name;$('#tDup').hidden=true;for(const[k,sel]of Object.entries(TF))$(sel).value=t[k]??'';$('#tChips').value=chipsToLines(t.chips_json);$('#tOrigins').value=jsonToLines(t.web_origins);$('#tActive').checked=!!t.active;$('#tTokenState').textContent=t.has_twilio_token?'configurado ✓ (escribe solo para sustituirlo)':'sin configurar';$('#tProv').hidden=false;$('#tUsersCard').hidden=false;loadProv(id);loadVersions(id);loadUsers(id)}
- else{editing=null;$('#tenantTitle').textContent='Nuevo cliente';$('#tDup').hidden=false;$('#tDupSel').innerHTML='<option value="">— empezar de cero —</option>'+tenantList.map(t=>'<option value="'+t.id+'">'+esc(t.name)+'</option>').join('');for(const sel of Object.values(TF))$(sel).value='';$('#tChips').value='';$('#tOrigins').value='';$('#tPartner').value='pendiente';$('#tActive').checked=true;$('#tTokenState').textContent='sin configurar';$('#tProv').hidden=true;$('#tUsersCard').hidden=true;$('#tVersions').textContent='—'}
+ $('#tToken').value='';clearDirtyDots();
+ // provPost recarga la ficha del MISMO cliente en mitad del alta: se conserva el paso.
+ const stayWiz=wizard&&editing&&editing.id===id;
+ if(id){const d=await api('/api/admin/tenants/'+id);const t=d.tenant;editing={id:t.id,updated_at:t.updated_at};$('#tenantTitle').textContent=t.name;$('#tDup').hidden=true;for(const[k,sel]of Object.entries(TF))$(sel).value=t[k]??'';$('#tChips').value=chipsToLines(t.chips_json);$('#tOrigins').value=jsonToLines(t.web_origins);$('#tActive').checked=!!t.active;$('#tTokenState').textContent=t.has_twilio_token?'configurado ✓ (escribe solo para sustituirlo)':'sin configurar';$('#tProv').hidden=false;$('#tUsersCard').hidden=false;$('#ttabProv').hidden=false;$('#ttabUsers').hidden=false;$('#ttabHist').hidden=false;if(stayWiz)wizShow();else{setWizard(false);showPane('identidad')}loadProv(id);loadVersions(id);loadUsers(id)}
+ else{editing=null;$('#tenantTitle').textContent='Nuevo cliente';$('#tDup').hidden=false;$('#tDupSel').innerHTML='<option value="">— empezar de cero —</option>'+tenantList.map(t=>'<option value="'+t.id+'">'+esc(t.name)+'</option>').join('');for(const sel of Object.values(TF))$(sel).value='';$('#tChips').value='';$('#tOrigins').value='';$('#tPartner').value='pendiente';$('#tActive').checked=false;$('#tTokenState').textContent='sin configurar';$('#tProv').hidden=true;$('#tUsersCard').hidden=true;$('#ttabProv').hidden=true;$('#ttabUsers').hidden=true;$('#ttabHist').hidden=true;$('#tVersions').textContent='—';setWizard(true)}
  updateCount();brandPreview();tenantDirty=false;$('#tenantModal').showModal()}
 $('#tDupSel').onchange=async e=>{if(!e.target.value)return;const d=await api('/api/admin/tenants/'+e.target.value);$('#tPrompt').value=d.tenant.system_prompt||'';updateCount()};
-$('#tenantSave').onclick=async()=>{clearTenantErrs();
+async function saveTenant(){clearTenantErrs();
  const body={};for(const[k,sel]of Object.entries(TF))body[k]=$(sel).value;body.chips_json=chipsFromLines();body.web_origins=linesFrom('#tOrigins',6);body.active=$('#tActive').checked;body.note=$('#tNote').value;
  if($('#tToken').value)body.twilio_auth_token=$('#tToken').value; // write-only: solo si se escribe
  try{
   if(editing){body.expected_updated_at=editing.updated_at;const r=await api('/api/admin/tenants/'+editing.id,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});editing.updated_at=r.updated_at;loadVersions(editing.id)}
-  else{const r=await api('/api/admin/tenants',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});editing={id:r.id,updated_at:r.updated_at};$('#tenantTitle').textContent=body.name;$('#tDup').hidden=true}
-  toast('Cliente guardado ✓ (el widget lo ve en ≤5 min por la caché)');tenantDirty=false;loadTenantList()
+  else{const r=await api('/api/admin/tenants',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});editing={id:r.id,updated_at:r.updated_at};$('#tenantTitle').textContent=body.name}
+  toast('Cliente guardado ✓ (el widget lo ve en ≤5 min por la caché)');tenantDirty=false;clearDirtyDots();loadTenantList();return true
  }catch(e){const c=e.message;const m=c.match(/^invalid_(.+)$/);
   if(m&&document.querySelector('.field-err[data-f="'+m[1]+'"]')){document.querySelector('.field-err[data-f="'+m[1]+'"]').textContent='Formato inválido — revisa el ejemplo del campo.';toast('NO guardado: revisa el campo «'+m[1]+'»',false)}
-  else toast('NO guardado: '+(TERRS[c]||c),false)}};
+  else toast('NO guardado: '+(TERRS[c]||c),false);return false}}
+$('#tenantSave').onclick=saveTenant;
 $('#tenantPreview').onclick=async()=>{clearTenantErrs();$('#tPreviewOut').textContent='Pensando…';
  try{const anyId=editing?editing.id:'00000000-0000-4000-8000-000000000001';
   const r=await api('/api/admin/tenants/'+anyId+'/preview',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({prompt:$('#tPrompt').value,message:$('#tTestMsg').value})});
