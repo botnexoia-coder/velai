@@ -142,6 +142,45 @@ dialog::backdrop{background:rgba(5,3,6,.78);backdrop-filter:blur(3px)}
 .panelcard{background:var(--bg2);border:1px solid var(--border);border-radius:var(--r);padding:22px 24px}
 .panelcard>b{display:block;font-family:var(--font-d);font-weight:900;font-size:15px;letter-spacing:-.01em;margin-bottom:2px}
 .panelcard input{background:var(--bg3)}
+.pt-count{font-family:var(--font-b);font-weight:500;font-size:12px;color:var(--muted);margin-left:8px}
+/* ── Configuración: estado de integraciones con semáforo (verde/ámbar/rojo) ── */
+.stpill{display:inline-flex;align-items:center;gap:8px;border-radius:999px;padding:5px 13px;font-size:12.5px;font-weight:700;white-space:nowrap;border:1px solid transparent}
+.stpill i{width:8px;height:8px;border-radius:50%;flex-shrink:0}
+.stpill.sm{padding:4px 11px;font-size:11.5px;gap:6px}
+.stpill.sm i{width:6px;height:6px}
+.stpill.ok{background:rgba(25,158,112,.10);border-color:rgba(25,158,112,.30);color:#7fd7b2}
+.stpill.ok i{background:var(--ok);box-shadow:0 0 8px rgba(25,158,112,.8)}
+.stpill.warn{background:rgba(255,170,0,.10);border-color:rgba(255,170,0,.30);color:#ffce7a}
+.stpill.warn i{background:var(--amber)}
+.stpill.bad{background:rgba(230,103,103,.10);border-color:rgba(230,103,103,.35);color:#f2a4a4}
+.stpill.bad i{background:var(--bad)}
+.cfgtoken{background:var(--bg3);border:1px solid rgba(255,248,244,.08);border-radius:12px;padding:18px 20px;margin-top:14px}
+.cfgtoken.ok{border-color:rgba(25,158,112,.25)}
+.cfgtoken.warn{border-color:rgba(255,170,0,.30)}
+.cfgtoken.bad{border-color:rgba(230,103,103,.35)}
+.cfg-h{display:flex;align-items:center;gap:14px;flex-wrap:wrap}
+.cfg-t{flex:1;min-width:220px}
+.cfg-name{display:block;font-size:14px;font-weight:700}
+.cfg-desc{display:block;font-size:12px;color:var(--muted2);margin-top:2px;max-width:640px}
+.chip{display:inline-flex;align-items:center;background:rgba(255,248,244,.05);border:1px solid rgba(255,248,244,.10);color:rgba(255,248,244,.70);border-radius:999px;padding:4px 12px;font-size:11.5px;font-weight:500;white-space:nowrap}
+.cfg-rot{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-top:16px;padding-top:16px;border-top:1px solid var(--line)}
+.cfg-rot input{flex:1;max-width:420px}
+.tico{width:30px;height:30px;border-radius:8px;display:flex;align-items:center;justify-content:center;flex-shrink:0}
+.tico svg{width:16px;height:16px}
+.tico.key{background:rgba(255,107,26,.14);color:var(--orange2)}
+.tico.cloud{background:rgba(57,135,229,.14);color:#9cc4ee}
+.tico.shield{background:rgba(255,170,0,.14);color:#ffce7a}
+.tico.lock{background:rgba(144,133,233,.14);color:#c3bdf5}
+.tico.db{background:rgba(42,168,184,.14);color:#8fd8e0}
+.cfgtiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:14px;margin-top:14px}
+.cfgtiles .tile{background:var(--bg3);border:1px solid rgba(255,248,244,.08);border-radius:12px;padding:16px 18px;display:flex;flex-direction:column;gap:10px}
+.tile .trow{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.tile .tname{font-size:13px;font-weight:700}
+.tile .tdetail{font-size:11.5px;color:var(--muted2)}
+.cfglegend{display:flex;gap:18px;flex-wrap:wrap;margin-top:16px;font-size:11.5px;color:var(--muted2)}
+.cfglegend span{display:inline-flex;align-items:center;gap:6px}
+.cfglegend i{width:7px;height:7px;border-radius:50%;flex-shrink:0}
+.cfglegend .lg-ok{background:var(--ok)}.cfglegend .lg-warn{background:var(--amber)}.cfglegend .lg-bad{background:var(--bad)}
 .actions{display:flex;gap:8px;flex-wrap:wrap;margin:18px 0}
 .note{display:flex;gap:8px}
 .timeline h3{font-family:var(--font-d);font-weight:900;letter-spacing:-.01em}
@@ -215,16 +254,21 @@ dialog::backdrop{background:rgba(5,3,6,.78);backdrop-filter:blur(3px)}
 <div class="vhead"><div><h1>Clientes</h1><p>Canal, contexto y estado de cada cliente</p></div><button class="btn" id="newTenant" type="button">Nuevo cliente</button></div>
 <div class="table"><table><thead><tr><th>Nombre</th><th>Canal</th><th>Leads</th><th>Contexto</th><th>Configuración</th><th>Estado</th></tr></thead><tbody id="tenantRows"></tbody></table></div></div>
 <div id="viewConfig" hidden>
-<div class="vhead"><div><h1>Configuración</h1><p>Admins de Velai y estado de las integraciones</p></div></div>
-<div class="panelcard" id="adminsCard"><b>Admins de Velai (ven TODO)</b>
+<div class="vhead"><div><h1>Configuración</h1><p>Admins de Velai y estado de las integraciones</p></div><span class="stpill ok" id="cfgOverall" hidden><i></i></span></div>
+<div class="panelcard" id="adminsCard"><b>Admins de Velai (ven TODO)<span class="pt-count" id="adminsCount"></span></b>
 <p class="muted mt6">Entran en admin.hirevai.com con código por correo (One-time PIN). El alta y la baja actualizan también la puerta de Cloudflare Access — sin CLI ni dashboard. Los marcados «raíz» viven en la configuración del worker y no se pueden quitar desde aquí (a propósito: nada del panel puede dejar a Velai fuera de su propio panel).</p>
 <div id="adminsList" class="mt6 muted">—</div>
 <div class="actions actions0"><input id="aEmail" type="email" placeholder="nuevo-admin@correo.com" class="grow inpill"><button class="btn alt" id="aAdd" type="button">Añadir admin</button></div></div>
 <p class="muted mt12" id="configOnly" hidden>El estado de las integraciones y el token de Cloudflare son solo para admins raíz (los de la configuración del worker).</p>
-<div class="panelcard mt12" id="configCard" hidden><b>Integraciones y token de Cloudflare</b>
-<p class="muted mt6">Estado de las integraciones y rotación del token de API de Cloudflare. El token nuevo se valida contra Cloudflare ANTES de guardarse, se cifra con la KEK y nunca se vuelve a mostrar (write-only). La KEK, la API key de Anthropic y las credenciales maestras de Twilio no se gestionan aquí a propósito: viven como secrets del worker.</p>
-<div id="configState" class="mt6 muted preline">—</div>
-<div class="actions actions0"><input id="cfgToken" type="password" autocomplete="new-password" placeholder="nuevo token de API de Cloudflare" class="grow inpill"><button class="btn alt" id="cfgTokenSave" type="button">Validar y guardar</button><button class="btn alt" id="cfgTokenClear" type="button">Volver al secret del worker</button></div></div></div></main>
+<div class="panelcard mt12" id="configCard" hidden><b>Estado de las integraciones</b>
+<p class="muted mt6">Lo que el worker comprueba al abrir esta vista. La KEK, la API key de Anthropic y las credenciales maestras de Twilio no se gestionan aquí a propósito: viven como secrets del worker.</p>
+<div class="cfgtoken" id="cfgTokenCard">
+<div class="cfg-h"><span class="tico key"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0 3 3L22 7l-3-3m-3.5 3.5L19 4"></path></svg></span><span class="cfg-t"><span class="cfg-name">Token de API de Cloudflare</span><span class="cfg-desc">Firma las sincronizaciones de Turnstile y las puertas de Access. Write-only: se valida contra Cloudflare ANTES de guardarse, se cifra con la KEK y nunca se vuelve a mostrar.</span></span><span class="chip" id="cfgOrigin">—</span><span class="stpill warn" id="cfgTokenState"><i></i>—</span></div>
+<div class="cfg-rot"><input id="cfgToken" type="password" autocomplete="new-password" placeholder="nuevo token de API de Cloudflare" class="inpill"><button class="btn alt" id="cfgTokenSave" type="button">Validar y guardar</button><button class="btn alt" id="cfgTokenClear" type="button">Volver al secret del worker</button></div>
+</div>
+<div class="cfgtiles" id="configState"></div>
+<div class="cfglegend"><span><i class="lg-ok"></i>operativo</span><span><i class="lg-warn"></i>requiere atención</span><span><i class="lg-bad"></i>error</span></div>
+</div></div></main>
 <dialog id="detail"><div class="modal-h"><strong>Detalle del lead</strong><button class="btn alt" id="close">Cerrar</button></div><div class="modal-b" id="detailBody"></div></dialog>
 <dialog id="tenantModal"><div class="modal-top"><div class="modal-h"><strong id="tenantTitle">Cliente</strong><div class="mh-r"><input id="tNote" placeholder="Nota del cambio (opcional)" class="inpill"><button class="btn" id="tenantSave" type="button">Guardar</button><button class="btn alt" id="tenantClose" type="button">Cerrar</button></div></div>
 <nav class="ttabs" id="ttabs">
@@ -349,15 +393,29 @@ function wireDetail(){$('#saveStatus').onclick=async()=>{try{await api('/api/adm
 const TERRS={already_provisioned:'Ese paso ya está hecho (idempotente: un doble clic no crea recursos duplicados).',provision_in_progress:'Ese paso ya está en curso, espera unos segundos.',waba_required:'Rellena y guarda primero la WABA del cliente.',subaccount_required:'Crea primero la subcuenta (paso 1).',twilio_auth_token_missing:'La subcuenta no tiene auth token guardado.',provision_orphan:'Twilio creó el recurso pero D1 no lo guardó: revisa Telegram y reconcilia a mano.',invalid_code:'El OTP son 4-8 dígitos.',slug_taken:'Ese slug ya existe.',address_taken:'Ese canal ya está asignado a otro cliente: guardarlo desviaría sus conversaciones.',subaccount_taken:'Esa subcuenta de Twilio ya está asignada a otro cliente.',pending_tenant_cannot_be_active:'Un prospecto (canal pending:) no puede activarse: ponle primero su canal real.',invalid_twilio_auth_token:'El auth token debe ser 32 caracteres hexadecimales (Twilio → Keys & Credentials).',stale_tenant:'Alguien modificó este cliente mientras editabas. Recarga la ficha y vuelve a aplicar tus cambios.',nothing_to_update:'No hay cambios que guardar.',invalid_preview:'Escribe un mensaje de prueba y un contexto de al menos 50 caracteres.',rate_limited:'Demasiadas pruebas seguidas: espera un minuto.',email_taken:'Ese correo ya tiene acceso al panel de OTRO cliente (un correo pertenece a un solo cliente).',email_is_admin:'Ese correo es admin de Velai (ADMIN_EMAILS): ya ve todo, no puede ser usuario de un cliente.',invalid_email:'Eso no parece un correo válido.',cloudflare_api_not_configured:'Falta CF_API_TOKEN (secret) o CF_ACCOUNT_ID en el worker: la sincronización con Cloudflare no está activa.',turnstile_sync_failed:'El PUT a Turnstile falló DESPUÉS de guardar en D1: el worker acepta el origen pero Turnstile no emitirá token. Reintenta Sincronizar Turnstile.',turnstile_domains_limit:'Turnstile admite 10 dominios por widget y ya se superan incluso plegando los www: toca pasar a un widget por cliente (alternativa §4 de la spec).',already_admin:'Ese correo ya es admin.',email_is_client:'Ese correo es usuario de un CLIENTE: primero quítalo de la ficha del cliente y luego dale admin.',admin_is_root:'Ese admin es raíz (vive en la configuración del worker): no se puede quitar desde el panel.',cannot_remove_self:'No puedes quitarte a ti mismo (que lo haga otro admin): evita el cierre accidental.',root_only:'Solo los admins raíz (los de la configuración del worker) pueden tocar la configuración.',invalid_token_format:'Eso no parece un token de API de Cloudflare.',token_invalid:'Cloudflare rechazó el token (no está activo): NO se guardó.',token_verify_unavailable:'No se pudo validar contra Cloudflare (red): NO se guardó.'};
 let tenantList=[],editing=null;
 document.querySelectorAll('.tab[data-view]').forEach(b=>b.onclick=()=>{document.querySelectorAll('.tab[data-view]').forEach(x=>{x.classList.toggle('is-on',x===b);x.setAttribute('aria-selected',x===b?'true':'false')});const v=b.dataset.view;$('#viewLeads').hidden=v!=='leads';$('#viewTenants').hidden=v!=='tenants';$('#viewConfig').hidden=v!=='config';if(v==='tenants')loadTenantList();else if(v==='config'){loadAdmins();loadConfig()}else loadStats()});
-// ── Configuración (solo raíz): el servidor decide con 403 root_only; el panel solo oculta ──
+// ── Configuración (solo raíz): el servidor decide con 403 root_only; el panel solo pinta ──
+// Los mismos datos de /api/admin/config, pero como tarjetas de estado con semáforo:
+// verde operativo · ámbar requiere atención (sin configurar) · rojo error (token rechazado, binding ausente).
+const CFG_ICONS={cloud:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M17.5 19a4.5 4.5 0 1 0-.42-8.98 6 6 0 1 0-11.4 2.38A3.5 3.5 0 0 0 6.5 19h11z"></path></svg>',shield:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path><path d="m9 12 2 2 4-4"></path></svg>',lock:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="11" width="18" height="10" rx="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path></svg>',db:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><ellipse cx="12" cy="5" rx="8" ry="3"></ellipse><path d="M4 5v14c0 1.66 3.58 3 8 3s8-1.34 8-3V5"></path><path d="M4 12c0 1.66 3.58 3 8 3s8-1.34 8-3"></path></svg>'};
+function stPill(state,label,sm){return '<span class="stpill '+state+(sm?' sm':'')+'"><i></i>'+esc(label)+'</span>'}
+function cfgTile(icon,name,pills,detail){return '<div class="tile"><div class="trow"><span class="tico '+icon+'">'+CFG_ICONS[icon]+'</span><span class="tname">'+esc(name)+'</span></div><div class="trow">'+pills+'</div><span class="tdetail">'+esc(detail)+'</span></div>'}
 async function loadConfig(){try{const c=await api('/api/admin/config');$('#configCard').hidden=false;$('#configOnly').hidden=true;
  const t=c.cf_token;
- $('#configState').textContent=[
-  'Token de API de Cloudflare: '+(t.source==='none'?'— sin configurar':('origen '+(t.source==='panel'?'PANEL (cifrado en D1)':'secret del worker')+' · '+(t.valid===true?'válido ✓ ('+t.status+')':'NO VÁLIDO ✗ ('+(t.status||'?')+')'))),
-  'Cuenta: '+(c.account_id||'—')+' · Sitekey de Turnstile: '+(c.turnstile_sitekey?'✓':'—'),
-  'Grupos de Access: clientes '+(c.groups.clientes?'✓':'—')+' · admins '+(c.groups.admins?'✓':'—'),
-  'Bindings: D1 '+(c.d1?'✓':'✗')+' · KV '+(c.kv?'✓':'✗')].join('\\n')}
- catch(e){if(e.message==='root_only'){$('#configCard').hidden=true;$('#configOnly').hidden=false}else{$('#configCard').hidden=false;$('#configOnly').hidden=true;$('#configState').textContent=TERRS[e.message]||e.message}}}
+ const tokenState=t.source==='none'?'warn':(t.valid===true?'ok':'bad');
+ const tokenLabel=t.source==='none'?'sin configurar':(t.valid===true?'válido · '+(t.status||'activo'):'NO válido ✗ ('+(t.status||'?')+')');
+ $('#cfgTokenCard').className='cfgtoken '+tokenState;
+ const tk=$('#cfgTokenState');tk.className='stpill '+tokenState;tk.innerHTML='<i></i>'+esc(tokenLabel);
+ $('#cfgOrigin').textContent='origen: '+(t.source==='none'?'—':(t.source==='panel'?'panel · cifrado en D1':'secret del worker'));
+ const acc=String(c.account_id||'');
+ $('#configState').innerHTML=
+  cfgTile('cloud','Cuenta de Cloudflare',stPill(acc?'ok':'warn',acc?'conectada':'sin CF_ACCOUNT_ID',true),acc?('cuenta '+acc.slice(0,4)+'…'+acc.slice(-4)):'necesaria para sincronizar con Cloudflare')+
+  cfgTile('shield','Turnstile',stPill(c.turnstile_sitekey?'ok':'warn',c.turnstile_sitekey?'sitekey configurada':'sin sitekey',true),'protege el widget del chat web')+
+  cfgTile('lock','Grupos de Access',stPill(c.groups.clientes?'ok':'warn','clientes',true)+stPill(c.groups.admins?'ok':'warn','admins',true),'las puertas de entrada al panel')+
+  cfgTile('db','Bindings del worker',stPill(c.d1?'ok':'bad','D1',true)+stPill(c.kv?'ok':'bad','KV',true),'leads (D1) y rate limit del chat (KV)');
+ const oks=[t.source!=='none'&&t.valid===true,!!acc,!!c.turnstile_sitekey,!!(c.groups.clientes&&c.groups.admins),!!(c.d1&&c.kv)];
+ const n=oks.filter(Boolean).length,all=n===oks.length;
+ const ov=$('#cfgOverall');ov.hidden=false;ov.className='stpill '+(all?'ok':'warn');ov.innerHTML='<i></i>'+esc((all?'Todo operativo':'Requiere atención')+' · '+n+' de '+oks.length)}
+ catch(e){$('#cfgOverall').hidden=true;if(e.message==='root_only'){$('#configCard').hidden=true;$('#configOnly').hidden=false}else{$('#configCard').hidden=false;$('#configOnly').hidden=true;$('#configState').textContent=TERRS[e.message]||e.message}}}
 $('#cfgTokenSave').onclick=async()=>{const token=$('#cfgToken').value.trim();if(!token)return;
  if(!confirm('El token se validará contra Cloudflare y pasará a usarse para TODAS las sincronizaciones (Turnstile y puertas de Access). ¿Continuar?'))return;
  try{const r=await api('/api/admin/config/cf-token',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token})});
@@ -368,8 +426,10 @@ $('#cfgTokenClear').onclick=async()=>{if(!confirm('¿Retirar el token del panel 
  catch(e){toast('No se pudo: '+(TERRS[e.message]||e.message),false)}};
 // ── Admins de Velai: alta/baja desde el panel, con la puerta de Access incluida ──
 async function loadAdmins(){try{const d=await api('/api/admin/admins');
- $('#adminsList').innerHTML=d.admins.map(a=>'<span class="flag '+(a.root?'ok':'off')+'">'+esc(a.email)+(a.root?' · raíz':' <a href="#" data-adel="'+esc(a.email)+'" title="Quitar admin">✕</a>')+'</span>').join(' ')}
- catch(e){$('#adminsList').textContent=TERRS[e.message]||e.message}}
+ $('#adminsList').innerHTML=d.admins.map(a=>'<span class="flag '+(a.root?'ok':'off')+'">'+esc(a.email)+(a.root?' · raíz':' <a href="#" data-adel="'+esc(a.email)+'" title="Quitar admin">✕</a>')+'</span>').join(' ');
+ const roots=d.admins.filter(a=>a.root).length;
+ $('#adminsCount').textContent=d.admins.length+(d.admins.length===1?' admin':' admins')+' · '+roots+(roots===1?' raíz':' raíces')}
+ catch(e){$('#adminsList').textContent=TERRS[e.message]||e.message;$('#adminsCount').textContent=''}}
 $('#aAdd').onclick=async()=>{const email=$('#aEmail').value.trim();if(!email)return;
  if(!confirm('Un ADMIN ve TODOS los clientes y TODOS los leads, y puede gestionar usuarios. ¿Dar acceso total a '+email+'?'))return;
  try{const r=await api('/api/admin/admins',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email})});
