@@ -66,9 +66,19 @@ main{flex:1;min-width:0;position:relative;padding:30px clamp(20px,3vw,42px) 60px
 .chartlabels{display:flex;justify-content:space-between;color:var(--muted2);font-size:11px;margin-top:6px}
 /* ── Filtros ── */
 .filters{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin-bottom:16px}
-.filters input,.filters select,.note textarea{background:var(--bg2);color:var(--white);border:1px solid rgba(255,248,244,.10);border-radius:var(--r-sm);padding:10px 13px}
-.filters input:hover,.filters select:hover{border-color:var(--orange)}
-.filters input[name=q]{flex:1;min-width:220px}
+.filters input,.note textarea{background:var(--bg2);color:var(--white);border:1px solid rgba(255,248,244,.10);border-radius:var(--r-sm);padding:10px 13px;font-size:13px}
+.filters input:hover{border-color:var(--orange)}
+.filters input[name=source]{max-width:120px}
+.filters input[type=date]{color-scheme:dark;color:rgba(255,248,244,.80)}
+.search{flex:1;min-width:220px;max-width:340px;display:flex;align-items:center;gap:9px;background:var(--bg2);border:1px solid rgba(255,248,244,.10);border-radius:var(--r-sm);padding:0 13px}
+.search:hover,.search:focus-within{border-color:var(--orange)}
+.search svg{width:15px;height:15px;color:rgba(255,248,244,.40);flex-shrink:0}
+.search input.q{flex:1;background:none;border:0;padding:10px 0;min-width:0}
+.search input.q:focus-visible{outline:none}
+.sel{position:relative;display:inline-flex}
+.sel select{appearance:none;-webkit-appearance:none;background:var(--bg2);color:rgba(255,248,244,.80);border:1px solid rgba(255,248,244,.10);border-radius:var(--r-sm);padding:10px 32px 10px 13px;font-size:13px;cursor:pointer}
+.sel:hover select{border-color:var(--orange)}
+.sel::after{content:'';position:absolute;right:13px;top:50%;width:7px;height:7px;border-right:1.5px solid rgba(255,248,244,.45);border-bottom:1.5px solid rgba(255,248,244,.45);transform:translateY(-70%) rotate(45deg);pointer-events:none}
 #resultCount{margin-left:auto;color:var(--muted);font-size:12.5px;white-space:nowrap}
 /* ── Tablas ── */
 .table{border:1px solid var(--border);border-radius:var(--r);overflow:auto;background:var(--bg2)}
@@ -135,6 +145,23 @@ dialog::backdrop{background:rgba(5,3,6,.78);backdrop-filter:blur(3px)}
 .ttab.dirty .dot{display:inline-block}
 .wizbar{display:flex;align-items:center;gap:12px;margin-top:18px;padding-top:16px;border-top:1px solid var(--line)}
 #wizHint{flex:1;font-size:12px}
+/* Stepper del alta: círculos numerados con conector; hecho = check naranja tenue, activo = naranja pleno */
+.wizsteps{display:flex;align-items:center;padding:14px 22px;border-bottom:1px solid rgba(255,248,244,.08);overflow-x:auto}
+.wstep{display:inline-flex;align-items:center;gap:9px;white-space:nowrap}
+.wdot{width:26px;height:26px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;flex-shrink:0;background:rgba(255,248,244,.05);color:rgba(255,248,244,.5);border:1px solid rgba(255,248,244,.10)}
+.wdot svg{width:12px;height:12px}
+.wstep.on .wdot{background:var(--orange);color:#fff;border-color:var(--orange);box-shadow:0 0 14px rgba(255,107,26,.4)}
+.wstep.done .wdot{background:rgba(255,107,26,.16);color:var(--orange2);border-color:rgba(255,107,26,.4)}
+.wlab{font-size:13px;font-weight:600;color:rgba(255,248,244,.5)}
+.wstep.on .wlab{color:var(--white)}
+.wstep.done .wlab{color:rgba(255,248,244,.75)}
+.wline{flex:1;height:1px;background:rgba(255,248,244,.08);margin:0 14px;min-width:18px}
+.wline.past{background:rgba(255,107,26,.35)}
+/* Marca del widget: campos a la izquierda, previsualización fija en columna derecha */
+.marca{display:flex;gap:24px;align-items:flex-start;margin-top:10px}
+.marca .grid{flex:1;min-width:0;grid-template-columns:repeat(2,minmax(0,1fr))}
+.marcaprev{width:320px;flex-shrink:0;position:sticky;top:118px}
+@media(max-width:1000px){.marca{flex-direction:column}.marcaprev{width:100%;position:static}}
 .grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px}
 .card{background:var(--surface);border:1px solid var(--border);border-radius:calc(var(--r) - 4px);padding:14px 16px}
 .card b{display:block;color:var(--muted);font-size:11px;font-weight:500;letter-spacing:.07em;text-transform:uppercase;margin-bottom:5px}
@@ -246,7 +273,7 @@ dialog::backdrop{background:rgba(5,3,6,.78);backdrop-filter:blur(3px)}
 </div>
 <div class="chartcard"><b>Leads por día · 14 días</b><div id="chart"></div><div class="chartlabels"><span id="chartFrom"></span><span id="chartTo"></span></div></div>
 <div id="escalations"></div>
-<form class="filters" id="filters"><input name="q" placeholder="Buscar nombre, teléfono, sector…"><select name="tenant" id="tenantFilter"><option value="">Todos los clientes</option></select><select name="status"><option value="">Todos los estados</option><option>new</option><option>contacted</option><option>qualified</option><option>won</option><option>lost</option><option>spam</option></select><select name="notification"><option value="">Todos los avisos</option><option>pending</option><option>sent</option><option>failed</option><option>skipped</option></select><input name="source" placeholder="Fuente"><input name="from" type="date"><input name="to" type="date"><button class="btn">Filtrar</button><span id="resultCount"></span></form>
+<form class="filters" id="filters"><label class="search"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"></circle><path d="m21 21-4.3-4.3"></path></svg><input name="q" class="q" placeholder="Buscar nombre, teléfono, sector…"></label><span class="sel"><select name="tenant" id="tenantFilter"><option value="">Todos los clientes</option></select></span><span class="sel"><select name="status"><option value="">Todos los estados</option><option>new</option><option>contacted</option><option>qualified</option><option>won</option><option>lost</option><option>spam</option></select></span><span class="sel"><select name="notification"><option value="">Todos los avisos</option><option>pending</option><option>sent</option><option>failed</option><option>skipped</option></select></span><input name="source" placeholder="Fuente"><input name="from" type="date" title="Desde"><input name="to" type="date" title="Hasta"><button class="btn">Filtrar</button><span id="resultCount"></span></form>
 <div id="message"></div><div class="table"><table><thead><tr><th>Fecha</th><th>Cliente</th><th>Estado</th><th>Nombre</th><th>WhatsApp</th><th>Sector</th><th>Fuente</th><th>Avisos</th></tr></thead><tbody id="rows"></tbody></table></div>
 <div class="legend"><span><i class="d-new"></i>nuevo</span><span><i class="d-contacted"></i>contactado</span><span><i class="d-qualified"></i>cualificado</span><span><i class="d-won"></i>ganado</span><span><i class="d-lost"></i>perdido</span></div>
 <div class="pager"><button class="btn alt" id="more" hidden>Cargar más</button></div></div>
@@ -278,7 +305,8 @@ dialog::backdrop{background:rgba(5,3,6,.78);backdrop-filter:blur(3px)}
 <button type="button" class="ttab" data-tt="prov" id="ttabProv">Aprovisionamiento<i class="dot"></i></button>
 <button type="button" class="ttab" data-tt="usuarios" id="ttabUsers">Usuarios<i class="dot"></i></button>
 <button type="button" class="ttab" data-tt="historial" id="ttabHist">Historial</button>
-</nav></div><div class="modal-b">
+</nav>
+<div class="wizsteps" id="wizSteps" hidden></div></div><div class="modal-b">
 <div id="tenantMsg"></div>
 <section class="tpane" data-tp="identidad">
 <div class="grid">
@@ -306,7 +334,8 @@ dialog::backdrop{background:rgba(5,3,6,.78);backdrop-filter:blur(3px)}
 <section class="tpane" data-tp="marca" hidden>
 <div class="card"><b>Marca del widget (chat en la web del cliente)</b>
 <p class="muted mt6">Lo que ve el visitante: logo, nombre, saludo, colores. Vacío = marca de Velai (hirevai.com no cambia). Se sirve por <code>/widget/boot</code> y se aplica sin deploy (caché 5 min).</p>
-<div class="grid mt6">
+<div class="marca">
+<div class="grid">
 <div class="card"><b>Nombre del bot</b><input id="tBotName" placeholder="Zoe"><small class="muted field-err" data-f="bot_name"></small></div>
 <div class="card"><b>Nombre de marca</b><input id="tBrandName" placeholder="Zoe Travel Spain"><small class="muted field-err" data-f="brand_name"></small></div>
 <div class="card"><b>Logo (URL https)</b><input id="tLogo" placeholder="https://… (el logo que ya usa su web)"><small class="muted field-err" data-f="logo_url"></small></div>
@@ -319,8 +348,10 @@ dialog::backdrop{background:rgba(5,3,6,.78);backdrop-filter:blur(3px)}
 <div class="card"><b>Tema del chat</b><select id="tTheme"><option value="">auto (según el visitante)</option><option value="light">light</option><option value="dark">dark</option></select></div>
 <div class="card"><b>Dominios de la web (https, uno por línea, máx. 6)</b><textarea id="tOrigins" rows="2" placeholder="https://… (apex y su www, uno por línea)"></textarea><small class="muted">Entran en la allowlist de CORS al Guardar (sin deploy). Después pulsa Sincronizar Turnstile.</small><small class="muted field-err" data-f="web_origins"></small></div>
 </div>
-<div class="mt12"><b class="muted">Previsualización</b><div id="brandPrev"></div></div>
-<div class="actions actions0"><button class="btn alt" id="tSyncDomains" type="button">Sincronizar Turnstile</button><span class="muted">Reescribe los hostnames del widget de Turnstile desde D1 (idempotente: también reconcilia).</span></div></div></section>
+<aside class="marcaprev"><b class="muted">Previsualización</b><div id="brandPrev"></div>
+<div class="actions actions0"><button class="btn alt" id="tSyncDomains" type="button">Sincronizar Turnstile</button></div>
+<small class="muted">Reescribe los hostnames del widget de Turnstile desde D1 (idempotente: también reconcilia).</small></aside>
+</div></div></section>
 <section class="tpane" data-tp="prov" hidden>
 <div class="card" id="tProv" hidden><b>Aprovisionamiento Twilio (automático)</b>
 <div id="tProvState" class="muted preline"></div>
@@ -489,9 +520,13 @@ function updateCount(){const n=$('#tPrompt').value.length;$('#tCount').textConte
 $('#tPrompt').oninput=updateCount;
 // ── Alta guiada (stepper): el borrador se guarda al pasar de paso; se activa al final ──
 const WIZ=['identidad','contexto','marca','prov','usuarios'];let wizard=false,wizStep=0;
-function wizShow(){showPane(WIZ[wizStep]);$('#wizBack').hidden=wizStep===0;$('#wizNext').textContent=wizStep===WIZ.length-1?'Finalizar':'Guardar y continuar';
+const WIZ_NAMES={identidad:'Identidad y canal',contexto:'Contexto',marca:'Marca del widget',prov:'Aprovisionamiento',usuarios:'Usuarios'};
+const WIZ_CHECK='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"></path></svg>';
+function renderWizSteps(){$('#wizSteps').innerHTML=WIZ.map((k,i)=>{const st=i<wizStep?'done':(i===wizStep?'on':'');
+ return (i?'<span class="wline'+(i<=wizStep?' past':'')+'"></span>':'')+'<span class="wstep '+st+'"><span class="wdot">'+(st==='done'?WIZ_CHECK:String(i+1))+'</span><span class="wlab">'+WIZ_NAMES[k]+'</span></span>'}).join('')}
+function wizShow(){showPane(WIZ[wizStep]);renderWizSteps();$('#wizBack').hidden=wizStep===0;$('#wizNext').textContent=wizStep===WIZ.length-1?'Finalizar':'Guardar y continuar';
  $('#wizHint').textContent=wizStep===WIZ.length-1?'Al finalizar, revisa la pestaña «Identidad y canal» y márcalo Activo cuando su canal real esté listo.':'El borrador se guarda al pasar de paso, sin activar nada hasta el final.'}
-function setWizard(on){wizard=on;$('#wizBar').hidden=!on;$('#tenantSave').hidden=on;$('#tNote').hidden=on;if(on){wizStep=0;wizShow()}}
+function setWizard(on){wizard=on;$('#wizBar').hidden=!on;$('#ttabs').hidden=on;$('#wizSteps').hidden=!on;$('#tenantSave').hidden=on;$('#tNote').hidden=on;if(on){wizStep=0;wizShow()}}
 $('#wizBack').onclick=()=>{if(wizStep>0){wizStep--;wizShow()}};
 $('#wizNext').onclick=async()=>{
  // Paso 1 sin canal: se rellena pending:<slug> — un prospecto que no enruta (y no puede activarse).
