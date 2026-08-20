@@ -1686,6 +1686,10 @@ function clienteAllowed(path, method) {
   if (path === '/api/admin/leads' && method === 'GET') return true;
   if (path === '/api/admin/leads/export.csv' && method === 'GET') return true;
   if (path === '/api/admin/appointments' && method === 'GET') return true;
+  // Calendario en autoservicio: el cliente conecta y gestiona SU calendario. El
+  // handler exige que el :id sea el suyo (ajeno = 404, nunca 403).
+  if (/^\/api\/admin\/tenants\/[0-9a-f-]+\/calendar$/i.test(path) && ['GET', 'PATCH', 'DELETE'].includes(method)) return true;
+  if (/^\/api\/admin\/tenants\/[0-9a-f-]+\/calendar\/connect$/i.test(path) && method === 'POST') return true;
   if (path === '/api/admin/stats' && method === 'GET') return true;
   if (path === '/api/admin/me' && method === 'GET') return true;
   if (path === '/api/admin/escalations' && method === 'GET') return true;
@@ -1741,7 +1745,9 @@ async function adminRouter(request, env, ctx, path, url, config, scope) {
       const row = await env.DB.prepare('SELECT name FROM tenants WHERE id=?').bind(scope.tenantId).first();
       tenantName = row ? row.name : null;
     }
-    return json({ role: scope.role, tenantName }, 200, NO_STORE);
+    // tenantId: el cliente lo necesita para llamar a SUS rutas de calendario
+    // (/tenants/:id/calendar); es su propio id, no filtra nada ajeno.
+    return json({ role: scope.role, tenantName, tenantId: scope.tenantId }, 200, NO_STORE);
   }
 
   if (path === '/api/admin/escalations' && request.method === 'GET') {
@@ -1987,6 +1993,9 @@ async function adminRouter(request, env, ctx, path, url, config, scope) {
   if (calMatch) {
     if (!UUID_RE.test(calMatch[1])) throw new HttpError(404, 'not_found');
     const tenantId = calMatch[1];
+    // Autoservicio del cliente: SOLO su propio calendario. Fuera de alcance = 404
+    // (un 403 confirmaría que ese tenant existe), y ANTES de tocar D1.
+    if (scope.role !== 'velai' && scope.tenantId !== tenantId) throw new HttpError(404, 'not_found');
     const tenantRow = await env.DB.prepare('SELECT id, slug, name FROM tenants WHERE id=?').bind(tenantId).first();
     if (!tenantRow) throw new HttpError(404, 'not_found');
     if (calMatch[2] === 'connect' && request.method === 'POST') {
@@ -2270,21 +2279,22 @@ async function adminRouter(request, env, ctx, path, url, config, scope) {
 // solo uso (leer-y-borrar) y va atado al tenant y al actor que inició la conexión.
 async function handleCalendarCallback(request, env, ctx, url) {
   const actor = await adminIdentity(request, env);
-  // Solo admins de Velai conectan calendarios (v1): el rol cliente no llega aquí.
   const scope = await resolveScope(env, actor);
-  if (scope.role !== 'velai') throw new HttpError(403, 'not_authorized');
-  return calendarCallbackFor(env, ctx, url, actor);
+  return calendarCallbackFor(env, ctx, url, actor, scope);
 }
 
 // Separada de la identidad (JWT de Access) para que los tests cubran la lógica
 // del state/intercambio sin montar un JWKS real.
-async function calendarCallbackFor(env, ctx, url, actor) {
+async function calendarCallbackFor(env, ctx, url, actor, scope = { role: 'velai' }) {
   if (!env.DB || !env.KV) throw new HttpError(503, 'calendar_not_configured');
   const state = clean(url.searchParams.get('state'), 40);
   let stored = null;
   if (state) { try { stored = await env.KV.get(`calstate:${state}`, 'json'); } catch (_) {} }
   if (!stored || !stored.tenantId) throw new HttpError(403, 'invalid_oauth_state');
   await env.KV.delete(`calstate:${state}`); // un solo uso, también si algo falla después
+  // Autoservicio: un cliente solo puede cerrar la conexión de SU tenant, aunque
+  // consiga un state ajeno (el state ya está consumido llegados aquí).
+  if (scope.role !== 'velai' && stored.tenantId !== scope.tenantId) throw new HttpError(403, 'not_authorized');
   const back = (result) => new Response(null, { status: 302, headers: { Location: `${adminOrigin(env)}/#calendar=${result}` } });
   const code = clean(url.searchParams.get('code'), 512);
   if (!code) return back('denegado'); // el usuario canceló en la pantalla de Google

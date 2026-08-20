@@ -1776,7 +1776,7 @@ test('callback OAuth: state de un solo uso, token cifrado con AAD calendar: y 40
   assert.equal(pub.status, 404);
 });
 
-test('citas en el panel: el cliente solo ve las suyas y jamás toca la config del calendario', async () => {
+test('citas en el panel: el cliente solo ve las suyas y solo puede tocar SU calendario', async () => {
   const APPTS = [
     { id: 'a1', tenant_id: 't-mio', tenant_name: 'Mi Negocio', customer_name: 'Ana', starts_at: '2026-09-01T10:00:00Z' },
     { id: 'a2', tenant_id: 't-otro', tenant_name: 'Otro', customer_name: 'Luis', starts_at: '2026-09-01T11:00:00Z' },
@@ -1793,7 +1793,29 @@ test('citas en el panel: el cliente solo ve las suyas y jamás toca la config de
   assert.equal(mine.appointments[0].tenant_name, undefined, 'sin nombres de tenant para el cliente');
   const all = await (await call(VELAI)).json();
   assert.equal(all.appointments.length, 2);
+  // autoservicio: el cliente accede a SU calendario; el de otro tenant es 404 (nunca 403)
+  const TID = '00000000-0000-4000-8000-0000000000c1';
+  const OWN = { role: 'cliente', tenantId: TID, email: 'cliente@x.com' };
+  const dbCal = { prepare: (sql) => ({ bind: () => ({
+    first: async () => sql.includes('SELECT id, slug, name') ? { id: TID, slug: 'mio', name: 'Mi Negocio' } : null,
+    all: async () => ({ results: [] }), run: async () => ({ meta: { changes: 1 } }),
+  }) }) };
+  const ownPath = `/api/admin/tenants/${TID}/calendar`;
+  const own = await (await testing.adminRouter(adminReq(ownPath), { DB: dbCal, KV: env.KV }, ctx, ownPath, new URL('https://x' + ownPath), {}, OWN)).json();
+  assert.equal(own.calendar, null, 'el cliente ve (aunque vacío) SU calendario');
   for (const [path, method] of [[`/api/admin/tenants/${LEADS[0].id}/calendar`, 'GET'], [`/api/admin/tenants/${LEADS[0].id}/calendar/connect`, 'POST']]) {
-    await assert.rejects(testing.adminRouter(adminReq(path, { method }), env, ctx, path, new URL('https://x' + path), {}, CLIENTE), (e) => e.code === 'not_authorized');
+    await assert.rejects(testing.adminRouter(adminReq(path, { method }), { DB: dbCal, KV: env.KV }, ctx, path, new URL('https://x' + path), {}, OWN), (e) => e.code === 'not_found', path);
   }
+});
+
+test('callback OAuth: un cliente no puede cerrar la conexión de OTRO tenant con un state ajeno', async () => {
+  const kv = mapKV();
+  const env = { DB: { prepare: () => ({ bind: () => ({ run: async () => ({ meta: { changes: 1 } }), first: async () => null, all: async () => ({ results: [] }) }) }) }, KV: kv, SECRETS_KEK: TEST_KEK, GOOGLE_OAUTH_CLIENT_ID: 'cid', GOOGLE_OAUTH_CLIENT_SECRET: 'sec', ADMIN_ORIGIN: 'https://admin.hirevai.com' };
+  const ctx = { waitUntil() {} };
+  await kv.put('calstate:stx', JSON.stringify({ tenantId: 't-otro', provider: 'google', actor: 'cliente@x.com' }));
+  await assert.rejects(
+    testing.calendarCallbackFor(env, ctx, new URL('https://admin.hirevai.com/oauth/calendar/callback?state=stx&code=c'), 'cliente@x.com', { role: 'cliente', tenantId: 't-mio' }),
+    (e) => e.code === 'not_authorized');
+  // y el state quedó consumido igualmente (un solo uso, también en el rechazo)
+  assert.equal(await kv.get('calstate:stx'), null);
 });

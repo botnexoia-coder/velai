@@ -250,9 +250,11 @@ let calTenant=null,calCur=null,calMonth=null,calAppts=[],calSelDay=null;
 function calTz(){return (calCur&&calCur.timezone)||'Europe/Madrid'}
 function calTzDay(iso){try{return new Intl.DateTimeFormat('en-CA',{timeZone:calTz(),year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date(iso))}catch(e){return String(iso).slice(0,10)}}
 function calTzHm(iso){try{return new Intl.DateTimeFormat('es-ES',{timeZone:calTz(),hour:'2-digit',minute:'2-digit',hour12:false}).format(new Date(iso))}catch(e){return ''}}
-async function openCalendar(id){calTenant=id;calMonth=new Date();calMonth.setDate(1);calSelDay=null;
- const t=tenantList.find(x=>x.id===id);$('#calTitle').textContent='Calendario — '+(t?t.name:'cliente');
+async function openCalendar(id,name){calTenant=id;calMonth=new Date();calMonth.setDate(1);calSelDay=null;
+ const t=tenantList.find(x=>x.id===id);$('#calTitle').textContent='Calendario — '+((t&&t.name)||name||'mi negocio');
  $('#calModal').showModal();await calRefresh()}
+// Rol cliente: su ítem de menú abre directamente SU calendario (autoservicio).
+$('#calNavBtn').onclick=()=>{if(ME&&ME.tenantId)openCalendar(ME.tenantId,ME.tenantName)};
 async function calRefresh(){try{const d=await api('/api/admin/tenants/'+calTenant+'/calendar');calCur=d.calendar;
  const c=d.calendar;const conn=c&&c.status==='connected';
  $('#calConnCard').hidden=!!conn;$('#calViewWrap').hidden=!conn;
@@ -305,7 +307,9 @@ $('#calSave').onclick=async()=>{let hours=null;const rawHours=$('#calHours').val
 (async function(){const h=String(location.hash||'');if(!h.startsWith('#calendar='))return;const r=h.slice(10);try{location.hash=''}catch(e){}
  if(!r.startsWith('ok')){toast('Conexión de calendario fallida: '+r,false);return}
  toast('Google Calendar conectado ✓');const tid=r.split(':')[1];if(!tid)return;
- try{if(!tenantList.length){const d=await api('/api/admin/tenants');tenantList=d.tenants}openCalendar(tid)}catch(e){}})();
+ try{const me=await api('/api/admin/me');
+  if(me.role==='velai'&&!tenantList.length){const d=await api('/api/admin/tenants');tenantList=d.tenants}
+  openCalendar(me.role==='velai'?tid:(me.tenantId||tid),me.tenantName)}catch(e){}})();
 $('#tSyncDomains').onclick=()=>{if(!editing){toast('Guarda primero el cliente: los dominios se leen de D1.',false);return}provPost('domains')};
 $('#pSub').onclick=()=>provPost('subaccount');
 $('#pTpl').onclick=()=>provPost('template');
