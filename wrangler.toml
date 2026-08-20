@@ -48,6 +48,9 @@ TURNSTILE_SITEKEY = "0x4AAAAAAESkAwvlDVJD9Z1l"
 # Vacío = la función de calendario queda APAGADA (los endpoints responden 503 y el
 # chat funciona sin citas). Rellenar con el client id del proyecto velai-calendar.
 GOOGLE_OAUTH_CLIENT_ID = "1059741045199-puqu4mcvbc8fmfj34puqdpo72tenb2a2.apps.googleusercontent.com"
+# TEMPORAL solo para grabar el vídeo de verificación de Google (la consent screen
+# debe verse EN INGLÉS). QUITAR esta línea al terminar la grabación.
+GOOGLE_OAUTH_HL = "en"
 # Id del grupo de Access «Clientes Velai» (creado el 2026-08-18 vía API; la política
 # «Clientes Velai» de la app admin.hirevai.com lo incluye, aparte de la de admins).
 CF_ACCESS_GROUP_ID = "e08705f9-5d71-457e-9628-13bdaf034435"
