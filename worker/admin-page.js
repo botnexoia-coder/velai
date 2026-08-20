@@ -319,6 +319,7 @@ body.cliente .cliente-only{display:flex}
 <div class="vhead"><div><h1 id="calTitle">Calendario</h1><p>Citas agendadas por Vai en el Google Calendar del negocio</p></div><div class="actions actions0"><select id="calTenantSel" class="inpill velai-only"></select><button class="btn alt velai-only" id="calBack" type="button">← Volver a Clientes</button></div></div>
 <div class="card" id="calConnCard" hidden><b>Conectar Google Calendar</b>
 <p class="muted mt6">Aún no hay calendario conectado. Al pulsar «Conectar Google» se abre la pantalla de permiso de Google: entra con la cuenta de Google del negocio. Vai consultará sus huecos y agendará citas directamente en su calendario, desde el chat web y WhatsApp.</p>
+<p class="muted mt6">Al conectar, Vai solo lee los tramos ocupados/libres del calendario elegido y crea los eventos de las citas; no lee el contenido del resto de eventos. Detalle del tratamiento: <a href="https://hirevai.com/privacidad/#google-calendar" target="_blank" rel="noopener">datos de Google Calendar</a> · <a href="https://hirevai.com/condiciones/#calendar" target="_blank" rel="noopener">condiciones del servicio (§5)</a>.</p>
 <div id="calState" class="mt6 muted"></div>
 <div class="actions actions0"><button class="btn" id="calConnect" type="button">Conectar Google</button></div></div>
 <div id="calViewWrap" hidden>

@@ -187,11 +187,16 @@
   <ul>
     <li><strong>Qué obtenemos:</strong> mediante el consentimiento OAuth de Google y con el permiso mínimo
       (ver y crear eventos), Vai lee únicamente los <strong>tramos ocupados y libres</strong> del calendario
-      elegido y <strong>crea los eventos</strong> de las citas solicitadas. No lee el título ni el contenido
-      del resto de eventos, y esos datos nunca llegan al usuario final del chat.</li>
+      elegido y <strong>crea los eventos</strong> de las citas solicitadas, escribiendo en ellos el nombre,
+      el teléfono, el motivo y la hora que el cliente final facilita al pedir su cita. No lee el título ni
+      el contenido del resto de eventos, y esos datos nunca llegan al usuario final del chat.</li>
     <li><strong>Para qué los usamos:</strong> exclusivamente para calcular huecos disponibles y crear citas.
       No los usamos para publicidad, no los vendemos y no los cedemos a terceros; solo intervienen los
       proveedores técnicos imprescindibles para prestar esta función.</li>
+    <li><strong>Qué sale de Google y qué no:</strong> para redactar la respuesta del chat, los
+      <strong>tramos horarios de disponibilidad</strong> (solo horas libres u ocupadas, sin ningún otro dato
+      del calendario) se procesan con nuestro proveedor de IA (Anthropic); el contenido de los eventos del
+      calendario nunca sale de Google.</li>
     <li><strong>Cómo los protegemos:</strong> la credencial de acceso (token) se guarda <strong>cifrada</strong>
       (AES-256-GCM) y aislada por cliente en nuestra infraestructura de Cloudflare.</li>
     <li><strong>Revocación:</strong> el negocio puede desconectar su calendario en cualquier momento desde el

@@ -693,7 +693,13 @@ test('el panel rediseñado: sin dominios externos salvo las fuentes, nonce y tod
   assert.equal(ADMIN_HTML.includes('http://'), false, 'nada por http://');
   const externals = [...ADMIN_HTML.matchAll(/https:\/\/([a-z0-9.-]+)/gi)].map((m) => m[1]);
   assert.deepEqual([...new Set(externals)], ['hirevai.com'], 'solo hirevai.com (fuentes)');
-  assert.ok([...ADMIN_HTML.matchAll(/hirevai\.com\/([a-z]+)\//g)].every((m) => m[1] === 'fonts'), 'y solo su ruta /fonts/');
+  // RECURSOS (src=/url() — lo que gobierna la CSP) siguen siendo solo /fonts/; los
+  // ENLACES <a> a hirevai.com (aviso in-product de Google Calendar) son navegación
+  // y solo apuntan a las páginas legales. La invariante de CSP no se debilita.
+  const resources = [...ADMIN_HTML.matchAll(/(?:src="|url\(')https:\/\/hirevai\.com\/([a-z]+)\//g)];
+  assert.ok(resources.length && resources.every((m) => m[1] === 'fonts'), 'recursos solo /fonts/');
+  const links = [...ADMIN_HTML.matchAll(/<a href="https:\/\/hirevai\.com\/([a-z]+)\//g)];
+  assert.ok(links.length && links.every((m) => ['privacidad', 'condiciones'].includes(m[1])), 'enlaces solo a páginas legales');
   assert.ok(ADMIN_HTML.includes('__NONCE__'));
   for (const id of ['tName', 'tSlug', 'tAddress', 'tFrom', 'tTeam', 'tChat', 'tTpl', 'tSub', 'tWaba', 'tToken', 'tPartner', 'tActive', 'tPrompt', 'tNote', 'pSub', 'pTpl', 'pPhone', 'pSender', 'pCode', 'pVerify', 'tenantFilter', 'newTenant', 'export', 'tTokenState', 'tBotName', 'tBrandName', 'tLogo', 'tColor1', 'tColor2', 'tGreeting', 'tGreetingEn', 'tChips', 'tPlaceholder', 'tWa', 'tTheme', 'brandPrev', 'toasts', 'tOrigins', 'tSyncDomains', 'logout', 'adminsCard', 'adminsList', 'aEmail', 'aAdd', 'configCard', 'configState', 'cfgToken', 'cfgTokenSave', 'cfgTokenClear']) {
     assert.ok(ADMIN_HTML.includes(`id="${id}"`), `falta #${id}`);

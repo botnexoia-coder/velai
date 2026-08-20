@@ -1,135 +1,84 @@
-# Verificación de la app OAuth de Velai en Google — guía de trabajo
+# Verificación de la app OAuth de Velai en Google — estado y guía
 
-> **Para quién es este doc**: para preparar y enviar la verificación de la app
-> `velai-calendar` en Google Auth Platform. Es autocontenido: incluye todos los
-> datos reales del proyecto. Objetivo: pasar la revisión del scope sensible de
-> Google Calendar para que los clientes de Velai conecten su calendario sin
-> avisos de "app no verificada" y sin que sus conexiones caduquen a los 7 días.
+> **Actualizado 2026-08-20 (noche)** tras la sesión de consolas (Cowork) + parche aplicado
+> por el CLI. Todo lo de Google Cloud se hizo con **botnexo.ia@gmail.com** (`authuser=4`),
+> dueña del proyecto `velai-calendar`. **Falta SOLO el vídeo para poder enviar.**
 
 ---
 
-## 1. Contexto: qué es la app y qué hace con el calendario
+## 1. Estado real (lo que YA está hecho — no repetir)
 
-- **Velai** (sitio: `https://hirevai.com`) es un SaaS español: un asistente de IA
-  («**Vai**») que atiende a los clientes de un negocio (clínicas, restaurantes,
-  gestorías…) por chat web y WhatsApp.
-- Función que requiere el scope: cada negocio cliente conecta **su propia cuenta
-  de Google** desde su panel (`https://admin.hirevai.com`) mediante OAuth. Con ese
-  permiso, Vai:
-  1. **Consulta la disponibilidad** del calendario del negocio (solo tramos
-     ocupados/libres — nunca lee títulos ni contenido de otros eventos), y
-  2. **Crea los eventos de las citas** que los clientes finales solicitan por chat.
-- El token de acceso se guarda **cifrado (AES-256-GCM)** y aislado por cliente.
-  El negocio puede revocar la conexión en cualquier momento desde el panel o desde
-  su cuenta de Google.
+- ✅ **Search Console**: `sc-domain:hirevai.com` verificada por `botnexo.ia@gmail.com`
+  (TXT `google-site-verification=PuaSHVFXLfGnwf4SWv2LIt6iZ9KyUTlF2OtGUl1IuC4` vía
+  Domain Connect de Cloudflare). Ojo: `johan.0413@gmail.com` sigue siendo otro propietario.
+- ✅ **App PUBLICADA (En producción)**: descubrimiento clave — Google **no deja enviar la
+  verificación con la app en «Prueba»**. Secuencia real: publicar app → verificar marca →
+  publicar marca → enviar acceso a los datos con el vídeo. Consecuencias del estado actual:
+  ya **NO caducan los refresh tokens a los 7 días** ni hace falta lista de test users;
+  a cambio, los usuarios ven la pantalla de **«app no verificada»** al conectar (desaparece
+  con la aprobación) y hay tope de 100 usuarios nuevos hasta entonces.
+- ✅ **Marca verificada Y publicada** (la consent screen muestra «Velai»).
+- ✅ **Cloudflare: Modo Bot Fight y AI Labyrinth APAGADOS** — eran la causa del rechazo del
+  verificador de Google («tu página principal está protegida por una página de acceso»).
+  🔴 Reactivarlos cuando aprueben el scope (o regla WAF que exima a los fetchers de Google).
+- ✅ **Parche in-product aplicado** (2026-08-20, CLI): aviso de privacidad en la tarjeta
+  «Conectar Google Calendar» del panel con enlaces a `/privacidad/#google-calendar` y
+  `/condiciones/#calendar`; la home nombra Google Calendar (featureList + tarjeta 05) y el
+  footer enlaza Condiciones; precisiones en privacidad (qué se escribe en el evento; los
+  tramos de disponibilidad pasan por Anthropic, el contenido de eventos nunca sale de
+  Google); y `googleAuthUrl` acepta `GOOGLE_OAUTH_HL` para forzar la consent screen en
+  inglés durante la grabación.
 
-## 2. Datos concretos del proyecto (usar tal cual)
+## 2. Datos del proyecto (usar tal cual)
 
 | Campo | Valor |
 |---|---|
-| Proyecto de Google Cloud | `velai-calendar` |
-| Nombre de la app (marca) | Velai |
-| Client ID OAuth | `1059741045199-puqu4mcvbc8fmfj34puqdpo72tenb2a2.apps.googleusercontent.com` |
-| Tipo de cliente | Aplicación web |
-| Redirect URIs registrados | `https://admin.hirevai.com/oauth/calendar/callback` y `http://localhost:8787/oauth/calendar/callback` |
-| **Scope solicitado (único)** | `https://www.googleapis.com/auth/calendar.events` (sensible) |
-| API habilitada | Google Calendar API |
-| Página principal | `https://hirevai.com/` |
-| Política de privacidad | `https://hirevai.com/privacidad/` — incluye sección específica «Datos de Google Calendar» con la declaración de **Limited Use** |
-| Condiciones del servicio | `https://hirevai.com/condiciones/` — incluye apartado 5 «Integración con Google Calendar» |
-| Dominio autorizado | `hirevai.com` |
-| Estado actual | **Testing** (usuarios de prueba; refresh tokens caducan a los 7 días) |
+| Proyecto | `velai-calendar` (cuenta `botnexo.ia@gmail.com`) |
+| Client ID | `1059741045199-puqu4mcvbc8fmfj34puqdpo72tenb2a2.apps.googleusercontent.com` |
+| Scope único (sensible) | `https://www.googleapis.com/auth/calendar.events` |
+| Redirects | `https://admin.hirevai.com/oauth/calendar/callback` · `http://localhost:8787/oauth/calendar/callback` |
+| Home / Privacidad / Condiciones | `https://hirevai.com/` · `/privacidad/` (con Limited Use en `#google-calendar`) · `/condiciones/` (§5) |
 
-## 3. Prerrequisitos ANTES de enviar (checklist)
+## 3. Lo ÚNICO que falta: el vídeo (y enviar)
 
-- [ ] **Search Console**: verificar la propiedad de `hirevai.com` en
-  `https://search.google.com/search-console` **con la misma cuenta de Google
-  dueña del proyecto** `velai-calendar`. Método recomendado: propiedad de dominio
-  con registro TXT en el DNS (el DNS está en Cloudflare). Sin esto, Google no
-  acepta el dominio autorizado ni la marca.
-- [ ] **Información de la marca completa** (Google Auth Platform → Información de
-  la marca): nombre «Velai», logo (opcional pero ayuda; si se sube, la revisión de
-  marca es obligatoria), correo de asistencia, dominio `hirevai.com`, enlaces de
-  privacidad y condiciones de la tabla de arriba.
-- [ ] **El vídeo demo** (sección 4).
-- [ ] La app funciona end-to-end en producción (verificado el 2026-08-20: un
-  negocio conectó su calendario y Vai agendó una cita real por chat) — así que la
-  demo se puede grabar del flujo real, no de un mock.
+**Antes de grabar** — poner la consent screen en inglés:
 
-## 4. El vídeo demo (lo más importante para el revisor)
+```bash
+# como var (recomendado: en wrangler.toml [vars] GOOGLE_OAUTH_HL = "en" + push)
+# o como secret temporal:
+npx wrangler secret put GOOGLE_OAUTH_HL     # valor: en
+# …grabar…  y luego QUITARLA para que los clientes la vean en español
+```
 
-**Formato**: YouTube, visibilidad **unlisted** (no privado). Idioma: inglés
-recomendado (o español con interfaz visible clara). Duración: 2–4 minutos.
-Sin cortes en las partes clave.
+**Guion (2–4 min, YouTube unlisted, narración o texto en pantalla):**
 
-**Debe mostrarse, en este orden:**
+1. Panel `admin.hirevai.com` → vista **Calendario** → se ve el **aviso de privacidad
+   in-product** → botón **Conectar Google**.
+2. **Consent screen completa y en inglés**: URL de `accounts.google.com`, nombre **Velai**,
+   **client ID legible en la barra** (hacer zoom), permiso de eventos de calendario.
+   La pantalla de «app no verificada» aparecerá: es normal y Google QUIERE verla.
+3. Uso real: «Conectado como…» → chat de Vai → «quiero cita mañana» → huecos leídos del
+   calendario → nombre y teléfono → confirmación → **el evento en Google Calendar** y la
+   cita en el panel.
+4. **Desconectar** desde el panel (revocación).
 
-1. **La pantalla de consentimiento OAuth completa**, donde se vea:
-   - la barra de direcciones con la URL de Google (`accounts.google.com`),
-   - que la app se llama **Velai**,
-   - **el client ID visible en la URL** de la pantalla de consentimiento (el
-     revisor lo comprueba contra la solicitud — ampliar/zoom si hace falta),
-   - el permiso solicitado (ver y editar eventos de calendario) tal y como lo
-     muestra Google.
-2. **Cómo se llega ahí**: desde el panel `admin.hirevai.com`, vista «Calendario»
-  del negocio → botón «Conectar Google».
-3. **El uso real del scope, de punta a punta**:
-   - tras conectar, se ve el calendario del negocio en el panel de Velai;
-   - en la web con el chat de Vai, un cliente final escribe «quiero una cita
-     mañana» → Vai ofrece huecos leídos del calendario conectado → el usuario da
-     nombre y teléfono y confirma;
-   - se muestra **el evento creado en Google Calendar** del negocio y la cita
-     reflejada en el panel.
-4. (Opcional, suma puntos) La **desconexión** desde el panel («Desconectar»).
+Datos ficticios y calendario de prueba (no el de un cliente real).
 
-**Nota de seguridad al grabar**: usar una cuenta/calendario de prueba, no exponer
-datos personales reales de clientes ni tokens.
+**Enviar**: Centro de verificación → *Prepare for verification* → enlace del vídeo +
+justificación de abajo → Confirmar. Google contesta por email (responder rápido); plazo
+típico 2–6 semanas.
 
-## 5. Respuestas para el formulario de verificación (borrador)
+### Justificación del scope (935/1000 caracteres — pegar tal cual)
 
-- **How will the scopes be used?** (calendar.events):
-  > Velai is a customer-service AI assistant for small businesses. When a business
-  > connects its own Google account via OAuth, Velai uses `calendar.events` for
-  > exactly two operations: (1) listing the business's own calendar events
-  > (start/end times only) to compute free/busy availability, and (2) creating
-  > events for appointments that the business's customers request through the
-  > business's chat channels. Velai does not read event titles or descriptions of
-  > existing events beyond start/end/status, does not access any other user data,
-  > does not use the data for advertising, and does not transfer it to third
-  > parties except the infrastructure sub-processors required to serve the
-  > feature. Refresh tokens are stored encrypted (AES-256-GCM) per business.
-  > Businesses can revoke access at any time from the Velai panel or their Google
-  > Account. Our privacy policy includes the Google API Services User Data Policy
-  > Limited Use disclosure: https://hirevai.com/privacidad/
-- **Why do you need a sensitive scope (and not a narrower one)?**
-  > Read-only scopes cannot create appointment events; `calendar.events` is the
-  > narrowest scope that allows both reading availability of the connected
-  > calendar and creating events. We request no other scopes.
-- **Demo video**: enlace de YouTube unlisted (sección 4).
+```
+Velai is a customer-service AI assistant for small businesses (clinics, restaurants, salons). Each business connects its own Google account from its private Velai dashboard. We use calendar.events for exactly two calls: (1) events.list on that calendar with fields=items(start,end,status,transparency) to compute free/busy slots - we never receive titles, descriptions, attendees or locations; (2) events.insert to create the appointment the business's own customer requested through the business's web or WhatsApp chat. No other Google API or scope is requested. Read-only scopes cannot create events and freebusy is not available to calendar.events, so this is the narrowest scope covering both halves of the feature. Data is never used for ads, sold or shared; refresh tokens are stored encrypted per business (AES-256-GCM) and revoked at Google on disconnect. Limited Use disclosure: https://hirevai.com/privacidad/#google-calendar
+```
 
-## 6. Envío y seguimiento
+En **Información adicional** (1000 car.): el panel está detrás de Cloudflare Access con OTP
+y el alta es asistida por Velai; si el revisor quiere probar en vivo, se le facilita un
+tenant de demo y un correo autorizado.
 
-1. Google Auth Platform → **Centro de verificación** → preparar/enviar la
-   verificación (marca + datos de la app + scope + vídeo).
-2. Google responde por **email** (a los contactos del proyecto): contestar rápido,
-   suelen pedir aclaraciones o re-grabar algún tramo del vídeo.
-3. Plazo típico: **2–6 semanas** para scopes sensibles.
-4. **No pulsar «Publicar app» hasta tener el vídeo y los prerrequisitos**: publicar
-   sin verificar muestra la pantalla de «app no verificada» a los usuarios.
+## 4. Lo que NO hay que tocar
 
-## 7. Mientras dura la revisión (modo Testing)
-
-- Solo los correos añadidos en **Público → Test users** pueden conectar su Google
-  (límite 100). Añadir ahí el Gmail de cada negocio piloto ANTES de que intente
-  conectar.
-- Los refresh tokens de Testing **caducan a los 7 días**: reconectar desde el
-  panel de Velai (dos clics). Avisar a los pilotos de esta limitación temporal.
-- Todo lo demás de la función de citas está operativo en producción.
-
-## 8. Qué NO hay que tocar
-
-- No añadir más scopes (cada scope extra reabre/complica la revisión).
-- No cambiar los redirect URIs ni el client ID (el worker en producción los usa).
-- No regenerar el client secret salvo decisión consciente (está cargado como
-  secret del worker; si se rota, hay que recargarlo con
-  `npx wrangler secret put GOOGLE_OAUTH_CLIENT_SECRET`).
+El client ID y sus redirects (el worker los usa), el scope único `calendar.events`, y el
+TXT de Search Console (borrarlo tumba la verificación del dominio y con ella la de marca).

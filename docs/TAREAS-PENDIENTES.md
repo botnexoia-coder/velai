@@ -69,9 +69,13 @@ Sin esto, las campañas gastarían presupuesto a ciegas (sin medir conversiones)
 ### 2i. Calendario (fase 1 VERIFICADA e2e el 2026-08-20 — consolidada en IMPLEMENTADO.md)
 
 - [x] Google Cloud Console (`velai-calendar`), credenciales cargadas, conexión y cita real de Diálogos agendada por chat y visible en panel + Google Calendar.
-- [ ] 🔴 **Verificación de la app por Google** (2–6 semanas, CAMINO CRÍTICO): Centro de verificación → enviar. Requiere: dominio `hirevai.com` verificado en Search Console, y un **vídeo demo en YouTube (unlisted)** mostrando la URL de la pantalla de consentimiento (con el client id visible), el scope `calendar.events` y el uso real (conectar desde el panel + Vai agendando). Mientras esté en Testing: conexiones caducan a los 7 DÍAS (reconectar desde el panel) y solo test users pueden conectar → **añadir el Gmail de cada piloto en Público → Test users**.
+- [x] Search Console verificada, app PUBLICADA (ya sin caducidad de 7 días ni test users), marca verificada y publicada, aviso de privacidad in-product en el panel (2026-08-20, sesión Cowork + parche del CLI — detalle en `VERIFICACION-GOOGLE.md`).
+- [ ] 🔴 **Grabar el vídeo y ENVIAR la verificación** (2–6 semanas, CAMINO CRÍTICO): guion, justificación del scope (935 car.) y el truco de `GOOGLE_OAUTH_HL="en"` para la consent screen en inglés, todo en `VERIFICACION-GOOGLE.md` §3. Tras grabar, QUITAR la var `GOOGLE_OAUTH_HL`.
+- [ ] 🔴 **Reactivar en Cloudflare «Modo Bot Fight» y «AI Labyrinth» cuando Google apruebe el scope** (se apagaron el 2026-08-20 porque el verificador de Google recibía el desafío JS y rechazaba la home). Alternativa si se quieren antes: regla WAF que exima a los fetchers de Google.
+- [ ] 🟠 Avisar a los clientes de la pantalla de **«app no verificada»** durante el alta del calendario (desaparece al aprobarse; tope de 100 usuarios nuevos hasta entonces).
+- [ ] 🟠 Página `/integraciones/google-calendar/` para usar como enlace de documentación del formulario (admite hasta 3).
+- [ ] 🟡 Botón «Conectar Google» con el estilo/logo oficial de Google (branding guidelines) · 🟡 cliente OAuth aparte para desarrollo (hoy `localhost:8787` convive en el de producción; higiene, no motivo de rechazo) · ℹ️ el test user `dialogosqueensenan@gmail.com` ya no hace falta (inocuo).
 - [ ] Probar también el camino WhatsApp (asíncrono): pedir cita por WhatsApp y ver la respuesta llegar como mensaje aparte.
-- [ ] Recordatorio semanal mientras dure Testing: reconectar el calendario de Diálogos (y de cualquier piloto) cuando caduque.
 - [ ] Validar con asesoría los textos de `/condiciones/` y la sección Google Calendar de `/privacidad/` (junto al bloque LSSI).
 - [ ] Pospuesto conscientemente: **Microsoft 365** (fase 2), picker de calendarios (hoy campo `calendar_id`), aviso Telegram por cita, enlace cita↔lead, recordatorios por plantilla, cancelación desde el panel, y canales Telegram/Instagram (spec aparte).
 

@@ -130,6 +130,9 @@ export function googleAuthUrl(env, state, redirectUri) {
     prompt: 'consent',
     state,
   });
+  // Google exige que el vídeo de verificación muestre la consent screen EN INGLÉS:
+  // GOOGLE_OAUTH_HL="en" solo mientras se graba; sin la var, el idioma del usuario.
+  if (env.GOOGLE_OAUTH_HL) params.set('hl', env.GOOGLE_OAUTH_HL);
   return `https://accounts.google.com/o/oauth2/v2/auth?${params}`;
 }
 
