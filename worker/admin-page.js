@@ -282,7 +282,7 @@ body.cliente .cliente-only{display:flex}
 <div class="navlabel velai-only">Gestión</div>
 <nav class="tabs" role="tablist">
 <button class="tab is-on" role="tab" aria-selected="true" data-view="leads" type="button"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M17 21v-2a4 4 0 0 0-4-4H7a4 4 0 0 0-4 4v2"></path><circle cx="10" cy="7" r="4"></circle><path d="M21 21v-2a4 4 0 0 0-3-3.87"></path><path d="M16 3.13a4 4 0 0 1 0 7.75"></path></svg>Leads</button>
-<button class="tab cliente-only" role="tab" aria-selected="false" data-view="calendario" id="calNavBtn" type="button"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="5" width="18" height="16" rx="2"></rect><line x1="8" y1="3" x2="8" y2="7"></line><line x1="16" y1="3" x2="16" y2="7"></line><line x1="3" y1="10" x2="21" y2="10"></line></svg>Calendario</button>
+<button class="tab" role="tab" aria-selected="false" data-view="calendario" id="calNavBtn" type="button"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="5" width="18" height="16" rx="2"></rect><line x1="8" y1="3" x2="8" y2="7"></line><line x1="16" y1="3" x2="16" y2="7"></line><line x1="3" y1="10" x2="21" y2="10"></line></svg>Calendario</button>
 <button class="tab velai-only" role="tab" aria-selected="false" data-view="tenants" type="button"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="7" width="18" height="13" rx="2"></rect><path d="M8 7V5a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>Clientes</button>
 </nav>
 <div class="navlabel velai-only">Sistema</div>
@@ -312,7 +312,7 @@ body.cliente .cliente-only{display:flex}
 <div class="vhead"><div><h1>Clientes</h1><p>Canal, contexto y estado de cada cliente</p></div><button class="btn" id="newTenant" type="button">Nuevo cliente</button></div>
 <div class="table"><table><thead><tr><th>Nombre</th><th>Canal</th><th>Leads</th><th>Contexto</th><th>Configuración</th><th>Estado</th><th>Calendario</th></tr></thead><tbody id="tenantRows"></tbody></table></div></div>
 <div id="viewCalendario" hidden>
-<div class="vhead"><div><h1 id="calTitle">Calendario</h1><p>Citas agendadas por Vai en el Google Calendar del negocio</p></div><button class="btn alt velai-only" id="calBack" type="button">← Volver a Clientes</button></div>
+<div class="vhead"><div><h1 id="calTitle">Calendario</h1><p>Citas agendadas por Vai en el Google Calendar del negocio</p></div><div class="actions actions0"><select id="calTenantSel" class="inpill velai-only"></select><button class="btn alt velai-only" id="calBack" type="button">← Volver a Clientes</button></div></div>
 <div class="card" id="calConnCard" hidden><b>Conectar Google Calendar</b>
 <p class="muted mt6">Aún no hay calendario conectado. Al pulsar «Conectar Google» se abre la pantalla de permiso de Google: entra con la cuenta de Google del negocio. Vai consultará sus huecos y agendará citas directamente en su calendario, desde el chat web y WhatsApp.</p>
 <div id="calState" class="mt6 muted"></div>
