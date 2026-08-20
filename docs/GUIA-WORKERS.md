@@ -19,7 +19,10 @@
 ```
 vai-worker.js        entrypoint: SOLO configuración/prompts + createWorker(config)
 worker/app.js        lógica: helpers, handlers, router, scheduled, export testing
-worker/admin-page.js UI embebida si la hay (template string + nonce CSP)
+worker/admin-page.js ensamblador de la UI embebida: HTML+CSS en template string +
+                     nonce CSP; el JS del panel se interpola como IIFE serializada
+worker/admin-panel.js el JS del panel como FUNCIÓN REAL (panelApp): node --check y
+                     los tests lo validan; autocontenida, solo APIs del navegador
 wrangler.toml        config declarativa (única fuente de verdad de bindings)
 migrations/          esquema D1 (NNNN_nombre.sql, aditivas, sin PRAGMA)
 test/                node --test contra el export `testing` y el router
@@ -34,8 +37,12 @@ Convenciones dentro de `worker/app.js` (reutilízalas, no las reinventes):
 - **Lookups seguros**: nunca `objeto[claveDelUsuario]` a pelo — usa
   `Object.prototype.hasOwnProperty.call(...)` (ver `isDemoKey`); `"constructor"` y
   `"__proto__"` son claves válidas para un atacante.
-- **`callAnthropic`**: timeout 15 s + 1 reintento en 429/5xx. Cualquier fetch externo
-  lleva `AbortSignal.timeout(...)`.
+- **`callAnthropic(env, payload, options)`**: por defecto timeout 15 s + 1 reintento
+  en 429/5xx. EXCEPCIÓN: el webhook de Twilio pasa `{retries:0, timeoutMs:10000}` —
+  Twilio corta a ~15 s y reintenta el webhook entero, así que reintentar dentro
+  garantizaba perder la respuesta y pagar el mensaje dos veces (hay dedupe por
+  `MessageSid` además). `options.tenant` activa el cupo de IA por tenant.
+  Cualquier fetch externo lleva `AbortSignal.timeout(...)`.
 - **Export `testing`** con los helpers puros para que `test/worker.test.js` los cubra.
 
 ## 3. `wrangler.toml` — plantilla mínima obligatoria

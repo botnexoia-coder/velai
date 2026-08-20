@@ -1,0 +1,64 @@
+# CD del worker: en push a main aplica migraciones D1 y despliega vai-worker.
+# Antes el deploy era manual (npx wrangler deploy) y main podía quedar verde con
+# un worker viejo o una migración sin aplicar en producción (ya pasó: resolveScope
+# lleva un try/catch por código desplegado antes de su migración).
+#
+# Semántica de fallo a mitad:
+#  - falla `npm run check`      → no se toca nada, main queda rojo.
+#  - falla `migrations apply`   → el worker no se despliega; producción intacta. Relanzar.
+#  - migraciones OK, falla deploy → worker viejo + esquema nuevo ADITIVO = estado seguro
+#    (regla de OPERATIONS.md: migración primero, deploy después). Relanzar el job:
+#    `migrations apply` es idempotente (tabla d1_migrations) y el deploy se reintenta.
+#
+# Requiere el secret de GitHub Actions CLOUDFLARE_API_TOKEN con permisos mínimos:
+# Account→Workers Scripts→Edit, Account→D1→Edit, Zone(hirevai.com)→Workers Routes→Edit
+# (por el custom_domain admin.hirevai.com). NO reutilizar el CF_API_TOKEN del worker:
+# tiene otros scopes (Turnstile/Access).
+name: Deploy worker
+on:
+  push:
+    branches: [main]
+    # Un push de solo-HTML/blog no despliega el worker (Pages ya se autodespliega).
+    # test/** entra a propósito: un cambio de tests puede poner esto rojo y debe bloquear.
+    paths:
+      - 'vai-worker.js'
+      - 'worker/**'
+      - 'migrations/**'
+      - 'wrangler.toml'
+      - 'test/**'
+      - 'package.json'
+      - '.github/workflows/deploy-worker.yml'
+permissions:
+  contents: read
+# Dos pushes seguidos a main no se solapan: el segundo espera al primero
+# (cancelar un deploy a medias es peor que encolarlo).
+concurrency:
+  group: deploy-worker
+  cancel-in-progress: false
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      # Público: es el mismo CF_ACCOUNT_ID de wrangler.toml [vars].
+      CLOUDFLARE_ACCOUNT_ID: 6a5877b5637ec5fa28d05af46e894542
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      # El job es hermético: repite el check aunque ci.yml también lo corra.
+      - run: npm run check
+      # Migraciones ANTES del deploy (OPERATIONS.md §esquema): son aditivas y el
+      # worker viejo convive con el esquema nuevo. Wrangler pineado a major (@4)
+      # porque el repo no tiene lockfile; subir de major será un cambio consciente.
+      - run: npx wrangler@4 d1 migrations apply vai-leads --remote
+      - run: npx wrangler@4 deploy
+      # Humo: el worker vivo responde el preflight CORS de /chat para un origen permitido.
+      - run: |
+          code=$(curl -s -o /dev/null -w '%{http_code}' -X OPTIONS \
+            -H 'Origin: https://hirevai.com' \
+            -H 'Access-Control-Request-Method: POST' \
+            https://vai-worker.botnexo-ia.workers.dev/chat)
+          echo "preflight /chat -> $code"
+          test "$code" = "204"

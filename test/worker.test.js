@@ -1338,3 +1338,208 @@ test('config: un token que Cloudflare rechaza NO se guarda', async () => {
     assert.equal(db.store.size, 0, 'nada escrito');
   } finally { globalThis.fetch = realFetch; }
 });
+
+// ── Sprint de blindaje: idempotencia del webhook + presupuesto por tenant ────
+
+function mapKV(kv = new Map()) {
+  return {
+    map: kv,
+    async get(k, t) { const v = kv.get(k); return v == null ? null : (t === 'json' ? JSON.parse(v) : v); },
+    async put(k, v) { kv.set(k, v); },
+    async delete(k) { kv.delete(k); },
+  };
+}
+
+function webhookEnv(tenants, kv) {
+  return {
+    TWILIO_AUTH_TOKEN: 'tok', TWILIO_ACCOUNT_SID: 'AC' + 'p'.repeat(32), ANTHROPIC_API_KEY: 'k',
+    KV: mapKV(kv),
+    DB: { prepare: (sql) => ({ bind: (...args) => ({
+      first: async () => sql.includes('channel_address') ? (tenants[args[0]] || null) : null,
+      all: async () => ({ results: [] }), run: async () => {},
+    }) }), batch: async () => [] },
+  };
+}
+
+test('el webhook ignora un MessageSid repetido sin llamar al modelo ni duplicar historial', async () => {
+  const worker = createWorker({ SYSTEM: 's', DEMOS: {}, SUMMARY_PROMPT: '', GUARDRAILS: '' });
+  const ctx = { waitUntil() {} };
+  const env = webhookEnv({ 'whatsapp:+15550000001': { id: 't-uno', slug: 'uno', system_prompt: 'P' } });
+  let modelCalls = 0;
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = async (url) => {
+    if (String(url).includes('api.anthropic.com')) { modelCalls++; return new Response(JSON.stringify({ content: [{ text: 'hola' }] }), { status: 200 }); }
+    return new Response('{}', { status: 200 });
+  };
+  try {
+    const params = { AccountSid: env.TWILIO_ACCOUNT_SID, From: 'whatsapp:+34600000000', To: 'whatsapp:+15550000001', Body: 'hola', MessageSid: 'SM' + '1'.repeat(32) };
+    const first = await worker.fetch(await twilioRequest('https://worker.test/', params, 'tok'), env, ctx);
+    assert.equal(first.status, 200);
+    assert.ok((await first.text()).includes('<Message>'), 'el primero contesta');
+    // Twilio reintenta el MISMO webhook (mismo MessageSid): TwiML vacío, sin modelo
+    const second = await worker.fetch(await twilioRequest('https://worker.test/', params, 'tok'), env, ctx);
+    assert.equal(second.status, 200);
+    assert.ok(!(await second.text()).includes('<Message>'), 'el duplicado responde TwiML vacío');
+    assert.equal(modelCalls, 1, 'el modelo se paga UNA vez');
+    const history = JSON.parse(env.KV.map.get('conv:wa:t-uno:whatsapp:+34600000000'));
+    assert.equal(history.filter((m) => m.role === 'user').length, 1, 'sin turnos duplicados');
+  } finally { globalThis.fetch = realFetch; }
+});
+
+test('el webhook no reintenta al modelo y los demás llamadores mantienen el reintento', async () => {
+  const worker = createWorker({ SYSTEM: 's', DEMOS: {}, SUMMARY_PROMPT: '', GUARDRAILS: '' });
+  const ctx = { waitUntil() {} };
+  const env = webhookEnv({ 'whatsapp:+15550000001': { id: 't-uno', slug: 'uno', system_prompt: 'P' } });
+  let modelCalls = 0;
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = async (url) => {
+    if (String(url).includes('api.anthropic.com')) { modelCalls++; return new Response('{}', { status: 500 }); }
+    return new Response('{}', { status: 200 });
+  };
+  try {
+    const params = { AccountSid: env.TWILIO_ACCOUNT_SID, From: 'whatsapp:+34600000000', To: 'whatsapp:+15550000001', Body: 'hola', MessageSid: 'SM' + '2'.repeat(32) };
+    const res = await worker.fetch(await twilioRequest('https://worker.test/', params, 'tok'), env, ctx);
+    assert.equal(res.status, 502);
+    assert.equal(modelCalls, 1, 'el webhook no reintenta: Twilio ya reintenta el webhook entero');
+    modelCalls = 0;
+    // fuera del webhook los defaults siguen: timeout 15 s y 1 reintento en 5xx
+    await assert.rejects(testing.callAnthropic({ ANTHROPIC_API_KEY: 'k' }, { messages: [] }), (e) => e.code === 'ai_unavailable');
+    assert.equal(modelCalls, 2, 'los defaults mantienen el reintento');
+  } finally { globalThis.fetch = realFetch; }
+});
+
+test('una petición sin firma válida no escribe la clave de dedupe', async () => {
+  const worker = createWorker({ SYSTEM: 's', DEMOS: {}, SUMMARY_PROMPT: '', GUARDRAILS: '' });
+  const ctx = { waitUntil() {} };
+  const env = webhookEnv({ 'whatsapp:+15550000001': { id: 't-uno', slug: 'uno', system_prompt: 'P' } });
+  const params = { AccountSid: env.TWILIO_ACCOUNT_SID, From: 'whatsapp:+34600000000', To: 'whatsapp:+15550000001', Body: 'hola', MessageSid: 'SM' + '3'.repeat(32) };
+  const res = await worker.fetch(await twilioRequest('https://worker.test/', params, 'token-equivocado'), env, ctx);
+  assert.equal(res.status, 403);
+  // sin firma no se puede envenenar el sid de un mensaje legítimo
+  assert.equal([...env.KV.map.keys()].filter((k) => k.startsWith('dedupe:')).length, 0);
+});
+
+test('el cupo agotado de un tenant no afecta a otro y la alerta dice qué tenant fue', async () => {
+  const worker = createWorker({ SYSTEM: 's', DEMOS: {}, SUMMARY_PROMPT: '', GUARDRAILS: '' });
+  const ctx = { waitUntil() {} };
+  const day = new Date().toISOString().slice(0, 10);
+  const kv = new Map([[`budget:ai:t-uno:${day}`, '300']]);
+  const env = webhookEnv({
+    'whatsapp:+15550000001': { id: 't-uno', slug: 'uno', name: 'Cliente Uno', system_prompt: 'P' },
+    'whatsapp:+15550000002': { id: 't-dos', slug: 'dos', name: 'Cliente Dos', system_prompt: 'P' },
+  }, kv);
+  env.TELEGRAM_TOKEN = 'tg'; env.TELEGRAM_CHAT_ID = '1';
+  const telegramTexts = [];
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = async (url, init) => {
+    if (String(url).includes('api.telegram.org')) { telegramTexts.push(JSON.parse(init.body).text); return new Response('{"ok":true}', { status: 200 }); }
+    if (String(url).includes('api.anthropic.com')) return new Response(JSON.stringify({ content: [{ text: 'hola' }] }), { status: 200 });
+    return new Response('{}', { status: 200 });
+  };
+  try {
+    const base = { AccountSid: env.TWILIO_ACCOUNT_SID, From: 'whatsapp:+34600000000', Body: 'hola' };
+    const blocked = await worker.fetch(await twilioRequest('https://worker.test/', { ...base, To: 'whatsapp:+15550000001', MessageSid: 'SM' + '4'.repeat(32) }, 'tok'), env, ctx);
+    assert.equal(blocked.status, 429);
+    assert.equal((await blocked.json()).error, 'ai_tenant_budget_exhausted');
+    assert.ok(telegramTexts.some((t) => t.includes('Cliente Uno')), 'la alerta nombra al tenant');
+    const fine = await worker.fetch(await twilioRequest('https://worker.test/', { ...base, To: 'whatsapp:+15550000002', MessageSid: 'SM' + '5'.repeat(32) }, 'tok'), env, ctx);
+    assert.equal(fine.status, 200, 'el otro tenant sigue en servicio');
+    // tras la llamada OK, ambos contadores existen e incrementados
+    assert.equal(kv.get(`budget:ai:t-dos:${day}`), '1');
+    assert.equal(kv.get(`budget:ai:${day}`), '1');
+  } finally { globalThis.fetch = realFetch; }
+});
+
+test('el techo global sigue cortando a todos y tenants.ai_daily_limit pisa el default', async () => {
+  const day = new Date().toISOString().slice(0, 10);
+  // techo global agotado: 429 ai_budget_exhausted para cualquier tenant
+  const globalKv = mapKV(new Map([[`budget:ai:${day}`, '1000']]));
+  await assert.rejects(
+    testing.callAnthropic({ ANTHROPIC_API_KEY: 'k', KV: globalKv }, { messages: [] }, { tenant: { id: 't-uno', slug: 'uno', name: 'Uno' } }),
+    (e) => e.code === 'ai_budget_exhausted');
+  // límite por fila (ai_daily_limit=1) por debajo del default del env
+  const kv = mapKV(new Map([[`budget:ai:t-uno:${day}`, '1']]));
+  const env = { ANTHROPIC_API_KEY: 'k', AI_TENANT_DAILY_LIMIT: '300', KV: kv };
+  await assert.rejects(
+    testing.callAnthropic(env, { messages: [] }, { tenant: { id: 't-uno', slug: 'uno', name: 'Uno', ai_daily_limit: 1 } }),
+    (e) => e.code === 'ai_tenant_budget_exhausted');
+  // el mismo contador con el default del env (300) pasa
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = async (url) => {
+    if (String(url).includes('api.anthropic.com')) return new Response(JSON.stringify({ content: [{ text: 'ok' }] }), { status: 200 });
+    return new Response('{}', { status: 200 });
+  };
+  try {
+    const reply = await testing.callAnthropic(env, { messages: [] }, { tenant: { id: 't-uno', slug: 'uno', name: 'Uno' } });
+    assert.equal(reply, 'ok');
+  } finally { globalThis.fetch = realFetch; }
+});
+
+// ── Sprint de blindaje: el JS del panel es una función real y arranca de verdad ──
+
+test('el JS del panel se serializa entero como IIFE, con nonce y sin romper el HTML', async () => {
+  const { ADMIN_HTML } = await import('../worker/admin-page.js');
+  const { panelApp } = await import('../worker/admin-panel.js');
+  assert.ok(ADMIN_HTML.includes('(function panelApp'), 'la función viaja serializada como IIFE');
+  assert.equal([...ADMIN_HTML.matchAll(/<\/script>/g)].length, 1, 'un único cierre de script');
+  // la regla de la cabecera de admin-panel.js, verificada: el cuerpo no puede
+  // contener el cierre (cortaría el <script> del panel a mitad)
+  assert.ok(!panelApp.toString().includes('</scr' + 'ipt>'));
+  assert.ok(!panelApp.toString().includes('`'), 'sin backticks: el ensamblador es un template literal');
+});
+
+test('el panel arranca contra un DOM mínimo y pide me, leads, stats y escalations', async () => {
+  const vm = await import('node:vm');
+  const { panelApp } = await import('../worker/admin-panel.js');
+  // Elemento stub: acepta cualquier lectura/escritura sin romperse. No simula un DOM;
+  // caza ReferenceErrors, typos y regresiones del arranque que el grep no ve.
+  const listNoop = () => [];
+  let element;
+  const handler = {
+    get(_, prop) {
+      if (prop === 'then' || prop === Symbol.toPrimitive) return undefined;
+      if (prop === 'querySelectorAll') return listNoop;
+      if (prop === 'children') return [];
+      if (prop === 'querySelector' || prop === 'closest' || prop === 'createElement') return () => element;
+      if (prop === 'classList') return { add() {}, remove() {}, toggle() {}, contains: () => false };
+      if (prop === 'dataset' || prop === 'style') return new Proxy({}, { get: () => '', set: () => true });
+      if (prop === 'value' || prop === 'textContent' || prop === 'innerHTML' || prop === 'id') return '';
+      if (prop === 'checked' || prop === 'hidden' || prop === 'disabled') return false;
+      if (prop === 'matches') return () => false;
+      return () => undefined; // addEventListener, insertAdjacentHTML, showPopover, remove…
+    },
+    set: () => true,
+  };
+  element = new Proxy(function () {}, handler);
+  const fetched = [];
+  const fixtures = [
+    ['/api/admin/me', { role: 'velai' }],
+    ['/api/admin/stats', { total30: 0, sinContactar: 0 }],
+    ['/api/admin/leads', { leads: [] }],
+    ['/api/admin/tenants', { tenants: [] }],
+    ['/api/admin/escalations', { escalations: [] }],
+  ];
+  const rejections = [];
+  const onRejection = (reason) => rejections.push(reason);
+  process.on('unhandledRejection', onRejection);
+  const context = vm.createContext({
+    document: element,
+    location: { href: '' },
+    fetch: async (path) => {
+      fetched.push(String(path));
+      const hit = fixtures.find(([route]) => String(path).startsWith(route));
+      return new Response(JSON.stringify(hit ? hit[1] : {}), { status: 200, headers: { 'Content-Type': 'application/json' } });
+    },
+    FormData: class { *[Symbol.iterator]() {} },
+    URLSearchParams, Intl, Response,
+    setTimeout: () => 0, requestAnimationFrame: () => {}, confirm: () => false,
+  });
+  try {
+    new vm.default.Script(`(${panelApp.toString()})();`).runInContext(context);
+    for (let i = 0; i < 10; i++) await new Promise((resolve) => setImmediate(resolve));
+  } finally { process.off('unhandledRejection', onRejection); }
+  assert.deepEqual(rejections, [], 'el arranque no deja promesas rotas');
+  for (const route of ['/api/admin/me', '/api/admin/leads', '/api/admin/stats', '/api/admin/escalations']) {
+    assert.ok(fetched.some((p) => p.startsWith(route)), `el arranque pide ${route}`);
+  }
+});

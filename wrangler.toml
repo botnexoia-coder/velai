@@ -26,8 +26,12 @@ routes = [
 ALLOWED_WEB_ORIGINS = "https://hirevai.com,https://www.hirevai.com,https://velai-dey.pages.dev,https://hiredatavision.com,https://www.hiredatavision.com,https://gogestion.es,https://www.gogestion.es,https://zoetravelspain.com,https://www.zoetravelspain.com,https://dialogosqueensenan.com,https://www.dialogosqueensenan.com,https://gogestion-demo.pages.dev"
 ADMIN_ORIGIN = "https://admin.hirevai.com"
 LEAD_RETENTION_MONTHS = "24"
-# Tope diario global de llamadas al modelo (presupuesto anti-abuso, resetea a medianoche UTC).
+# Tope diario GLOBAL de llamadas al modelo (presupuesto anti-abuso, resetea a medianoche UTC).
 AI_DAILY_LIMIT = "1000"
+# Tope diario POR TENANT (default; la columna tenants.ai_daily_limit lo pisa por fila).
+# Un cliente con tráfico anómalo agota su cupo (429 ai_tenant_budget_exhausted) sin
+# tumbar el chat de los demás.
+AI_TENANT_DAILY_LIMIT = "300"
 # Tenant del canal web cuando el payload no trae `tenant` (el widget de hirevai.com).
 DEFAULT_TENANT_SLUG = "velai"
 # Admins de Velai en el panel (rol completo). Fuera de D1 a propósito: una fila
@@ -49,7 +53,8 @@ CF_ACCESS_GROUP_ID = "e08705f9-5d71-457e-9628-13bdaf034435"
 CF_ADMIN_GROUP_ID = "92360e3f-8e40-4dfd-85e6-718617d140d0"
 
 # Workers Logs: sin este bloque cada deploy lo deja APAGADO y los logs operativos
-# (tenant_token_undecryptable, provision_orphan, lead_d1_fallback…) no se ven en
+# (tenant_token_undecryptable, provision_orphan, lead_d1_fallback,
+# twilio_duplicate_ignored, ai_tenant_budget_exhausted…) no se ven en
 # ninguna parte. Los logs no llevan PII por diseño, así que muestreo al 100%.
 [observability]
 enabled = true

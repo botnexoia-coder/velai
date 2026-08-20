@@ -16,7 +16,17 @@
 4. Sustituir `REPLACE_WITH_TURNSTILE_SITE_KEY` en los 26 HTML por la site key pública. `npm run check` falla mientras quede algún marcador (en CI de ramas puede saltarse con `CHECK_ALLOW_PLACEHOLDERS=1`; el deploy real nunca). *(Hecho.)*
 5. Guardar `TURNSTILE_SECRET_KEY`, `ANTHROPIC_API_KEY`, `TELEGRAM_TOKEN`, `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN` y `TELEGRAM_CHAT_ID` como secrets (`npx wrangler secret put <NOMBRE>`). *(Hechos.)*
 6. Configurar `TEAM_WHATSAPP`, `TWILIO_FROM` y `TWILIO_LEAD_TEMPLATE_SID` (formato `whatsapp:+E164`; el SID es de la plantilla aprobada `velai_nuevo_lead`). *(Hechos.)* **El aviso por WhatsApp va SIEMPRE por plantilla** (`ContentSid`) — texto libre fuera de la ventana de 24 h devuelve `Undelivered 63016`, que es lo que tuvo el canal roto desde junio (ver `docs/IMPLEMENTADO.md` §FASE0). Pendiente: duplicar la plantilla en categoría **Utility** y actualizar el SID.
-7. Desplegar el Worker: `npx wrangler deploy`. Verificar en **Workers → vai-worker → Settings → Triggers** que el cron `*/5 * * * *` quedó registrado. *(Hecho.)*
+7. Desplegar el Worker: **automático desde 2026-08-20** — el push a `main` que toque
+   `vai-worker.js`, `worker/**`, `migrations/**`, `wrangler.toml`, `test/**` o
+   `package.json` dispara `.github/workflows/deploy-worker.yml`, que corre los checks,
+   aplica las migraciones D1 (**antes** del deploy, ver §esquema) y hace `wrangler deploy`
+   con smoke test del preflight de `/chat`. Requiere el secret de GitHub Actions
+   `CLOUDFLARE_API_TOKEN` (permisos mínimos: Workers Scripts Edit + D1 Edit +
+   Workers Routes Edit en la zona `hirevai.com`; NO es el `CF_API_TOKEN` del worker).
+   El deploy manual `npx wrangler deploy` sigue funcionando como respaldo.
+   **Caveat**: Pages y este workflow corren en paralelo — para cambios de contrato
+   worker↔frontend sigue valiendo la disciplina de dos commits (primero worker, luego sitio).
+   Verificar en **Workers → vai-worker → Settings → Triggers** que el cron `*/5 * * * *` sigue registrado. *(Hecho.)*
 
 No desplegar con el UUID D1 de ceros ni con el marcador de Turnstile. **No quitar de `wrangler.toml` los bindings `KV` y `DB`**: un deploy sin ellos los elimina del Worker (sin `KV`, `/chat` responde 503 y el rate limit se desactiva).
 
@@ -164,7 +174,9 @@ bandeja, el equipo del cliente responde desde SU WhatsApp (número distinto al d
 Automáticas (llegan al Telegram del equipo, con antirebote de 1 h):
 
 - **`lead_d1_fallback` / `lead_d1_misconfigured`** — D1 caída o binding roto; los leads van a la cola KV. Revisar el binding DB y el estado de D1; el cron re-inserta al volver.
-- **`ai_budget_exhausted`** — se agotó el tope diario de llamadas al modelo (`AI_DAILY_LIMIT`, hoy 1000). El chat responde 429 hasta medianoche UTC; si es tráfico legítimo, subir la variable y redeploy.
+- **`ai_budget_exhausted`** — se agotó el techo diario GLOBAL de llamadas al modelo (`AI_DAILY_LIMIT`, hoy 1000). El chat responde 429 hasta medianoche UTC; si es tráfico legítimo, subir la variable y redeploy.
+- **`ai_tenant_budget_exhausted`** — UN tenant agotó su cupo diario (`tenants.ai_daily_limit`, o `AI_TENANT_DAILY_LIMIT`=300 por defecto). Solo sus canales responden 429; los demás siguen. La alerta de Telegram nombra al tenant. Si es tráfico legítimo, subir su `ai_daily_limit` por SQL — aplica en ≤5 min (caché de tenants), sin deploy.
+- **`twilio_duplicate_ignored`** — Twilio reintentó un webhook ya procesado (mismo `MessageSid`); se respondió TwiML vacío sin llamar al modelo. Es el comportamiento esperado, no un error.
 
 A vigilar a mano (en Workers Logs / panel / GA4) hasta tener alerting externo:
 

@@ -66,6 +66,11 @@ Sin esto, las campañas gastarían presupuesto a ciegas (sin medir conversiones)
 - [ ] En Cloudflare: `www.hirevai.com` figura "Inactivo (Error)", DMARC sigue en `p=none`, y el proyecto Pages legacy `hirevai` sin retirar.
 - [ ] Revisar las métricas del chat (eventos `chat_*` en GA4) a partir del ~2026-08-24, con una semana de datos.
 
+### 2h. Seguimiento del sprint de blindaje (desplegado 2026-08-20)
+
+- [ ] **Webhook 100% asíncrono (TwiML vacío + `waitUntil` + Messages API de Twilio)**: evaluado y descartado en el sprint — solo abordarlo si los logs `ai_usage` muestran p95 > ~9 s en el canal WhatsApp (hoy el webhook va con timeout 10 s / 0 reintentos + dedupe por `MessageSid`, suficiente). Nota: SPEC-CALENDARIO ya contempla este patrón para el bucle de tools, que lo necesitará de verdad.
+- [ ] Exponer `tenants.ai_daily_limit` en la ficha del panel (hoy se edita por SQL; el default es `AI_TENANT_DAILY_LIMIT`=300).
+
 ### 2f. Widget con marca en las webs de los clientes (desplegado `?v=7` el 2026-08-18 — ver `IMPLEMENTADO.md`)
 
 - [x] **Hostnames del widget de Turnstile verificados por API (2026-08-18)**: los 4 apex de los clientes + `hirevai.com`/`www` + `velai-dey.pages.dev` + `gogestion-demo.pages.dev` están en el widget `velai-web`. Los `www.` de los clientes quedan cubiertos: Turnstile permite automáticamente los subdominios de los dominios listados. Ojo servidor: `verifyTurnstile` cruza contra `ALLOWED_WEB_ORIGINS`, que sí lista los `www` explícitos — las dos listas alineadas.

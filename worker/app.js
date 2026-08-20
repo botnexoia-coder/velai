@@ -147,30 +147,62 @@ async function verifyTurnstile(env, token, request, expectedAction) {
   }
 }
 
-// Presupuesto diario global de llamadas al modelo: un abuso distribuido (muchas IPs)
-// no puede quemar la API key. Contador en KV por día UTC; fail-open si KV cae
-// (igual que el rate limit — Turnstile sigue siendo la barrera principal).
-async function aiBudgetGuard(env) {
+// Presupuesto diario de llamadas al modelo en dos niveles. El cupo POR TENANT evita
+// que el tráfico anómalo de un cliente tumbe el chat de los demás; el techo GLOBAL
+// se mantiene como red anti-catástrofe de la API key ante un abuso distribuido.
+// Contadores en KV por día UTC; fail-open si KV cae (igual que el rate limit —
+// Turnstile sigue siendo la barrera principal). Sin tenant (preview del panel)
+// solo aplica el techo global.
+async function aiBudgetGuard(env, tenant) {
   if (!env.KV) return;
+  const day = new Date().toISOString().slice(0, 10);
+  // Cupo del tenant primero: su 429 nombra al culpable. La columna ai_daily_limit
+  // (migración 0011) permite estrangular a UN cliente sin deploy; la caché de
+  // tenants (5 min) aplica el cambio casi al momento. Clave por id, no por slug:
+  // el slug es editable y renombrarlo no debe resetear el contador.
+  let tenantKey = null; let tenantCount = 0;
+  if (tenant && tenant.id) {
+    const tenantLimit = Number(tenant.ai_daily_limit) || Number(env.AI_TENANT_DAILY_LIMIT) || 300;
+    tenantKey = `budget:ai:${tenant.id}:${day}`;
+    try { tenantCount = Number(await env.KV.get(tenantKey) || 0); } catch (_) { tenantKey = null; }
+    if (tenantKey && tenantCount >= tenantLimit) {
+      try {
+        const alertKey = `alert:aibudget:${tenant.id}`;
+        if (!(await env.KV.get(alertKey))) {
+          await env.KV.put(alertKey, '1', { expirationTtl: 3600 });
+          await sendTelegramText(env, `⚠️ <b>Velai</b>: presupuesto de IA agotado para <b>${escapeHtml(tenant.name)}</b> (${escapeHtml(tenant.slug)}): ${tenantLimit} llamadas hoy. Sus canales responden 429 hasta mañana o hasta subir su límite.`);
+        }
+      } catch (_) {}
+      throw new HttpError(429, 'ai_tenant_budget_exhausted');
+    }
+  }
   const limit = Number(env.AI_DAILY_LIMIT) || 1000;
-  const key = `budget:ai:${new Date().toISOString().slice(0, 10)}`;
+  const key = `budget:ai:${day}`;
   let current = 0;
   try { current = Number(await env.KV.get(key) || 0); } catch (_) { return; }
   if (current >= limit) {
     try {
       if (!(await env.KV.get('alert:aibudget'))) {
         await env.KV.put('alert:aibudget', '1', { expirationTtl: 3600 });
-        await sendTelegramText(env, `⚠️ <b>Velai</b>: presupuesto diario de IA agotado (${limit} llamadas). El chat responde 429 hasta mañana o hasta subir AI_DAILY_LIMIT.`);
+        await sendTelegramText(env, `⚠️ <b>Velai</b>: presupuesto diario de IA agotado (techo GLOBAL, ${limit} llamadas). El chat responde 429 hasta mañana o hasta subir AI_DAILY_LIMIT.`);
       }
     } catch (_) {}
     throw new HttpError(429, 'ai_budget_exhausted');
   }
+  // Se incrementan AMBOS contadores tras pasar ambos cortes: así un 429 del techo
+  // global no gasta cupo del tenant.
   try { await env.KV.put(key, String(current + 1), { expirationTtl: 2 * 86400 }); } catch (_) {}
+  if (tenantKey) { try { await env.KV.put(tenantKey, String(tenantCount + 1), { expirationTtl: 2 * 86400 }); } catch (_) {} }
 }
 
-async function callAnthropic(env, payload) {
+// options: { tenant }  → presupuesto por tenant además del global.
+//          { retries, timeoutMs } → el webhook de Twilio usa 0 reintentos / 10 s
+//          (Twilio corta a ~15 s; reintentar aquí garantizaba perder la respuesta).
+//          Los demás llamadores mantienen 1 reintento / 15 s.
+async function callAnthropic(env, payload, options = {}) {
+  const { retries = 1, timeoutMs = 15000, tenant = null } = options;
   if (!env.ANTHROPIC_API_KEY) throw new HttpError(503, 'ai_not_configured');
-  await aiBudgetGuard(env);
+  await aiBudgetGuard(env, tenant);
   // Caché de prompt (CONTEXTOS-AMPLIOS fase 1): el system es estable por tenant y se
   // reenvía EN CADA turno — con cache_control la relectura cuesta 0,1x desde el segundo
   // mensaje de la conversación (escritura 1,25x, TTL 5 min). Por debajo del mínimo
@@ -181,14 +213,14 @@ async function callAnthropic(env, payload) {
     body.system = [{ type: 'text', text: body.system, cache_control: { type: 'ephemeral' } }];
   }
   let response;
-  for (let attempt = 0; attempt < 2; attempt++) {
+  for (let attempt = 0; attempt <= retries; attempt++) {
     response = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'x-api-key': env.ANTHROPIC_API_KEY, 'anthropic-version': '2023-06-01' },
       body: JSON.stringify(body),
-      signal: AbortSignal.timeout(15000),
+      signal: AbortSignal.timeout(timeoutMs),
     });
-    if (response.ok || ![429, 500, 502, 503, 504].includes(response.status) || attempt) break;
+    if (response.ok || ![429, 500, 502, 503, 504].includes(response.status) || attempt >= retries) break;
   }
   if (!response.ok) throw new HttpError(response.status === 429 ? 429 : 502, 'ai_unavailable');
   const data = await response.json();
@@ -786,10 +818,10 @@ async function validTwilioSignature(authToken, url, params, signature) {
   return difference === 0;
 }
 
-async function summarizeLead(config, env, messages) {
+async function summarizeLead(config, env, tenant, messages) {
   const conversation = messages.map((m) => `${m.role === 'user' ? 'Cliente' : 'Vai'}: ${m.content}`).join('\n');
   try {
-    const raw = await callAnthropic(env, { model: 'claude-haiku-4-5-20251001', max_tokens: 200, system: config.SUMMARY_PROMPT, messages: [{ role: 'user', content: conversation }] });
+    const raw = await callAnthropic(env, { model: 'claude-haiku-4-5-20251001', max_tokens: 200, system: config.SUMMARY_PROMPT, messages: [{ role: 'user', content: conversation }] }, { tenant });
     return JSON.parse(raw.match(/\{[\s\S]*\}/)?.[0] || '{}');
   } catch (_) { return {}; }
 }
@@ -801,7 +833,7 @@ async function captureChatLead(config, env, ctx, tenant, body, phone, messages) 
   const mark = `lead:web:${tenant.id}:${body.conversationId}`;
   if (env.KV && await env.KV.get(mark)) return;
   if (messages.filter((m) => m.role === 'user').length < 2) return;
-  const summary = await summarizeLead(config, env, messages);
+  const summary = await summarizeLead(config, env, tenant, messages);
   const result = await storeLead(env, ctx, {
     requestId: `chat:${tenant.id}:${body.conversationId}:${phone}`, conversationId: body.conversationId,
     tenantId: tenant.id, tenantIsDefault: tenant.slug === defaultTenantSlug(env),
@@ -822,7 +854,7 @@ async function captureWhatsAppLead(config, env, ctx, tenant, from, phone, messag
   const mark = `lead:wa:${tenant.id}:${from}`;
   if (env.KV && await env.KV.get(mark)) return;
   if (messages.filter((m) => m.role === 'user').length < 2) return;
-  const summary = await summarizeLead(config, env, messages);
+  const summary = await summarizeLead(config, env, tenant, messages);
   const sector = clean(summary.negocio, 100);
   const need = clean(summary.necesidad, 200);
   if (!sector && !need) return;
@@ -858,7 +890,7 @@ async function handleChat(request, env, cors, ctx, config) {
     model: 'claude-sonnet-4-6', max_tokens: 300,
     // Las DEMOS son material comercial de Velai, no de un tenant: van tal cual.
     system: isDemoKey(config, state.demo) ? config.DEMOS[state.demo] : systemFor(config, tenant), messages: state.messages,
-  });
+  }, { tenant });
   // El centinela de handoff jamás llega al usuario, tampoco en el canal web
   // (la pausa v1 es solo del canal WhatsApp — SPEC-HANDOFF §A.1).
   reply = reply.replace(WANTS_HUMAN, '').trim() || 'De acuerdo, aviso al equipo para que te contacten.';
@@ -946,6 +978,22 @@ async function handleTwilio(request, env, ctx, config) {
   if (!await validTwilioSignature(authToken, request.url, object, request.headers.get('X-Twilio-Signature') || '')) {
     throw new HttpError(403, 'invalid_twilio_signature');
   }
+  // Twilio reintenta el webhook si la respuesta tarda o falla: sin dedupe, el mismo
+  // mensaje se procesaba (y se pagaba al modelo) DOS veces. La clave se escribe ANTES
+  // de llamar al modelo: si el modelo falla se pierde esa respuesta, pero nunca se
+  // cobra doble. Solo tras validar la firma: una petición sin firmar no puede
+  // envenenar el sid de un mensaje legítimo. Fail-open si KV cae (como el rate limit).
+  const messageSid = clean(params.get('MessageSid') || params.get('SmsMessageSid'), 40);
+  if (env.KV && messageSid) {
+    const dedupeKey = `dedupe:twilio:${tenant.id}:${messageSid}`;
+    try {
+      if (await env.KV.get(dedupeKey)) {
+        console.log(JSON.stringify({ level: 'info', code: 'twilio_duplicate_ignored', tenant: tenant.slug }));
+        return new Response(EMPTY_TWIML, { headers: { 'Content-Type': 'text/xml; charset=utf-8' } });
+      }
+      await env.KV.put(dedupeKey, '1', { expirationTtl: 86400 });
+    } catch (_) { /* mejor riesgo de duplicado que webhook caído */ }
+  }
   const from = clean(params.get('From'), 80);
   const message = clean(params.get('Body'), 2000);
   if (!from) throw new HttpError(400, 'invalid_twilio_payload');
@@ -968,7 +1016,7 @@ async function handleTwilio(request, env, ctx, config) {
     console.log(JSON.stringify({ level: 'info', code: 'bot_paused', tenant: tenant.slug }));
     return new Response(EMPTY_TWIML, { headers: { 'Content-Type': 'text/xml; charset=utf-8' } });
   }
-  let reply = await callAnthropic(env, { model: 'claude-sonnet-4-6', max_tokens: 300, system: systemFor(config, tenant), messages: history });
+  let reply = await callAnthropic(env, { model: 'claude-sonnet-4-6', max_tokens: 300, system: systemFor(config, tenant), messages: history }, { tenant, retries: 0, timeoutMs: 10000 });
   const wantsHuman = WANTS_HUMAN.test(reply);
   reply = reply.replace(WANTS_HUMAN, '').trim();
   if (wantsHuman) {
@@ -1759,6 +1807,8 @@ async function adminRouter(request, env, ctx, path, url, config, scope) {
     if (tenantAction === 'preview' && request.method === 'POST') {
       // Ejecuta el prompt BORRADOR contra el modelo. No guarda, no toca KV, no crea
       // lead, no notifica. Rate limit por actor (no por IP): son llamadas que se pagan.
+      // Sin cupo por tenant a propósito: son llamadas de admin ya limitadas por actor,
+      // y no deben gastar el presupuesto diario del cliente que se está editando.
       if (await rateLimited(env, actor, 'preview', 20)) throw new HttpError(429, 'rate_limited');
       const body = await readJson(request, 32000);
       const draft = String(body.prompt ?? '').trim().slice(0, PROMPT_MAX);
@@ -1958,4 +2008,4 @@ export function createWorker(config) {
   };
 }
 
-export const testing = { clean, normalizePhone, extractPhone, safeUtm, publicCors, validTwilioSignature, csvCell, expiryDate, leadFilters, isDemoKey, templateVar, leadTemplateVariables, readJson, deliver, drainQueuedLeads, verifyTurnstile, systemFor, validateTenant, invalidateTenantCache, tenantWriteError, assertNotActivePending, handleProvision, pollProvisioning, fillSeries, resolveScope, scopeClause, clienteAllowed, adminRouter, recordAuthFailure, handleAdmin, handleWidgetBoot, allowedOrigins, envOrigins, syncPanelGate, envAdmins, syncAdminGate, getSetting, setSetting, withCfToken };
+export const testing = { clean, normalizePhone, extractPhone, safeUtm, publicCors, validTwilioSignature, callAnthropic, csvCell, expiryDate, leadFilters, isDemoKey, templateVar, leadTemplateVariables, readJson, deliver, drainQueuedLeads, verifyTurnstile, systemFor, validateTenant, invalidateTenantCache, tenantWriteError, assertNotActivePending, handleProvision, pollProvisioning, fillSeries, resolveScope, scopeClause, clienteAllowed, adminRouter, recordAuthFailure, handleAdmin, handleWidgetBoot, allowedOrigins, envOrigins, syncPanelGate, envAdmins, syncAdminGate, getSetting, setSetting, withCfToken };

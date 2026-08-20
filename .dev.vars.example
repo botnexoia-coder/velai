@@ -17,3 +17,5 @@ SECRETS_KEK="EJEMPLOEJEMPLOEJEMPLOEJEMPLOEJEMPLOEJEMPLOs="
 ALLOWED_WEB_ORIGINS="http://localhost:8080,http://127.0.0.1:8080"
 ADMIN_ORIGIN="http://localhost:8787"
 LEAD_RETENTION_MONTHS="24"
+# Tope diario de llamadas al modelo por tenant (la columna tenants.ai_daily_limit lo pisa).
+AI_TENANT_DAILY_LIMIT="300"
