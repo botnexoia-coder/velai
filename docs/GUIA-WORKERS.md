@@ -23,6 +23,8 @@ worker/admin-page.js ensamblador de la UI embebida: HTML+CSS en template string 
                      nonce CSP; el JS del panel se interpola como IIFE serializada
 worker/admin-panel.js el JS del panel como FUNCIÓN REAL (panelApp): node --check y
                      los tests lo validan; autocontenida, solo APIs del navegador
+worker/calendar.js   proveedor Google Calendar + freeSlots puro + CALENDAR_TOOLS
+                     (SPEC-CALENDARIO); no toca D1/KV — eso vive en app.js
 wrangler.toml        config declarativa (única fuente de verdad de bindings)
 migrations/          esquema D1 (NNNN_nombre.sql, aditivas, sin PRAGMA)
 test/                node --test contra el export `testing` y el router

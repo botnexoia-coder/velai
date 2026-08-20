@@ -180,15 +180,15 @@ $('#wizNext').onclick=async()=>{
  if(wizStep===0&&!$('#tAddress').value.trim()&&$('#tSlug').value.trim())$('#tAddress').value='pending:'+$('#tSlug').value.trim();
  const wasNew=!editing;
  if(tenantDirty||wasNew){const ok=await saveTenant();if(!ok)return}
- if(wasNew&&editing){$('#ttabProv').hidden=false;$('#ttabUsers').hidden=false;$('#ttabHist').hidden=false;$('#tProv').hidden=false;$('#tUsersCard').hidden=false;$('#tDup').hidden=true;loadProv(editing.id);loadUsers(editing.id);loadVersions(editing.id)}
+ if(wasNew&&editing){$('#ttabProv').hidden=false;$('#ttabUsers').hidden=false;$('#ttabHist').hidden=false;$('#tProv').hidden=false;$('#tUsersCard').hidden=false;$('#tDup').hidden=true;$('#ttabCal').hidden=false;loadProv(editing.id);loadUsers(editing.id);loadVersions(editing.id);loadCalendar(editing.id)}
  if(wizStep===WIZ.length-1){setWizard(false);showPane('identidad');toast('Alta completada ✓ — actívalo en «Identidad y canal» cuando su canal esté listo');return}
  wizStep++;wizShow()};
 async function openTenant(id){clearTenantErrs();$('#tPreviewOut').textContent='';$('#tTestMsg').value='';$('#tNote').value='';
  $('#tToken').value='';clearDirtyDots();
  // provPost recarga la ficha del MISMO cliente en mitad del alta: se conserva el paso.
  const stayWiz=wizard&&editing&&editing.id===id;
- if(id){const d=await api('/api/admin/tenants/'+id);const t=d.tenant;editing={id:t.id,updated_at:t.updated_at};$('#tenantTitle').textContent=t.name;$('#tDup').hidden=true;for(const[k,sel]of Object.entries(TF))$(sel).value=t[k]??'';$('#tChips').value=chipsToLines(t.chips_json);$('#tOrigins').value=jsonToLines(t.web_origins);$('#tActive').checked=!!t.active;$('#tTokenState').textContent=t.has_twilio_token?'configurado ✓ (escribe solo para sustituirlo)':'sin configurar';$('#tProv').hidden=false;$('#tUsersCard').hidden=false;$('#ttabProv').hidden=false;$('#ttabUsers').hidden=false;$('#ttabHist').hidden=false;if(stayWiz)wizShow();else{setWizard(false);showPane('identidad')}loadProv(id);loadVersions(id);loadUsers(id)}
- else{editing=null;$('#tenantTitle').textContent='Nuevo cliente';$('#tDup').hidden=false;$('#tDupSel').innerHTML='<option value="">— empezar de cero —</option>'+tenantList.map(t=>'<option value="'+t.id+'">'+esc(t.name)+'</option>').join('');for(const sel of Object.values(TF))$(sel).value='';$('#tChips').value='';$('#tOrigins').value='';$('#tPartner').value='pendiente';$('#tActive').checked=false;$('#tTokenState').textContent='sin configurar';$('#tProv').hidden=true;$('#tUsersCard').hidden=true;$('#ttabProv').hidden=true;$('#ttabUsers').hidden=true;$('#ttabHist').hidden=true;$('#tVersions').textContent='—';setWizard(true)}
+ if(id){const d=await api('/api/admin/tenants/'+id);const t=d.tenant;editing={id:t.id,updated_at:t.updated_at};$('#tenantTitle').textContent=t.name;$('#tDup').hidden=true;for(const[k,sel]of Object.entries(TF))$(sel).value=t[k]??'';$('#tChips').value=chipsToLines(t.chips_json);$('#tOrigins').value=jsonToLines(t.web_origins);$('#tActive').checked=!!t.active;$('#tTokenState').textContent=t.has_twilio_token?'configurado ✓ (escribe solo para sustituirlo)':'sin configurar';$('#tProv').hidden=false;$('#tUsersCard').hidden=false;$('#ttabProv').hidden=false;$('#ttabUsers').hidden=false;$('#ttabHist').hidden=false;if(stayWiz)wizShow();else{setWizard(false);showPane('identidad')}$('#ttabCal').hidden=false;loadProv(id);loadVersions(id);loadUsers(id);loadCalendar(id)}
+ else{editing=null;$('#tenantTitle').textContent='Nuevo cliente';$('#tDup').hidden=false;$('#tDupSel').innerHTML='<option value="">— empezar de cero —</option>'+tenantList.map(t=>'<option value="'+t.id+'">'+esc(t.name)+'</option>').join('');for(const sel of Object.values(TF))$(sel).value='';$('#tChips').value='';$('#tOrigins').value='';$('#tPartner').value='pendiente';$('#tActive').checked=false;$('#tTokenState').textContent='sin configurar';$('#tProv').hidden=true;$('#tUsersCard').hidden=true;$('#ttabProv').hidden=true;$('#ttabUsers').hidden=true;$('#ttabHist').hidden=true;$('#ttabCal').hidden=true;$('#tVersions').textContent='—';setWizard(true)}
  updateCount();brandPreview();tenantDirty=false;$('#tenantModal').showModal()}
 $('#tDupSel').onchange=async e=>{if(!e.target.value)return;const d=await api('/api/admin/tenants/'+e.target.value);$('#tPrompt').value=d.tenant.system_prompt||'';updateCount()};
 async function saveTenant(){clearTenantErrs();
@@ -242,6 +242,40 @@ $('#tUsersList').onclick=async e=>{const email=e.target&&e.target.dataset&&e.tar
   else toast('Acceso revocado ✓ a '+email+(r.gate==='sincronizado'?' — puerta de Access actualizada':''));
   loadUsers(editing.id)}
  catch(e2){toast('Acceso NO revocado: '+(TERRS[e2.message]||e2.message),false)}};
+
+// ── Calendario del cliente (SPEC-CALENDARIO): conectar SU Google, config y citas ──
+let calCur=null;
+async function loadCalendar(id){try{const d=await api('/api/admin/tenants/'+id+'/calendar');calCur=d.calendar;const c=d.calendar;
+ $('#calState').innerHTML=!c?'Sin conectar. «Conectar Google» abre la pantalla de permiso: entra con la cuenta de Google DEL CLIENTE.'
+  :(c.status==='connected'?'<span class="flag">Conectado'+(c.account_email?' como '+esc(c.account_email):'')+' ✓</span>'
+  :'<span class="flag off">Error: '+esc(c.last_error||c.status)+' — reconecta con «Conectar Google»</span>');
+ $('#calConnect').textContent=c?'Reconectar Google':'Conectar Google';
+ $('#calDisconnect').hidden=!c;$('#calCfgCard').hidden=!c;$('#calApptsCard').hidden=!c;
+ if(c){$('#calId').value=c.calendar_id||'primary';$('#calTz').value=c.timezone||'';$('#calSlot').value=c.slot_minutes||30;
+  $('#calHours').value=c.business_hours||'';loadAppts(id)}}
+ catch(e){$('#calState').textContent=e.message}}
+async function loadAppts(id){try{const d=await api('/api/admin/appointments?tenant='+id);
+ $('#calAppts').innerHTML=d.appointments.map(a=>'<div>'+fmt(a.starts_at)+' · <b>'+esc(a.customer_name)+'</b> <span class="muted">('+esc(a.customer_phone)+(a.reason?' · '+esc(a.reason):'')+' · '+esc(a.channel)+')</span></div>').join('')||'Aún no hay citas agendadas por Vai.'}
+ catch(e){$('#calAppts').textContent=e.message}}
+$('#calConnect').onclick=async()=>{if(!editing)return;
+ try{const d=await api('/api/admin/tenants/'+editing.id+'/calendar/connect',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({provider:'google'})});
+  location.href=d.authUrl}
+ catch(e){toast('No se pudo iniciar la conexión: '+(TERRS[e.message]||e.message),false)}};
+$('#calDisconnect').onclick=async()=>{if(!editing)return;
+ if(!confirm('¿Desconectar el calendario? Vai dejará de consultar huecos y agendar citas para este cliente.'))return;
+ try{await api('/api/admin/tenants/'+editing.id+'/calendar',{method:'DELETE'});toast('Calendario desconectado');loadCalendar(editing.id)}
+ catch(e){toast('No se pudo desconectar: '+(TERRS[e.message]||e.message),false)}};
+$('#calSave').onclick=async()=>{if(!editing)return;
+ let hours=null;const rawHours=$('#calHours').value.trim();
+ if(rawHours){try{hours=JSON.parse(rawHours)}catch(e){toast('El horario no es JSON válido',false);return}}
+ try{await api('/api/admin/tenants/'+editing.id+'/calendar',{method:'PATCH',headers:{'Content-Type':'application/json'},
+  body:JSON.stringify({calendar_id:$('#calId').value.trim()||'primary',timezone:$('#calTz').value.trim()||'Europe/Madrid',slot_minutes:Number($('#calSlot').value)||30,business_hours:hours})});
+  toast('Calendario guardado ✓');loadCalendar(editing.id)}
+ catch(e){toast('No se pudo guardar: '+(TERRS[e.message]||e.message),false)}};
+// Al volver del OAuth de Google el callback redirige con #calendar=<resultado>.
+(function(){const h=String(location.hash||'');if(!h.startsWith('#calendar='))return;const r=h.slice(10);
+ toast(r==='ok'?'Google Calendar conectado ✓':'Conexión de calendario fallida: '+r,r==='ok');
+ try{location.hash=''}catch(e){}})();
 $('#tSyncDomains').onclick=()=>{if(!editing){toast('Guarda primero el cliente: los dominios se leen de D1.',false);return}provPost('domains')};
 $('#pSub').onclick=()=>provPost('subaccount');
 $('#pTpl').onclick=()=>provPost('template');

@@ -2,6 +2,7 @@ import { ADMIN_HEADERS, ADMIN_HTML } from './admin-page.js';
 import { encryptSecret, decryptSecret } from './crypto.js';
 import { cloudflareConfigured, syncTurnstileDomains, syncAccessGroup, syncAdminGroup, verifyCfToken } from './cloudflare.js';
 import { createSubaccount, createLeadTemplate, submitTemplateApproval, fetchApprovalStatus, createWhatsAppSender, verifySender, fetchSenderStatus } from './twilio.js';
+import { CALENDAR_TOOLS, CALENDAR_GUARDRAILS, DEFAULT_BUSINESS_HOURS, freeSlots, localToUtcMs, localDateStr, localWeekday, googleAuthUrl, exchangeGoogleCode, refreshGoogleToken, revokeGoogleToken, googleBusy, createGoogleEvent } from './calendar.js';
 
 const JSON_HEADERS = { 'Content-Type': 'application/json; charset=utf-8' };
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -199,7 +200,10 @@ async function aiBudgetGuard(env, tenant) {
 //          { retries, timeoutMs } → el webhook de Twilio usa 0 reintentos / 10 s
 //          (Twilio corta a ~15 s; reintentar aquí garantizaba perder la respuesta).
 //          Los demás llamadores mantienen 1 reintento / 15 s.
-async function callAnthropic(env, payload, options = {}) {
+// Devuelve el JSON COMPLETO de la API: con tools el primer bloque puede ser
+// tool_use y content[0].text no existe — el wrapper callAnthropic (texto) queda
+// para los llamadores sin herramientas.
+async function callAnthropicRaw(env, payload, options = {}) {
   const { retries = 1, timeoutMs = 15000, tenant = null } = options;
   if (!env.ANTHROPIC_API_KEY) throw new HttpError(503, 'ai_not_configured');
   await aiBudgetGuard(env, tenant);
@@ -209,6 +213,8 @@ async function callAnthropic(env, payload, options = {}) {
   // cacheable (1.024 tokens en Sonnet) la API lo ignora sin coste. El bloque debe ser
   // idéntico byte a byte: nada variable (fechas, nombres) puede entrar en el system.
   const body = { ...payload };
+  // Un system en array llega YA en bloques (calendario: [estable cacheado, volátil
+  // con la fecha]) y no se toca; el string simple se envuelve como siempre.
   if (typeof body.system === 'string' && body.system) {
     body.system = [{ type: 'text', text: body.system, cache_control: { type: 'ephemeral' } }];
   }
@@ -229,9 +235,51 @@ async function callAnthropic(env, payload, options = {}) {
   if (data.usage) {
     console.log(JSON.stringify({ level: 'info', code: 'ai_usage', in: data.usage.input_tokens || 0, out: data.usage.output_tokens || 0, cache_w: data.usage.cache_creation_input_tokens || 0, cache_r: data.usage.cache_read_input_tokens || 0 }));
   }
+  return data;
+}
+
+async function callAnthropic(env, payload, options = {}) {
+  const data = await callAnthropicRaw(env, payload, options);
   const reply = data.content?.[0]?.text;
   if (!reply) throw new HttpError(502, 'ai_invalid_response');
   return reply;
+}
+
+function contentText(data) {
+  return (data.content || []).filter((b) => b.type === 'text').map((b) => b.text).join('').trim();
+}
+
+// ── Bucle de tool use (SPEC-CALENDARIO §3) ───────────────────────────────────
+// Contrato de la Messages API blindado por tests: los tool_result de una vuelta
+// van en UN SOLO mensaje user (cada uno con su tool_use_id) y el content del
+// assistant se reenvía ENTERO. Cada vuelta pasa por aiBudgetGuard (cada una se
+// factura). Un fallo del executor es tool_result con is_error, nunca rompe el bucle.
+const MAX_TOOL_ITERATIONS = 3;
+async function runToolLoop(env, payload, tools, executor, options = {}, first = null) {
+  const messages = payload.messages.slice();
+  let data = first;
+  for (let round = 0; ; round++) {
+    if (!data) data = await callAnthropicRaw(env, { ...payload, messages, tools }, options);
+    const toolUses = (data.content || []).filter((b) => b.type === 'tool_use');
+    if (data.stop_reason !== 'tool_use' || !toolUses.length) return contentText(data);
+    if (round >= MAX_TOOL_ITERATIONS) {
+      console.log(JSON.stringify({ level: 'warn', code: 'tool_loop_overflow', rounds: round }));
+      return null; // el llamador pone la disculpa del canal
+    }
+    const results = [];
+    for (const use of toolUses) {
+      try {
+        results.push({ type: 'tool_result', tool_use_id: use.id, content: String(await executor(use.name, use.input || {})) });
+      } catch (error) {
+        // El proveedor caído no debe tumbar la conversación: el modelo se disculpa.
+        console.log(JSON.stringify({ level: 'error', code: 'calendar_tool_failed', tool: use.name, error: clean(error.message, 60) }));
+        results.push({ type: 'tool_result', tool_use_id: use.id, content: JSON.stringify({ error: 'herramienta_no_disponible' }), is_error: true });
+      }
+    }
+    messages.push({ role: 'assistant', content: data.content });
+    messages.push({ role: 'user', content: results });
+    data = null;
+  }
 }
 
 function expiryDate(env) {
@@ -524,6 +572,7 @@ async function invalidateTenantCache(env, tenants) {
     if (!t) continue;
     if (t.channel_address) keys.add(`tenant:addr:${t.channel_address}`);
     if (t.slug) keys.add(`tenant:slug:${t.slug}`);
+    if (t.id) keys.add(`calcfg:${t.id}`); // la config de calendario se cachea aparte
   }
   await Promise.all([...keys].map((k) => env.KV.delete(k).catch(() => {})));
 }
@@ -867,6 +916,168 @@ async function captureWhatsAppLead(config, env, ctx, tenant, from, phone, messag
   if (result.ok && env.KV) await env.KV.put(mark, '1', { expirationTtl: 30 * 86400 });
 }
 
+// ── Calendario por tenant (SPEC-CALENDARIO fase 1, solo Google) ──────────────
+// La conexión vive en tenant_calendars (migración 0012) con el refresh_token
+// cifrado (AAD `calendar:<tenant_id>`); la config se cachea en KV como los tenants.
+async function tenantCalendar(env, tenant) {
+  if (!env.DB || !tenant || !env.GOOGLE_OAUTH_CLIENT_ID) return null;
+  const key = `calcfg:${tenant.id}`;
+  if (env.KV) {
+    try { const cached = await env.KV.get(key, 'json'); if (cached) return cached.tenant_id ? cached : null; } catch (_) {}
+  }
+  let row = null;
+  // try/catch deliberado: si la tabla aún no existe (deploy antes de migrar en dev),
+  // el tenant simplemente no tiene calendario — el chat nunca se cae por esto.
+  try {
+    row = await env.DB.prepare("SELECT tenant_id,provider,refresh_token_enc,calendar_id,timezone,slot_minutes,business_hours,status FROM tenant_calendars WHERE tenant_id = ? AND status = 'connected'").bind(tenant.id).first();
+  } catch (_) { return null; }
+  if (env.KV) { try { await env.KV.put(key, JSON.stringify(row || {}), { expirationTtl: TENANT_TTL }); } catch (_) {} }
+  return row || null;
+}
+
+// invalid_grant = el negocio revocó el acceso (o caducó el token en modo Testing de
+// Google): la conexión pasa a error, alerta con antirebote, y las tools dejan de
+// ofrecerse en ≤5 min (caché de calcfg) — el bot vuelve a contestar sin calendario.
+async function calendarAccessToken(env, cal) {
+  const kvKey = `caltoken:${cal.tenant_id}`;
+  if (env.KV) { try { const cached = await env.KV.get(kvKey); if (cached) return cached; } catch (_) {} }
+  let secret;
+  try { secret = await decryptSecret(env, `calendar:${cal.tenant_id}`, cal.refresh_token_enc); } catch (_) { secret = null; }
+  if (!secret) {
+    console.log(JSON.stringify({ level: 'error', code: 'calendar_token_undecryptable', tenant: cal.tenant_id }));
+    throw new HttpError(503, 'calendar_not_configured');
+  }
+  let data;
+  try {
+    data = await refreshGoogleToken(env, secret.value);
+  } catch (error) {
+    if (error.message === 'invalid_grant') {
+      try {
+        await env.DB.prepare("UPDATE tenant_calendars SET status='error', last_error='invalid_grant', updated_at=? WHERE tenant_id=?").bind(new Date().toISOString(), cal.tenant_id).run();
+        await env.KV?.delete(`calcfg:${cal.tenant_id}`);
+        const alertKey = `alert:calendar:${cal.tenant_id}`;
+        if (env.KV && !(await env.KV.get(alertKey))) {
+          await env.KV.put(alertKey, '1', { expirationTtl: 3600 });
+          await sendTelegramText(env, `⚠️ <b>Velai</b>: la conexión de Google Calendar del tenant <code>${escapeHtml(cal.tenant_id)}</code> fue revocada o caducó. Reconectar desde el panel; mientras tanto el bot atiende sin citas.`);
+        }
+      } catch (_) {}
+    }
+    console.log(JSON.stringify({ level: 'error', code: 'calendar_refresh_failed', tenant: cal.tenant_id, error: clean(error.message, 40) }));
+    throw new HttpError(503, 'calendar_unavailable');
+  }
+  if (env.KV) { try { await env.KV.put(kvKey, data.access_token, { expirationTtl: Math.max(60, (Number(data.expires_in) || 3600) - 60) }); } catch (_) {} }
+  return data.access_token;
+}
+
+// system con calendario = [bloque ESTABLE cacheado (negocio + guardrails de citas),
+// bloque VOLÁTIL sin cache_control (fecha/hora actual)]. La fecha JAMÁS puede entrar
+// en el bloque cacheado: rompería el contrato byte-a-byte de CONTEXTOS-AMPLIOS.
+function calendarSystem(config, tenant, cal) {
+  const tz = cal.timezone || 'Europe/Madrid';
+  const now = new Intl.DateTimeFormat('es-ES', { timeZone: tz, dateStyle: 'full', timeStyle: 'short' }).format(new Date());
+  return [
+    { type: 'text', text: `${systemFor(config, tenant)}\n${CALENDAR_GUARDRAILS}`, cache_control: { type: 'ephemeral' } },
+    { type: 'text', text: `Ahora mismo es ${now} (zona horaria del negocio: ${tz}). Las citas duran ${Number(cal.slot_minutes) || 30} minutos.` },
+  ];
+}
+
+function calendarHoursFor(cal, weekday) {
+  let table = null;
+  try { table = cal.business_hours ? JSON.parse(cal.business_hours) : null; } catch (_) {}
+  const source = table && typeof table === 'object' ? table : DEFAULT_BUSINESS_HOURS;
+  const windows = source[weekday];
+  return Array.isArray(windows) ? windows.filter((w) => Array.isArray(w) && /^\d{2}:\d{2}$/.test(w[0]) && /^\d{2}:\d{2}$/.test(w[1])) : [];
+}
+
+// null si la fecha es operable; si no, el JSON de error que se devuelve al modelo.
+function validCalendarDate(cal, fecha) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(fecha)) return JSON.stringify({ error: 'fecha_invalida', nota: 'usa YYYY-MM-DD' });
+  const tz = cal.timezone || 'Europe/Madrid';
+  const today = localDateStr(tz, Date.now());
+  const max = localDateStr(tz, Date.now() + 60 * 86400000);
+  if (fecha < today) return JSON.stringify({ error: 'fecha_pasada', hoy: today });
+  if (fecha > max) return JSON.stringify({ error: 'fecha_lejana', nota: 'máximo 60 días vista' });
+  return null;
+}
+
+// Huecos libres del día: horario del negocio menos la ocupación REAL de su Google
+// Calendar (releída del proveedor — es la barrera principal contra dobles reservas).
+async function availableSlots(env, cal, fecha) {
+  const tz = cal.timezone || 'Europe/Madrid';
+  const windows = calendarHoursFor(cal, localWeekday(tz, fecha));
+  if (!windows.length) return [];
+  const dayStart = localToUtcMs(tz, fecha, '00:00');
+  const dayEnd = localToUtcMs(tz, fecha, '23:59') + 60000;
+  const token = await calendarAccessToken(env, cal);
+  const busy = await googleBusy(env, token, cal.calendar_id, new Date(dayStart).toISOString(), new Date(dayEnd).toISOString());
+  return freeSlots({ date: fecha, busy, hours: windows, slotMinutes: cal.slot_minutes, timezone: tz, nowMs: Date.now() });
+}
+
+// El executor es un CLOSURE sobre el tenant ya resuelto por el canal: las tools no
+// aceptan identificadores — ni el modelo ni una inyección del usuario final pueden
+// apuntar al calendario de otro cliente. Todo input del modelo se trata como
+// entrada hostil (clean/regex/normalizePhone) y NUNCA lanza hacia el bucle salvo
+// fallo real del proveedor (que el bucle convierte en is_error).
+function calendarExecutor(env, tenant, cal, meta) {
+  return async (name, rawInput) => {
+    const input = rawInput && typeof rawInput === 'object' && !Array.isArray(rawInput) ? rawInput : {};
+    if (name === 'consultar_disponibilidad') {
+      const fecha = clean(input.fecha, 10);
+      const invalid = validCalendarDate(cal, fecha);
+      if (invalid) return invalid;
+      const huecos = await availableSlots(env, cal, fecha);
+      return JSON.stringify(huecos.length ? { fecha, huecos } : { fecha, huecos, nota: 'sin huecos ese día, prueba otro' });
+    }
+    if (name === 'agendar_cita') {
+      const fechaHora = clean(input.fecha_hora, 16);
+      if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(fechaHora)) return JSON.stringify({ error: 'fecha_invalida', nota: 'usa YYYY-MM-DDTHH:MM' });
+      const [fecha, hhmm] = fechaHora.split('T');
+      const invalid = validCalendarDate(cal, fecha);
+      if (invalid) return invalid;
+      const nombre = clean(input.nombre, 100);
+      // En WhatsApp el From del canal vale como teléfono: no se le pide dos veces.
+      const telefono = normalizePhone(clean(input.telefono, 40)) || meta.defaultPhone || '';
+      if (!nombre || !telefono) return JSON.stringify({ error: 'datos_incompletos', nota: 'hacen falta nombre y teléfono' });
+      const motivo = clean(input.motivo, 200);
+      // Relectura del hueco JUSTO antes de crear + cerrojo KV best-effort: las dos
+      // primeras capas anti doble reserva; la tercera es el UNIQUE de request_id.
+      const huecos = await availableSlots(env, cal, fecha);
+      if (!huecos.includes(hhmm)) return JSON.stringify({ error: 'hueco_ocupado', alternativas: huecos.slice(0, 6) });
+      const tz = cal.timezone || 'Europe/Madrid';
+      const startMs = localToUtcMs(tz, fecha, hhmm);
+      const endMs = startMs + (Number(cal.slot_minutes) || 30) * 60000;
+      const startIso = new Date(startMs).toISOString();
+      if (env.KV) {
+        const lockKey = `booklock:${cal.tenant_id}:${startIso}`;
+        try {
+          if (await env.KV.get(lockKey)) return JSON.stringify({ error: 'hueco_ocupado', alternativas: huecos.filter((h) => h !== hhmm).slice(0, 6) });
+          await env.KV.put(lockKey, '1', { expirationTtl: 60 });
+        } catch (_) {}
+      }
+      const token = await calendarAccessToken(env, cal);
+      const event = await createGoogleEvent(env, token, cal.calendar_id, {
+        summary: `Cita: ${nombre}${motivo ? ` — ${motivo}` : ''}`,
+        description: `Teléfono: ${telefono}\nAgendada por Vai (${meta.channel}).`,
+        startIso, endIso: new Date(endMs).toISOString(), timezone: tz,
+      });
+      const now = new Date().toISOString();
+      try {
+        await env.DB.prepare('INSERT INTO appointments (id,tenant_id,request_id,channel,customer_name,customer_phone,reason,starts_at,ends_at,timezone,provider_event_id,status,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)')
+          .bind(crypto.randomUUID(), cal.tenant_id, `cita:${cal.tenant_id}:${clean(meta.conversationKey, 80)}:${fechaHora}`, meta.channel, nombre, telefono, motivo || null, startIso, new Date(endMs).toISOString(), tz, (event && event.id) || null, 'confirmed', now)
+          .run();
+      } catch (error) {
+        // UNIQUE de request_id: un reintento del bucle no duplica la cita (el evento
+        // de Google sí podría duplicarse en ese reintento — riesgo residual asumido).
+        if (!/UNIQUE/i.test(String(error.message))) throw error;
+      }
+      console.log(JSON.stringify({ level: 'info', code: 'appointment_created', tenant: tenant.slug, channel: meta.channel }));
+      // La fecha vuelve YA formateada en local: el modelo no debe recalcularla.
+      return JSON.stringify({ ok: true, fecha, hora: hhmm, nombre, duracion_min: Number(cal.slot_minutes) || 30 });
+    }
+    return JSON.stringify({ error: 'tool_desconocida' });
+  };
+}
+
 async function handleChat(request, env, cors, ctx, config) {
   const body = await readJson(request, 8000);
   if (!UUID_RE.test(body.conversationId || '')) throw new HttpError(400, 'invalid_conversation_id');
@@ -886,11 +1097,24 @@ async function handleChat(request, env, cors, ctx, config) {
   if (body.demo && state.demo !== body.demo) throw new HttpError(409, 'conversation_mode_mismatch');
   state.messages.push({ role: 'user', content: message });
   state.messages = state.messages.slice(-20);
-  let reply = await callAnthropic(env, {
-    model: 'claude-sonnet-4-6', max_tokens: 300,
-    // Las DEMOS son material comercial de Velai, no de un tenant: van tal cual.
-    system: isDemoKey(config, state.demo) ? config.DEMOS[state.demo] : systemFor(config, tenant), messages: state.messages,
-  }, { tenant });
+  // Con calendario conectado (y fuera de demo) el turno va por el bucle de tools;
+  // max_tokens sube a 500 SOLO ahí: el JSON de tool_use consume output y con 300
+  // un agendar_cita con motivo largo se truncaba a mitad de JSON.
+  const cal = isDemoKey(config, state.demo) ? null : await tenantCalendar(env, tenant);
+  let reply;
+  if (cal) {
+    reply = await runToolLoop(env, {
+      model: 'claude-sonnet-4-6', max_tokens: 500,
+      system: calendarSystem(config, tenant, cal), messages: state.messages,
+    }, CALENDAR_TOOLS, calendarExecutor(env, tenant, cal, { channel: 'web', conversationKey: body.conversationId, defaultPhone: '' }), { tenant });
+    reply = reply || 'Ahora mismo no puedo consultar la agenda. Déjame tu nombre y teléfono y el equipo te confirma la cita enseguida.';
+  } else {
+    reply = await callAnthropic(env, {
+      model: 'claude-sonnet-4-6', max_tokens: 300,
+      // Las DEMOS son material comercial de Velai, no de un tenant: van tal cual.
+      system: isDemoKey(config, state.demo) ? config.DEMOS[state.demo] : systemFor(config, tenant), messages: state.messages,
+    }, { tenant });
+  }
   // El centinela de handoff jamás llega al usuario, tampoco en el canal web
   // (la pausa v1 es solo del canal WhatsApp — SPEC-HANDOFF §A.1).
   reply = reply.replace(WANTS_HUMAN, '').trim() || 'De acuerdo, aviso al equipo para que te contacten.';
@@ -940,6 +1164,48 @@ async function alertTenantMisconfigured(env, tenant, accountSid) {
   try {
     await sendTelegramText(env, `⚠️ <b>Velai</b>: mensajes entrantes de <code>${escapeHtml(accountSid)}</code> para <b>${escapeHtml(tenant.name)}</b> sin auth token configurado. El cliente no está siendo atendido.`);
   } catch (_) {}
+}
+
+// Tras la respuesta del modelo, el cierre del turno de Twilio es idéntico en el
+// camino síncrono (TwiML) y en el asíncrono del calendario (Messages API): handoff,
+// historial en KV y captura de lead — factorizado para que no diverjan.
+async function settleTwilioReply(config, env, ctx, tenant, from, message, history, key, rawReply) {
+  let reply = String(rawReply || '');
+  const wantsHuman = WANTS_HUMAN.test(reply);
+  reply = reply.replace(WANTS_HUMAN, '').trim();
+  if (wantsHuman) {
+    ctx.waitUntil(escalateToHuman(env, tenant, from, message).catch((error) => {
+      console.log(JSON.stringify({ level: 'error', code: 'handoff_alert_failed', tenant: tenant.slug, error: error.name }));
+    }));
+  }
+  let trail = history;
+  if (reply) trail = [...history, { role: 'assistant', content: reply }].slice(-20);
+  if (env.KV) await env.KV.put(key, JSON.stringify(trail), { expirationTtl: 86400 });
+  const phone = normalizePhone(from.replace(/^whatsapp:/i, ''));
+  if (phone) {
+    ctx.waitUntil(captureWhatsAppLead(config, env, ctx, tenant, from, phone, trail).catch((error) => {
+      console.log(JSON.stringify({ level: 'error', code: 'wa_lead_capture_failed', tenant: tenant.slug, error: error.name }));
+    }));
+  }
+  return reply;
+}
+
+// Respuesta saliente FUERA del webhook (camino asíncrono del calendario). Texto libre
+// es legal aquí: la ventana de 24 h la abrió el mensaje entrante del usuario. From =
+// el To del webhook (la dirección del tenant). Credenciales de la subcuenta si existe
+// — regla de oro de deliver(): los recursos de una subcuenta se operan con SUS credenciales.
+async function sendTwilioText(env, tenant, fromAddress, toAddress, body) {
+  const sub = tenant && tenant.twilio_subaccount_sid;
+  const sid = sub || env.TWILIO_ACCOUNT_SID;
+  const token = sub ? await twilioAuthTokenFor(env, tenant) : env.TWILIO_AUTH_TOKEN;
+  if (!sid || !token) return { skipped: true, error: 'not_configured' };
+  const response = await fetch(`https://api.twilio.com/2010-04-01/Accounts/${sid}/Messages.json`, {
+    method: 'POST',
+    headers: { Authorization: `Basic ${btoa(`${sid}:${token}`)}`, 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({ From: fromAddress, To: toAddress, Body: String(body).slice(0, 1500) }),
+    signal: AbortSignal.timeout(8000),
+  });
+  return response.ok ? { ok: true } : { error: `twilio_${response.status}` };
 }
 
 async function handleTwilio(request, env, ctx, config) {
@@ -1016,24 +1282,39 @@ async function handleTwilio(request, env, ctx, config) {
     console.log(JSON.stringify({ level: 'info', code: 'bot_paused', tenant: tenant.slug }));
     return new Response(EMPTY_TWIML, { headers: { 'Content-Type': 'text/xml; charset=utf-8' } });
   }
-  let reply = await callAnthropic(env, { model: 'claude-sonnet-4-6', max_tokens: 300, system: systemFor(config, tenant), messages: history }, { tenant, retries: 0, timeoutMs: 10000 });
-  const wantsHuman = WANTS_HUMAN.test(reply);
-  reply = reply.replace(WANTS_HUMAN, '').trim();
-  if (wantsHuman) {
-    ctx.waitUntil(escalateToHuman(env, tenant, from, message).catch((error) => {
-      console.log(JSON.stringify({ level: 'error', code: 'handoff_alert_failed', tenant: tenant.slug, error: error.name }));
-    }));
+  const twiml = (text) => new Response(`<?xml version="1.0" encoding="UTF-8"?><Response><Message>${escapeHtml(text)}</Message></Response>`, { headers: { 'Content-Type': 'text/xml; charset=utf-8' } });
+  const cal = await tenantCalendar(env, tenant);
+  if (!cal) {
+    const raw = await callAnthropic(env, { model: 'claude-sonnet-4-6', max_tokens: 300, system: systemFor(config, tenant), messages: history }, { tenant, retries: 0, timeoutMs: 10000 });
+    return twiml(await settleTwilioReply(config, env, ctx, tenant, from, message, history, key, raw));
   }
-  if (reply) { history.push({ role: 'assistant', content: reply }); history = history.slice(-20); }
-  if (env.KV) await env.KV.put(key, JSON.stringify(history), { expirationTtl: 86400 });
-  const phone = normalizePhone(from.replace(/^whatsapp:/i, ''));
-  if (phone) {
-    ctx.waitUntil(captureWhatsAppLead(config, env, ctx, tenant, from, phone, history).catch((error) => {
-      console.log(JSON.stringify({ level: 'error', code: 'wa_lead_capture_failed', tenant: tenant.slug, error: error.name }));
-    }));
+  // Con calendario: híbrido síncrono/asíncrono (SPEC-CALENDARIO §3.4). La primera
+  // llamada mantiene la latencia de siempre; si el modelo NO pide herramientas,
+  // TwiML como hoy. Si las pide, TwiML vacío YA (el bucle puede superar el corte
+  // de ~15 s de Twilio) y el resto sigue en waitUntil, entregando la respuesta
+  // final por la Messages API — el dedupe por MessageSid impide que el reintento
+  // de Twilio (si lo hubiera) duplique el trabajo.
+  const payload = { model: 'claude-sonnet-4-6', max_tokens: 500, system: calendarSystem(config, tenant, cal), messages: history };
+  const first = await callAnthropicRaw(env, { ...payload, tools: CALENDAR_TOOLS }, { tenant, retries: 0, timeoutMs: 10000 });
+  if (first.stop_reason !== 'tool_use') {
+    return twiml(await settleTwilioReply(config, env, ctx, tenant, from, message, history, key, contentText(first)));
   }
-  const safe = escapeHtml(reply);
-  return new Response(`<?xml version="1.0" encoding="UTF-8"?><Response><Message>${safe}</Message></Response>`, { headers: { 'Content-Type': 'text/xml; charset=utf-8' } });
+  ctx.waitUntil((async () => {
+    const executor = calendarExecutor(env, tenant, cal, {
+      channel: from.startsWith('messenger:') ? 'messenger' : 'whatsapp',
+      conversationKey: from,
+      defaultPhone: normalizePhone(from.replace(/^whatsapp:/i, '')),
+    });
+    // Timeouts agresivos en el tramo asíncrono: waitUntil da ~30 s en total.
+    const raw = await runToolLoop(env, payload, CALENDAR_TOOLS, executor, { tenant, retries: 0, timeoutMs: 10000 }, first)
+      || 'No he podido confirmar la agenda ahora mismo; el equipo te escribe enseguida para cerrarla.';
+    const reply = await settleTwilioReply(config, env, ctx, tenant, from, message, history, key, raw);
+    if (reply) {
+      const sent = await sendTwilioText(env, tenant, to, from, reply);
+      if (!sent.ok) console.log(JSON.stringify({ level: 'error', code: 'calendar_reply_failed', tenant: tenant.slug, error: sent.error || 'skipped' }));
+    }
+  })().catch((error) => console.log(JSON.stringify({ level: 'error', code: 'calendar_reply_failed', tenant: tenant.slug, error: error.name }))));
+  return new Response(EMPTY_TWIML, { headers: { 'Content-Type': 'text/xml; charset=utf-8' } });
 }
 
 function decodeBase64Url(value) {
@@ -1404,6 +1685,7 @@ function scopeClause(scope) {
 function clienteAllowed(path, method) {
   if (path === '/api/admin/leads' && method === 'GET') return true;
   if (path === '/api/admin/leads/export.csv' && method === 'GET') return true;
+  if (path === '/api/admin/appointments' && method === 'GET') return true;
   if (path === '/api/admin/stats' && method === 'GET') return true;
   if (path === '/api/admin/me' && method === 'GET') return true;
   if (path === '/api/admin/escalations' && method === 'GET') return true;
@@ -1680,6 +1962,108 @@ async function adminRouter(request, env, ctx, path, url, config, scope) {
     return json({ ok: true, gate }, 200, NO_STORE);
   }
 
+  // ── Citas (SPEC-CALENDARIO): lista scoped — velai todo (con ?tenant=), cliente
+  // solo las suyas vía scopeClause (mismo único punto de paso que los leads).
+  if (path === '/api/admin/appointments' && request.method === 'GET') {
+    const limit = Math.min(100, Math.max(1, Number(url.searchParams.get('limit')) || 50));
+    const clauses = ['1=1']; const values = [];
+    const tenantFilter = clean(url.searchParams.get('tenant'), 40);
+    if (scope.role === 'velai' && tenantFilter && UUID_RE.test(tenantFilter)) { clauses.push('l.tenant_id = ?'); values.push(tenantFilter); }
+    const rows = (await env.DB.prepare(`SELECT l.id,l.tenant_id,t.name AS tenant_name,l.channel,l.customer_name,l.customer_phone,l.reason,l.starts_at,l.ends_at,l.timezone,l.status,l.created_at FROM appointments l LEFT JOIN tenants t ON t.id=l.tenant_id WHERE ${clauses.join(' AND ')}${sc.sql} ORDER BY l.starts_at DESC LIMIT ?`)
+      .bind(...values, ...sc.args, limit).all()).results;
+    if (scope.role !== 'velai') for (const row of rows) { delete row.tenant_name; delete row.tenant_id; }
+    return json({ appointments: rows }, 200, NO_STORE);
+  }
+
+  // ── Calendario del tenant (SPEC-CALENDARIO §6): solo rol velai en v1
+  // (clienteAllowed no incluye estas rutas). El GET jamás devuelve el token cifrado.
+  const calMatch = path.match(/^\/api\/admin\/tenants\/([0-9a-f-]+)\/calendar(?:\/(connect))?$/i);
+  if (calMatch) {
+    if (!UUID_RE.test(calMatch[1])) throw new HttpError(404, 'not_found');
+    const tenantId = calMatch[1];
+    const tenantRow = await env.DB.prepare('SELECT id, slug, name FROM tenants WHERE id=?').bind(tenantId).first();
+    if (!tenantRow) throw new HttpError(404, 'not_found');
+    if (calMatch[2] === 'connect' && request.method === 'POST') {
+      const body = await readJson(request, 2000);
+      if (clean(body.provider, 20) !== 'google') throw new HttpError(400, 'invalid_provider'); // microsoft: fase futura
+      if (!env.GOOGLE_OAUTH_CLIENT_ID || !env.GOOGLE_OAUTH_CLIENT_SECRET) throw new HttpError(503, 'calendar_not_configured');
+      if (!env.KV) throw new HttpError(503, 'calendar_not_configured');
+      const state = crypto.randomUUID();
+      await env.KV.put(`calstate:${state}`, JSON.stringify({ tenantId, provider: 'google', actor }), { expirationTtl: 600 });
+      return json({ authUrl: googleAuthUrl(env, state, `${adminOrigin(env)}/oauth/calendar/callback`) }, 200, NO_STORE);
+    }
+    if (!calMatch[2] && request.method === 'GET') {
+      // Columnas explícitas, NUNCA SELECT * : refresh_token_enc no sale del worker.
+      let row = null;
+      try { row = await env.DB.prepare('SELECT provider,account_email,calendar_id,timezone,slot_minutes,business_hours,status,last_error,connected_at,updated_at FROM tenant_calendars WHERE tenant_id=?').bind(tenantId).first(); } catch (_) {}
+      return json({ calendar: row || null }, 200, NO_STORE);
+    }
+    if (!calMatch[2] && request.method === 'PATCH') {
+      const body = await readJson(request, 4000);
+      const sets = []; const args = [];
+      if (body.calendar_id !== undefined) {
+        const calendarId = clean(body.calendar_id, 200) || 'primary';
+        sets.push('calendar_id=?'); args.push(calendarId);
+      }
+      if (body.timezone !== undefined) {
+        const tz = clean(body.timezone, 60);
+        try { new Intl.DateTimeFormat('en-US', { timeZone: tz }); } catch (_) { throw new HttpError(400, 'invalid_timezone'); }
+        sets.push('timezone=?'); args.push(tz);
+      }
+      if (body.slot_minutes !== undefined) {
+        const minutes = Number(body.slot_minutes);
+        if (!Number.isInteger(minutes) || minutes < 10 || minutes > 240) throw new HttpError(400, 'invalid_slot_minutes');
+        sets.push('slot_minutes=?'); args.push(minutes);
+      }
+      if (body.business_hours !== undefined) {
+        let stored = null;
+        if (body.business_hours !== null && body.business_hours !== '') {
+          const hours = body.business_hours;
+          const DAYS = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'];
+          const HHMM = /^([01]\d|2[0-3]):[0-5]\d$/;
+          if (!hours || typeof hours !== 'object' || Array.isArray(hours)) throw new HttpError(400, 'invalid_business_hours');
+          const outHours = {};
+          for (const day of Object.keys(hours)) {
+            if (!DAYS.includes(day)) throw new HttpError(400, 'invalid_business_hours');
+            const windows = hours[day];
+            if (!Array.isArray(windows) || windows.length > 4) throw new HttpError(400, 'invalid_business_hours');
+            for (const w of windows) {
+              if (!Array.isArray(w) || w.length !== 2 || !HHMM.test(w[0]) || !HHMM.test(w[1]) || w[0] >= w[1]) throw new HttpError(400, 'invalid_business_hours');
+            }
+            outHours[day] = windows;
+          }
+          stored = JSON.stringify(outHours);
+        }
+        sets.push('business_hours=?'); args.push(stored);
+      }
+      if (!sets.length) throw new HttpError(400, 'nothing_to_update');
+      const now = new Date().toISOString();
+      const updated = await env.DB.prepare(`UPDATE tenant_calendars SET ${sets.join(',')}, updated_at=? WHERE tenant_id=?`).bind(...args, now, tenantId).run();
+      if (!updated.meta.changes) throw new HttpError(404, 'not_found');
+      if (env.KV) { try { await env.KV.delete(`calcfg:${tenantId}`); } catch (_) {} }
+      ctx.waitUntil(env.DB.prepare('INSERT INTO tenant_versions (tenant_id,actor_email,field,previous_value,note,created_at) VALUES (?,?,?,?,?,?)')
+        .bind(tenantId, actor, 'calendar', null, 'config editada', now).run().catch(() => {}));
+      return json({ ok: true }, 200, NO_STORE);
+    }
+    if (!calMatch[2] && request.method === 'DELETE') {
+      const row = await env.DB.prepare('SELECT refresh_token_enc FROM tenant_calendars WHERE tenant_id=?').bind(tenantId).first();
+      if (!row) throw new HttpError(404, 'not_found');
+      // Revocación best-effort en Google; borrar la fila ya inutiliza la conexión aquí.
+      try {
+        const secret = await decryptSecret(env, `calendar:${tenantId}`, row.refresh_token_enc);
+        if (secret) ctx.waitUntil(revokeGoogleToken(secret.value));
+      } catch (_) {}
+      await env.DB.prepare('DELETE FROM tenant_calendars WHERE tenant_id=?').bind(tenantId).run();
+      if (env.KV) { try { await env.KV.delete(`calcfg:${tenantId}`); await env.KV.delete(`caltoken:${tenantId}`); } catch (_) {} }
+      const now = new Date().toISOString();
+      ctx.waitUntil(env.DB.prepare('INSERT INTO tenant_versions (tenant_id,actor_email,field,previous_value,note,created_at) VALUES (?,?,?,?,?,?)')
+        .bind(tenantId, actor, 'calendar', null, 'desconectado', now).run().catch(() => {}));
+      console.log(JSON.stringify({ level: 'info', code: 'calendar_disconnected', tenant: tenantId }));
+      return json({ ok: true }, 200, NO_STORE);
+    }
+    throw new HttpError(405, 'method_not_allowed');
+  }
+
   // ── Usuarios del cliente (SPEC-USUARIOS §B.2): solo rol velai (clienteAllowed es
   // lista blanca y no incluye estas rutas). resolveScope consulta tenant_users en cada
   // petición sin caché, así que alta y baja surten efecto inmediato.
@@ -1874,6 +2258,60 @@ async function adminRouter(request, env, ctx, path, url, config, scope) {
   throw new HttpError(405, 'method_not_allowed');
 }
 
+// ── Callback OAuth de Google Calendar (SPEC-CALENDARIO §1.2) ─────────────────
+// Vive SOLO en el hostname del panel: Access delante (el admin llega con su cookie)
+// y el worker valida el JWT igual que el resto del panel. El state en KV es de un
+// solo uso (leer-y-borrar) y va atado al tenant y al actor que inició la conexión.
+async function handleCalendarCallback(request, env, ctx, url) {
+  const actor = await adminIdentity(request, env);
+  // Solo admins de Velai conectan calendarios (v1): el rol cliente no llega aquí.
+  const scope = await resolveScope(env, actor);
+  if (scope.role !== 'velai') throw new HttpError(403, 'not_authorized');
+  return calendarCallbackFor(env, ctx, url, actor);
+}
+
+// Separada de la identidad (JWT de Access) para que los tests cubran la lógica
+// del state/intercambio sin montar un JWKS real.
+async function calendarCallbackFor(env, ctx, url, actor) {
+  if (!env.DB || !env.KV) throw new HttpError(503, 'calendar_not_configured');
+  const state = clean(url.searchParams.get('state'), 40);
+  let stored = null;
+  if (state) { try { stored = await env.KV.get(`calstate:${state}`, 'json'); } catch (_) {} }
+  if (!stored || !stored.tenantId) throw new HttpError(403, 'invalid_oauth_state');
+  await env.KV.delete(`calstate:${state}`); // un solo uso, también si algo falla después
+  const back = (result) => new Response(null, { status: 302, headers: { Location: `${adminOrigin(env)}/#calendar=${result}` } });
+  const code = clean(url.searchParams.get('code'), 512);
+  if (!code) return back('denegado'); // el usuario canceló en la pantalla de Google
+  let tokens;
+  try {
+    tokens = await exchangeGoogleCode(env, code, `${adminOrigin(env)}/oauth/calendar/callback`);
+  } catch (_) { return back('error_intercambio'); }
+  // Sin refresh_token la conexión muere en 1 h. Google solo lo da con prompt=consent
+  // (ya va en la URL): si aun así falta, mejor error claro que conexión zombi.
+  if (!tokens.refresh_token) return back('error_sin_refresh');
+  const enc = await encryptSecret(env, `calendar:${stored.tenantId}`, tokens.refresh_token);
+  let email = null;
+  try {
+    const payload = JSON.parse(new TextDecoder().decode(decodeBase64Url(tokens.id_token.split('.')[1])));
+    email = clean(payload.email, 200);
+  } catch (_) { /* sin email no pasa nada: es solo informativo en el panel */ }
+  const now = new Date().toISOString();
+  // Reconectar conserva la config (calendar_id, horario…): solo rotan los tokens.
+  await env.DB.prepare(`INSERT INTO tenant_calendars (tenant_id,provider,refresh_token_enc,account_email,calendar_id,timezone,slot_minutes,business_hours,status,last_error,connected_by,connected_at,updated_at)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
+    ON CONFLICT(tenant_id) DO UPDATE SET provider=excluded.provider, refresh_token_enc=excluded.refresh_token_enc, account_email=excluded.account_email, status='connected', last_error=NULL, updated_at=excluded.updated_at`)
+    .bind(stored.tenantId, 'google', enc, email, 'primary', 'Europe/Madrid', 30, null, 'connected', null, actor, now, now).run();
+  if (env.KV && tokens.access_token) {
+    try { await env.KV.put(`caltoken:${stored.tenantId}`, tokens.access_token, { expirationTtl: Math.max(60, (Number(tokens.expires_in) || 3600) - 60) }); } catch (_) {}
+  }
+  try { await env.KV.delete(`calcfg:${stored.tenantId}`); } catch (_) {}
+  // Auditoría SIN tokens: solo que se conectó, quién y cuándo.
+  ctx.waitUntil(env.DB.prepare('INSERT INTO tenant_versions (tenant_id,actor_email,field,previous_value,note,created_at) VALUES (?,?,?,?,?,?)')
+    .bind(stored.tenantId, actor, 'calendar', null, 'conectado google', now).run().catch(() => {}));
+  console.log(JSON.stringify({ level: 'info', code: 'calendar_connected', tenant: stored.tenantId, provider: 'google' }));
+  return back('ok');
+}
+
 // Re-inserta en D1 los leads encolados en KV durante una caída (idempotente por
 // request_id). Si el aviso directo ya salió en el fallback, marca los canales como
 // enviados para no duplicar el ping al equipo.
@@ -1976,6 +2414,13 @@ export function createWorker(config) {
           if (url.hostname !== host) throw new HttpError(404, 'not_found');
           return await handleAdmin(request, env, ctx, path, url, config);
         }
+        if (path === '/oauth/calendar/callback' && request.method === 'GET') {
+          // Mismo perímetro que el panel: solo en el hostname de Access (en el
+          // público es un 404 idéntico al de cualquier ruta inexistente).
+          const host = adminHost(env);
+          if (!host || url.hostname !== host) throw new HttpError(404, 'not_found');
+          return await handleCalendarCallback(request, env, ctx, url);
+        }
         const contentType = request.headers.get('Content-Type') || '';
         if (path === '/' && request.method === 'POST' && contentType.includes('application/x-www-form-urlencoded')) {
           // Con el reorden tenant→firma, una petición sin firma ya toca D1: rate limit por IP.
@@ -2008,4 +2453,4 @@ export function createWorker(config) {
   };
 }
 
-export const testing = { clean, normalizePhone, extractPhone, safeUtm, publicCors, validTwilioSignature, callAnthropic, csvCell, expiryDate, leadFilters, isDemoKey, templateVar, leadTemplateVariables, readJson, deliver, drainQueuedLeads, verifyTurnstile, systemFor, validateTenant, invalidateTenantCache, tenantWriteError, assertNotActivePending, handleProvision, pollProvisioning, fillSeries, resolveScope, scopeClause, clienteAllowed, adminRouter, recordAuthFailure, handleAdmin, handleWidgetBoot, allowedOrigins, envOrigins, syncPanelGate, envAdmins, syncAdminGate, getSetting, setSetting, withCfToken };
+export const testing = { clean, normalizePhone, extractPhone, safeUtm, publicCors, validTwilioSignature, callAnthropic, callAnthropicRaw, runToolLoop, calendarExecutor, calendarSystem, tenantCalendar, validCalendarDate, availableSlots, handleCalendarCallback, calendarCallbackFor, sendTwilioText, csvCell, expiryDate, leadFilters, isDemoKey, templateVar, leadTemplateVariables, readJson, deliver, drainQueuedLeads, verifyTurnstile, systemFor, validateTenant, invalidateTenantCache, tenantWriteError, assertNotActivePending, handleProvision, pollProvisioning, fillSeries, resolveScope, scopeClause, clienteAllowed, adminRouter, recordAuthFailure, handleAdmin, handleWidgetBoot, allowedOrigins, envOrigins, syncPanelGate, envAdmins, syncAdminGate, getSetting, setSetting, withCfToken };

@@ -318,6 +318,7 @@ dialog::backdrop{background:rgba(5,3,6,.78);backdrop-filter:blur(3px)}
 <button type="button" class="ttab" data-tt="marca">Marca del widget<i class="dot"></i></button>
 <button type="button" class="ttab" data-tt="prov" id="ttabProv">Aprovisionamiento<i class="dot"></i></button>
 <button type="button" class="ttab" data-tt="usuarios" id="ttabUsers">Usuarios<i class="dot"></i></button>
+<button type="button" class="ttab" data-tt="calendario" id="ttabCal">Calendario</button>
 <button type="button" class="ttab" data-tt="historial" id="ttabHist">Historial</button>
 </nav>
 <div class="wizsteps" id="wizSteps" hidden></div></div><div class="modal-b">
@@ -383,6 +384,23 @@ dialog::backdrop{background:rgba(5,3,6,.78);backdrop-filter:blur(3px)}
 <div id="tUsersList" class="mt6 muted">—</div>
 <div class="actions actions0"><input id="uEmail" type="email" placeholder="gestora@cliente.com" class="grow inpill"><button class="btn alt" id="uAdd" type="button">Añadir</button></div>
 <small class="muted field-err" data-f="panel_email"></small></div></section>
+<section class="tpane" data-tp="calendario" hidden>
+<div class="card"><b>Google Calendar del cliente</b>
+<p class="muted mt6">El cliente conecta SU cuenta de Google: Vai consulta sus huecos y agenda citas directamente en su calendario desde el chat web y WhatsApp. Al conectar, entra con la cuenta de Google DEL CLIENTE.</p>
+<div id="calState" class="mt6 muted">—</div>
+<div class="actions actions0"><button class="btn alt" id="calConnect" type="button">Conectar Google</button><button class="btn alt" id="calDisconnect" type="button" hidden>Desconectar</button></div></div>
+<div class="card mt12" id="calCfgCard" hidden><b>Configuración de citas</b>
+<div class="grid mt6">
+<div class="card"><b>Calendario (ID)</b><input id="calId" placeholder="primary"></div>
+<div class="card"><b>Zona horaria</b><input id="calTz" placeholder="Europe/Madrid"></div>
+<div class="card"><b>Duración (min)</b><input id="calSlot" type="number" min="10" max="240" placeholder="30"></div>
+</div>
+<div class="mt6"><b>Horario laboral</b><p class="muted">JSON por día (mon…sun); vacío = L-V 9:00-19:00.</p>
+<textarea id="calHours" rows="3" placeholder='{"mon":[["09:00","14:00"],["16:00","20:00"]]}'></textarea></div>
+<div class="actions actions0"><button class="btn" id="calSave" type="button">Guardar calendario</button></div>
+<small class="muted field-err" data-f="calendar"></small></div>
+<div class="card mt12" id="calApptsCard" hidden><b>Citas agendadas por Vai</b>
+<div id="calAppts" class="mt6 muted">—</div></div></section>
 <section class="tpane" data-tp="historial" hidden>
 <div class="timeline"><div id="tVersions" class="muted">—</div></div></section>
 <div class="wizbar" id="wizBar" hidden><button class="btn alt" id="wizBack" type="button">Atrás</button><span class="muted" id="wizHint">El borrador se guarda al pasar de paso, sin activar nada hasta el final.</span><button class="btn" id="wizNext" type="button">Guardar y continuar</button></div>

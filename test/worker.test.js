@@ -1553,3 +1553,247 @@ test('el panel arranca contra un DOM mínimo y pide me, leads, stats y escalatio
     assert.ok(fetched.some((p) => p.startsWith(route)), `el arranque pide ${route}`);
   }
 });
+
+// ── SPEC-CALENDARIO fase 1 (solo Google) ─────────────────────────────────────
+
+test('freeSlots: DST de Madrid, horario partido, solapes y margen de 15 min', async () => {
+  const { freeSlots, localToUtcMs } = await import('../worker/calendar.js');
+  // offsets reales: invierno +1, verano +2, y el propio día del cambio de hora
+  assert.equal(new Date(localToUtcMs('Europe/Madrid', '2026-01-15', '10:00')).toISOString(), '2026-01-15T09:00:00.000Z');
+  assert.equal(new Date(localToUtcMs('Europe/Madrid', '2026-07-15', '10:00')).toISOString(), '2026-07-15T08:00:00.000Z');
+  assert.equal(new Date(localToUtcMs('Europe/Madrid', '2026-03-29', '10:00')).toISOString(), '2026-03-29T08:00:00.000Z');
+  const base = { date: '2026-07-15', slotMinutes: 60, timezone: 'Europe/Madrid', nowMs: Date.parse('2026-07-14T00:00:00Z') };
+  // horario partido y una cita 11:00-12:00 local: se cae exactamente ese hueco
+  const huecos = freeSlots({ ...base, hours: [['10:00', '13:00'], ['16:00', '18:00']], busy: [{ start: '2026-07-15T09:00:00Z', end: '2026-07-15T10:00:00Z' }] });
+  assert.deepEqual(huecos, ['10:00', '12:00', '16:00', '17:00']);
+  assert.deepEqual(freeSlots({ ...base, hours: [], busy: [] }), [], 'día sin horario = sin huecos');
+  // margen: a las 10:30 ya no se ofrece el hueco de las 10:00 (ni "en 3 minutos")
+  const hoy = freeSlots({ ...base, hours: [['10:00', '12:00']], busy: [], nowMs: localToUtcMs('Europe/Madrid', '2026-07-15', '10:30') });
+  assert.deepEqual(hoy, ['11:00']);
+});
+
+test('el bucle de tools cumple el contrato de la API y corta en 3 vueltas', async () => {
+  const requests = [];
+  let mode = 'oneTool';
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = async (url, init) => {
+    if (!String(url).includes('api.anthropic.com')) return new Response('{}', { status: 200 });
+    requests.push(JSON.parse(init.body));
+    if (mode === 'always') return new Response(JSON.stringify({ stop_reason: 'tool_use', content: [{ type: 'tool_use', id: 'tu_x', name: 'consultar_disponibilidad', input: {} }] }), { status: 200 });
+    if (requests.length === 1) return new Response(JSON.stringify({ stop_reason: 'tool_use', content: [{ type: 'text', text: 'Voy a mirar' }, { type: 'tool_use', id: 'tu_1', name: 'consultar_disponibilidad', input: { fecha: '2026-09-01' } }] }), { status: 200 });
+    return new Response(JSON.stringify({ stop_reason: 'end_turn', content: [{ type: 'text', text: 'Tengo hueco a las 10:00' }] }), { status: 200 });
+  };
+  try {
+    const env = { ANTHROPIC_API_KEY: 'k' };
+    const calls = [];
+    const executor = async (name, input) => { calls.push({ name, input }); return JSON.stringify({ huecos: ['10:00'] }); };
+    const reply = await testing.runToolLoop(env, { model: 'm', max_tokens: 500, messages: [{ role: 'user', content: 'cita' }] }, [], executor);
+    assert.equal(reply, 'Tengo hueco a las 10:00');
+    assert.deepEqual(calls, [{ name: 'consultar_disponibilidad', input: { fecha: '2026-09-01' } }]);
+    // 2ª petición: content del assistant ENTERO + UN solo mensaje user con el tool_result
+    const assistant = requests[1].messages.at(-2); const user = requests[1].messages.at(-1);
+    assert.equal(assistant.role, 'assistant');
+    assert.equal(assistant.content.length, 2, 'el content del assistant se reenvía entero');
+    assert.deepEqual(user.content.map((b) => [b.type, b.tool_use_id]), [['tool_result', 'tu_1']]);
+    // un executor que lanza es tool_result con is_error, no rompe el bucle
+    requests.length = 0; mode = 'oneTool';
+    const errored = await testing.runToolLoop(env, { model: 'm', messages: [{ role: 'user', content: 'x' }] }, [], async () => { throw new Error('boom'); });
+    assert.equal(errored, 'Tengo hueco a las 10:00');
+    assert.equal(requests[1].messages.at(-1).content[0].is_error, true);
+    // bucle infinito: corta tras 3 vueltas de tools (4 llamadas) y devuelve null
+    requests.length = 0; mode = 'always';
+    assert.equal(await testing.runToolLoop(env, { model: 'm', messages: [{ role: 'user', content: 'x' }] }, [], executor), null);
+    assert.equal(requests.length, 4);
+  } finally { globalThis.fetch = realFetch; }
+});
+
+test('system del calendario: bloque estable cacheado y bloque volátil sin cache_control', () => {
+  const config = { SYSTEM: 'BASE', GUARDRAILS: 'REGLA' };
+  const cal = { timezone: 'Europe/Madrid', slot_minutes: 30 };
+  const a = testing.calendarSystem(config, { system_prompt: 'NEGOCIO' }, cal);
+  const b = testing.calendarSystem(config, { system_prompt: 'NEGOCIO' }, cal);
+  assert.equal(a[0].cache_control.type, 'ephemeral');
+  assert.ok(a[0].text.includes('NEGOCIO') && a[0].text.includes('REGLA') && a[0].text.includes('GESTIÓN DE CITAS'));
+  assert.equal(a[1].cache_control, undefined, 'el bloque volátil JAMÁS lleva cache_control');
+  assert.ok(a[1].text.includes('Europe/Madrid'));
+  assert.equal(a[0].text, b[0].text, 'el bloque cacheado es byte-estable entre llamadas');
+  assert.ok(!/\d{4}/.test(a[0].text), 'ninguna fecha puede entrar en el bloque cacheado');
+});
+
+test('el executor trata el input del modelo como hostil y nunca lanza por datos malos', async () => {
+  const cal = { tenant_id: 't-cal', calendar_id: 'primary', timezone: 'Europe/Madrid', slot_minutes: 30, business_hours: null };
+  const exec = testing.calendarExecutor({}, { slug: 'uno' }, cal, { channel: 'web', conversationKey: 'c1', defaultPhone: '' });
+  const future = `${new Date(Date.now() + 7 * 86400000).toISOString().slice(0, 10)}T10:00`;
+  assert.equal(JSON.parse(await exec('consultar_disponibilidad', { fecha: 'mañana' })).error, 'fecha_invalida');
+  assert.equal(JSON.parse(await exec('consultar_disponibilidad', { fecha: '2020-01-01' })).error, 'fecha_pasada');
+  assert.equal(JSON.parse(await exec('agendar_cita', { fecha_hora: '2099-01-01T10:00', nombre: 'Ana', telefono: '612345678' })).error, 'fecha_lejana');
+  assert.equal(JSON.parse(await exec('agendar_cita', { fecha_hora: future, nombre: 'Ana', telefono: '12' })).error, 'datos_incompletos');
+  assert.equal(JSON.parse(await exec('agendar_cita', { fecha_hora: 'basura' })).error, 'fecha_invalida');
+  assert.equal(JSON.parse(await exec('otra_cosa', {})).error, 'tool_desconocida');
+});
+
+// Próximo día laborable a ≥7 días vista en Madrid (el horario default es L-V).
+function nextWorkday() {
+  for (let offset = 7; ; offset++) {
+    const day = new Date(Date.now() + offset * 86400000).toISOString().slice(0, 10);
+    const wd = new Intl.DateTimeFormat('en-US', { timeZone: 'Europe/Madrid', weekday: 'short' }).format(new Date(`${day}T12:00:00Z`)).toLowerCase();
+    if (wd !== 'sat' && wd !== 'sun') return day;
+  }
+}
+
+test('agendar_cita: relee el hueco antes de crear, no duplica y respeta el cerrojo', async () => {
+  const { localToUtcMs } = await import('../worker/calendar.js');
+  const day = nextWorkday();
+  const iso = (hhmm) => new Date(localToUtcMs('Europe/Madrid', day, hhmm)).toISOString();
+  const inserts = [];
+  const db = { prepare: (sql) => ({ bind: (...args) => ({
+    run: async () => {
+      if (sql.includes('INSERT INTO appointments')) {
+        if (inserts.some((i) => i[2] === args[2])) throw new Error('UNIQUE constraint failed: appointments.request_id');
+        inserts.push(args);
+      }
+      return { meta: { changes: 1 } };
+    },
+    first: async () => null, all: async () => ({ results: [] }),
+  }) }) };
+  const env = { DB: db, KV: mapKV(), GOOGLE_OAUTH_CLIENT_ID: 'cid', GOOGLE_OAUTH_CLIENT_SECRET: 'sec', SECRETS_KEK: TEST_KEK };
+  const enc = await encryptSecret(env, 'calendar:t-cal', 'refresh-tok');
+  const cal = { tenant_id: 't-cal', provider: 'google', refresh_token_enc: enc, calendar_id: 'primary', timezone: 'Europe/Madrid', slot_minutes: 30, business_hours: null, status: 'connected' };
+  const created = [];
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = async (url, init) => {
+    const u = String(url);
+    if (u.includes('oauth2.googleapis.com/token')) return new Response(JSON.stringify({ access_token: 'at', expires_in: 3600 }), { status: 200 });
+    if (u.includes('/events?')) return new Response(JSON.stringify({ items: [{ start: { dateTime: iso('10:00') }, end: { dateTime: iso('10:30') }, status: 'confirmed' }] }), { status: 200 });
+    if (u.includes('/events')) { created.push(JSON.parse(init.body)); return new Response(JSON.stringify({ id: 'evt1' }), { status: 201 }); }
+    return new Response('{}', { status: 200 });
+  };
+  try {
+    const exec = testing.calendarExecutor(env, { slug: 'uno' }, cal, { channel: 'whatsapp', conversationKey: 'whatsapp:+34600', defaultPhone: '+34600000000' });
+    // relectura del proveedor: el hueco de las 10:00 está ocupado — ni evento ni fila
+    const busy = JSON.parse(await exec('agendar_cita', { fecha_hora: `${day}T10:00`, nombre: 'Ana', telefono: '612345678' }));
+    assert.equal(busy.error, 'hueco_ocupado');
+    assert.ok(busy.alternativas.length && !busy.alternativas.includes('10:00'));
+    assert.equal(created.length, 0);
+    // hueco libre: evento en Google + fila en appointments
+    const ok = JSON.parse(await exec('agendar_cita', { fecha_hora: `${day}T11:00`, nombre: 'Ana', telefono: '612345678' }));
+    assert.deepEqual([ok.ok, ok.hora], [true, '11:00']);
+    assert.equal(created.length, 1);
+    assert.equal(inserts.length, 1);
+    assert.ok(created[0].summary.includes('Ana'));
+    // cerrojo KV: otra conversación sobre el MISMO hueco no crea un segundo evento
+    const race = JSON.parse(await exec('agendar_cita', { fecha_hora: `${day}T11:00`, nombre: 'Luis', telefono: '612345679' }));
+    assert.equal(race.error, 'hueco_ocupado');
+    assert.equal(created.length, 1, 'el cerrojo evita el segundo evento');
+  } finally { globalThis.fetch = realFetch; }
+});
+
+test('webhook con calendario: tool_use → TwiML vacío YA y la respuesta llega por la Messages API', async () => {
+  const worker = createWorker({ SYSTEM: 's', DEMOS: {}, SUMMARY_PROMPT: '', GUARDRAILS: 'REGLA' });
+  const waits = [];
+  const ctx = { waitUntil(p) { waits.push(p); } };
+  const kv = new Map();
+  const tenant = { id: '00000000-0000-4000-8000-0000000000c1', slug: 'uno', name: 'Uno', system_prompt: 'P' };
+  const env = webhookEnv({}, kv);
+  env.GOOGLE_OAUTH_CLIENT_ID = 'cid'; env.GOOGLE_OAUTH_CLIENT_SECRET = 'sec'; env.SECRETS_KEK = TEST_KEK;
+  const enc = await encryptSecret(env, `calendar:${tenant.id}`, 'refresh-tok');
+  const calRow = { tenant_id: tenant.id, provider: 'google', refresh_token_enc: enc, calendar_id: 'primary', timezone: 'Europe/Madrid', slot_minutes: 30, business_hours: null, status: 'connected' };
+  env.DB = { prepare: (sql) => ({ bind: () => ({
+    first: async () => sql.includes('channel_address') ? tenant : (sql.includes('tenant_calendars') ? calRow : null),
+    all: async () => ({ results: [] }), run: async () => ({ meta: { changes: 1 } }),
+  }) }), batch: async () => [] };
+  let anthropicCalls = 0; const twilioSends = [];
+  const day = nextWorkday();
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = async (url, init) => {
+    const u = String(url);
+    if (u.includes('api.anthropic.com')) {
+      anthropicCalls++;
+      if (anthropicCalls === 1) return new Response(JSON.stringify({ stop_reason: 'tool_use', content: [{ type: 'tool_use', id: 'tu_1', name: 'consultar_disponibilidad', input: { fecha: day } }] }), { status: 200 });
+      return new Response(JSON.stringify({ stop_reason: 'end_turn', content: [{ type: 'text', text: 'Tienes hueco a las 10:00, ¿te lo reservo?' }] }), { status: 200 });
+    }
+    if (u.includes('oauth2.googleapis.com/token')) return new Response(JSON.stringify({ access_token: 'at', expires_in: 3600 }), { status: 200 });
+    if (u.includes('/events?')) return new Response(JSON.stringify({ items: [] }), { status: 200 });
+    if (u.includes('api.twilio.com')) { twilioSends.push(String(init.body)); return new Response('{}', { status: 201 }); }
+    return new Response('{}', { status: 200 });
+  };
+  try {
+    const params = { AccountSid: env.TWILIO_ACCOUNT_SID, From: 'whatsapp:+34600000000', To: 'whatsapp:+15550000001', Body: 'quiero cita', MessageSid: 'SM' + '6'.repeat(32) };
+    env.DB.prepare('x'); // no-op para linters de stub
+    const tenants = { 'whatsapp:+15550000001': tenant };
+    env.DB = { prepare: (sql) => ({ bind: (...args) => ({
+      first: async () => sql.includes('channel_address') ? (tenants[args[0]] || null) : (sql.includes('tenant_calendars') ? calRow : null),
+      all: async () => ({ results: [] }), run: async () => ({ meta: { changes: 1 } }),
+    }) }), batch: async () => [] };
+    const res = await worker.fetch(await twilioRequest('https://worker.test/', params, 'tok'), env, ctx);
+    assert.equal(res.status, 200);
+    assert.ok(!(await res.text()).includes('<Message>'), 'TwiML vacío inmediato: Twilio no espera al bucle');
+    await Promise.all(waits);
+    assert.equal(anthropicCalls, 2);
+    const send = twilioSends.map((b) => new URLSearchParams(b)).find((p) => p.get('Body'));
+    assert.ok(send, 'la respuesta final sale por la Messages API');
+    assert.equal(send.get('From'), 'whatsapp:+15550000001', 'From = la dirección del tenant');
+    assert.equal(send.get('To'), 'whatsapp:+34600000000');
+    assert.ok(send.get('Body').includes('10:00'));
+    const history = JSON.parse(kv.get(`conv:wa:${tenant.id}:whatsapp:+34600000000`));
+    assert.equal(history.at(-1).role, 'assistant', 'el turno completo queda en el historial');
+  } finally { globalThis.fetch = realFetch; }
+});
+
+test('callback OAuth: state de un solo uso, token cifrado con AAD calendar: y 404 en el hostname público', async () => {
+  const kv = mapKV();
+  const inserts = [];
+  const db = { prepare: (sql) => ({ bind: (...args) => ({
+    run: async () => { inserts.push({ sql, args }); return { meta: { changes: 1 } }; },
+    first: async () => null, all: async () => ({ results: [] }),
+  }) }), batch: async () => [] };
+  const env = { DB: db, KV: kv, SECRETS_KEK: TEST_KEK, GOOGLE_OAUTH_CLIENT_ID: 'cid', GOOGLE_OAUTH_CLIENT_SECRET: 'sec', ADMIN_ORIGIN: 'https://admin.hirevai.com' };
+  const ctx = { waitUntil() {} };
+  const cbUrl = (qs) => new URL(`https://admin.hirevai.com/oauth/calendar/callback?${qs}`);
+  await assert.rejects(testing.calendarCallbackFor(env, ctx, cbUrl('state=malo&code=c'), 'admin@velai'), (e) => e.code === 'invalid_oauth_state');
+  const tenantId = '00000000-0000-4000-8000-0000000000c1';
+  await kv.put('calstate:st1', JSON.stringify({ tenantId, provider: 'google', actor: 'admin@velai' }));
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = async (url) => String(url).includes('oauth2.googleapis.com/token')
+    ? new Response(JSON.stringify({ access_token: 'at', refresh_token: 'rt', expires_in: 3600, id_token: `x.${btoa(JSON.stringify({ email: 'negocio@gmail.com' }))}.y` }), { status: 200 })
+    : new Response('{}', { status: 200 });
+  try {
+    const ok = await testing.calendarCallbackFor(env, ctx, cbUrl('state=st1&code=abc'), 'admin@velai');
+    assert.equal(ok.status, 302);
+    assert.ok(ok.headers.get('Location').includes('#calendar=ok'));
+    const upsert = inserts.find((i) => i.sql.includes('tenant_calendars'));
+    assert.ok(upsert && String(upsert.args[2]).startsWith('v1:'), 'el refresh_token va CIFRADO a D1');
+    assert.ok(!JSON.stringify(inserts.map((i) => i.args)).includes('"rt"'), 'el token en claro no toca D1');
+    // AAD por propósito: el AAD de calendar: no descifra como si fuera el de twilio
+    await assert.rejects(decryptSecret(env, tenantId, upsert.args[2]), /cipher_undecryptable/);
+    assert.equal((await decryptSecret(env, `calendar:${tenantId}`, upsert.args[2])).value, 'rt');
+    // el MISMO state otra vez → 403 (un solo uso)
+    await assert.rejects(testing.calendarCallbackFor(env, ctx, cbUrl('state=st1&code=abc'), 'admin@velai'), (e) => e.code === 'invalid_oauth_state');
+  } finally { globalThis.fetch = realFetch; }
+  // el hostname público no expone el callback
+  const worker = createWorker({ SYSTEM: 's', DEMOS: {}, SUMMARY_PROMPT: '', GUARDRAILS: '' });
+  const pub = await worker.fetch(new Request('https://vai-worker.botnexo-ia.workers.dev/oauth/calendar/callback?state=x'), env, ctx);
+  assert.equal(pub.status, 404);
+});
+
+test('citas en el panel: el cliente solo ve las suyas y jamás toca la config del calendario', async () => {
+  const APPTS = [
+    { id: 'a1', tenant_id: 't-mio', tenant_name: 'Mi Negocio', customer_name: 'Ana', starts_at: '2026-09-01T10:00:00Z' },
+    { id: 'a2', tenant_id: 't-otro', tenant_name: 'Otro', customer_name: 'Luis', starts_at: '2026-09-01T11:00:00Z' },
+  ];
+  const db = { prepare: (sql) => ({ bind: (...args) => ({
+    all: async () => ({ results: sql.includes('FROM appointments l') ? (sql.includes('l.tenant_id = ?') ? APPTS.filter((a) => a.tenant_id === args.at(-2)) : APPTS).map((a) => ({ ...a })) : [] }),
+    first: async () => null, run: async () => ({ meta: { changes: 1 } }),
+  }) }) };
+  const env = { DB: db, KV: { async get() { return null; }, async put() {}, async delete() {}, async list() { return { keys: [] }; } } };
+  const ctx = { waitUntil() {} };
+  const call = (scope) => testing.adminRouter(adminReq('/api/admin/appointments'), env, ctx, '/api/admin/appointments', new URL('https://x/api/admin/appointments'), {}, scope);
+  const mine = await (await call(CLIENTE)).json();
+  assert.deepEqual(mine.appointments.map((a) => a.id), ['a1']);
+  assert.equal(mine.appointments[0].tenant_name, undefined, 'sin nombres de tenant para el cliente');
+  const all = await (await call(VELAI)).json();
+  assert.equal(all.appointments.length, 2);
+  for (const [path, method] of [[`/api/admin/tenants/${LEADS[0].id}/calendar`, 'GET'], [`/api/admin/tenants/${LEADS[0].id}/calendar/connect`, 'POST']]) {
+    await assert.rejects(testing.adminRouter(adminReq(path, { method }), env, ctx, path, new URL('https://x' + path), {}, CLIENTE), (e) => e.code === 'not_authorized');
+  }
+});

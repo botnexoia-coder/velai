@@ -66,6 +66,14 @@ Sin esto, las campañas gastarían presupuesto a ciegas (sin medir conversiones)
 - [ ] En Cloudflare: `www.hirevai.com` figura "Inactivo (Error)", DMARC sigue en `p=none`, y el proyecto Pages legacy `hirevai` sin retirar.
 - [ ] Revisar las métricas del chat (eventos `chat_*` en GA4) a partir del ~2026-08-24, con una semana de datos.
 
+### 2i. Calendario (SPEC-CALENDARIO fase 1 implementada 2026-08-20 — falta activarla)
+
+- [ ] **Google Cloud Console** (Juan, en curso): proyecto `velai-calendar`, Calendar API habilitada, OAuth client Web con redirects `https://admin.hirevai.com/oauth/calendar/callback` y `http://localhost:8787/oauth/calendar/callback`, scope único `calendar.events`.
+- [ ] **Credenciales al worker**: pegar el Client ID en `GOOGLE_OAUTH_CLIENT_ID` (wrangler.toml) y `npx wrangler secret put GOOGLE_OAUTH_CLIENT_SECRET`. Hasta entonces la función está APAGADA (503 en los endpoints, chat sin citas).
+- [ ] 🔴 **Verificación de la app por Google** (2–6 semanas, CAMINO CRÍTICO): iniciarla YA; requiere vídeo demostrando el uso del scope. Mientras esté en Testing: clientes piloto como test users y sus conexiones CADUCAN A LOS 7 DÍAS (reconectar desde el panel).
+- [ ] Prueba e2e con un calendario real: conectar → consultar huecos por chat web → agendar → ver el evento en Google y la cita en el panel; luego lo mismo por WhatsApp (camino asíncrono).
+- [ ] Pospuesto conscientemente: **Microsoft 365** (fase 2 de la spec), picker de calendarios (hoy campo de texto `calendar_id`), UI de citas para el rol cliente (el endpoint ya filtra por scope), aviso Telegram por cita, enlace cita↔lead, recordatorios.
+
 ### 2h. Seguimiento del sprint de blindaje (desplegado 2026-08-20)
 
 - [ ] **Webhook 100% asíncrono (TwiML vacío + `waitUntil` + Messages API de Twilio)**: evaluado y descartado en el sprint — solo abordarlo si los logs `ai_usage` muestran p95 > ~9 s en el canal WhatsApp (hoy el webhook va con timeout 10 s / 0 reintentos + dedupe por `MessageSid`, suficiente). Nota: SPEC-CALENDARIO ya contempla este patrón para el bucle de tools, que lo necesitará de verdad.
