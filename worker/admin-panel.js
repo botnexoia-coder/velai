@@ -254,11 +254,11 @@ $('#tUsersList').onclick=async e=>{const email=e.target&&e.target.dataset&&e.tar
 // ── Calendario por cliente (SPEC-CALENDARIO): modal con conexión, rejilla mensual y config ──
 // Se abre desde la columna «Calendario» de la lista de clientes: si el cliente ya
 // conectó su Google, muestra el calendario del mes con sus citas; si no, la conexión.
-let calTenant=null,calCur=null,calMonth=null,calAppts=[],calSelDay=null;
+let calTenant=null,calCur=null,calMonth=null,calAppts=[];
 function calTz(){return (calCur&&calCur.timezone)||'Europe/Madrid'}
 function calTzDay(iso){try{return new Intl.DateTimeFormat('en-CA',{timeZone:calTz(),year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date(iso))}catch(e){return String(iso).slice(0,10)}}
 function calTzHm(iso){try{return new Intl.DateTimeFormat('es-ES',{timeZone:calTz(),hour:'2-digit',minute:'2-digit',hour12:false}).format(new Date(iso))}catch(e){return ''}}
-async function openCalendar(id,name){calTenant=id;calMonth=new Date();calMonth.setDate(1);calSelDay=null;
+async function openCalendar(id,name){calTenant=id;calMonth=new Date();calMonth.setDate(1);
  const t=tenantList.find(x=>x.id===id);$('#calTitle').textContent='Calendario — '+((t&&t.name)||name||'mi negocio');
  // Es una VISTA (no un modal): sustituye a la que esté abierta.
  $('#viewLeads').hidden=true;$('#viewTenants').hidden=true;$('#viewConfig').hidden=true;$('#viewCalendario').hidden=false;
@@ -279,26 +279,38 @@ async function calLoadMonth(){const y=calMonth.getFullYear(),m=calMonth.getMonth
  const from=new Date(Date.UTC(y,m,1)-86400000).toISOString(),to=new Date(Date.UTC(y,m+1,1)+86400000).toISOString();
  try{const d=await api('/api/admin/appointments?tenant='+calTenant+'&from='+encodeURIComponent(from)+'&to='+encodeURIComponent(to));calAppts=d.appointments}catch(e){calAppts=[]}
  calRender()}
+function calByDay(){const byDay={};for(const a of calAppts){const k=calTzDay(a.starts_at);(byDay[k]=byDay[k]||[]).push(a)}
+ for(const k of Object.keys(byDay))byDay[k].sort((a,b)=>a.starts_at<b.starts_at?-1:1);return byDay}
 function calRender(){const y=calMonth.getFullYear(),m=calMonth.getMonth();
  $('#calMonthTitle').textContent=new Intl.DateTimeFormat('es-ES',{month:'long',year:'numeric'}).format(calMonth);
- const byDay={};for(const a of calAppts){const k=calTzDay(a.starts_at);(byDay[k]=byDay[k]||[]).push(a)}
+ const byDay=calByDay();
  const lead=(new Date(y,m,1).getDay()+6)%7; // semana empieza en lunes
  const days=new Date(y,m+1,0).getDate();
  const today=calTzDay(new Date().toISOString());
  let html=['Lun','Mar','Mié','Jue','Vie','Sáb','Dom'].map(d=>'<div class="caldow">'+d+'</div>').join('');
  for(let i=0;i<lead;i++)html+='<div class="calcell out"></div>';
  for(let day=1;day<=days;day++){const k=y+'-'+String(m+1).padStart(2,'0')+'-'+String(day).padStart(2,'0');
-  const list=(byDay[k]||[]).sort((a,b)=>a.starts_at<b.starts_at?-1:1);
-  const chips=list.slice(0,2).map(a=>'<span class="calchip">'+calTzHm(a.starts_at)+' '+esc(a.customer_name)+'</span>').join('')
-   +(list.length>2?'<span class="calmore">+'+(list.length-2)+' más</span>':'');
-  html+='<div class="calcell'+(k===today?' today':'')+(k===calSelDay?' sel':'')+'" data-day="'+k+'"><b>'+day+'</b>'+chips+'</div>'}
- $('#calGrid').innerHTML=html;calRenderDay(byDay)}
-function calRenderDay(byDay){if(!calSelDay){$('#calDayList').textContent=calAppts.length?'Toca un día para ver el detalle de sus citas.':'Sin citas este mes. Vai las creará aquí (y en el Google Calendar del cliente) cuando las agende por chat o WhatsApp.';return}
- const list=byDay[calSelDay]||[];
- $('#calDayList').innerHTML='<b>'+esc(calSelDay)+'</b>'+(list.length?list.map(a=>'<div>'+calTzHm(a.starts_at)+' · <b>'+esc(a.customer_name)+'</b> <span class="muted">('+esc(a.customer_phone)+(a.reason?' · '+esc(a.reason):'')+' · '+esc(a.channel)+')</span></div>').join(''):'<div class="muted">Sin citas ese día.</div>')}
-$('#calGrid').onclick=e=>{const c=e.target.closest('[data-day]');if(!c||!c.dataset.day)return;calSelDay=c.dataset.day;calRender()};
-$('#calPrev').onclick=()=>{calMonth.setMonth(calMonth.getMonth()-1);calSelDay=null;calLoadMonth()};
-$('#calNext').onclick=()=>{calMonth.setMonth(calMonth.getMonth()+1);calSelDay=null;calLoadMonth()};
+  const list=byDay[k]||[];
+  const chips=list.slice(0,3).map(a=>'<span class="calchip">'+calTzHm(a.starts_at)+' '+esc(a.customer_name)+'</span>').join('')
+   +(list.length>3?'<span class="calmore">+'+(list.length-3)+' más</span>':'');
+  html+='<div class="calcell'+(k===today?' today':'')+'" data-day="'+k+'"><span class="dnum">'+day+'</span>'+chips+'</div>'}
+ // completar la última semana: la rejilla tipo Google siempre cierra en domingo
+ const tail=(7-((lead+days)%7))%7;
+ for(let i=0;i<tail;i++)html+='<div class="calcell out"></div>';
+ $('#calGrid').innerHTML=html;
+ $('#calHint').textContent=calAppts.length?'Toca un día para ver sus citas.':'Sin citas este mes. Vai las creará aquí (y en el Google Calendar del negocio) cuando las agende por chat o WhatsApp.'}
+// El detalle del día se abre en modal (pedido de Juan, estilo Google Calendar).
+function openCalDay(k){const list=calByDay()[k]||[];
+ $('#calDayTitle').textContent=new Intl.DateTimeFormat('es-ES',{dateStyle:'full'}).format(new Date(k+'T12:00:00Z'));
+ $('#calDayBody').innerHTML=list.length
+  ?list.map(a=>'<div><b>'+calTzHm(a.starts_at)+'–'+calTzHm(a.ends_at)+'</b> · <b>'+esc(a.customer_name)+'</b><br><span class="muted">'+esc(a.customer_phone)+(a.reason?' · '+esc(a.reason):'')+' · '+esc(a.channel)+'</span></div>').join('')
+  :'<div class="muted">Sin citas ese día. Vai las agenda desde el chat web y WhatsApp.</div>';
+ $('#calDayDlg').showModal()}
+$('#calGrid').onclick=e=>{const c=e.target.closest('[data-day]');if(!c||!c.dataset.day)return;openCalDay(c.dataset.day)};
+$('#calDayClose').onclick=()=>$('#calDayDlg').close();
+$('#calToday').onclick=()=>{calMonth=new Date();calMonth.setDate(1);calLoadMonth()};
+$('#calPrev').onclick=()=>{calMonth.setMonth(calMonth.getMonth()-1);calLoadMonth()};
+$('#calNext').onclick=()=>{calMonth.setMonth(calMonth.getMonth()+1);calLoadMonth()};
 // «Volver» es de Velai (que llega desde la lista de Clientes); el cliente navega por su menú.
 $('#calBack').onclick=()=>{$('#viewCalendario').hidden=true;$('#viewTenants').hidden=false};
 async function calStartOAuth(){try{const d=await api('/api/admin/tenants/'+calTenant+'/calendar/connect',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({provider:'google'})});

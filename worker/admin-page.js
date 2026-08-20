@@ -259,22 +259,26 @@ dialog::backdrop{background:rgba(5,3,6,.78);backdrop-filter:blur(3px)}
 @media(max-width:1100px){.grid{grid-template-columns:1fr 1fr}}
 @media(max-width:900px){body{flex-direction:column}.side{position:static;height:auto;width:auto;flex-direction:row;align-items:center;gap:6px;padding:10px 16px;border-right:0;border-bottom:1px solid var(--border)}.sep,.navlabel{display:none}.tabs{flex-direction:row}.sidefoot{border:0;padding:0;margin-left:auto}.brand small{display:none}}
 @media(max-width:700px){.grid{grid-template-columns:1fr}#tNote{display:none}}
-/* Vista Calendario por cliente (SPEC-CALENDARIO): rejilla mensual con las citas de Vai. */
-/* El ítem del menú es del ROL CLIENTE (autoservicio); Velai entra por Clientes → Calendario. */
+/* Vista Calendario (SPEC-CALENDARIO), estilo Google Calendar: rejilla continua
+   (gap 1px sobre fondo = líneas finas), número del día en círculo (hoy relleno),
+   citas como chips con barra de color. El detalle del día se abre en modal. */
 .cliente-only{display:none}
 body.cliente .cliente-only{display:flex}
-.calnav{display:flex;align-items:center;gap:10px;margin:2px 0 8px}
-.calnav b{font-size:15px;text-transform:capitalize;min-width:170px;text-align:center}
-.calgrid{display:grid;grid-template-columns:repeat(7,1fr);gap:6px}
-.caldow{font-size:10.5px;color:var(--muted);text-transform:uppercase;letter-spacing:.07em;text-align:center;padding:2px 0}
-.calcell{min-height:72px;border:1px solid var(--border);border-radius:var(--r-sm);padding:5px 6px;cursor:pointer;background:var(--bg2);overflow:hidden}
-.calcell.out{opacity:.35}
-.calcell.today{border-color:var(--orange)}
-.calcell.sel{border-color:var(--orange2);box-shadow:0 0 0 1px var(--orange2) inset}
-.calcell>b{font-size:11.5px;color:var(--muted);font-weight:600}
-.calchip{display:block;font-size:10.5px;line-height:1.35;margin-top:3px;padding:1px 5px;border-radius:6px;background:rgba(255,107,26,.14);color:var(--orange2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.calmore{display:block;font-size:10px;color:var(--muted);margin-top:2px}
+.calnav{display:flex;align-items:center;gap:10px;margin:2px 0 10px}
+.calnav b{font-size:16px;text-transform:capitalize;min-width:185px;text-align:center}
+.calgrid{display:grid;grid-template-columns:repeat(7,1fr);gap:1px;background:var(--line);border:1px solid var(--line);border-radius:var(--r-sm);overflow:hidden}
+.caldow{background:var(--bg2);font-size:10.5px;color:var(--muted);text-transform:uppercase;letter-spacing:.07em;text-align:center;padding:7px 0}
+.calcell{background:var(--bg2);min-height:104px;padding:3px;cursor:pointer;overflow:hidden;text-align:center}
+.calcell:hover{background:var(--bg3)}
+.calcell.out{cursor:default}
+.calcell.out:hover{background:var(--bg2)}
+.dnum{display:inline-flex;align-items:center;justify-content:center;width:23px;height:23px;border-radius:50%;font-size:11.5px;color:var(--muted);font-weight:600;margin:2px 0}
+.calcell.today .dnum{background:var(--orange);color:var(--white)}
+.calchip{display:block;font-size:10.5px;line-height:1.45;margin:2px 3px 0;padding:1px 6px 1px 5px;border-radius:4px;background:rgba(255,107,26,.15);color:var(--orange2);border-left:3px solid var(--orange);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-align:left}
+.calmore{display:block;font-size:10px;color:var(--muted);margin-top:2px;text-align:left;padding-left:6px}
 .btnsm{padding:4px 10px;font-size:12px}
+.caldaylist>div{padding:9px 0;border-bottom:1px solid var(--line)}
+.caldaylist>div:last-child{border-bottom:0}
 </style></head><body>
 <aside class="side">
 <div class="brand"><i></i>Velai <small>Panel</small></div>
@@ -319,9 +323,9 @@ body.cliente .cliente-only{display:flex}
 <div class="actions actions0"><button class="btn" id="calConnect" type="button">Conectar Google</button></div></div>
 <div id="calViewWrap" hidden>
 <div class="card"><div id="calWho" class="muted"></div>
-<div class="calnav mt6"><button class="btn alt btnsm" id="calPrev" type="button">◀</button><b id="calMonthTitle">—</b><button class="btn alt btnsm" id="calNext" type="button">▶</button><span class="spacer"></span><button class="btn alt btnsm" id="calReconnect" type="button">Reconectar</button><button class="btn alt btnsm" id="calDisconnect" type="button">Desconectar</button></div>
+<div class="calnav mt6"><button class="btn alt btnsm" id="calToday" type="button">Hoy</button><button class="btn alt btnsm" id="calPrev" type="button">◀</button><b id="calMonthTitle">—</b><button class="btn alt btnsm" id="calNext" type="button">▶</button><span class="spacer"></span><button class="btn alt btnsm" id="calReconnect" type="button">Reconectar</button><button class="btn alt btnsm" id="calDisconnect" type="button">Desconectar</button></div>
 <div class="calgrid" id="calGrid"></div>
-<div id="calDayList" class="mt6 muted"></div></div>
+<div id="calHint" class="mt6 muted"></div></div>
 <div class="card mt12"><b>Configuración de citas</b>
 <div class="grid mt6">
 <div class="card"><b>Calendario (ID)</b><input id="calId" placeholder="primary"></div>
@@ -426,6 +430,7 @@ body.cliente .cliente-only{display:flex}
 <div class="timeline"><div id="tVersions" class="muted">—</div></div></section>
 <div class="wizbar" id="wizBar" hidden><button class="btn alt" id="wizBack" type="button">Atrás</button><span class="muted" id="wizHint">El borrador se guarda al pasar de paso, sin activar nada hasta el final.</span><button class="btn" id="wizNext" type="button">Guardar y continuar</button></div>
 </div></dialog>
+<dialog id="calDayDlg"><div class="modal-h"><strong id="calDayTitle">Citas del día</strong><button class="btn alt" id="calDayClose" type="button">Cerrar</button></div><div class="modal-b caldaylist" id="calDayBody"></div></dialog>
 <div id="toasts" popover="manual"></div>
 <script nonce="__NONCE__">var __name=(t,v)=>Object.defineProperty(t,"name",{value:v,configurable:true});(${panelApp.toString()})();</script></body></html>`;
 
