@@ -130,8 +130,8 @@ function semaforo(t){if(!t.active&&String(t.channel_address).startsWith('pending
  if(String(t.channel_address).startsWith('web:')){const f=[...long];if(t.prompt_len<200)f.push('contexto corto');if(!t.has_team&&!t.has_telegram)f.push('sin canal de aviso');return '<span class="flag web">solo web</span>'+(f.length?flags(f):' <span class="flag ok">listo</span>')}
  const f=[...long];if(!t.has_template)f.push('sin plantilla');if(!t.has_team)f.push('sin equipo');if(t.prompt_len<200)f.push('contexto corto');if(t.has_subaccount&&!t.has_twilio_token)f.push('sin token');if(t.has_subaccount&&!t.has_from)f.push('sin From');if(t.meta_partner_status==='pendiente'&&t.has_subaccount)f.push('socio pendiente');return f.length?flags(f):'<span class="flag ok">listo</span>'}
 function meter(chars){const w=Math.min(100,Math.round(chars/12000*100));return '<span class="meter" title="El contexto viaja al modelo en CADA mensaje"><i data-w="'+w+'"></i></span><span class="muted">'+chars+' car.</span>'}
-async function loadTenantList(){try{const d=await api('/api/admin/tenants');tenantList=d.tenants;$('#tenantRows').innerHTML=d.tenants.map(t=>'<tr data-tid="'+t.id+'"><td>'+tenantChip(t.id,t.name)+'</td><td class="muted">'+esc(t.channel_address)+'</td><td>'+t.lead_count+'</td><td>'+meter(t.prompt_len)+'</td><td>'+semaforo(t)+'</td><td>'+(t.active?'<span class="flag ok">activo</span>':'<span class="flag off">inactivo</span>')+'</td></tr>').join('')||'<tr><td colspan="6" class="empty">Sin clientes.</td></tr>';paint($('#tenantRows'))}catch(e){toast('No se pudo cargar la lista de clientes: '+e.message,false)}}
-$('#tenantRows').onclick=e=>{const tr=e.target.closest('[data-tid]');if(tr)openTenant(tr.dataset.tid)};
+async function loadTenantList(){try{const d=await api('/api/admin/tenants');tenantList=d.tenants;$('#tenantRows').innerHTML=d.tenants.map(t=>'<tr data-tid="'+t.id+'"><td>'+tenantChip(t.id,t.name)+'</td><td class="muted">'+esc(t.channel_address)+'</td><td>'+t.lead_count+'</td><td>'+meter(t.prompt_len)+'</td><td>'+semaforo(t)+'</td><td>'+(t.active?'<span class="flag ok">activo</span>':'<span class="flag off">inactivo</span>')+'</td><td><button type="button" class="btn alt btnsm" data-cal="'+t.id+'">Abrir</button></td></tr>').join('')||'<tr><td colspan="7" class="empty">Sin clientes.</td></tr>';paint($('#tenantRows'))}catch(e){toast('No se pudo cargar la lista de clientes: '+e.message,false)}}
+$('#tenantRows').onclick=e=>{const cal=e.target.closest('[data-cal]');if(cal)return openCalendar(cal.dataset.cal);const tr=e.target.closest('[data-tid]');if(tr)openTenant(tr.dataset.tid)};
 $('#newTenant').onclick=()=>openTenant(null);
 // ── Pestañas de la ficha: un solo Guardar; el punto ámbar marca cambios sin guardar por pestaña ──
 function showPane(k){document.querySelectorAll('.ttab').forEach(x=>x.classList.toggle('is-on',x.dataset.tt===k));document.querySelectorAll('.tpane').forEach(p=>{p.hidden=p.dataset.tp!==k})}
@@ -180,15 +180,15 @@ $('#wizNext').onclick=async()=>{
  if(wizStep===0&&!$('#tAddress').value.trim()&&$('#tSlug').value.trim())$('#tAddress').value='pending:'+$('#tSlug').value.trim();
  const wasNew=!editing;
  if(tenantDirty||wasNew){const ok=await saveTenant();if(!ok)return}
- if(wasNew&&editing){$('#ttabProv').hidden=false;$('#ttabUsers').hidden=false;$('#ttabHist').hidden=false;$('#tProv').hidden=false;$('#tUsersCard').hidden=false;$('#tDup').hidden=true;$('#ttabCal').hidden=false;loadProv(editing.id);loadUsers(editing.id);loadVersions(editing.id);loadCalendar(editing.id)}
+ if(wasNew&&editing){$('#ttabProv').hidden=false;$('#ttabUsers').hidden=false;$('#ttabHist').hidden=false;$('#tProv').hidden=false;$('#tUsersCard').hidden=false;$('#tDup').hidden=true;loadProv(editing.id);loadUsers(editing.id);loadVersions(editing.id)}
  if(wizStep===WIZ.length-1){setWizard(false);showPane('identidad');toast('Alta completada ✓ — actívalo en «Identidad y canal» cuando su canal esté listo');return}
  wizStep++;wizShow()};
 async function openTenant(id){clearTenantErrs();$('#tPreviewOut').textContent='';$('#tTestMsg').value='';$('#tNote').value='';
  $('#tToken').value='';clearDirtyDots();
  // provPost recarga la ficha del MISMO cliente en mitad del alta: se conserva el paso.
  const stayWiz=wizard&&editing&&editing.id===id;
- if(id){const d=await api('/api/admin/tenants/'+id);const t=d.tenant;editing={id:t.id,updated_at:t.updated_at};$('#tenantTitle').textContent=t.name;$('#tDup').hidden=true;for(const[k,sel]of Object.entries(TF))$(sel).value=t[k]??'';$('#tChips').value=chipsToLines(t.chips_json);$('#tOrigins').value=jsonToLines(t.web_origins);$('#tActive').checked=!!t.active;$('#tTokenState').textContent=t.has_twilio_token?'configurado ✓ (escribe solo para sustituirlo)':'sin configurar';$('#tProv').hidden=false;$('#tUsersCard').hidden=false;$('#ttabProv').hidden=false;$('#ttabUsers').hidden=false;$('#ttabHist').hidden=false;if(stayWiz)wizShow();else{setWizard(false);showPane('identidad')}$('#ttabCal').hidden=false;loadProv(id);loadVersions(id);loadUsers(id);loadCalendar(id)}
- else{editing=null;$('#tenantTitle').textContent='Nuevo cliente';$('#tDup').hidden=false;$('#tDupSel').innerHTML='<option value="">— empezar de cero —</option>'+tenantList.map(t=>'<option value="'+t.id+'">'+esc(t.name)+'</option>').join('');for(const sel of Object.values(TF))$(sel).value='';$('#tChips').value='';$('#tOrigins').value='';$('#tPartner').value='pendiente';$('#tActive').checked=false;$('#tTokenState').textContent='sin configurar';$('#tProv').hidden=true;$('#tUsersCard').hidden=true;$('#ttabProv').hidden=true;$('#ttabUsers').hidden=true;$('#ttabHist').hidden=true;$('#ttabCal').hidden=true;$('#tVersions').textContent='—';setWizard(true)}
+ if(id){const d=await api('/api/admin/tenants/'+id);const t=d.tenant;editing={id:t.id,updated_at:t.updated_at};$('#tenantTitle').textContent=t.name;$('#tDup').hidden=true;for(const[k,sel]of Object.entries(TF))$(sel).value=t[k]??'';$('#tChips').value=chipsToLines(t.chips_json);$('#tOrigins').value=jsonToLines(t.web_origins);$('#tActive').checked=!!t.active;$('#tTokenState').textContent=t.has_twilio_token?'configurado ✓ (escribe solo para sustituirlo)':'sin configurar';$('#tProv').hidden=false;$('#tUsersCard').hidden=false;$('#ttabProv').hidden=false;$('#ttabUsers').hidden=false;$('#ttabHist').hidden=false;if(stayWiz)wizShow();else{setWizard(false);showPane('identidad')}loadProv(id);loadVersions(id);loadUsers(id)}
+ else{editing=null;$('#tenantTitle').textContent='Nuevo cliente';$('#tDup').hidden=false;$('#tDupSel').innerHTML='<option value="">— empezar de cero —</option>'+tenantList.map(t=>'<option value="'+t.id+'">'+esc(t.name)+'</option>').join('');for(const sel of Object.values(TF))$(sel).value='';$('#tChips').value='';$('#tOrigins').value='';$('#tPartner').value='pendiente';$('#tActive').checked=false;$('#tTokenState').textContent='sin configurar';$('#tProv').hidden=true;$('#tUsersCard').hidden=true;$('#ttabProv').hidden=true;$('#ttabUsers').hidden=true;$('#ttabHist').hidden=true;$('#tVersions').textContent='—';setWizard(true)}
  updateCount();brandPreview();tenantDirty=false;$('#tenantModal').showModal()}
 $('#tDupSel').onchange=async e=>{if(!e.target.value)return;const d=await api('/api/admin/tenants/'+e.target.value);$('#tPrompt').value=d.tenant.system_prompt||'';updateCount()};
 async function saveTenant(){clearTenantErrs();
@@ -243,39 +243,69 @@ $('#tUsersList').onclick=async e=>{const email=e.target&&e.target.dataset&&e.tar
   loadUsers(editing.id)}
  catch(e2){toast('Acceso NO revocado: '+(TERRS[e2.message]||e2.message),false)}};
 
-// ── Calendario del cliente (SPEC-CALENDARIO): conectar SU Google, config y citas ──
-let calCur=null;
-async function loadCalendar(id){try{const d=await api('/api/admin/tenants/'+id+'/calendar');calCur=d.calendar;const c=d.calendar;
- $('#calState').innerHTML=!c?'Sin conectar. «Conectar Google» abre la pantalla de permiso: entra con la cuenta de Google DEL CLIENTE.'
-  :(c.status==='connected'?'<span class="flag">Conectado'+(c.account_email?' como '+esc(c.account_email):'')+' ✓</span>'
-  :'<span class="flag off">Error: '+esc(c.last_error||c.status)+' — reconecta con «Conectar Google»</span>');
- $('#calConnect').textContent=c?'Reconectar Google':'Conectar Google';
- $('#calDisconnect').hidden=!c;$('#calCfgCard').hidden=!c;$('#calApptsCard').hidden=!c;
- if(c){$('#calId').value=c.calendar_id||'primary';$('#calTz').value=c.timezone||'';$('#calSlot').value=c.slot_minutes||30;
-  $('#calHours').value=c.business_hours||'';loadAppts(id)}}
- catch(e){$('#calState').textContent=e.message}}
-async function loadAppts(id){try{const d=await api('/api/admin/appointments?tenant='+id);
- $('#calAppts').innerHTML=d.appointments.map(a=>'<div>'+fmt(a.starts_at)+' · <b>'+esc(a.customer_name)+'</b> <span class="muted">('+esc(a.customer_phone)+(a.reason?' · '+esc(a.reason):'')+' · '+esc(a.channel)+')</span></div>').join('')||'Aún no hay citas agendadas por Vai.'}
- catch(e){$('#calAppts').textContent=e.message}}
-$('#calConnect').onclick=async()=>{if(!editing)return;
- try{const d=await api('/api/admin/tenants/'+editing.id+'/calendar/connect',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({provider:'google'})});
-  location.href=d.authUrl}
- catch(e){toast('No se pudo iniciar la conexión: '+(TERRS[e.message]||e.message),false)}};
-$('#calDisconnect').onclick=async()=>{if(!editing)return;
- if(!confirm('¿Desconectar el calendario? Vai dejará de consultar huecos y agendar citas para este cliente.'))return;
- try{await api('/api/admin/tenants/'+editing.id+'/calendar',{method:'DELETE'});toast('Calendario desconectado');loadCalendar(editing.id)}
+// ── Calendario por cliente (SPEC-CALENDARIO): modal con conexión, rejilla mensual y config ──
+// Se abre desde la columna «Calendario» de la lista de clientes: si el cliente ya
+// conectó su Google, muestra el calendario del mes con sus citas; si no, la conexión.
+let calTenant=null,calCur=null,calMonth=null,calAppts=[],calSelDay=null;
+function calTz(){return (calCur&&calCur.timezone)||'Europe/Madrid'}
+function calTzDay(iso){try{return new Intl.DateTimeFormat('en-CA',{timeZone:calTz(),year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date(iso))}catch(e){return String(iso).slice(0,10)}}
+function calTzHm(iso){try{return new Intl.DateTimeFormat('es-ES',{timeZone:calTz(),hour:'2-digit',minute:'2-digit',hour12:false}).format(new Date(iso))}catch(e){return ''}}
+async function openCalendar(id){calTenant=id;calMonth=new Date();calMonth.setDate(1);calSelDay=null;
+ const t=tenantList.find(x=>x.id===id);$('#calTitle').textContent='Calendario — '+(t?t.name:'cliente');
+ $('#calModal').showModal();await calRefresh()}
+async function calRefresh(){try{const d=await api('/api/admin/tenants/'+calTenant+'/calendar');calCur=d.calendar;
+ const c=d.calendar;const conn=c&&c.status==='connected';
+ $('#calConnCard').hidden=!!conn;$('#calViewWrap').hidden=!conn;
+ if(!conn){$('#calState').innerHTML=c?'<span class="flag off">La conexión está en error ('+esc(c.last_error||c.status)+'): vuelve a conectar.</span>':'';
+  $('#calConnect').textContent=c?'Reconectar Google':'Conectar Google';return}
+ $('#calWho').innerHTML='Conectado como <b>'+esc(c.account_email||'cuenta de Google')+'</b> · las citas se crean en su calendario «'+esc(c.calendar_id||'primary')+'»';
+ $('#calId').value=c.calendar_id||'primary';$('#calTz').value=c.timezone||'';$('#calSlot').value=c.slot_minutes||30;$('#calHours').value=c.business_hours||'';
+ await calLoadMonth()}
+ catch(e){toast('No se pudo cargar el calendario: '+(TERRS[e.message]||e.message),false)}}
+async function calLoadMonth(){const y=calMonth.getFullYear(),m=calMonth.getMonth();
+ // margen de ±1 día alrededor del mes: el corte exacto por tz lo hace calTzDay al pintar
+ const from=new Date(Date.UTC(y,m,1)-86400000).toISOString(),to=new Date(Date.UTC(y,m+1,1)+86400000).toISOString();
+ try{const d=await api('/api/admin/appointments?tenant='+calTenant+'&from='+encodeURIComponent(from)+'&to='+encodeURIComponent(to));calAppts=d.appointments}catch(e){calAppts=[]}
+ calRender()}
+function calRender(){const y=calMonth.getFullYear(),m=calMonth.getMonth();
+ $('#calMonthTitle').textContent=new Intl.DateTimeFormat('es-ES',{month:'long',year:'numeric'}).format(calMonth);
+ const byDay={};for(const a of calAppts){const k=calTzDay(a.starts_at);(byDay[k]=byDay[k]||[]).push(a)}
+ const lead=(new Date(y,m,1).getDay()+6)%7; // semana empieza en lunes
+ const days=new Date(y,m+1,0).getDate();
+ const today=calTzDay(new Date().toISOString());
+ let html=['Lun','Mar','Mié','Jue','Vie','Sáb','Dom'].map(d=>'<div class="caldow">'+d+'</div>').join('');
+ for(let i=0;i<lead;i++)html+='<div class="calcell out"></div>';
+ for(let day=1;day<=days;day++){const k=y+'-'+String(m+1).padStart(2,'0')+'-'+String(day).padStart(2,'0');
+  const list=(byDay[k]||[]).sort((a,b)=>a.starts_at<b.starts_at?-1:1);
+  const chips=list.slice(0,2).map(a=>'<span class="calchip">'+calTzHm(a.starts_at)+' '+esc(a.customer_name)+'</span>').join('')
+   +(list.length>2?'<span class="calmore">+'+(list.length-2)+' más</span>':'');
+  html+='<div class="calcell'+(k===today?' today':'')+(k===calSelDay?' sel':'')+'" data-day="'+k+'"><b>'+day+'</b>'+chips+'</div>'}
+ $('#calGrid').innerHTML=html;calRenderDay(byDay)}
+function calRenderDay(byDay){if(!calSelDay){$('#calDayList').textContent=calAppts.length?'Toca un día para ver el detalle de sus citas.':'Sin citas este mes. Vai las creará aquí (y en el Google Calendar del cliente) cuando las agende por chat o WhatsApp.';return}
+ const list=byDay[calSelDay]||[];
+ $('#calDayList').innerHTML='<b>'+esc(calSelDay)+'</b>'+(list.length?list.map(a=>'<div>'+calTzHm(a.starts_at)+' · <b>'+esc(a.customer_name)+'</b> <span class="muted">('+esc(a.customer_phone)+(a.reason?' · '+esc(a.reason):'')+' · '+esc(a.channel)+')</span></div>').join(''):'<div class="muted">Sin citas ese día.</div>')}
+$('#calGrid').onclick=e=>{const c=e.target.closest('[data-day]');if(!c||!c.dataset.day)return;calSelDay=c.dataset.day;calRender()};
+$('#calPrev').onclick=()=>{calMonth.setMonth(calMonth.getMonth()-1);calSelDay=null;calLoadMonth()};
+$('#calNext').onclick=()=>{calMonth.setMonth(calMonth.getMonth()+1);calSelDay=null;calLoadMonth()};
+$('#calClose').onclick=()=>$('#calModal').close();
+async function calStartOAuth(){try{const d=await api('/api/admin/tenants/'+calTenant+'/calendar/connect',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({provider:'google'})});
+ location.href=d.authUrl}
+ catch(e){toast('No se pudo iniciar la conexión: '+(TERRS[e.message]||e.message),false)}}
+$('#calConnect').onclick=calStartOAuth;$('#calReconnect').onclick=calStartOAuth;
+$('#calDisconnect').onclick=async()=>{if(!confirm('¿Desconectar el calendario? Vai dejará de consultar huecos y agendar citas para este cliente.'))return;
+ try{await api('/api/admin/tenants/'+calTenant+'/calendar',{method:'DELETE'});toast('Calendario desconectado');calRefresh()}
  catch(e){toast('No se pudo desconectar: '+(TERRS[e.message]||e.message),false)}};
-$('#calSave').onclick=async()=>{if(!editing)return;
- let hours=null;const rawHours=$('#calHours').value.trim();
+$('#calSave').onclick=async()=>{let hours=null;const rawHours=$('#calHours').value.trim();
  if(rawHours){try{hours=JSON.parse(rawHours)}catch(e){toast('El horario no es JSON válido',false);return}}
- try{await api('/api/admin/tenants/'+editing.id+'/calendar',{method:'PATCH',headers:{'Content-Type':'application/json'},
+ try{await api('/api/admin/tenants/'+calTenant+'/calendar',{method:'PATCH',headers:{'Content-Type':'application/json'},
   body:JSON.stringify({calendar_id:$('#calId').value.trim()||'primary',timezone:$('#calTz').value.trim()||'Europe/Madrid',slot_minutes:Number($('#calSlot').value)||30,business_hours:hours})});
-  toast('Calendario guardado ✓');loadCalendar(editing.id)}
+  toast('Calendario guardado ✓');calRefresh()}
  catch(e){toast('No se pudo guardar: '+(TERRS[e.message]||e.message),false)}};
-// Al volver del OAuth de Google el callback redirige con #calendar=<resultado>.
-(function(){const h=String(location.hash||'');if(!h.startsWith('#calendar='))return;const r=h.slice(10);
- toast(r==='ok'?'Google Calendar conectado ✓':'Conexión de calendario fallida: '+r,r==='ok');
- try{location.hash=''}catch(e){}})();
+// Al volver del OAuth el callback redirige con #calendar=ok:<tenantId>: se reabre SU calendario.
+(async function(){const h=String(location.hash||'');if(!h.startsWith('#calendar='))return;const r=h.slice(10);try{location.hash=''}catch(e){}
+ if(!r.startsWith('ok')){toast('Conexión de calendario fallida: '+r,false);return}
+ toast('Google Calendar conectado ✓');const tid=r.split(':')[1];if(!tid)return;
+ try{if(!tenantList.length){const d=await api('/api/admin/tenants');tenantList=d.tenants}openCalendar(tid)}catch(e){}})();
 $('#tSyncDomains').onclick=()=>{if(!editing){toast('Guarda primero el cliente: los dominios se leen de D1.',false);return}provPost('domains')};
 $('#pSub').onclick=()=>provPost('subaccount');
 $('#pTpl').onclick=()=>provPost('template');

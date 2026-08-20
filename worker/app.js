@@ -1965,11 +1965,17 @@ async function adminRouter(request, env, ctx, path, url, config, scope) {
   // ── Citas (SPEC-CALENDARIO): lista scoped — velai todo (con ?tenant=), cliente
   // solo las suyas vía scopeClause (mismo único punto de paso que los leads).
   if (path === '/api/admin/appointments' && request.method === 'GET') {
-    const limit = Math.min(100, Math.max(1, Number(url.searchParams.get('limit')) || 50));
     const clauses = ['1=1']; const values = [];
     const tenantFilter = clean(url.searchParams.get('tenant'), 40);
     if (scope.role === 'velai' && tenantFilter && UUID_RE.test(tenantFilter)) { clauses.push('l.tenant_id = ?'); values.push(tenantFilter); }
-    const rows = (await env.DB.prepare(`SELECT l.id,l.tenant_id,t.name AS tenant_name,l.channel,l.customer_name,l.customer_phone,l.reason,l.starts_at,l.ends_at,l.timezone,l.status,l.created_at FROM appointments l LEFT JOIN tenants t ON t.id=l.tenant_id WHERE ${clauses.join(' AND ')}${sc.sql} ORDER BY l.starts_at DESC LIMIT ?`)
+    // Rango opcional (la vista de calendario del panel pide el mes visible).
+    const fromIso = clean(url.searchParams.get('from'), 30);
+    const toIso = clean(url.searchParams.get('to'), 30);
+    if (fromIso) { clauses.push('l.starts_at >= ?'); values.push(fromIso); }
+    if (toIso) { clauses.push('l.starts_at < ?'); values.push(toIso); }
+    const hasRange = Boolean(fromIso || toIso);
+    const limit = Math.min(hasRange ? 500 : 100, Math.max(1, Number(url.searchParams.get('limit')) || (hasRange ? 500 : 50)));
+    const rows = (await env.DB.prepare(`SELECT l.id,l.tenant_id,t.name AS tenant_name,l.channel,l.customer_name,l.customer_phone,l.reason,l.starts_at,l.ends_at,l.timezone,l.status,l.created_at FROM appointments l LEFT JOIN tenants t ON t.id=l.tenant_id WHERE ${clauses.join(' AND ')}${sc.sql} ORDER BY l.starts_at ${hasRange ? 'ASC' : 'DESC'} LIMIT ?`)
       .bind(...values, ...sc.args, limit).all()).results;
     if (scope.role !== 'velai') for (const row of rows) { delete row.tenant_name; delete row.tenant_id; }
     return json({ appointments: rows }, 200, NO_STORE);
@@ -2309,7 +2315,8 @@ async function calendarCallbackFor(env, ctx, url, actor) {
   ctx.waitUntil(env.DB.prepare('INSERT INTO tenant_versions (tenant_id,actor_email,field,previous_value,note,created_at) VALUES (?,?,?,?,?,?)')
     .bind(stored.tenantId, actor, 'calendar', null, 'conectado google', now).run().catch(() => {}));
   console.log(JSON.stringify({ level: 'info', code: 'calendar_connected', tenant: stored.tenantId, provider: 'google' }));
-  return back('ok');
+  // El tenantId viaja en el hash para que el panel reabra SU calendario al volver.
+  return back(`ok:${stored.tenantId}`);
 }
 
 // Re-inserta en D1 los leads encolados en KV durante una caída (idempotente por
