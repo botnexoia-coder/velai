@@ -1486,11 +1486,21 @@ test('el JS del panel se serializa entero como IIFE, con nonce y sin romper el H
   // contener el cierre (cortaría el <script> del panel a mitad)
   assert.ok(!panelApp.toString().includes('</scr' + 'ipt>'));
   assert.ok(!panelApp.toString().includes('`'), 'sin backticks: el ensamblador es un template literal');
+  // el shim de __name debe ir ANTES de la IIFE: esbuild (keepNames) inyecta
+  // __name(...) dentro del cuerpo y sin shim el panel muere al arrancar
+  assert.ok(ADMIN_HTML.indexOf('var __name=') < ADMIN_HTML.indexOf('(function panelApp'), 'shim de __name antes de la IIFE');
 });
 
 test('el panel arranca contra un DOM mínimo y pide me, leads, stats y escalations', async () => {
   const vm = await import('node:vm');
-  const { panelApp } = await import('../worker/admin-panel.js');
+  const { ADMIN_HTML } = await import('../worker/admin-page.js');
+  // Se ejecuta el script ENSAMBLADO extraído del HTML (shim de __name incluido),
+  // no panelApp a secas: es lo más parecido a lo que recibe el navegador que se
+  // puede probar sin bundlear (el bundle real lo cubre scripts/check-bundle.mjs).
+  const script = ADMIN_HTML.slice(
+    ADMIN_HTML.indexOf('<script nonce="__NONCE__">') + '<script nonce="__NONCE__">'.length,
+    ADMIN_HTML.lastIndexOf('</scr' + 'ipt>'),
+  );
   // Elemento stub: acepta cualquier lectura/escritura sin romperse. No simula un DOM;
   // caza ReferenceErrors, typos y regresiones del arranque que el grep no ve.
   const listNoop = () => [];
@@ -1535,7 +1545,7 @@ test('el panel arranca contra un DOM mínimo y pide me, leads, stats y escalatio
     setTimeout: () => 0, requestAnimationFrame: () => {}, confirm: () => false,
   });
   try {
-    new vm.default.Script(`(${panelApp.toString()})();`).runInContext(context);
+    new vm.default.Script(script).runInContext(context);
     for (let i = 0; i < 10; i++) await new Promise((resolve) => setImmediate(resolve));
   } finally { process.off('unhandledRejection', onRejection); }
   assert.deepEqual(rejections, [], 'el arranque no deja promesas rotas');

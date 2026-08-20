@@ -7,6 +7,12 @@
 // El JS del panel vive en admin-panel.js como función real (validable por
 // node --check y ejecutable en tests); aquí solo se serializa al HTML como IIFE
 // — (fn)() y no por nombre, para ser inmune a renombrados del bundler.
+// OJO (incidente 2026-08-20): wrangler bundlea con keepNames y esbuild inyecta
+// llamadas a su helper __name(fn,...) DENTRO del cuerpo de panelApp — el helper
+// vive en la cabecera del bundle y no viaja con toString(), así que el script
+// del panel define un shim de __name ANTES de la IIFE. Cualquier cambio aquí
+// debe pasar scripts/check-bundle.mjs (lo corre el workflow de deploy contra
+// el bundle real): es lo único que reproduce lo que ejecuta el navegador.
 import { panelApp } from './admin-panel.js';
 
 export const ADMIN_HTML = `<!doctype html>
@@ -382,7 +388,7 @@ dialog::backdrop{background:rgba(5,3,6,.78);backdrop-filter:blur(3px)}
 <div class="wizbar" id="wizBar" hidden><button class="btn alt" id="wizBack" type="button">Atrás</button><span class="muted" id="wizHint">El borrador se guarda al pasar de paso, sin activar nada hasta el final.</span><button class="btn" id="wizNext" type="button">Guardar y continuar</button></div>
 </div></dialog>
 <div id="toasts" popover="manual"></div>
-<script nonce="__NONCE__">(${panelApp.toString()})();</script></body></html>`;
+<script nonce="__NONCE__">var __name=(t,v)=>Object.defineProperty(t,"name",{value:v,configurable:true});(${panelApp.toString()})();</script></body></html>`;
 
 export const ADMIN_HEADERS = {
   'Content-Type': 'text/html; charset=utf-8',

@@ -52,6 +52,10 @@ jobs:
       # Migraciones ANTES del deploy (OPERATIONS.md §esquema): son aditivas y el
       # worker viejo convive con el esquema nuevo. Wrangler pineado a major (@4)
       # porque el repo no tiene lockfile; subir de major será un cambio consciente.
+      # El panel viaja serializado con toString() y los tests sin bundlear no ven
+      # los artefactos de esbuild (incidente __name, 2026-08-20): se valida el
+      # arranque del panel CONTRA EL BUNDLE REAL antes de tocar producción.
+      - run: npx wrangler@4 deploy --dry-run --outdir /tmp/dist && node scripts/check-bundle.mjs /tmp/dist/vai-worker.js
       - run: npx wrangler@4 d1 migrations apply vai-leads --remote
       - run: npx wrangler@4 deploy
       # Humo: el worker vivo responde el preflight CORS de /chat para un origen permitido.
