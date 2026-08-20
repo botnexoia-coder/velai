@@ -282,7 +282,7 @@ body.cliente .cliente-only{display:flex}
 <div class="navlabel velai-only">Gestión</div>
 <nav class="tabs" role="tablist">
 <button class="tab is-on" role="tab" aria-selected="true" data-view="leads" type="button"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M17 21v-2a4 4 0 0 0-4-4H7a4 4 0 0 0-4 4v2"></path><circle cx="10" cy="7" r="4"></circle><path d="M21 21v-2a4 4 0 0 0-3-3.87"></path><path d="M16 3.13a4 4 0 0 1 0 7.75"></path></svg>Leads</button>
-<button class="tab cliente-only" id="calNavBtn" type="button"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="5" width="18" height="16" rx="2"></rect><line x1="8" y1="3" x2="8" y2="7"></line><line x1="16" y1="3" x2="16" y2="7"></line><line x1="3" y1="10" x2="21" y2="10"></line></svg>Calendario</button>
+<button class="tab cliente-only" role="tab" aria-selected="false" data-view="calendario" id="calNavBtn" type="button"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="5" width="18" height="16" rx="2"></rect><line x1="8" y1="3" x2="8" y2="7"></line><line x1="16" y1="3" x2="16" y2="7"></line><line x1="3" y1="10" x2="21" y2="10"></line></svg>Calendario</button>
 <button class="tab velai-only" role="tab" aria-selected="false" data-view="tenants" type="button"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="7" width="18" height="13" rx="2"></rect><path d="M8 7V5a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>Clientes</button>
 </nav>
 <div class="navlabel velai-only">Sistema</div>
@@ -311,6 +311,28 @@ body.cliente .cliente-only{display:flex}
 <div id="viewTenants" hidden>
 <div class="vhead"><div><h1>Clientes</h1><p>Canal, contexto y estado de cada cliente</p></div><button class="btn" id="newTenant" type="button">Nuevo cliente</button></div>
 <div class="table"><table><thead><tr><th>Nombre</th><th>Canal</th><th>Leads</th><th>Contexto</th><th>Configuración</th><th>Estado</th><th>Calendario</th></tr></thead><tbody id="tenantRows"></tbody></table></div></div>
+<div id="viewCalendario" hidden>
+<div class="vhead"><div><h1 id="calTitle">Calendario</h1><p>Citas agendadas por Vai en el Google Calendar del negocio</p></div><button class="btn alt velai-only" id="calBack" type="button">← Volver a Clientes</button></div>
+<div class="card" id="calConnCard" hidden><b>Conectar Google Calendar</b>
+<p class="muted mt6">Aún no hay calendario conectado. Al pulsar «Conectar Google» se abre la pantalla de permiso de Google: entra con la cuenta de Google del negocio. Vai consultará sus huecos y agendará citas directamente en su calendario, desde el chat web y WhatsApp.</p>
+<div id="calState" class="mt6 muted"></div>
+<div class="actions actions0"><button class="btn" id="calConnect" type="button">Conectar Google</button></div></div>
+<div id="calViewWrap" hidden>
+<div class="card"><div id="calWho" class="muted"></div>
+<div class="calnav mt6"><button class="btn alt btnsm" id="calPrev" type="button">◀</button><b id="calMonthTitle">—</b><button class="btn alt btnsm" id="calNext" type="button">▶</button><span class="spacer"></span><button class="btn alt btnsm" id="calReconnect" type="button">Reconectar</button><button class="btn alt btnsm" id="calDisconnect" type="button">Desconectar</button></div>
+<div class="calgrid" id="calGrid"></div>
+<div id="calDayList" class="mt6 muted"></div></div>
+<div class="card mt12"><b>Configuración de citas</b>
+<div class="grid mt6">
+<div class="card"><b>Calendario (ID)</b><input id="calId" placeholder="primary"></div>
+<div class="card"><b>Zona horaria</b><input id="calTz" placeholder="Europe/Madrid"></div>
+<div class="card"><b>Duración (min)</b><input id="calSlot" type="number" min="10" max="240" placeholder="30"></div>
+</div>
+<div class="mt6"><b>Horario laboral</b><p class="muted">JSON por día (mon…sun); vacío = L-V 9:00-19:00.</p>
+<textarea id="calHours" rows="3" placeholder='{"mon":[["09:00","14:00"],["16:00","20:00"]]}'></textarea></div>
+<div class="actions actions0"><button class="btn" id="calSave" type="button">Guardar calendario</button></div></div>
+</div>
+</div>
 <div id="viewConfig" hidden>
 <div class="vhead"><div><h1>Configuración</h1><p>Admins de Velai y estado de las integraciones</p></div><span class="stpill ok" id="cfgOverall" hidden><i></i></span></div>
 <div class="panelcard" id="adminsCard"><b>Admins de Velai (ven TODO)<span class="pt-count" id="adminsCount"></span></b>
@@ -403,28 +425,6 @@ body.cliente .cliente-only{display:flex}
 <section class="tpane" data-tp="historial" hidden>
 <div class="timeline"><div id="tVersions" class="muted">—</div></div></section>
 <div class="wizbar" id="wizBar" hidden><button class="btn alt" id="wizBack" type="button">Atrás</button><span class="muted" id="wizHint">El borrador se guarda al pasar de paso, sin activar nada hasta el final.</span><button class="btn" id="wizNext" type="button">Guardar y continuar</button></div>
-</div></dialog>
-<dialog id="calModal"><div class="modal-h"><strong id="calTitle">Calendario</strong><button class="btn alt" id="calClose" type="button">Cerrar</button></div>
-<div class="modal-b">
-<div class="card" id="calConnCard" hidden><b>Conectar Google Calendar</b>
-<p class="muted mt6">Este cliente aún no tiene calendario conectado. Al pulsar «Conectar Google» se abre la pantalla de permiso de Google: entra con la cuenta de Google DEL CLIENTE. Vai consultará sus huecos y agendará citas directamente en su calendario, desde el chat web y WhatsApp.</p>
-<div id="calState" class="mt6 muted"></div>
-<div class="actions actions0"><button class="btn" id="calConnect" type="button">Conectar Google</button></div></div>
-<div id="calViewWrap" hidden>
-<div class="card"><div id="calWho" class="muted"></div>
-<div class="calnav mt6"><button class="btn alt btnsm" id="calPrev" type="button">◀</button><b id="calMonthTitle">—</b><button class="btn alt btnsm" id="calNext" type="button">▶</button><span class="spacer"></span><button class="btn alt btnsm" id="calReconnect" type="button">Reconectar</button><button class="btn alt btnsm" id="calDisconnect" type="button">Desconectar</button></div>
-<div class="calgrid" id="calGrid"></div>
-<div id="calDayList" class="mt6 muted"></div></div>
-<div class="card mt12"><b>Configuración de citas</b>
-<div class="grid mt6">
-<div class="card"><b>Calendario (ID)</b><input id="calId" placeholder="primary"></div>
-<div class="card"><b>Zona horaria</b><input id="calTz" placeholder="Europe/Madrid"></div>
-<div class="card"><b>Duración (min)</b><input id="calSlot" type="number" min="10" max="240" placeholder="30"></div>
-</div>
-<div class="mt6"><b>Horario laboral</b><p class="muted">JSON por día (mon…sun); vacío = L-V 9:00-19:00.</p>
-<textarea id="calHours" rows="3" placeholder='{"mon":[["09:00","14:00"],["16:00","20:00"]]}'></textarea></div>
-<div class="actions actions0"><button class="btn" id="calSave" type="button">Guardar calendario</button></div></div>
-</div>
 </div></dialog>
 <div id="toasts" popover="manual"></div>
 <script nonce="__NONCE__">var __name=(t,v)=>Object.defineProperty(t,"name",{value:v,configurable:true});(${panelApp.toString()})();</script></body></html>`;
