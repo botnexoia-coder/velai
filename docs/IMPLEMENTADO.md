@@ -274,3 +274,59 @@ de 6 turnos; por debajo del mínimo cacheable la API lo ignora sin coste. Cada l
 emite `ai_usage` con `cache_w`/`cache_r` para verificar en Workers Logs que el caché
 acierta. El contrato (bloque estable, sin datos variables) está blindado por un helper de
 test transversal.
+
+## Sprint de blindaje (2026-08-20, sin MD previo — auditoría de 2 agentes)
+
+Cuatro arreglos que compran ~1 año con la arquitectura actual (veredicto de la
+auditoría: NO reescribir — monolito Cloudflare correcto para esta escala):
+(1) **CD del worker** — `.github/workflows/deploy-worker.yml` en push a `main`:
+checks → valida el panel contra el BUNDLE real (`scripts/check-bundle.mjs`) →
+migraciones D1 → deploy → smoke del preflight de `/chat`. Secret de Actions
+`CLOUDFLARE_API_TOKEN` (scopes mínimos, distinto del `CF_API_TOKEN` del worker).
+(2) **Webhook idempotente** — dedupe por `MessageSid` en KV tras la firma y
+`callAnthropic(env,payload,options)` con `{retries:0, timeoutMs:10000}` solo en el
+webhook (Twilio corta a ~15 s; reintentar dentro cobraba dos veces el mismo mensaje).
+(3) **Cupo de IA por tenant** — migración 0011 (`tenants.ai_daily_limit`) +
+`AI_TENANT_DAILY_LIMIT=300`; 429 `ai_tenant_budget_exhausted` con alerta que nombra
+al tenant; el techo global queda como red anti-catástrofe.
+(4) **Panel testeable** — el JS vive en `worker/admin-panel.js` como función real
+(`panelApp`), serializada al HTML como IIFE; `node --check`, smoke con `vm.Script`
+y validación contra el bundle. Incidente y lección: esbuild (keepNames) inyecta
+`__name(...)` dentro del cuerpo y el helper no viaja con `toString()` → shim de
+`__name` en el script del panel + check-bundle en el workflow para siempre.
+Comparativa Twilio vs Zernio: quedarse en Twilio hoy; reevaluar vs 360dialog a ~10
+clientes. Suite 72→79.
+
+## Calendario fase 1 — Google (`SPEC-CALENDARIO.md`, 2026-08-20, VERIFICADO e2e)
+
+Cada cliente conecta SU cuenta de Google (autoservicio desde su panel) y Vai
+consulta huecos reales y agenda citas EN SU calendario desde el chat web y
+WhatsApp/Messenger. Verificado en producción el mismo día: cita agendada por chat
+en el calendario real de Diálogos y visible en el panel.
+- `worker/calendar.js`: proveedor Google (events.list/insert, refresh con
+  `invalid_grant`→estado error+alerta, revoke), `freeSlots` puro con DST,
+  `CALENDAR_TOOLS`/`CALENDAR_GUARDRAILS` como constantes de código.
+- Tool use propio en el worker: `callAnthropicRaw` + `runToolLoop` (máx 3 vueltas,
+  tool_results en UN mensaje user, executor que NUNCA rompe el bucle); system en
+  2 bloques (estable cacheado / fecha-hora volátil SIN cache_control) — el caché
+  de prompt sigue acertando. `max_tokens` 500 solo con tools.
+- `handleTwilio` híbrido: sin tools TwiML como siempre; con `tool_use`, TwiML vacío
+  inmediato y respuesta final por la Messages API en `waitUntil` (texto libre legal:
+  ventana de 24 h). `settleTwilioReply` unifica handoff/historial/captura.
+- Anti dobles reservas en 3 capas: relectura del proveedor justo antes de crear +
+  cerrojo KV 60 s + `request_id` UNIQUE (migración 0012: `tenant_calendars` con
+  refresh cifrado AAD `calendar:<tenant_id>`, y `appointments`).
+- OAuth: `POST /tenants/:id/calendar/connect` → state un-solo-uso en KV →
+  `GET /oauth/calendar/callback` SOLO en el hostname admin (Access + JWT + scope);
+  el cliente solo puede conectar SU tenant (ajeno = 404/403, con tests).
+- Panel: vista `#viewCalendario` estilo Google Calendar (rejilla continua, día en
+  círculo, chips, «Hoy», modal con las citas del día) con ítem de menú bajo Leads
+  para AMBOS roles — el cliente su calendario; el admin el de Velai + selector de
+  cliente y columna Calendario→Abrir en Clientes. `/api/admin/appointments` scoped
+  con rango `from`/`to`.
+- Legal para la verificación de Google: `/condiciones/` nueva y sección de datos de
+  Google Calendar con **Limited Use** en `/privacidad/`.
+Suite 79→88. **Sobrevive como pendiente** (TAREAS §2i): verificación de la app por
+Google (en Testing los refresh caducan a 7 días), Microsoft (fase 2), picker de
+calendarios, aviso Telegram por cita, enlace cita↔lead, recordatorios, y los nuevos
+canales Telegram/Instagram como spec aparte.
