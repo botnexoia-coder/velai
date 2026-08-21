@@ -298,6 +298,13 @@ body.cliente .cliente-only{display:flex}
    Estados SOLO por clases (la CSP no cubre style="" dinámico). */
 .tgw-top{display:flex;align-items:flex-start;gap:16px}
 .tgw-top .grow{flex:1}
+/* La regla global .card b (bloque, gris, MAYÚSCULAS) no aplica dentro del asistente:
+   reset amplio y re-especialización de títulos. Y [hidden] debe GANAR al display
+   de las clases de nodo/barra — si no, el paso oculto deja un nodo fantasma. */
+.card .tgpanel b,.card b.tgh{display:inline;color:inherit;font-size:inherit;font-weight:700;letter-spacing:0;text-transform:none;margin:0}
+.card b.tgh{display:block;font-family:var(--font-d);font-size:19px;letter-spacing:-.02em;color:var(--white)}
+.card .tgcard>b{display:block;font-size:12.5px;color:var(--white);margin-bottom:2px}
+.tgnode[hidden],.tgbar[hidden],.tgstep[hidden]{display:none}
 .tgh{font-family:var(--font-d);font-weight:700;font-size:19px;letter-spacing:-.02em}
 .tgh2{font-family:var(--font-d);font-weight:700;font-size:16px;letter-spacing:-.01em}
 .tgsub{margin:4px 0 0;color:var(--muted);font-size:13px}
