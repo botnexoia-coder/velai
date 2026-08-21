@@ -293,6 +293,17 @@ body.cliente .cliente-only{display:flex}
 .calchip{display:block;font-size:10.5px;line-height:1.45;margin:2px 3px 0;padding:1px 6px 1px 5px;border-radius:4px;background:rgba(255,107,26,.15);color:var(--chip-t);border-left:3px solid var(--orange);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-align:left}
 .calmore{display:block;font-size:10px;color:var(--muted);margin-top:2px;text-align:left;padding-left:6px}
 .btnsm{padding:4px 10px;font-size:12px}
+/* Stepper de Conexiones (pedido de Juan: guiar al cliente que "no sabe", paso a paso) */
+.wstep{border:1px solid var(--line);border-radius:var(--r-sm);margin-bottom:8px;background:var(--bg2)}
+.wstep .wh{display:flex;align-items:center;gap:10px;padding:11px 13px;cursor:pointer}
+.wnum{display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;border-radius:50%;background:rgba(var(--ink),.08);color:var(--muted);font-size:12px;font-weight:700;flex-shrink:0}
+.wstep.cur{border-color:var(--orange)}
+.wstep.cur .wnum{background:var(--orange);color:#fff}
+.wstep.done .wnum{background:var(--ok);color:#fff}
+.wst{margin-left:auto;font-size:11.5px;color:var(--muted);white-space:nowrap}
+.wb{padding:2px 14px 13px 47px}
+.wol{margin:6px 0 10px;padding-left:18px}
+.wol li{margin-bottom:7px}
 .caldaylist>div{padding:9px 0;border-bottom:1px solid var(--line)}
 .caldaylist>div:last-child{border-bottom:0}
 </style></head><body>
@@ -359,23 +370,53 @@ body.cliente .cliente-only{display:flex}
 <div id="viewConexiones" hidden>
 <div class="vhead"><div><h1>Conexiones</h1><p>Canales de aviso y estado de WhatsApp del negocio</p></div><div class="actions actions0"><select id="cxTenantSel" class="inpill velai-only"></select></div></div>
 <div class="card"><b>Avisos por Telegram</b>
-<p class="muted mt6">Vincula el Telegram del negocio (un grupo o un chat directo) y el aviso de cada lead llegará ahí al momento, sin depender de nadie.</p>
-<div id="tgState" class="mt6 muted">—</div>
-<div class="actions actions0"><button class="btn" id="tgLink" type="button">Conectar Telegram</button><button class="btn alt" id="tgUnlink" type="button" hidden>Desconectar</button></div>
-<div id="tgLinkBox" class="note mt6" hidden>
-<p class="mb6"><b>Elige dónde recibir los avisos</b> — el enlace caduca en 15 minutos:</p>
-<p class="mb6"><b>Recomendado — en un grupo del negocio:</b> crea primero en Telegram un grupo tuyo con tu equipo (p. ej. «Mi Negocio · Leads») y luego <a id="tgGroupUrl" href="#" target="_blank" rel="noopener">añade el bot de avisos a ese grupo</a> — Telegram te pedirá elegir cuál. Si al añadirlo no llega la confirmación, escribe en el grupo: <code id="tgCmd"></code></p>
-<p class="mb6">O en un chat directo contigo: <a id="tgDmUrl" href="#" target="_blank" rel="noopener">abrir el chat con el bot</a> y pulsar INICIAR.</p>
-<p class="muted">Cuando Telegram confirme la vinculación, esta tarjeta lo mostrará al recargar.</p>
-</div>
-<div class="mt6" id="tgBotBlock" hidden><b>Bot propio (marca blanca)</b> <span id="tgWlState" class="flag off velai-only">desactivada</span> <button class="btn alt btnsm velai-only" id="tgWlToggle" type="button">Activar</button>
-<p class="muted">Por defecto los avisos llegan desde el bot de Velai. Para que lleguen desde el bot DEL NEGOCIO (p. ej. @MiNegocioBot): créalo en Telegram con @BotFather (comando /newbot), copia el token que te da y pégalo aquí. Al guardarlo hay que volver a vincular el chat (es el bot nuevo el que debe entrar al grupo).</p>
+<p class="muted mt6">Sigue estos pasos una sola vez (5–10 minutos) y el aviso de cada lead llegará al Telegram del negocio al momento, clasificado por temas. Puedes volver a cualquier paso tocándolo.</p>
+<div class="mt6">
+
+<div class="wstep" id="tgs1" hidden><div class="wh"><span class="wnum">1</span><b>El bot del negocio (marca blanca)</b><span class="wst" id="tgs1st"></span></div>
+<div class="wb" id="tgs1b" hidden>
+<span class="velai-only mb6" id="tgWlRow"><span id="tgWlState" class="flag off">desactivada</span> <button class="btn alt btnsm" id="tgWlToggle" type="button">Activar</button></span>
+<p class="muted">Con esto los avisos llegarán desde el bot con el nombre del negocio (p. ej. @MiNegocioBot):</p>
+<ol class="wol muted"><li>Abre Telegram y busca <b>@BotFather</b> (el que tiene la insignia azul de verificado).</li>
+<li>Escríbele <code>/newbot</code>. Te hará dos preguntas: el <b>nombre visible</b> (p. ej. «Mi Negocio Avisos») y el <b>usuario</b>, que debe terminar en <code>bot</code> (p. ej. <code>MiNegocioBot</code>).</li>
+<li>BotFather te responderá con un <b>token</b> (una línea larga de números y letras). Cópialo y pégalo aquí abajo.</li></ol>
 <div id="tgBotState" class="mb6 muted">—</div>
-<div class="actions actions0"><input id="tgBotToken" type="password" autocomplete="new-password" placeholder="token de @BotFather (solo se escribe, nunca se muestra)" class="grow inpill"><button class="btn alt" id="tgBotSave" type="button">Guardar bot</button><button class="btn alt" id="tgBotDel" type="button" hidden>Quitar</button></div></div>
-<div class="mt6" id="tgTopicsBlock" hidden><b>Temas del grupo (clasificación automática de leads)</b>
-<p class="muted">Crea aquí los temas y Vai los abrirá en tu grupo de Telegram. La <b>descripción</b> es lo que usa Vai para decidir qué lead va a cada tema — cuanto más clara, mejor clasifica; lo que no encaje con ninguna irá al chat General. Requisitos (una vez): activar «Temas» en los ajustes del grupo y hacer admin al bot con permiso de gestionar temas. Los temas creados a mano en Telegram también se registran solos (o con <code>/tema</code> dentro del tema) y puedes ponerles descripción aquí.</p>
-<div class="actions actions0"><input id="tgTopicName" placeholder="Nombre del tema, p. ej. Presupuestos" class="inpill"><input id="tgTopicDesc" placeholder="Descripción para Vai, p. ej. clientes que piden precio o cotización" class="grow inpill"><button class="btn alt" id="tgTopicAdd" type="button">Crear tema</button></div>
-<div id="tgTopics" class="muted mt6">—</div></div></div>
+<div class="actions actions0"><input id="tgBotToken" type="password" autocomplete="new-password" placeholder="pega aquí el token de @BotFather" class="grow inpill"><button class="btn" id="tgBotSave" type="button">Guardar bot</button><button class="btn alt" id="tgBotDel" type="button" hidden>Quitar</button></div>
+</div></div>
+
+<div class="wstep" id="tgs2"><div class="wh"><span class="wnum">2</span><b>Crea el grupo de tu equipo</b><span class="wst" id="tgs2st"></span></div>
+<div class="wb" id="tgs2b" hidden>
+<ol class="wol muted"><li>En Telegram: menú → <b>Nuevo grupo</b>.</li>
+<li>Añade a las personas del negocio que deben ver los leads (puedes añadir más después).</li>
+<li>Ponle un nombre claro, p. ej. <b>«Mi Negocio · Leads»</b>.</li></ol>
+<div class="actions actions0"><button class="btn" id="tgs2ok" type="button">Ya tengo el grupo →</button></div>
+</div></div>
+
+<div class="wstep" id="tgs3"><div class="wh"><span class="wnum">3</span><b>Conecta el grupo con Vai</b><span class="wst" id="tgs3st"></span></div>
+<div class="wb" id="tgs3b" hidden>
+<div id="tgState" class="muted mb6">—</div>
+<div class="actions actions0"><button class="btn" id="tgLink" type="button">Generar enlace de conexión</button><button class="btn alt" id="tgUnlink" type="button" hidden>Desconectar</button></div>
+<div id="tgLinkBox" class="note mt6" hidden>
+<p class="mb6">Abre este enlace <b>desde el móvil</b> donde tienes Telegram: <a id="tgGroupUrl" href="#" target="_blank" rel="noopener"><b>conectar mi grupo</b></a> → Telegram te preguntará a qué grupo añadir el bot → elige el del paso 2. En el grupo aparecerá la confirmación «✅ Listo…».</p>
+<p class="mb6 muted">¿No llegó la confirmación? Escribe esto dentro del grupo: <code id="tgCmd"></code> · ¿Prefieres un chat directo contigo en vez de grupo? <a id="tgDmUrl" href="#" target="_blank" rel="noopener">usa este enlace</a>. El enlace caduca en 15 minutos.</p>
+</div></div></div>
+
+<div class="wstep" id="tgs4"><div class="wh"><span class="wnum">4</span><b>Activa los «Temas» y dale permiso al bot</b><span class="wst" id="tgs4st"></span></div>
+<div class="wb" id="tgs4b" hidden>
+<ol class="wol muted"><li>Abre el grupo → toca su <b>nombre</b> (arriba) → <b>Editar</b> → activa el interruptor <b>«Temas»</b>.</li>
+<li>En esa misma pantalla: <b>Administradores</b> → <b>Añadir administrador</b> → elige el bot (el del paso 1, o el bot de Velai) → activa el permiso <b>«Gestionar temas»</b> → guarda.</li></ol>
+<div class="actions actions0"><button class="btn" id="tgs4ok" type="button">Ya lo activé →</button></div>
+</div></div>
+
+<div class="wstep" id="tgs5"><div class="wh"><span class="wnum">5</span><b>Crea los temas para clasificar tus leads</b><span class="wst" id="tgs5st"></span></div>
+<div class="wb" id="tgs5b" hidden>
+<p class="muted">Escribe el nombre y una <b>descripción clara</b> de qué leads deben caer ahí — la descripción es lo que Vai usa para decidir. Vai abrirá el tema en tu grupo automáticamente. Lo que no encaje con ningún tema irá al chat General.</p>
+<div class="actions actions0"><input id="tgTopicName" placeholder="Nombre, p. ej. Presupuestos" class="inpill"><input id="tgTopicDesc" placeholder="Descripción, p. ej. clientes que piden precio o cotización" class="grow inpill"><button class="btn" id="tgTopicAdd" type="button">Crear tema</button></div>
+<div id="tgTopics" class="muted mt6">—</div>
+</div></div>
+
+<div class="note mt6" id="tgWizDone" hidden><b>✅ Todo listo.</b> Los próximos leads llegarán al grupo, clasificados por temas — y puedes afinar las descripciones cuando quieras en el paso 5.</div>
+</div></div>
 <div class="card mt12 velai-only"><b>Webhook del bot (solo Velai, una vez)</b>
 <p class="muted mt6">Registra el webhook de Telegram apuntando al worker. OJO: con el webhook activo, getUpdates deja de funcionar para ese bot.</p>
 <div class="actions actions0"><button class="btn alt" id="tgSetup" type="button">Registrar webhook</button><span id="tgSetupOut" class="muted"></span></div></div>

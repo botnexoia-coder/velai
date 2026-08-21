@@ -97,24 +97,45 @@ async function loadConexiones(){$('#tgLinkBox').hidden=true;
  try{const d=await api('/api/admin/tenants/'+cxTenant+'/telegram');const t=d.telegram;
   $('#tgState').innerHTML=t.linked
    ?'<span class="flag ok">Conectado'+(t.title?': '+esc(t.title):'')+'</span>'+(t.linked_at?' <span class="muted">desde '+fmt(t.linked_at)+'</span>':'')
-   :'Sin conectar. Los avisos de este negocio aún no llegan a su Telegram.';
-  $('#tgLink').textContent=t.linked?'Vincular otro chat':'Conectar Telegram';
+   :'Aún sin conectar: genera el enlace y ábrelo desde el móvil.';
+  $('#tgLink').textContent=t.linked?'Vincular otro chat':'Generar enlace de conexión';
   $('#tgUnlink').hidden=!t.linked;
-  // Marca blanca: el conmutador es de Velai; el cliente solo ve el bloque si está activa.
   cxWl=!!t.whitelabel;
-  const soyVelai=!(ME&&ME.tenantId);
-  $('#tgBotBlock').hidden=!(soyVelai||t.whitelabel);
   $('#tgWlState').textContent=t.whitelabel?'activada':'desactivada';
   $('#tgWlState').className='flag velai-only '+(t.whitelabel?'ok':'off');
   $('#tgWlToggle').textContent=t.whitelabel?'Desactivar':'Activar';
-  $('#tgBotState').innerHTML=t.botUsername?'<span class="flag ok">Bot propio: @'+esc(t.botUsername)+'</span>':'<span class="flag off">Usando el bot de Velai</span>';
+  $('#tgBotState').innerHTML=t.botUsername?'<span class="flag ok">Bot del negocio: @'+esc(t.botUsername)+' ✓</span>':'<span class="flag off">Aún sin bot propio (se usa el bot de Velai)</span>';
   $('#tgBotDel').hidden=!t.botUsername;$('#tgBotToken').value='';
-  // Temas: se crean desde el panel (nombre + descripción para el clasificador).
-  $('#tgTopicsBlock').hidden=!t.linked;
   $('#tgTopics').innerHTML=(t.topics&&t.topics.length)
    ?t.topics.map(tp=>'<div class="mb6"><span class="flag off">'+esc(tp.name)+' <a href="#" data-tdel="'+esc(String(tp.thread_id))+'" title="Quitar del enrutado">✕</a></span> <span class="muted">'+(tp.description?esc(tp.description):'sin descripción')+' · <a href="#" data-tdesc="'+esc(String(tp.thread_id))+'">editar</a></span></div>').join('')
-   :'Aún no hay temas: crea el primero arriba.'}
+   :'Aún no hay temas: crea el primero arriba.';
+  tgRenderWiz(t)}
  catch(e){$('#tgState').textContent=e.message}}
+// ── Stepper (el cliente "que no sabe" no debe perderse): el estado real (bot,
+// vínculo, temas) marca los pasos hechos; los pasos sin señal del servidor (crear
+// el grupo, activar Temas) se confirman con su botón. Tocar una cabecera reabre
+// ese paso.
+const tgManual={};let tgWizOpen=null;
+function tgRenderWiz(t){
+ const soyVelai=!(ME&&ME.tenantId);
+ const steps=[
+  {el:'tgs1',visible:soyVelai||!!t.whitelabel,done:!t.whitelabel?true:!!t.botUsername,label:!t.whitelabel?(soyVelai?'desactivada':''):(t.botUsername?'@'+t.botUsername+' ✓':'pendiente')},
+  {el:'tgs2',visible:true,done:!!t.linked||!!tgManual[cxTenant+':2'],label:''},
+  {el:'tgs3',visible:true,done:!!t.linked,label:t.linked?esc(t.title||'conectado')+' ✓':''},
+  {el:'tgs4',visible:true,done:!!(t.topics&&t.topics.length)||!!tgManual[cxTenant+':4'],label:''},
+  {el:'tgs5',visible:true,done:!!(t.topics&&t.topics.length),label:(t.topics&&t.topics.length)?t.topics.length+(t.topics.length===1?' tema ✓':' temas ✓'):''},
+ ];
+ let cur=null;
+ for(const s of steps)if(s.visible&&!s.done&&cur===null)cur=s.el;
+ for(const s of steps){const el=$('#'+s.el);
+  el.hidden=!s.visible;
+  el.className='wstep'+(s.done?' done':'')+(s.el===cur?' cur':'');
+  $('#'+s.el+'st').textContent=s.done?(s.label||'hecho ✓'):(s.el===cur?(s.label||''):'pendiente');
+  $('#'+s.el+'b').hidden=!(s.el===cur||s.el===tgWizOpen)}
+ $('#tgWizDone').hidden=cur!==null}
+document.querySelectorAll('.wstep .wh').forEach(h=>{h.onclick=()=>{const step=h.parentElement&&h.parentElement.id;if(!step)return;tgWizOpen=tgWizOpen===step?null:step;loadConexiones()}});
+$('#tgs2ok').onclick=()=>{tgManual[cxTenant+':2']=1;tgWizOpen=null;loadConexiones()};
+$('#tgs4ok').onclick=()=>{tgManual[cxTenant+':4']=1;tgWizOpen=null;loadConexiones()};
 $('#tgTopicAdd').onclick=async()=>{const name=$('#tgTopicName').value.trim();const description=$('#tgTopicDesc').value.trim();
  if(!name)return toast('Ponle nombre al tema',false);
  try{await api('/api/admin/tenants/'+cxTenant+'/telegram/topics',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name,description})});
