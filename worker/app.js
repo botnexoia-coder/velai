@@ -661,6 +661,28 @@ async function registerTelegramTopic(env, ctx, chatId, threadId, name) {
   return json({ ok: true }, 200, NO_STORE);
 }
 
+// Crea un Tema en el grupo del cliente DESDE el panel (pedido de Juan: nombre +
+// descripción definidos en nuestra plataforma). Requiere que el grupo tenga Temas
+// activados y que el bot sea admin con «Gestionar temas» — los dos fallos típicos
+// se traducen a códigos que el panel explica.
+async function createTelegramTopic(env, tenant, chatId, name) {
+  const botToken = (await tenantTelegramToken(env, tenant)) || env.TELEGRAM_TOKEN;
+  if (!botToken) throw new HttpError(503, 'telegram_not_configured');
+  const response = await fetch(`https://api.telegram.org/bot${botToken}/createForumTopic`, {
+    method: 'POST', headers: JSON_HEADERS,
+    body: JSON.stringify({ chat_id: chatId, name }),
+    signal: AbortSignal.timeout(8000),
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok || !data.ok || !data.result || !data.result.message_thread_id) {
+    const why = String(data.description || '').toLowerCase();
+    if (why.includes('forum')) throw new HttpError(400, 'group_sin_temas');
+    if (why.includes('rights') || why.includes('administrator')) throw new HttpError(400, 'bot_sin_permisos');
+    throw new HttpError(502, 'telegram_topic_failed');
+  }
+  return { threadId: data.result.message_thread_id, botToken };
+}
+
 // Clasifica el lead en uno de los Temas que el cliente creó en su grupo. Estricto:
 // el modelo responde el nombre EXACTO de un tema o GENERAL, y ante cualquier duda
 // o fallo la respuesta es null (chat General) — un aviso jamás se pierde por esto.
@@ -672,7 +694,9 @@ async function telegramThreadFor(env, tenant, lead) {
   try {
     const reply = await callAnthropic(env, {
       model: 'claude-haiku-4-5-20251001', max_tokens: 20,
-      system: `Clasifica el lead en UNO de estos temas de Telegram definidos por el negocio y responde SOLO con el nombre exacto del tema, sin nada más. Si ninguno encaja claramente, responde GENERAL.\nTemas: ${topics.map((t) => t.name).join(' | ')}`,
+      // La DESCRIPCIÓN del tema (escrita por el cliente en el panel) es la señal
+      // principal del enrutado; el nombre solo es la etiqueta de respuesta.
+      system: `Clasifica el lead en UNO de estos temas de Telegram definidos por el negocio y responde SOLO con el nombre exacto del tema, sin nada más. Si ninguno encaja claramente, responde GENERAL.\nTemas:\n${topics.map((t) => `- «${t.name}»${t.description ? `: ${t.description}` : ''}`).join('\n')}`,
       messages: [{ role: 'user', content: JSON.stringify({ fuente: lead.source, sector: lead.sector, necesidad: lead.need, contexto: lead.context, nota: lead.note }) }],
     }, { tenant, retries: 0, timeoutMs: 8000 });
     const pick = String(reply).trim().toLowerCase();
@@ -1885,7 +1909,8 @@ function clienteAllowed(path, method) {
   if (/^\/api\/admin\/tenants\/[0-9a-f-]+\/telegram$/i.test(path) && ['GET', 'DELETE'].includes(method)) return true;
   if (/^\/api\/admin\/tenants\/[0-9a-f-]+\/telegram\/link$/i.test(path) && method === 'POST') return true;
   if (/^\/api\/admin\/tenants\/[0-9a-f-]+\/telegram\/bot$/i.test(path) && ['POST', 'DELETE'].includes(method)) return true;
-  if (/^\/api\/admin\/tenants\/[0-9a-f-]+\/telegram\/topics\/\d+$/i.test(path) && method === 'DELETE') return true;
+  if (/^\/api\/admin\/tenants\/[0-9a-f-]+\/telegram\/topics$/i.test(path) && method === 'POST') return true;
+  if (/^\/api\/admin\/tenants\/[0-9a-f-]+\/telegram\/topics\/\d+$/i.test(path) && ['PATCH', 'DELETE'].includes(method)) return true;
   if (path === '/api/admin/stats' && method === 'GET') return true;
   if (path === '/api/admin/me' && method === 'GET') return true;
   if (path === '/api/admin/escalations' && method === 'GET') return true;
@@ -2192,21 +2217,55 @@ async function adminRouter(request, env, ctx, path, url, config, scope) {
     console.log(JSON.stringify({ level: 'info', code: 'telegram_webhook_registered', actor }));
     return json({ ok: true, botUsername: await telegramBotUsername(env) }, 200, NO_STORE);
   }
-  // Quitar un Tema del enrutado (el cliente, en autoservicio): solo deja de
-  // clasificarse hacia él — el Tema sigue existiendo en su Telegram.
-  const tgTopicMatch = path.match(/^\/api\/admin\/tenants\/([0-9a-f-]+)\/telegram\/topics\/(\d+)$/i);
-  if (tgTopicMatch && request.method === 'DELETE') {
+  // Temas del grupo: crear DESDE el panel (nombre + descripción — la descripción
+  // es la que guía al clasificador), editar la descripción y quitar del enrutado.
+  const tgTopicMatch = path.match(/^\/api\/admin\/tenants\/([0-9a-f-]+)\/telegram\/topics(?:\/(\d+))?$/i);
+  if (tgTopicMatch) {
     if (!UUID_RE.test(tgTopicMatch[1])) throw new HttpError(404, 'not_found');
     const tenantId = tgTopicMatch[1];
     if (scope.role !== 'velai' && scope.tenantId !== tenantId) throw new HttpError(404, 'not_found');
-    const row = await env.DB.prepare('SELECT id, slug, channel_address, telegram_topics FROM tenants WHERE id=?').bind(tenantId).first();
+    const row = await env.DB.prepare('SELECT id, slug, name, channel_address, telegram_chat_id, telegram_topics, telegram_bot_token_enc FROM tenants WHERE id=?').bind(tenantId).first();
     if (!row) throw new HttpError(404, 'not_found');
     let topics = [];
     try { topics = JSON.parse(row.telegram_topics || '[]'); } catch (_) {}
-    const remaining = (Array.isArray(topics) ? topics : []).filter((t) => String(t.thread_id) !== tgTopicMatch[2]);
-    await env.DB.prepare('UPDATE tenants SET telegram_topics=?, updated_at=? WHERE id=?').bind(JSON.stringify(remaining), new Date().toISOString(), tenantId).run();
-    await invalidateTenantCache(env, [row]);
-    return json({ ok: true, topics: remaining }, 200, NO_STORE);
+    if (!Array.isArray(topics)) topics = [];
+    if (!tgTopicMatch[2] && request.method === 'POST') {
+      if (!row.telegram_chat_id) throw new HttpError(400, 'telegram_no_vinculado');
+      if (topics.length >= 25) throw new HttpError(400, 'demasiados_temas');
+      if (await rateLimited(env, actor, 'tgtopic', 10)) throw new HttpError(429, 'rate_limited');
+      const body = await readJson(request, 4000);
+      const name = clean(body.name, 64);
+      const description = clean(body.description, 200);
+      if (!name) throw new HttpError(400, 'invalid_topic_name');
+      // El tema se crea EN el Telegram del cliente, con el bot que está en su grupo.
+      const { threadId, botToken } = await createTelegramTopic(env, row, row.telegram_chat_id, name);
+      topics.push({ thread_id: Number(threadId), name, ...(description ? { description } : {}) });
+      const now = new Date().toISOString();
+      await env.DB.prepare('UPDATE tenants SET telegram_topics=?, updated_at=? WHERE id=?').bind(JSON.stringify(topics), now, tenantId).run();
+      await invalidateTenantCache(env, [row]);
+      console.log(JSON.stringify({ level: 'info', code: 'telegram_topic_registered', tenant: row.slug, topics: topics.length, from: 'panel' }));
+      // Primer mensaje del tema = su propósito: útil para el equipo del cliente.
+      if (description) ctx.waitUntil(sendTelegramText(env, `📌 Aquí llegarán: ${escapeHtml(description)}`, row.telegram_chat_id, { botToken, threadId }).catch(() => {}));
+      return json({ ok: true, topics }, 200, NO_STORE);
+    }
+    if (tgTopicMatch[2] && request.method === 'PATCH') {
+      const body = await readJson(request, 4000);
+      const topic = topics.find((t) => String(t.thread_id) === tgTopicMatch[2]);
+      if (!topic) throw new HttpError(404, 'not_found');
+      const description = clean(body.description, 200);
+      if (description) topic.description = description; else delete topic.description;
+      await env.DB.prepare('UPDATE tenants SET telegram_topics=?, updated_at=? WHERE id=?').bind(JSON.stringify(topics), new Date().toISOString(), tenantId).run();
+      await invalidateTenantCache(env, [row]);
+      return json({ ok: true, topics }, 200, NO_STORE);
+    }
+    if (tgTopicMatch[2] && request.method === 'DELETE') {
+      // Solo lo quita del ENRUTADO: el Tema sigue existiendo en su Telegram.
+      const remaining = topics.filter((t) => String(t.thread_id) !== tgTopicMatch[2]);
+      await env.DB.prepare('UPDATE tenants SET telegram_topics=?, updated_at=? WHERE id=?').bind(JSON.stringify(remaining), new Date().toISOString(), tenantId).run();
+      await invalidateTenantCache(env, [row]);
+      return json({ ok: true, topics: remaining }, 200, NO_STORE);
+    }
+    throw new HttpError(405, 'method_not_allowed');
   }
   const tgMatch = path.match(/^\/api\/admin\/tenants\/([0-9a-f-]+)\/telegram(?:\/(link|bot))?$/i);
   if (tgMatch) {

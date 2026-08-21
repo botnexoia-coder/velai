@@ -2094,3 +2094,49 @@ test('temas de Telegram: el grupo los registra solo (servicio y /tema) y Vai cla
     assert.deepEqual(res.topics, [{ thread_id: 43, name: 'Urgente' }]);
   } finally { globalThis.fetch = realFetch; }
 });
+
+test('temas desde el panel: se crean en el Telegram del cliente con descripción, y la descripción guía al clasificador', async () => {
+  const TID = '00000000-0000-4000-8000-0000000000d1';
+  const row = { id: TID, slug: 'mio', name: 'Mi Negocio', channel_address: 'web:mio', telegram_chat_id: '-777', telegram_topics: null, telegram_bot_token_enc: null };
+  const env = {
+    KV: mapKV(), TELEGRAM_TOKEN: 'tg-velai', ANTHROPIC_API_KEY: 'k',
+    DB: { prepare: (sql) => ({ bind: (...args) => ({
+      first: async () => sql.includes('FROM tenants WHERE id=') ? { ...row } : null,
+      run: async () => { if (sql.includes('SET telegram_topics=')) row.telegram_topics = args[0]; return { meta: { changes: 1 } }; },
+      all: async () => ({ results: [] }),
+    }) }) },
+  };
+  const ctx = { waitUntil(p) { if (p && p.catch) p.catch(() => {}); } };
+  const OWN = { role: 'cliente', tenantId: TID, email: 'cliente@x.com' };
+  const base = `/api/admin/tenants/${TID}/telegram/topics`;
+  const call = (method, path, body) => testing.adminRouter(adminReq(path, { method, headers: { 'Content-Type': 'application/json' }, body: body ? JSON.stringify(body) : undefined }), env, ctx, path, new URL('https://x' + path), {}, OWN);
+  let forum = true; let classifierSystem = '';
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = async (url, init) => {
+    const u = String(url);
+    if (u.includes('/createForumTopic')) {
+      if (!forum) return new Response(JSON.stringify({ ok: false, description: 'Bad Request: the chat is not a forum' }), { status: 400 });
+      return new Response(JSON.stringify({ ok: true, result: { message_thread_id: 77 } }), { status: 200 });
+    }
+    if (u.includes('api.telegram.org')) return new Response('{"ok":true}', { status: 200 });
+    if (u.includes('api.anthropic.com')) { classifierSystem = JSON.parse(init.body).system[0].text; return new Response(JSON.stringify({ content: [{ text: 'Presupuestos' }] }), { status: 200 }); }
+    return new Response('{}', { status: 200 });
+  };
+  try {
+    // grupo sin Temas activados → error traducible, nada guardado
+    forum = false;
+    await assert.rejects(call('POST', base, { name: 'Presupuestos' }), (e) => e.code === 'group_sin_temas');
+    assert.equal(row.telegram_topics, null);
+    // con Temas: se crea EN Telegram y se guarda con su descripción
+    forum = true;
+    const out = await (await call('POST', base, { name: 'Presupuestos', description: 'clientes que piden precio o cotización' })).json();
+    assert.deepEqual(out.topics, [{ thread_id: 77, name: 'Presupuestos', description: 'clientes que piden precio o cotización' }]);
+    // el clasificador recibe la DESCRIPCIÓN, no solo el nombre
+    const tenant = { id: TID, slug: 'mio', telegram_chat_id: '-777', telegram_topics: row.telegram_topics, telegram_bot_token_enc: null };
+    await testing.deliver({ ...env, TELEGRAM_CHAT_ID: '-100999' }, 'telegram', { id: 'ldx', source: 'chat web', need: 'precio del servicio' }, tenant);
+    assert.ok(classifierSystem.includes('clientes que piden precio o cotización'), 'la descripción viaja en el prompt');
+    // editar la descripción desde el panel
+    const patched = await (await call('PATCH', `${base}/77`, { description: 'todo lo que hable de dinero' })).json();
+    assert.equal(patched.topics[0].description, 'todo lo que hable de dinero');
+  } finally { globalThis.fetch = realFetch; }
+});

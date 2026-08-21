@@ -373,8 +373,9 @@ body.cliente .cliente-only{display:flex}
 <div id="tgBotState" class="mb6 muted">—</div>
 <div class="actions actions0"><input id="tgBotToken" type="password" autocomplete="new-password" placeholder="token de @BotFather (solo se escribe, nunca se muestra)" class="grow inpill"><button class="btn alt" id="tgBotSave" type="button">Guardar bot</button><button class="btn alt" id="tgBotDel" type="button" hidden>Quitar</button></div></div>
 <div class="mt6" id="tgTopicsBlock" hidden><b>Temas del grupo (clasificación automática de leads)</b>
-<p class="muted">Activa los «Temas» en los ajustes de tu grupo de Telegram y crea uno por categoría con el nombre que quieras — «Presupuestos», «Citas», «Urgente»… El bot los registra al crearlos; para registrar un tema que ya existía, escribe <code>/tema</code> dentro de ese tema. Vai lee cada lead y lo publica en el tema que mejor encaje; si ninguno encaja, va al chat General.</p>
-<div id="tgTopics" class="muted">—</div></div></div>
+<p class="muted">Crea aquí los temas y Vai los abrirá en tu grupo de Telegram. La <b>descripción</b> es lo que usa Vai para decidir qué lead va a cada tema — cuanto más clara, mejor clasifica; lo que no encaje con ninguna irá al chat General. Requisitos (una vez): activar «Temas» en los ajustes del grupo y hacer admin al bot con permiso de gestionar temas. Los temas creados a mano en Telegram también se registran solos (o con <code>/tema</code> dentro del tema) y puedes ponerles descripción aquí.</p>
+<div class="actions actions0"><input id="tgTopicName" placeholder="Nombre del tema, p. ej. Presupuestos" class="inpill"><input id="tgTopicDesc" placeholder="Descripción para Vai, p. ej. clientes que piden precio o cotización" class="grow inpill"><button class="btn alt" id="tgTopicAdd" type="button">Crear tema</button></div>
+<div id="tgTopics" class="muted mt6">—</div></div></div>
 <div class="card mt12 velai-only"><b>Webhook del bot (solo Velai, una vez)</b>
 <p class="muted mt6">Registra el webhook de Telegram apuntando al worker. OJO: con el webhook activo, getUpdates deja de funcionar para ese bot.</p>
 <div class="actions actions0"><button class="btn alt" id="tgSetup" type="button">Registrar webhook</button><span id="tgSetupOut" class="muted"></span></div></div>
