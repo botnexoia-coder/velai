@@ -222,9 +222,9 @@ dialog::backdrop{background:rgba(5,3,6,.78);backdrop-filter:blur(3px)}
 .tico{width:30px;height:30px;border-radius:8px;display:flex;align-items:center;justify-content:center;flex-shrink:0}
 .tico svg{width:16px;height:16px}
 .tico.key{background:rgba(255,107,26,.14);color:var(--orange2)}
-.tico.cloud{background:rgba(57,135,229,.14);color:#9cc4ee}
-.tico.shield{background:rgba(255,170,0,.14);color:#ffce7a}
-.tico.lock{background:rgba(144,133,233,.14);color:#c3bdf5}
+.tico.cloud{background:rgba(57,135,229,.14);color:var(--stt-new)}
+.tico.shield{background:rgba(255,170,0,.14);color:var(--amber-t)}
+.tico.lock{background:rgba(144,133,233,.14);color:var(--stt-qualified)}
 .tico.db{background:rgba(42,168,184,.14);color:#8fd8e0}
 .cfgtiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:14px;margin-top:14px}
 .cfgtiles .tile{background:var(--bg3);border:1px solid rgba(var(--ink),.08);border-radius:12px;padding:16px 18px;display:flex;flex-direction:column;gap:10px}
