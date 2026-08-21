@@ -2370,9 +2370,14 @@ async function adminRouter(request, env, ctx, path, url, config, scope) {
     if (scope.role !== 'velai' && scope.tenantId !== tenantId) throw new HttpError(404, 'not_found');
     const tenantRow = await env.DB.prepare('SELECT id, slug, name, channel_address, telegram_chat_id, telegram_chat_title, telegram_linked_at, telegram_bot_username, telegram_bot_token_enc, telegram_whitelabel, telegram_topics FROM tenants WHERE id=?').bind(tenantId).first();
     if (!tenantRow) throw new HttpError(404, 'not_found');
-    // La marca blanca es una feature que ACTIVA VELAI por cliente: sin el flag, para
-    // el rol cliente el bot propio no existe (404, ni confirmación de la feature).
-    if (tgMatch[2] === 'bot' && scope.role !== 'velai' && !tenantRow.telegram_whitelabel) throw new HttpError(404, 'not_found');
+    // La marca blanca es una feature que ACTIVA VELAI por cliente: sin el flag, el
+    // bot propio no existe — para el cliente es 404 (ni confirmación de la feature)
+    // y para velai un 400 claro: activar el flag primero, un básico jamás acaba con
+    // bot propio "por accidente" (el DELETE sí se permite, es limpieza).
+    if (tgMatch[2] === 'bot' && request.method === 'POST' && !tenantRow.telegram_whitelabel) {
+      throw scope.role === 'velai' ? new HttpError(400, 'marca_blanca_requerida') : new HttpError(404, 'not_found');
+    }
+    if (tgMatch[2] === 'bot' && request.method === 'DELETE' && scope.role !== 'velai' && !tenantRow.telegram_whitelabel) throw new HttpError(404, 'not_found');
     if (!tgMatch[2] && request.method === 'PATCH') {
       // Conmutador de marca blanca: SOLO Velai (fuera de clienteAllowed).
       if (scope.role !== 'velai') throw new HttpError(403, 'not_authorized');

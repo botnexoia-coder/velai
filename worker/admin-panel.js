@@ -132,7 +132,9 @@ function tgRenderWiz(t){
  const wl=!!t.whitelabel;
  const nTemas=(t.topics&&t.topics.length)||0;
  const steps=[
-  {id:'tgs1',visible:soyVelai||wl,done:!wl?true:(!!t.botUsername||!!tgManual[cxTenant+':1'])},
+  // Básico = 2 pasos EXACTOS (grupo y conectar) para AMBOS roles: el paso del bot
+  // solo existe con la marca blanca activa — si no, básico tendría marca blanca.
+  {id:'tgs1',visible:wl,done:!!t.botUsername||!!tgManual[cxTenant+':1']},
   {id:'tgs2',visible:true,done:!!t.linked||!!tgManual[cxTenant+':2']},
   {id:'tgs3',visible:true,done:!!t.linked},
   {id:'tgs4',visible:wl,done:nTemas>0||!!tgManual[cxTenant+':4']},

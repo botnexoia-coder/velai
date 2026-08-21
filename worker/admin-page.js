@@ -403,7 +403,7 @@ body.cliente .cliente-only{display:flex}
 <div class="card">
 <div class="tgw-top"><div class="grow"><b class="tgh">Recibe tus leads en Telegram</b>
 <p class="tgsub">Una sola vez, 5–10 minutos. El asistente detecta lo que ya está hecho y guarda tu avance.</p></div>
-<span class="tgchip" id="tgProgress">—</span></div>
+<span class="velai-only" id="tgWlRow"><span id="tgWlState" class="flag off">desactivada</span> <button class="btn alt btnsm" id="tgWlToggle" type="button">Activar</button></span> <span class="tgchip" id="tgProgress">—</span></div>
 
 <div class="tgrail">
 <button class="tgnode" id="tgn1" type="button" data-tgo="tgs1"><span class="tgnum">1</span><span class="tgnlbl">Tu bot</span></button><i class="tgbar" id="tgbar1"></i>
@@ -415,7 +415,7 @@ body.cliente .cliente-only{display:flex}
 
 <div class="tgpanel">
 <div class="tgstep" id="tgs1b" hidden><div class="tgbody">
-<div class="tgh2">Crea el bot de tu negocio <span class="velai-only"><span id="tgWlState" class="flag off">desactivada</span> <button class="btn alt btnsm" id="tgWlToggle" type="button">Activar</button></span></div>
+<div class="tgh2">Crea el bot de tu negocio</div>
 <p class="tgsub">Así los avisos llegarán firmados por tu marca (p. ej. @MiNegocioBot).</p>
 <div class="tgcards">
 <div class="tgcard"><b>1 · Abre @BotFather</b><p>En Telegram, busca <b>@BotFather</b> — el que tiene la insignia azul de verificado.</p></div>
