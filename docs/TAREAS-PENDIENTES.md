@@ -79,6 +79,14 @@ Sin esto, las campañas gastarían presupuesto a ciegas (sin medir conversiones)
 - [ ] Validar con asesoría los textos de `/condiciones/` y la sección Google Calendar de `/privacidad/` (junto al bloque LSSI).
 - [ ] Pospuesto conscientemente: **Microsoft 365** (fase 2), picker de calendarios (hoy campo `calendar_id`), aviso Telegram por cita, enlace cita↔lead, recordatorios por plantilla, cancelación desde el panel, y canales Telegram/Instagram (spec aparte).
 
+### 2j. Conexiones en autoservicio (SPEC-CONEXIONES — PR1 Telegram desplegado 2026-08-21)
+
+- [ ] 🔴 Pulsar **«Registrar webhook»** en el panel → Conexiones (una vez; secret ya cargado). OJO: desde ese momento `getUpdates` deja de funcionar para el bot — los chat ids ya no se leen a mano, que es el punto.
+- [ ] Probar el ciclo real: generar enlace para GOgestión → su `/start` en un grupo → el aviso de un lead de prueba llega AL GRUPO y la copia a Velai.
+- [ ] **PR 2** — WhatsApp `sender/sync` (leer el sender de la subcuenta por API y rellenar la fila) + tarjeta de estado para el cliente. ⚠️ verificar en la 1ª ejecución real el shape de la respuesta de Twilio y `webhookOk` (el Self Sign-up NO configura nuestro webhook: es el fallo más probable del alta).
+- [ ] **PR 3** — `team_whatsapp`/`wa_number` editables por el cliente + guarda del `63031` (From ∈ team_whatsapp) también en el PATCH general.
+- [ ] **PR 4 (Fase B, NO implementar aún)** — Embedded Signup real en el panel. Precondiciones, en orden, todas de Juan: (1) S.L./alta censal para la verificación de negocio de Velai en Meta; (2) 2FA + verificación del portfolio `949061711290882` («several weeks»); (3) app de Meta NUEVA enviada a App Review; (4) alta en el programa Tech Provider de Twilio. Reevaluar a ~10 clientes junto a la comparativa 360dialog.
+
 ### 2h. Seguimiento del sprint de blindaje (desplegado 2026-08-20)
 
 - [ ] **Webhook 100% asíncrono (TwiML vacío + `waitUntil` + Messages API de Twilio)**: evaluado y descartado en el sprint — solo abordarlo si los logs `ai_usage` muestran p95 > ~9 s en el canal WhatsApp (hoy el webhook va con timeout 10 s / 0 reintentos + dedupe por `MessageSid`, suficiente). Nota: SPEC-CALENDARIO ya contempla este patrón para el bucle de tools, que lo necesitará de verdad.

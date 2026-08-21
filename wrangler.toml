@@ -59,7 +59,8 @@ CF_ADMIN_GROUP_ID = "92360e3f-8e40-4dfd-85e6-718617d140d0"
 
 # Workers Logs: sin este bloque cada deploy lo deja APAGADO y los logs operativos
 # (tenant_token_undecryptable, provision_orphan, lead_d1_fallback,
-# twilio_duplicate_ignored, ai_tenant_budget_exhausted, calendar_connected,
+# twilio_duplicate_ignored, ai_tenant_budget_exhausted, telegram_linked,
+# telegram_unlinked, telegram_link_expired, telegram_webhook_registered, calendar_connected,
 # calendar_disconnected, calendar_refresh_failed, calendar_token_undecryptable,
 # calendar_tool_failed, calendar_reply_failed, appointment_created,
 # tool_loop_overflow…) no se ven en ninguna parte.

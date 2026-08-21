@@ -188,3 +188,17 @@ A vigilar a mano (en Workers Logs / panel / GA4) hasta tener alerting externo:
 ## Riesgo legal pendiente
 
 La web identifica por ahora únicamente el nombre comercial Velai. **No activar campañas de pago** hasta validar con asesoría y publicar el titular, NIF y domicilio que correspondan conforme al artículo 10 de la LSSI (las plataformas de anuncios exigen además una política de privacidad válida). El derecho de supresión ya es operativo: solicitudes a `privacidad@hirevai.com` se atienden con el botón «Borrar lead» del panel.
+
+## Telegram en autoservicio (SPEC-CONEXIONES PR1, 2026-08-21)
+
+- El webhook del bot se registra desde el panel (Conexiones → «Registrar webhook», solo
+  Velai): llama a `setWebhook` con `TELEGRAM_WEBHOOK_SECRET` (secret del worker) apuntando
+  a `<worker>/telegram/webhook`. **Con el webhook activo, `getUpdates` DEJA de funcionar**
+  para ese bot: los chat ids ya no se leen a mano — cada cliente se vincula con su enlace
+  de un solo uso desde su pestaña Conexiones.
+- Avisos de lead por Telegram: entrega DUAL — al chat del cliente (sin chat propio =
+  `skipped: telegram_not_configured`, visible en el ledger) y SIEMPRE una copia operativa
+  al `TELEGRAM_CHAT_ID` de Velai, deduplicada por lead (`opsping:` en KV, 30 días). El
+  fallback silencioso al chat de Velai devolviendo ok:true está cerrado por test.
+- El username del bot se descubre con `getMe` (caché KV `tg:botuser`, 1 día): si se cambia
+  el bot (nuevo `TELEGRAM_TOKEN`), borrar esa clave o esperar el TTL, y re-registrar el webhook.

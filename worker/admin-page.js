@@ -303,6 +303,7 @@ body.cliente .cliente-only{display:flex}
 <nav class="tabs" role="tablist">
 <button class="tab is-on" role="tab" aria-selected="true" data-view="leads" type="button"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M17 21v-2a4 4 0 0 0-4-4H7a4 4 0 0 0-4 4v2"></path><circle cx="10" cy="7" r="4"></circle><path d="M21 21v-2a4 4 0 0 0-3-3.87"></path><path d="M16 3.13a4 4 0 0 1 0 7.75"></path></svg>Leads</button>
 <button class="tab" role="tab" aria-selected="false" data-view="calendario" id="calNavBtn" type="button"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="5" width="18" height="16" rx="2"></rect><line x1="8" y1="3" x2="8" y2="7"></line><line x1="16" y1="3" x2="16" y2="7"></line><line x1="3" y1="10" x2="21" y2="10"></line></svg>Calendario</button>
+<button class="tab" role="tab" aria-selected="false" data-view="conexiones" id="cxNavBtn" type="button"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"></path><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"></path></svg>Conexiones</button>
 <button class="tab velai-only" role="tab" aria-selected="false" data-view="tenants" type="button"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="7" width="18" height="13" rx="2"></rect><path d="M8 7V5a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>Clientes</button>
 </nav>
 <div class="navlabel velai-only">Sistema</div>
@@ -354,6 +355,22 @@ body.cliente .cliente-only{display:flex}
 <textarea id="calHours" rows="3" placeholder='{"mon":[["09:00","14:00"],["16:00","20:00"]]}'></textarea></div>
 <div class="actions actions0"><button class="btn" id="calSave" type="button">Guardar calendario</button></div></div>
 </div>
+</div>
+<div id="viewConexiones" hidden>
+<div class="vhead"><div><h1>Conexiones</h1><p>Canales de aviso y estado de WhatsApp del negocio</p></div><div class="actions actions0"><select id="cxTenantSel" class="inpill velai-only"></select></div></div>
+<div class="card"><b>Avisos por Telegram</b>
+<p class="muted mt6">Vincula el Telegram del negocio (un grupo o un chat directo) y el aviso de cada lead llegará ahí al momento, sin depender de nadie.</p>
+<div id="tgState" class="mt6 muted">—</div>
+<div class="actions actions0"><button class="btn" id="tgLink" type="button">Conectar Telegram</button><button class="btn alt" id="tgUnlink" type="button" hidden>Desconectar</button></div>
+<div id="tgLinkBox" class="note mt6" hidden>
+<p class="mb6"><b>Elige dónde recibir los avisos</b> — el enlace caduca en 15 minutos:</p>
+<p class="mb6">En un grupo: <a id="tgGroupUrl" href="#" target="_blank" rel="noopener">añadir el bot al grupo</a>. Si al añadirlo no llega la confirmación, escribe en el grupo: <code id="tgCmd"></code></p>
+<p class="mb6">En un chat directo: <a id="tgDmUrl" href="#" target="_blank" rel="noopener">abrir el chat con el bot</a> y pulsar INICIAR.</p>
+<p class="muted">Cuando Telegram confirme la vinculación, esta tarjeta lo mostrará al recargar.</p>
+</div></div>
+<div class="card mt12 velai-only"><b>Webhook del bot (solo Velai, una vez)</b>
+<p class="muted mt6">Registra el webhook de Telegram apuntando al worker. OJO: con el webhook activo, getUpdates deja de funcionar para ese bot.</p>
+<div class="actions actions0"><button class="btn alt" id="tgSetup" type="button">Registrar webhook</button><span id="tgSetupOut" class="muted"></span></div></div>
 </div>
 <div id="viewConfig" hidden>
 <div class="vhead"><div><h1>Configuración</h1><p>Admins de Velai y estado de las integraciones</p></div><span class="stpill ok" id="cfgOverall" hidden><i></i></span></div>

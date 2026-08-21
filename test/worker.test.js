@@ -1825,3 +1825,135 @@ test('callback OAuth: un cliente no puede cerrar la conexión de OTRO tenant con
   // y el state quedó consumido igualmente (un solo uso, también en el rechazo)
   assert.equal(await kv.get('calstate:stx'), null);
 });
+
+// ── SPEC-CONEXIONES PR1: Telegram en autoservicio ────────────────────────────
+
+function tgDb(row) {
+  const writes = [];
+  return { writes, prepare: (sql) => ({ bind: (...args) => ({
+    first: async () => { writes.push({ sql, args, op: 'first' }); return sql.includes('FROM tenants WHERE id=') ? row : null; },
+    run: async () => { writes.push({ sql, args, op: 'run' }); return { meta: { changes: 1 } }; },
+    all: async () => ({ results: [] }),
+  }) }) };
+}
+
+test('telegram/link: el cliente genera SU enlace; el de otro tenant es 404 sin tocar tenants', async () => {
+  const TID = '00000000-0000-4000-8000-0000000000d1';
+  const row = { id: TID, slug: 'mio', name: 'Mi Negocio', channel_address: 'web:mio', telegram_chat_id: null };
+  const db = tgDb(row);
+  const kv = mapKV();
+  const env = { DB: db, KV: kv, TELEGRAM_TOKEN: 'tg-token' };
+  const ctx = { waitUntil() {} };
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = async (url) => String(url).includes('/getMe')
+    ? new Response(JSON.stringify({ ok: true, result: { username: 'VelaiAvisosBot' } }), { status: 200 })
+    : new Response('{}', { status: 200 });
+  try {
+    const OWN = { role: 'cliente', tenantId: TID, email: 'cliente@x.com' };
+    const path = `/api/admin/tenants/${TID}/telegram/link`;
+    const out = await (await testing.adminRouter(adminReq(path, { method: 'POST' }), env, ctx, path, new URL('https://x' + path), {}, OWN)).json();
+    assert.match(out.token, /^[0-9a-f]{32}$/);
+    assert.ok(out.dmUrl.includes('t.me/VelaiAvisosBot?start=' + out.token));
+    assert.ok(out.groupUrl.includes('startgroup=' + out.token));
+    assert.ok(kv.map.has('tglink:' + out.token), 'el token queda en KV con TTL');
+    // ajeno → 404 y CERO consultas a tenants
+    db.writes.length = 0;
+    const foreign = `/api/admin/tenants/${LEADS[1].id}/telegram/link`;
+    await assert.rejects(testing.adminRouter(adminReq(foreign, { method: 'POST' }), env, ctx, foreign, new URL('https://x' + foreign), {}, OWN), (e) => e.code === 'not_found');
+    assert.equal(db.writes.length, 0, 'el 404 de alcance no toca D1');
+  } finally { globalThis.fetch = realFetch; }
+});
+
+test('webhook de Telegram: sin secreto 200 mudo; con /start válido vincula, borra el token y no revincula al reintentar', async () => {
+  const worker = createWorker({ SYSTEM: 's', DEMOS: {}, SUMMARY_PROMPT: '', GUARDRAILS: '' });
+  const waits = [];
+  const ctx = { waitUntil(p) { waits.push(p.catch(() => {})); } };
+  const TID = '00000000-0000-4000-8000-0000000000d1';
+  const row = { id: TID, slug: 'mio', name: 'Mi Negocio', channel_address: 'web:mio' };
+  const db = tgDb(row);
+  const kv = mapKV();
+  const token = 'a'.repeat(32);
+  await kv.put('tglink:' + token, JSON.stringify({ tenantId: TID, actor: 'cliente@x.com' }));
+  const env = { DB: db, KV: kv, TELEGRAM_WEBHOOK_SECRET: 'S3CRETO', TELEGRAM_TOKEN: 'tg', TELEGRAM_CHAT_ID: '-100999' };
+  const tgReq = (body, secret) => new Request('https://vai-worker.botnexo-ia.workers.dev/telegram/webhook', {
+    method: 'POST', headers: { 'Content-Type': 'application/json', ...(secret ? { 'X-Telegram-Bot-Api-Secret-Token': secret } : {}) },
+    body: JSON.stringify(body),
+  });
+  // chat de GRUPO: id negativo — debe guardarse con el signo
+  const update = { message: { text: `/start@VelaiAvisosBot ${token}`, chat: { id: -481516234, title: 'GOgestión · Leads' } } };
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = async () => new Response('{"ok":true}', { status: 200 });
+  try {
+    // sin secreto → 200 y ninguna escritura
+    const bad = await worker.fetch(tgReq(update, null), env, ctx);
+    assert.equal(bad.status, 200);
+    assert.equal(db.writes.filter((w) => w.op === 'run').length, 0, 'sin secreto no se escribe nada');
+    // con secreto → vincula: UPDATE con chat id NEGATIVO y título, token consumido
+    const ok = await worker.fetch(tgReq(update, 'S3CRETO'), env, ctx);
+    assert.equal(ok.status, 200);
+    const update1 = db.writes.find((w) => w.sql.includes('SET telegram_chat_id='));
+    assert.ok(update1, 'escribe la vinculación');
+    assert.equal(update1.args[0], '-481516234', 'el id de grupo conserva el signo');
+    assert.equal(update1.args[1], 'GOgestión · Leads');
+    assert.equal(await kv.get('tglink:' + token), null, 'token de un solo uso');
+    await Promise.all(waits);
+    // el MISMO update reenviado → no revincula (el token ya no existe) y no lanza
+    db.writes.length = 0;
+    const replay = await worker.fetch(tgReq(update, 'S3CRETO'), env, ctx);
+    assert.equal(replay.status, 200);
+    assert.equal(db.writes.filter((w) => w.sql.includes('SET telegram_chat_id=')).length, 0, 'el reintento no revincula');
+    // un mensaje sin /start → 200 sin escritura
+    const noise = await worker.fetch(tgReq({ message: { text: 'hola grupo', chat: { id: -1 } } }, 'S3CRETO'), env, ctx);
+    assert.equal(noise.status, 200);
+    assert.equal(db.writes.filter((w) => w.op === 'run').length, 0);
+  } finally { globalThis.fetch = realFetch; }
+});
+
+test('deliver(telegram): entrega DUAL — el cliente sin chat es skip visible y Velai recibe SIEMPRE su copia', async () => {
+  const sent = [];
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = async (url, init) => {
+    if (String(url).includes('api.telegram.org')) { sent.push(JSON.parse(init.body).chat_id); return new Response('{"ok":true}', { status: 200 }); }
+    return new Response('{}', { status: 200 });
+  };
+  try {
+    const env = { TELEGRAM_TOKEN: 'tg', TELEGRAM_CHAT_ID: '-100999', KV: mapKV() };
+    const lead = { id: 'lead-1', source: 'chat web', name: 'Ana' };
+    // tenant SIN chat propio: skip visible para su ledger… pero la copia a Velai sale
+    const out = await testing.deliver(env, 'telegram', lead, { id: 't1', telegram_chat_id: null });
+    assert.deepEqual(out, { skipped: true, error: 'telegram_not_configured' }, 'cierra el bug del fallback silencioso');
+    assert.deepEqual(sent, ['-100999'], 'la copia operativa de Velai SÍ llegó');
+    // el reintento del ledger (skipped se revisita) NO duplica la copia a Velai
+    await testing.deliver(env, 'telegram', lead, { id: 't1', telegram_chat_id: null });
+    assert.equal(sent.length, 1, 'copia deduplicada por lead');
+    // tenant CON chat propio: le llega a él Y a Velai (lead nuevo)
+    sent.length = 0;
+    await testing.deliver(env, 'telegram', { id: 'lead-2', source: 'chat web' }, { id: 't1', telegram_chat_id: '-555' });
+    assert.deepEqual(sent.sort(), ['-100999', '-555'].sort());
+    // tenant cuyo chat ES el de Velai (backfill): un solo envío, sin duplicar
+    sent.length = 0;
+    await testing.deliver(env, 'telegram', { id: 'lead-3', source: 'chat web' }, { id: 't2', telegram_chat_id: '-100999' });
+    assert.deepEqual(sent, ['-100999']);
+    // y las alertas operativas conservan el respaldo global de siempre
+    sent.length = 0;
+    await testing.sendTelegramText(env, 'alerta interna');
+    assert.deepEqual(sent, ['-100999']);
+  } finally { globalThis.fetch = realFetch; }
+});
+
+test('telegram: GET de estado y DELETE de desvinculación (rol cliente, solo lo suyo)', async () => {
+  const TID = '00000000-0000-4000-8000-0000000000d1';
+  const row = { id: TID, slug: 'mio', name: 'Mi Negocio', channel_address: 'web:mio', telegram_chat_id: '-555', telegram_chat_title: 'Mi grupo', telegram_linked_at: '2026-08-21T10:00:00Z' };
+  const db = tgDb(row);
+  const env = { DB: db, KV: mapKV(), TELEGRAM_TOKEN: 'tg' };
+  const ctx = { waitUntil(p) { if (p && p.catch) p.catch(() => {}); } };
+  const OWN = { role: 'cliente', tenantId: TID, email: 'cliente@x.com' };
+  const path = `/api/admin/tenants/${TID}/telegram`;
+  const got = await (await testing.adminRouter(adminReq(path), env, ctx, path, new URL('https://x' + path), {}, OWN)).json();
+  assert.deepEqual(got.telegram, { linked: true, title: 'Mi grupo', linked_at: '2026-08-21T10:00:00Z' });
+  const del = await (await testing.adminRouter(adminReq(path, { method: 'DELETE' }), env, ctx, path, new URL('https://x' + path), {}, OWN)).json();
+  assert.equal(del.ok, true);
+  const cleared = db.writes.find((w) => w.sql.includes('SET telegram_chat_id=NULL'));
+  assert.ok(cleared, 'limpia las tres columnas');
+  assert.ok(db.writes.some((w) => w.sql.includes('tenant_versions')), 'queda auditado');
+});

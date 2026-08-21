@@ -81,7 +81,35 @@ function wireDetail(){$('#saveStatus').onclick=async()=>{try{await api('/api/adm
 // ── Vistas (barra lateral) ──
 const TERRS={already_provisioned:'Ese paso ya está hecho (idempotente: un doble clic no crea recursos duplicados).',provision_in_progress:'Ese paso ya está en curso, espera unos segundos.',waba_required:'Rellena y guarda primero la WABA del cliente.',subaccount_required:'Crea primero la subcuenta (paso 1).',twilio_auth_token_missing:'La subcuenta no tiene auth token guardado.',provision_orphan:'Twilio creó el recurso pero D1 no lo guardó: revisa Telegram y reconcilia a mano.',invalid_code:'El OTP son 4-8 dígitos.',slug_taken:'Ese slug ya existe.',address_taken:'Ese canal ya está asignado a otro cliente: guardarlo desviaría sus conversaciones.',subaccount_taken:'Esa subcuenta de Twilio ya está asignada a otro cliente.',pending_tenant_cannot_be_active:'Un prospecto (canal pending:) no puede activarse: ponle primero su canal real.',invalid_twilio_auth_token:'El auth token debe ser 32 caracteres hexadecimales (Twilio → Keys & Credentials).',stale_tenant:'Alguien modificó este cliente mientras editabas. Recarga la ficha y vuelve a aplicar tus cambios.',nothing_to_update:'No hay cambios que guardar.',invalid_preview:'Escribe un mensaje de prueba y un contexto de al menos 50 caracteres.',rate_limited:'Demasiadas pruebas seguidas: espera un minuto.',email_taken:'Ese correo ya tiene acceso al panel de OTRO cliente (un correo pertenece a un solo cliente).',email_is_admin:'Ese correo es admin de Velai (ADMIN_EMAILS): ya ve todo, no puede ser usuario de un cliente.',invalid_email:'Eso no parece un correo válido.',cloudflare_api_not_configured:'Falta CF_API_TOKEN (secret) o CF_ACCOUNT_ID en el worker: la sincronización con Cloudflare no está activa.',turnstile_sync_failed:'El PUT a Turnstile falló DESPUÉS de guardar en D1: el worker acepta el origen pero Turnstile no emitirá token. Reintenta Sincronizar Turnstile.',turnstile_domains_limit:'Turnstile admite 10 dominios por widget y ya se superan incluso plegando los www: toca pasar a un widget por cliente (alternativa §4 de la spec).',already_admin:'Ese correo ya es admin.',email_is_client:'Ese correo es usuario de un CLIENTE: primero quítalo de la ficha del cliente y luego dale admin.',admin_is_root:'Ese admin es raíz (vive en la configuración del worker): no se puede quitar desde el panel.',cannot_remove_self:'No puedes quitarte a ti mismo (que lo haga otro admin): evita el cierre accidental.',root_only:'Solo los admins raíz (los de la configuración del worker) pueden tocar la configuración.',invalid_token_format:'Eso no parece un token de API de Cloudflare.',token_invalid:'Cloudflare rechazó el token (no está activo): NO se guardó.',token_verify_unavailable:'No se pudo validar contra Cloudflare (red): NO se guardó.'};
 let tenantList=[],editing=null;
-document.querySelectorAll('.tab[data-view]').forEach(b=>b.onclick=()=>{document.querySelectorAll('.tab[data-view]').forEach(x=>{x.classList.toggle('is-on',x===b);x.setAttribute('aria-selected',x===b?'true':'false')});const v=b.dataset.view;$('#viewLeads').hidden=v!=='leads';$('#viewTenants').hidden=v!=='tenants';$('#viewConfig').hidden=v!=='config';$('#viewCalendario').hidden=v!=='calendario';if(v==='tenants')loadTenantList();else if(v==='config'){loadAdmins();loadConfig()}else if(v==='calendario'){calMenu()}else loadStats()});
+document.querySelectorAll('.tab[data-view]').forEach(b=>b.onclick=()=>{document.querySelectorAll('.tab[data-view]').forEach(x=>{x.classList.toggle('is-on',x===b);x.setAttribute('aria-selected',x===b?'true':'false')});const v=b.dataset.view;$('#viewLeads').hidden=v!=='leads';$('#viewTenants').hidden=v!=='tenants';$('#viewConfig').hidden=v!=='config';$('#viewCalendario').hidden=v!=='calendario';$('#viewConexiones').hidden=v!=='conexiones';if(v==='tenants')loadTenantList();else if(v==='config'){loadAdmins();loadConfig()}else if(v==='calendario'){calMenu()}else if(v==='conexiones'){cxMenu()}else loadStats()});
+// ── Conexiones (SPEC-CONEXIONES PR1): Telegram de avisos en autoservicio ──
+// El cliente abre SU tarjeta; Velai elige tenant con el selector de la cabecera.
+let cxTenant=null;
+async function cxMenu(){if(ME&&ME.tenantId){cxTenant=ME.tenantId;return loadConexiones()}
+ try{if(!tenantList.length){const d=await api('/api/admin/tenants');tenantList=d.tenants}
+  if(!tenantList.length)return toast('Aún no hay clientes dados de alta',false);
+  cxTenant=cxTenant||((tenantList.find(t=>t.slug==='velai')||tenantList[0]).id);
+  $('#cxTenantSel').innerHTML=tenantList.map(x=>'<option value="'+esc(x.id)+'"'+(x.id===cxTenant?' selected':'')+'>'+esc(x.name)+'</option>').join('');
+  loadConexiones()}
+ catch(e){toast('No se pudieron cargar las conexiones: '+e.message,false)}}
+$('#cxTenantSel').onchange=e=>{cxTenant=e.target.value;loadConexiones()};
+async function loadConexiones(){$('#tgLinkBox').hidden=true;
+ try{const d=await api('/api/admin/tenants/'+cxTenant+'/telegram');const t=d.telegram;
+  $('#tgState').innerHTML=t.linked
+   ?'<span class="flag ok">Conectado'+(t.title?': '+esc(t.title):'')+'</span>'+(t.linked_at?' <span class="muted">desde '+fmt(t.linked_at)+'</span>':'')
+   :'Sin conectar. Los avisos de este negocio aún no llegan a su Telegram.';
+  $('#tgLink').textContent=t.linked?'Vincular otro chat':'Conectar Telegram';
+  $('#tgUnlink').hidden=!t.linked}
+ catch(e){$('#tgState').textContent=e.message}}
+$('#tgLink').onclick=async()=>{try{const d=await api('/api/admin/tenants/'+cxTenant+'/telegram/link',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'});
+ $('#tgGroupUrl').href=d.groupUrl;$('#tgDmUrl').href=d.dmUrl;$('#tgCmd').textContent='/start '+d.token;$('#tgLinkBox').hidden=false}
+ catch(e){toast('No se pudo generar el enlace: '+(TERRS[e.message]||e.message),false)}};
+$('#tgUnlink').onclick=async()=>{if(!confirm('¿Desvincular el Telegram? Los avisos de leads dejarán de llegar a ese chat.'))return;
+ try{await api('/api/admin/tenants/'+cxTenant+'/telegram',{method:'DELETE'});toast('Telegram desvinculado');loadConexiones()}
+ catch(e){toast('No se pudo desvincular: '+(TERRS[e.message]||e.message),false)}};
+$('#tgSetup').onclick=async()=>{try{const d=await api('/api/admin/telegram/setup',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'});
+ $('#tgSetupOut').textContent='Webhook registrado ✓ (bot @'+(d.botUsername||'?')+')'}
+ catch(e){$('#tgSetupOut').textContent='Error: '+(TERRS[e.message]||e.message)}};
 // El ítem Calendario del menú: el cliente abre SU calendario; Velai abre el del
 // tenant velai (su propio negocio también agenda citas) con selector para saltar
 // al de cualquier cliente sin pasar por la lista.

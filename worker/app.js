@@ -5,6 +5,8 @@ import { createSubaccount, createLeadTemplate, submitTemplateApproval, fetchAppr
 import { CALENDAR_TOOLS, CALENDAR_GUARDRAILS, DEFAULT_BUSINESS_HOURS, freeSlots, localToUtcMs, localDateStr, localWeekday, googleAuthUrl, exchangeGoogleCode, refreshGoogleToken, revokeGoogleToken, googleBusy, createGoogleEvent } from './calendar.js';
 
 const JSON_HEADERS = { 'Content-Type': 'application/json; charset=utf-8' };
+// URL pública del worker: webhook de Twilio (senders) y de Telegram apuntan aquí.
+const WORKER_PUBLIC_URL = 'https://vai-worker.botnexo-ia.workers.dev';
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const STATUSES = new Set(['new', 'contacted', 'qualified', 'won', 'lost', 'spam']);
 const UTM_KEYS = ['utm_source', 'utm_medium', 'utm_campaign', 'utm_content', 'utm_term', 'gclid', 'fbclid'];
@@ -577,6 +579,71 @@ async function invalidateTenantCache(env, tenants) {
   await Promise.all([...keys].map((k) => env.KV.delete(k).catch(() => {})));
 }
 
+// ── Telegram en autoservicio (SPEC-CONEXIONES PR1) ───────────────────────────
+// El cliente pulsa su enlace t.me con un token de un solo uso, Telegram nos entrega
+// el /start por webhook, y la fila del tenant queda vinculada a SU chat sin que
+// nadie transcriba un chat id a mano.
+
+// Comparación en tiempo constante para el secreto del webhook (mismo principio que
+// la firma de Twilio): longitudes desiguales salen rápido, el resto no filtra bytes.
+function timingSafeEqual(a, b) {
+  const x = String(a); const y = String(b);
+  if (x.length !== y.length) return false;
+  let diff = 0;
+  for (let i = 0; i < x.length; i++) diff |= x.charCodeAt(i) ^ y.charCodeAt(i);
+  return diff === 0;
+}
+
+// Usuario del bot (para construir los enlaces t.me): se descubre con getMe y se
+// cachea en KV — sin variable nueva que pueda quedar desincronizada del token.
+async function telegramBotUsername(env) {
+  if (!env.TELEGRAM_TOKEN) return null;
+  if (env.KV) { try { const cached = await env.KV.get('tg:botuser'); if (cached) return cached; } catch (_) {} }
+  try {
+    const response = await fetch(`https://api.telegram.org/bot${env.TELEGRAM_TOKEN}/getMe`, { signal: AbortSignal.timeout(8000) });
+    const data = await response.json();
+    const username = (data && data.ok && data.result && clean(data.result.username, 64)) || null;
+    if (username && env.KV) { try { await env.KV.put('tg:botuser', username, { expirationTtl: 86400 }); } catch (_) {} }
+    return username;
+  } catch (_) { return null; }
+}
+
+async function handleTelegramWebhook(request, env, ctx) {
+  const update = await readJson(request, 16000).catch(() => null);
+  const message = update && update.message;
+  const text = clean(message && message.text, 200);
+  // En grupos el cliente llega como '/start@NombreDelBot <token>': aceptar ambas formas.
+  const match = text.match(/^\/start(?:@\w+)?\s+([0-9a-f]{32})\b/i);
+  if (!match || !message.chat || message.chat.id === undefined) return json({ ok: true }, 200, NO_STORE);
+  const token = match[1].toLowerCase();
+  let stored = null;
+  try { stored = await env.KV.get(`tglink:${token}`, 'json'); } catch (_) {}
+  if (!stored || !stored.tenantId) {
+    // Nada al chat: un token caducado no debe confirmar que un cliente existe.
+    console.log(JSON.stringify({ level: 'info', code: 'telegram_link_expired' }));
+    return json({ ok: true }, 200, NO_STORE);
+  }
+  // Un solo uso: borrar ANTES de escribir — el reintento del mismo update no revincula.
+  await env.KV.delete(`tglink:${token}`);
+  const chatId = String(message.chat.id);
+  if (!CHAT_ID_RE.test(chatId)) return json({ ok: true }, 200, NO_STORE);
+  const title = clean(message.chat.title || message.chat.first_name, 100) || null;
+  const row = await env.DB.prepare('SELECT id, slug, name, channel_address FROM tenants WHERE id=?').bind(stored.tenantId).first();
+  if (!row) return json({ ok: true }, 200, NO_STORE);
+  const now = new Date().toISOString();
+  await env.DB.prepare('UPDATE tenants SET telegram_chat_id=?, telegram_chat_title=?, telegram_linked_at=?, updated_at=? WHERE id=?')
+    .bind(chatId, title, now, now, stored.tenantId).run();
+  await invalidateTenantCache(env, [row]);
+  console.log(JSON.stringify({ level: 'info', code: 'telegram_linked', tenant: row.slug }));
+  ctx.waitUntil(env.DB.prepare('INSERT INTO tenant_versions (tenant_id,actor_email,field,previous_value,note,created_at) VALUES (?,?,?,?,?,?)')
+    .bind(stored.tenantId, stored.actor, 'telegram', null, `vinculado: ${title || 'chat'}`, now).run().catch(() => {}));
+  // Confirmación al propio chat (el cliente ve que funcionó sin volver al panel)…
+  ctx.waitUntil(sendTelegramText(env, `✅ Listo. Los avisos de leads de <b>${escapeHtml(row.name)}</b> llegarán a este chat.`, chatId).catch(() => {}));
+  // …y alerta operativa a Velai (aquí el respaldo global es correcto: es interna).
+  ctx.waitUntil(sendTelegramText(env, `🔗 <b>${escapeHtml(row.name)}</b> vinculó su Telegram (${escapeHtml(title || chatId)}).`).catch(() => {}));
+  return json({ ok: true }, 200, NO_STORE);
+}
+
 // ── Handoff a humano (SPEC-HANDOFF §A) ───────────────────────────────────────
 // El modelo termina con [[HUMANO]] SOLO cuando la persona pide hablar con alguien
 // del equipo (instrucción en GUARDRAILS). El centinela se quita SIEMPRE del texto:
@@ -661,8 +728,12 @@ function notificationText(lead) {
   return text + '\n⚡ <b>Contactar hoy mismo</b>';
 }
 
-async function sendTelegramText(env, text, chatId) {
-  const target = chatId || env.TELEGRAM_CHAT_ID;
+// El respaldo a env.TELEGRAM_CHAT_ID es para las alertas OPERATIVAS de Velai
+// (provision_orphan, tokens indescifrables…), NUNCA para el aviso de lead de un
+// cliente: ahí un chat id vacío tiene que ser un skip visible, no un mensaje que
+// acaba en el Telegram de Velai diciendo ok:true (SPEC-CONEXIONES §1.2).
+async function sendTelegramText(env, text, chatId, { allowFallback = true } = {}) {
+  const target = chatId || (allowFallback ? env.TELEGRAM_CHAT_ID : null);
   if (!env.TELEGRAM_TOKEN || !target) return { skipped: true, error: 'not_configured' };
   const response = await fetch(`https://api.telegram.org/bot${env.TELEGRAM_TOKEN}/sendMessage`, {
     method: 'POST', headers: JSON_HEADERS,
@@ -696,7 +767,25 @@ function leadTemplateVariables(lead) {
 // Los canales de aviso se resuelven por tenant con respaldo a las variables de
 // entorno: Velai sigue funcionando aunque su fila falte o esté incompleta.
 async function deliver(env, channel, lead, tenant) {
-  if (channel === 'telegram') return sendTelegramText(env, notificationText(lead), tenant && tenant.telegram_chat_id);
+  if (channel === 'telegram') {
+    // Entrega DUAL (decisión de Juan, 2026-08-21): el aviso del cliente va a SU chat
+    // — y sin chat propio es un skip VISIBLE, no un fallback silencioso — pero a
+    // Velai le llega SIEMPRE una copia operativa de cada lead, deduplicada por lead
+    // para que los reintentos del ledger no dupliquen el ping.
+    const chatId = tenant ? tenant.telegram_chat_id : env.TELEGRAM_CHAT_ID;
+    if (env.TELEGRAM_CHAT_ID && String(chatId || '') !== String(env.TELEGRAM_CHAT_ID)) {
+      try {
+        const dedupeId = lead.id || lead.request_id || '';
+        const opsKey = `opsping:${dedupeId}`;
+        if (!dedupeId || !env.KV || !(await env.KV.get(opsKey))) {
+          if (dedupeId && env.KV) await env.KV.put(opsKey, '1', { expirationTtl: 30 * 86400 });
+          await sendTelegramText(env, notificationText(lead), env.TELEGRAM_CHAT_ID);
+        }
+      } catch (_) { /* la copia de Velai jamás decide el estado del aviso del cliente */ }
+    }
+    if (tenant && !chatId) return { skipped: true, error: 'telegram_not_configured' };
+    return sendTelegramText(env, notificationText(lead), chatId, { allowFallback: false });
+  }
   const sub = tenant && tenant.twilio_subaccount_sid;
   const recipientsRaw = (tenant && tenant.team_whatsapp) || env.TEAM_WHATSAPP;
   // Los recursos del padre (número y plantilla de Velai) NO existen dentro de una
@@ -1618,7 +1707,7 @@ async function runProvisionStep(request, env, ctx, tenant, tenantId, step, actor
     const body = await readJson(request, 2000);
     const phone = clean(body.phone, 20);
     if (!/^\+[1-9]\d{6,14}$/.test(phone)) throw new HttpError(400, 'invalid_phone');
-    const created = await createWhatsAppSender(credentials, { phone, wabaId: tenant.waba_id, callbackUrl: 'https://vai-worker.botnexo-ia.workers.dev' });
+    const created = await createWhatsAppSender(credentials, { phone, wabaId: tenant.waba_id, callbackUrl: WORKER_PUBLIC_URL });
     try {
       const res = await env.DB.prepare('UPDATE tenants SET sender_sid=?, sender_status=?, updated_at=? WHERE id=? AND sender_sid IS NULL')
         .bind(created.senderSid, created.status || 'CREATING', now, tenantId).run();
@@ -1690,6 +1779,9 @@ function clienteAllowed(path, method) {
   // handler exige que el :id sea el suyo (ajeno = 404, nunca 403).
   if (/^\/api\/admin\/tenants\/[0-9a-f-]+\/calendar$/i.test(path) && ['GET', 'PATCH', 'DELETE'].includes(method)) return true;
   if (/^\/api\/admin\/tenants\/[0-9a-f-]+\/calendar\/connect$/i.test(path) && method === 'POST') return true;
+  // Telegram en autoservicio (SPEC-CONEXIONES PR1): mismo molde que el calendario.
+  if (/^\/api\/admin\/tenants\/[0-9a-f-]+\/telegram$/i.test(path) && ['GET', 'DELETE'].includes(method)) return true;
+  if (/^\/api\/admin\/tenants\/[0-9a-f-]+\/telegram\/link$/i.test(path) && method === 'POST') return true;
   if (path === '/api/admin/stats' && method === 'GET') return true;
   if (path === '/api/admin/me' && method === 'GET') return true;
   if (path === '/api/admin/escalations' && method === 'GET') return true;
@@ -1985,6 +2077,54 @@ async function adminRouter(request, env, ctx, path, url, config, scope) {
       .bind(...values, ...sc.args, limit).all()).results;
     if (scope.role !== 'velai') for (const row of rows) { delete row.tenant_name; delete row.tenant_id; }
     return json({ appointments: rows }, 200, NO_STORE);
+  }
+
+  // ── Telegram del tenant (SPEC-CONEXIONES PR1): vinculación en autoservicio ──
+  if (path === '/api/admin/telegram/setup' && request.method === 'POST') {
+    // Registra el webhook del bot (idempotente; solo Velai). OJO operativo: con el
+    // webhook activo, getUpdates deja de funcionar para ese bot (OPERATIONS.md).
+    if (!env.TELEGRAM_TOKEN || !env.TELEGRAM_WEBHOOK_SECRET) throw new HttpError(503, 'telegram_not_configured');
+    const response = await fetch(`https://api.telegram.org/bot${env.TELEGRAM_TOKEN}/setWebhook`, {
+      method: 'POST', headers: JSON_HEADERS,
+      body: JSON.stringify({ url: `${WORKER_PUBLIC_URL}/telegram/webhook`, secret_token: env.TELEGRAM_WEBHOOK_SECRET, allowed_updates: ['message'] }),
+      signal: AbortSignal.timeout(8000),
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok || !data.ok) throw new HttpError(502, 'telegram_setup_failed');
+    console.log(JSON.stringify({ level: 'info', code: 'telegram_webhook_registered', actor }));
+    return json({ ok: true, botUsername: await telegramBotUsername(env) }, 200, NO_STORE);
+  }
+  const tgMatch = path.match(/^\/api\/admin\/tenants\/([0-9a-f-]+)\/telegram(?:\/(link))?$/i);
+  if (tgMatch) {
+    if (!UUID_RE.test(tgMatch[1])) throw new HttpError(404, 'not_found');
+    const tenantId = tgMatch[1];
+    // Autoservicio: el cliente solo SU tenant — ajeno = 404, ANTES de tocar D1.
+    if (scope.role !== 'velai' && scope.tenantId !== tenantId) throw new HttpError(404, 'not_found');
+    const tenantRow = await env.DB.prepare('SELECT id, slug, name, channel_address, telegram_chat_id, telegram_chat_title, telegram_linked_at FROM tenants WHERE id=?').bind(tenantId).first();
+    if (!tenantRow) throw new HttpError(404, 'not_found');
+    if (tgMatch[2] === 'link' && request.method === 'POST') {
+      if (!env.KV || !env.TELEGRAM_TOKEN) throw new HttpError(503, 'telegram_not_configured');
+      if (await rateLimited(env, actor, 'tglink', 5)) throw new HttpError(429, 'rate_limited');
+      const botUser = await telegramBotUsername(env);
+      if (!botUser) throw new HttpError(503, 'telegram_not_configured');
+      // 32 hex sin guiones: el payload de /start admite 64 caracteres como máximo.
+      const token = crypto.randomUUID().replace(/-/g, '');
+      await env.KV.put(`tglink:${token}`, JSON.stringify({ tenantId, actor }), { expirationTtl: 900 });
+      return json({ token, dmUrl: `https://t.me/${botUser}?start=${token}`, groupUrl: `https://t.me/${botUser}?startgroup=${token}`, expiresInSeconds: 900 }, 200, NO_STORE);
+    }
+    if (!tgMatch[2] && request.method === 'GET') {
+      return json({ telegram: { linked: Boolean(tenantRow.telegram_chat_id), title: tenantRow.telegram_chat_title || null, linked_at: tenantRow.telegram_linked_at || null } }, 200, NO_STORE);
+    }
+    if (!tgMatch[2] && request.method === 'DELETE') {
+      const now = new Date().toISOString();
+      await env.DB.prepare('UPDATE tenants SET telegram_chat_id=NULL, telegram_chat_title=NULL, telegram_linked_at=NULL, updated_at=? WHERE id=?').bind(now, tenantId).run();
+      await invalidateTenantCache(env, [tenantRow]);
+      console.log(JSON.stringify({ level: 'info', code: 'telegram_unlinked', tenant: tenantRow.slug, actor_role: scope.role }));
+      ctx.waitUntil(env.DB.prepare('INSERT INTO tenant_versions (tenant_id,actor_email,field,previous_value,note,created_at) VALUES (?,?,?,?,?,?)')
+        .bind(tenantId, actor, 'telegram', tenantRow.telegram_chat_title || null, 'desvinculado', now).run().catch(() => {}));
+      return json({ ok: true }, 200, NO_STORE);
+    }
+    throw new HttpError(405, 'method_not_allowed');
   }
 
   // ── Calendario del tenant (SPEC-CALENDARIO §6): solo rol velai en v1
@@ -2445,6 +2585,17 @@ export function createWorker(config) {
           if (await rateLimited(env, twilioIp, 'twilio', 120)) throw new HttpError(429, 'rate_limited');
           return await handleTwilio(request, env, ctx, config);
         }
+        if (path === '/telegram/webhook' && request.method === 'POST') {
+          // Público (lo llama Telegram, fuera de Access): primero el secreto, y 200
+          // SIEMPRE — un 403 confirma el endpoint a un escáner y pone a Telegram a
+          // reintentar en bucle. Sin secreto configurado, el endpoint no existe.
+          if (!env.TELEGRAM_WEBHOOK_SECRET || !timingSafeEqual(request.headers.get('X-Telegram-Bot-Api-Secret-Token') || '', env.TELEGRAM_WEBHOOK_SECRET)) {
+            return json({ ok: true }, 200, NO_STORE);
+          }
+          const tgIp = request.headers.get('CF-Connecting-IP') || 'unknown';
+          if (await rateLimited(env, tgIp, 'tgwh', 120)) return json({ ok: true }, 200, NO_STORE);
+          return await handleTelegramWebhook(request, env, ctx);
+        }
         if (path === '/widget/boot' && request.method === 'GET') {
           return await handleWidgetBoot(request, env, url);
         }
@@ -2470,4 +2621,4 @@ export function createWorker(config) {
   };
 }
 
-export const testing = { clean, normalizePhone, extractPhone, safeUtm, publicCors, validTwilioSignature, callAnthropic, callAnthropicRaw, runToolLoop, calendarExecutor, calendarSystem, tenantCalendar, validCalendarDate, availableSlots, handleCalendarCallback, calendarCallbackFor, sendTwilioText, csvCell, expiryDate, leadFilters, isDemoKey, templateVar, leadTemplateVariables, readJson, deliver, drainQueuedLeads, verifyTurnstile, systemFor, validateTenant, invalidateTenantCache, tenantWriteError, assertNotActivePending, handleProvision, pollProvisioning, fillSeries, resolveScope, scopeClause, clienteAllowed, adminRouter, recordAuthFailure, handleAdmin, handleWidgetBoot, allowedOrigins, envOrigins, syncPanelGate, envAdmins, syncAdminGate, getSetting, setSetting, withCfToken };
+export const testing = { clean, normalizePhone, extractPhone, safeUtm, publicCors, validTwilioSignature, callAnthropic, callAnthropicRaw, runToolLoop, calendarExecutor, calendarSystem, tenantCalendar, validCalendarDate, availableSlots, handleCalendarCallback, calendarCallbackFor, sendTwilioText, timingSafeEqual, telegramBotUsername, handleTelegramWebhook, sendTelegramText, csvCell, expiryDate, leadFilters, isDemoKey, templateVar, leadTemplateVariables, readJson, deliver, drainQueuedLeads, verifyTurnstile, systemFor, validateTenant, invalidateTenantCache, tenantWriteError, assertNotActivePending, handleProvision, pollProvisioning, fillSeries, resolveScope, scopeClause, clienteAllowed, adminRouter, recordAuthFailure, handleAdmin, handleWidgetBoot, allowedOrigins, envOrigins, syncPanelGate, envAdmins, syncAdminGate, getSetting, setSetting, withCfToken };
