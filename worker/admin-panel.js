@@ -44,6 +44,17 @@ async function loadTenants(){try{const d=await api('/api/admin/tenants');for(con
 // Cerrar sesión = logout de Cloudflare Access (borra la cookie CF_Authorization de
 // esta app y redirige al login). La ruta la atiende Access, nunca llega al worker.
 $('#logout').onclick=()=>{location.href='/cdn-cgi/access/logout'};
+// Tema de las VISTAS (canvas «Panel Velai — Tema claro»): claro por defecto, el
+// botón del pie de la barra alterna a oscuro. La barra lateral no cambia nunca
+// (los tokens oscuros de :root no entran en el ámbito de main/dialog). La elección
+// se recuerda POR PESTAÑA en sessionStorage — la invariante del panel prohíbe el
+// almacenamiento persistente del navegador.
+function applyTheme(dark){document.body.classList.toggle('dark',!!dark);
+ $('#thSun').hidden=!dark;$('#thMoon').hidden=!!dark;
+ $('#themeLabel').textContent=dark?'Tema claro':'Tema oscuro';
+ try{sessionStorage.setItem('velai-panel-dark',dark?'1':'')}catch(e){}}
+$('#themeBtn').onclick=()=>applyTheme(!document.body.classList.contains('dark'));
+(function(){let dark=false;try{dark=sessionStorage.getItem('velai-panel-dark')==='1'}catch(e){}if(dark)applyTheme(true)})();
 $('#filters').onsubmit=e=>{e.preventDefault();cursor=null;load()};$('#more').onclick=()=>load(true);$('#export').onclick=()=>location.href='/api/admin/leads/export.csv?'+params();$('#close').onclick=()=>$('#detail').close();
 $('#rows').onclick=e=>{const tr=e.target.closest('[data-id]');if(tr)openLead(tr.dataset.id)};
 async function openLead(id){try{const d=await api('/api/admin/leads/'+id);current=d.lead;const l=d.lead;
