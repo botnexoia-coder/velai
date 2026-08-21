@@ -1,7 +1,7 @@
 import { ADMIN_HEADERS, ADMIN_HTML } from './admin-page.js';
 import { encryptSecret, decryptSecret } from './crypto.js';
 import { cloudflareConfigured, syncTurnstileDomains, syncAccessGroup, syncAdminGroup, verifyCfToken } from './cloudflare.js';
-import { createSubaccount, createLeadTemplate, submitTemplateApproval, fetchApprovalStatus, createWhatsAppSender, verifySender, fetchSenderStatus } from './twilio.js';
+import { createSubaccount, createLeadTemplate, submitTemplateApproval, fetchApprovalStatus, createWhatsAppSender, verifySender, fetchSenderStatus, listWhatsAppSenders, updateSenderWebhook } from './twilio.js';
 import { CALENDAR_TOOLS, CALENDAR_GUARDRAILS, DEFAULT_BUSINESS_HOURS, freeSlots, localToUtcMs, localDateStr, localWeekday, googleAuthUrl, exchangeGoogleCode, refreshGoogleToken, revokeGoogleToken, googleBusy, createGoogleEvent } from './calendar.js';
 
 const JSON_HEADERS = { 'Content-Type': 'application/json; charset=utf-8' };
@@ -1834,6 +1834,44 @@ async function runProvisionStep(request, env, ctx, tenant, tenantId, step, actor
     return json({ ok: true, sid: contentSid, status: 'pending' }, 201, NO_STORE);
   }
 
+  if (step === 'sender/sync') {
+    // Reconciliación de LECTURA (SPEC-CONEXIONES PR2): tras el Self Sign-up del
+    // cliente en la consola, el worker lee el sender de la subcuenta y rellena la
+    // fila solo. Idempotente y NO destructivo: channel_address y twilio_from no se
+    // pisan si ya tienen valor — channel_address es UNIQUE y enruta TODOS los
+    // webhooks del cliente; pisarlo por una lectura dejaría al tenant sin atender.
+    const senders = await listWhatsAppSenders(credentials);
+    if (!senders.length) throw new HttpError(404, 'sender_not_found');
+    if (senders.length > 1) throw new HttpError(409, 'multiple_senders'); // decidir a mano, no adivinar
+    const s = senders[0];
+    const phone = s.senderId;
+    const proposed = { waba_id: s.wabaId, sender_sid: s.senderSid, sender_status: s.status, twilio_from: phone, channel_address: phone };
+    const sets = []; const args = [];
+    for (const [col, val] of Object.entries(proposed)) {
+      if (!val) continue;
+      if ((col === 'channel_address' || col === 'twilio_from') && tenant[col]) continue; // ya puesto: se informa, no se pisa
+      sets.push(`${col}=?`); args.push(val);
+    }
+    if (sets.length) {
+      await env.DB.prepare(`UPDATE tenants SET ${sets.join(',')}, updated_at=? WHERE id=?`).bind(...args, now, tenantId).run();
+      await invalidateTenantCache(env, [tenant]);
+    }
+    // El Self Sign-up deja el webhook en el default de Twilio: sender verde y bot
+    // mudo. Si no apunta al worker, se repara AQUÍ y se informa del resultado.
+    let webhookOk = s.webhookUrl === WORKER_PUBLIC_URL;
+    let webhookFixed = false;
+    if (!webhookOk) {
+      try { await updateSenderWebhook(credentials, s.senderSid, WORKER_PUBLIC_URL); webhookOk = true; webhookFixed = true; }
+      catch (error) { console.log(JSON.stringify({ level: 'error', code: 'sender_webhook_fix_failed', tenant: tenant.slug, error: clean(error.message, 60) })); }
+    }
+    await provisionAudit(env, ctx, tenantId, actor, `sender sincronizado desde Twilio (${s.senderSid}, ${s.status})${webhookFixed ? ' + webhook reparado' : ''}`);
+    return json({
+      ok: true, applied: sets.length, sender: { senderSid: s.senderSid, senderId: s.senderId, status: s.status, wabaId: s.wabaId },
+      conflicts: ['channel_address', 'twilio_from'].filter((c) => tenant[c] && tenant[c] !== phone).map((c) => ({ field: c, current: tenant[c], fromTwilio: phone })),
+      webhookOk, webhookFixed,
+    }, 200, NO_STORE);
+  }
+
   if (step === 'sender') {
     if (tenant.sender_sid) throw new HttpError(409, 'already_provisioned');
     if (!tenant.waba_id) throw new HttpError(400, 'waba_required');
@@ -1916,6 +1954,7 @@ function clienteAllowed(path, method) {
   if (/^\/api\/admin\/tenants\/[0-9a-f-]+\/telegram$/i.test(path) && ['GET', 'DELETE'].includes(method)) return true;
   if (/^\/api\/admin\/tenants\/[0-9a-f-]+\/telegram\/link$/i.test(path) && method === 'POST') return true;
   if (/^\/api\/admin\/tenants\/[0-9a-f-]+\/telegram\/bot$/i.test(path) && ['POST', 'DELETE'].includes(method)) return true;
+  if (/^\/api\/admin\/tenants\/[0-9a-f-]+\/whatsapp$/i.test(path) && method === 'GET') return true;
   if (/^\/api\/admin\/tenants\/[0-9a-f-]+\/telegram\/topics$/i.test(path) && method === 'POST') return true;
   if (/^\/api\/admin\/tenants\/[0-9a-f-]+\/telegram\/topics\/\d+$/i.test(path) && ['PATCH', 'DELETE'].includes(method)) return true;
   if (path === '/api/admin/stats' && method === 'GET') return true;
@@ -2103,7 +2142,7 @@ async function adminRouter(request, env, ctx, path, url, config, scope) {
       porDia: fillSeries(serieRows.results || [], 14),
     }, 200, NO_STORE);
   }
-  const provMatch = path.match(/^\/api\/admin\/tenants\/([0-9a-f-]+)\/provision(?:\/(subaccount|template|sender\/verify|sender|domains))?$/i);
+  const provMatch = path.match(/^\/api\/admin\/tenants\/([0-9a-f-]+)\/provision(?:\/(subaccount|template|sender\/verify|sender\/sync|sender|domains))?$/i);
   if (provMatch) {
     if (!UUID_RE.test(provMatch[1])) throw new HttpError(404, 'not_found');
     return await handleProvision(request, env, ctx, provMatch[1], provMatch[2] || '', actor);
@@ -2213,6 +2252,18 @@ async function adminRouter(request, env, ctx, path, url, config, scope) {
       .bind(...values, ...sc.args, limit).all()).results;
     if (scope.role !== 'velai') for (const row of rows) { delete row.tenant_name; delete row.tenant_id; }
     return json({ appointments: rows }, 200, NO_STORE);
+  }
+
+  // ── WhatsApp del tenant (SPEC-CONEXIONES PR2): estado de SOLO LECTURA para el
+  // cliente, en columnas explícitas — ni el token cifrado ni el SID de la subcuenta
+  // (eso es infraestructura de Velai, no dato del cliente).
+  const waMatch = path.match(/^\/api\/admin\/tenants\/([0-9a-f-]+)\/whatsapp$/i);
+  if (waMatch && request.method === 'GET') {
+    if (!UUID_RE.test(waMatch[1])) throw new HttpError(404, 'not_found');
+    if (scope.role !== 'velai' && scope.tenantId !== waMatch[1]) throw new HttpError(404, 'not_found');
+    const row = await env.DB.prepare('SELECT channel_address, twilio_from, (waba_id IS NOT NULL) AS has_waba, sender_status, lead_template_status, meta_partner_status, team_whatsapp, wa_number, (twilio_auth_token_enc IS NOT NULL) AS has_token, (twilio_subaccount_sid IS NOT NULL) AS has_subaccount FROM tenants WHERE id=?').bind(waMatch[1]).first();
+    if (!row) throw new HttpError(404, 'not_found');
+    return json({ whatsapp: row }, 200, NO_STORE);
   }
 
   // ── Telegram del tenant (SPEC-CONEXIONES PR1): vinculación en autoservicio ──

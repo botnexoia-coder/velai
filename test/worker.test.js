@@ -2154,3 +2154,75 @@ test('temas desde el panel: se crean en el Telegram del cliente con descripción
     assert.equal(patched.topics[0].description, 'todo lo que hable de dinero');
   } finally { globalThis.fetch = realFetch; }
 });
+
+// ── SPEC-CONEXIONES PR2: WhatsApp sender/sync + estado para el cliente ───────
+
+test('sender/sync: reconcilia desde Twilio sin pisar el canal, repara el webhook y no adivina', async () => {
+  const subToken = 'f0e1d2c3b4a5968778695a4b3c2d1e0f';
+  const mkTenant = async (env, extra) => ({
+    id: '00000000-0000-4000-8000-00000000000a', slug: 'gogestion', name: 'GOgestión',
+    twilio_subaccount_sid: 'AC' + 'c'.repeat(32),
+    twilio_auth_token_enc: await encryptSecret(env, '00000000-0000-4000-8000-00000000000a', subToken),
+    waba_id: null, sender_sid: null, sender_status: null, twilio_from: null, channel_address: 'web:gogestion', ...extra,
+  });
+  let senders = []; const twilioCalls = [];
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = async (url, init) => {
+    const u = String(url); twilioCalls.push({ u, method: (init && init.method) || 'POST', body: init && init.body });
+    if (u.endsWith('/v2/channels/senders') && (!init || init.method === 'GET')) return new Response(JSON.stringify({ senders }), { status: 200 });
+    if (u.includes('/v2/channels/senders/')) return new Response(JSON.stringify({ status: 'ONLINE' }), { status: 200 });
+    return new Response('{}', { status: 200 });
+  };
+  try {
+    // 0 senders → 404 y la fila no se toca
+    let h = provisionHarness({});
+    h.row = await mkTenant(h.env);
+    h.env.DB.prepare = ((orig) => (sql) => ({ bind: (...args) => ({
+      first: async () => sql.startsWith('SELECT * FROM tenants') ? h.row : null,
+      run: async () => { h.updates.push({ sql, args }); return { meta: { changes: 1 } }; },
+      all: async () => ({ results: [] }),
+    }) }))();
+    await assert.rejects(
+      testing.handleProvision(provReq(), h.env, h.ctx, h.row.id, 'sender/sync', 'admin@velai'),
+      (e) => e.code === 'sender_not_found');
+    assert.equal(h.updates.filter((u) => u.sql.includes('SET waba_id')).length, 0);
+    // 2 senders → 409 multiple_senders, sin tocar la fila
+    senders = [{ sid: 'XE1', sender_id: 'whatsapp:+34624121930' }, { sid: 'XE2', sender_id: 'whatsapp:+34999999999' }];
+    await assert.rejects(
+      testing.handleProvision(provReq(), h.env, h.ctx, h.row.id, 'sender/sync', 'admin@velai'),
+      (e) => e.code === 'multiple_senders');
+    // 1 sender con webhook por defecto: rellena, NO pisa channel_address, y REPARA el webhook
+    senders = [{ sid: 'XE' + 'a'.repeat(32), sender_id: 'whatsapp:+34624121930', status: 'ONLINE', configuration: { waba_id: '123456789012345' }, webhook: { callback_url: 'https://webhooks.twilio.com/default' } }];
+    const res = await (await testing.handleProvision(provReq(), h.env, h.ctx, h.row.id, 'sender/sync', 'admin@velai')).json();
+    assert.deepEqual([res.ok, res.webhookOk, res.webhookFixed], [true, true, true]);
+    const up = h.updates.find((u) => u.sql.includes('SET waba_id'));
+    assert.ok(up, 'rellena la fila');
+    assert.ok(up.sql.includes('waba_id=?') && up.sql.includes('sender_sid=?') && up.sql.includes('sender_status=?') && up.sql.includes('twilio_from=?'), 'campos vacíos rellenados');
+    assert.ok(!up.sql.includes('channel_address=?'), 'channel_address ya tenía valor (web:) y NO se pisa');
+    assert.deepEqual(res.conflicts, [{ field: 'channel_address', current: 'web:gogestion', fromTwilio: 'whatsapp:+34624121930' }]);
+    assert.ok(twilioCalls.some((c) => c.u.includes('/v2/channels/senders/XE') && String(c.body).includes(WORKER_URL_TEST)), 'el PUT del webhook apunta al worker');
+  } finally { globalThis.fetch = realFetch; }
+});
+const WORKER_URL_TEST = 'vai-worker.botnexo-ia.workers.dev';
+
+test('whatsapp del cliente: estado propio sin secretos, ajeno 404, y sender/sync vetado al rol cliente', async () => {
+  const TID = '00000000-0000-4000-8000-0000000000e1';
+  const db = { prepare: (sql) => ({ bind: () => ({
+    first: async () => sql.includes('FROM tenants WHERE id=') ? { channel_address: 'web:mio', twilio_from: 'whatsapp:+34624121930', has_waba: 0, sender_status: null, lead_template_status: null, meta_partner_status: 'pendiente', team_whatsapp: null, wa_number: null, has_token: 0, has_subaccount: 0 } : null,
+    all: async () => ({ results: [] }), run: async () => ({ meta: { changes: 1 } }),
+  }) }) };
+  const env = { DB: db, KV: { async get() { return null; }, async put() {}, async delete() {}, async list() { return { keys: [] }; } } };
+  const ctx = { waitUntil() {} };
+  const OWN = { role: 'cliente', tenantId: TID, email: 'cliente@x.com' };
+  const path = `/api/admin/tenants/${TID}/whatsapp`;
+  const out = await (await testing.adminRouter(adminReq(path), env, ctx, path, new URL('https://x' + path), {}, OWN)).json();
+  assert.equal(out.whatsapp.twilio_from, 'whatsapp:+34624121930');
+  const raw = JSON.stringify(out);
+  assert.ok(!raw.includes('token_enc') && !raw.includes('subaccount_sid'), 'ni token ni SID de subcuenta');
+  // ajeno → 404
+  const foreign = `/api/admin/tenants/${LEADS[1].id}/whatsapp`;
+  await assert.rejects(testing.adminRouter(adminReq(foreign), env, ctx, foreign, new URL('https://x' + foreign), {}, OWN), (e) => e.code === 'not_found');
+  // provision/* sigue siendo 403 para el cliente, ANTES de tocar D1
+  const prov = `/api/admin/tenants/${TID}/provision/sender/sync`;
+  await assert.rejects(testing.adminRouter(adminReq(prov, { method: 'POST' }), env, ctx, prov, new URL('https://x' + prov), {}, OWN), (e) => e.code === 'not_authorized');
+});

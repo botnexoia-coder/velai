@@ -66,6 +66,36 @@ export async function createWhatsAppSender(credentials, { phone, wabaId, callbac
   return { senderSid: data.sid, status: data.status };
 }
 
+// Lista los senders de WhatsApp de una subcuenta. Es la contraparte de LECTURA de
+// createWhatsAppSender: cuando el sender lo creó el Self Sign-up (el cliente desde
+// la consola de Twilio, no nuestro botón), la fila de D1 no sabe nada y hay que
+// reconciliarla. ⚠️ El nombre del array de la respuesta no está verificado contra
+// una llamada real (¿senders o data?): se toleran ambos y la primera ejecución
+// real hay que mirarla en Workers Logs (SPEC-CONEXIONES §2.2).
+export async function listWhatsAppSenders(credentials) {
+  const data = await twilioRequest('https://messaging.twilio.com/v2/channels/senders', credentials, { method: 'GET' });
+  const items = Array.isArray(data.senders) ? data.senders : (Array.isArray(data.data) ? data.data : []);
+  return items
+    .filter((s) => String(s.sender_id || '').startsWith('whatsapp:'))
+    .map((s) => ({
+      senderSid: s.sid,
+      senderId: s.sender_id,                                        // 'whatsapp:+34624121930'
+      status: s.status,                                             // CREATING|PENDING_VERIFICATION|VERIFYING|ONLINE|…
+      wabaId: (s.configuration && s.configuration.waba_id) || null,
+      webhookUrl: (s.webhook && s.webhook.callback_url) || null,
+    }));
+}
+
+// El Self Sign-up NO configura nuestro webhook (queda el default de Twilio): sin
+// esto, el sender está ONLINE pero los mensajes no llegan al worker y el bot calla.
+// Es el fallo más probable de todo el alta (SPEC-CONEXIONES §2.4).
+export async function updateSenderWebhook(credentials, senderSid, callbackUrl) {
+  const data = await twilioRequest(`https://messaging.twilio.com/v2/channels/senders/${senderSid}`, credentials, {
+    json: { webhook: { callback_url: callbackUrl, callback_method: 'POST' } },
+  });
+  return { status: data.status };
+}
+
 export async function verifySender(credentials, senderSid, code) {
   const data = await twilioRequest(`https://messaging.twilio.com/v2/channels/senders/${senderSid}`, credentials, {
     json: { configuration: { verification_code: code } },

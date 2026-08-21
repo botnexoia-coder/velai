@@ -303,6 +303,7 @@ body.cliente .cliente-only{display:flex}
    de las clases de nodo/barra — si no, el paso oculto deja un nodo fantasma. */
 .card .tgpanel b,.card b.tgh{display:inline;color:inherit;font-size:inherit;font-weight:700;letter-spacing:0;text-transform:none;margin:0}
 .card b.tgh{display:block;font-family:var(--font-d);font-size:19px;letter-spacing:-.02em;color:var(--white)}
+.card b.tgh-sm{font-size:16px}
 .card .tgcard>b{display:block;font-size:12.5px;color:var(--white);margin-bottom:2px}
 .tgnode[hidden],.tgbar[hidden],.tgstep[hidden]{display:none}
 .tgh{font-family:var(--font-d);font-weight:700;font-size:19px;letter-spacing:-.02em}
@@ -470,6 +471,10 @@ body.cliente .cliente-only{display:flex}
 <div class="actions actions0"><button class="btn alt btnsm" id="tgMoreTopics" type="button">Añadir o editar temas</button></div>
 </div></div>
 </div></div>
+<div class="card mt12"><b class="tgh tgh-sm">WhatsApp del negocio</b>
+<p class="tgsub">El estado de tu número de WhatsApp con Vai. La conexión inicial la hacemos juntos en una sesión corta — te avisaremos.</p>
+<div id="waState" class="mt6 muted">—</div>
+<div class="actions actions0 velai-only"><button class="btn alt" id="waSync" type="button">Sincronizar desde Twilio</button><span id="waSyncOut" class="muted"></span></div></div>
 <div class="card mt12 velai-only"><b>Webhook del bot (solo Velai, una vez)</b>
 <p class="muted mt6">Registra el webhook de Telegram apuntando al worker. OJO: con el webhook activo, getUpdates deja de funcionar para ese bot.</p>
 <div class="actions actions0"><button class="btn alt" id="tgSetup" type="button">Registrar webhook</button><span id="tgSetupOut" class="muted"></span></div></div>
