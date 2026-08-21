@@ -100,9 +100,22 @@ async function loadConexiones(){$('#tgLinkBox').hidden=true;
    :'Sin conectar. Los avisos de este negocio aún no llegan a su Telegram.';
   $('#tgLink').textContent=t.linked?'Vincular otro chat':'Conectar Telegram';
   $('#tgUnlink').hidden=!t.linked;
+  // Marca blanca: el conmutador es de Velai; el cliente solo ve el bloque si está activa.
+  cxWl=!!t.whitelabel;
+  const soyVelai=!(ME&&ME.tenantId);
+  $('#tgBotBlock').hidden=!(soyVelai||t.whitelabel);
+  $('#tgWlState').textContent=t.whitelabel?'activada':'desactivada';
+  $('#tgWlState').className='flag velai-only '+(t.whitelabel?'ok':'off');
+  $('#tgWlToggle').textContent=t.whitelabel?'Desactivar':'Activar';
   $('#tgBotState').innerHTML=t.botUsername?'<span class="flag ok">Bot propio: @'+esc(t.botUsername)+'</span>':'<span class="flag off">Usando el bot de Velai</span>';
   $('#tgBotDel').hidden=!t.botUsername;$('#tgBotToken').value=''}
  catch(e){$('#tgState').textContent=e.message}}
+let cxWl=false;
+$('#tgWlToggle').onclick=async()=>{const enable=!cxWl;
+ if(!enable&&!confirm('¿Desactivar la marca blanca? Si el cliente tiene bot propio, se retira y se desvincula su chat.'))return;
+ try{await api('/api/admin/tenants/'+cxTenant+'/telegram',{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({whitelabel:enable})});
+  toast(enable?'Marca blanca activada ✓ — el cliente ya ve el bloque de bot propio':'Marca blanca desactivada');loadConexiones()}
+ catch(e){toast('No se pudo cambiar: '+(TERRS[e.message]||e.message),false)}};
 $('#tgBotSave').onclick=async()=>{const token=$('#tgBotToken').value.trim();if(!token)return toast('Pega primero el token de @BotFather',false);
  try{const d=await api('/api/admin/tenants/'+cxTenant+'/telegram/bot',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token})});
   toast('Bot propio guardado ✓ (@'+d.botUsername+'). Ahora vincula el chat: el bot NUEVO es el que debe entrar al grupo.');loadConexiones()}

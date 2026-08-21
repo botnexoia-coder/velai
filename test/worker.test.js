@@ -1950,7 +1950,7 @@ test('telegram: GET de estado y DELETE de desvinculación (rol cliente, solo lo 
   const OWN = { role: 'cliente', tenantId: TID, email: 'cliente@x.com' };
   const path = `/api/admin/tenants/${TID}/telegram`;
   const got = await (await testing.adminRouter(adminReq(path), env, ctx, path, new URL('https://x' + path), {}, OWN)).json();
-  assert.deepEqual(got.telegram, { linked: true, title: 'Mi grupo', linked_at: '2026-08-21T10:00:00Z', botUsername: null });
+  assert.deepEqual(got.telegram, { linked: true, title: 'Mi grupo', linked_at: '2026-08-21T10:00:00Z', botUsername: null, whitelabel: false });
   const del = await (await testing.adminRouter(adminReq(path, { method: 'DELETE' }), env, ctx, path, new URL('https://x' + path), {}, OWN)).json();
   assert.equal(del.ok, true);
   const cleared = db.writes.find((w) => w.sql.includes('SET telegram_chat_id=NULL'));
@@ -1960,12 +1960,21 @@ test('telegram: GET de estado y DELETE de desvinculación (rol cliente, solo lo 
 
 test('bot propio (marca blanca): se valida con getMe, se cifra, registra su webhook y desvincula el chat anterior', async () => {
   const TID = '00000000-0000-4000-8000-0000000000d1';
-  const row = { id: TID, slug: 'mio', name: 'Mi Negocio', channel_address: 'web:mio', telegram_chat_id: '-555', telegram_chat_title: 'Viejo', telegram_bot_username: null, telegram_bot_token_enc: null };
+  const row = { id: TID, slug: 'mio', name: 'Mi Negocio', channel_address: 'web:mio', telegram_chat_id: '-555', telegram_chat_title: 'Viejo', telegram_bot_username: null, telegram_bot_token_enc: null, telegram_whitelabel: 0 };
   const db = tgDb(row);
   const env = { DB: db, KV: mapKV(), SECRETS_KEK: TEST_KEK, TELEGRAM_WEBHOOK_SECRET: 'S3CRETO', TELEGRAM_TOKEN: 'tg-velai' };
   const ctx = { waitUntil(p) { if (p && p.catch) p.catch(() => {}); } };
   const OWN = { role: 'cliente', tenantId: TID, email: 'cliente@x.com' };
   const path = `/api/admin/tenants/${TID}/telegram/bot`;
+  // la marca blanca es una FEATURE que activa Velai: sin el flag, para el cliente
+  // el bot propio NO EXISTE (404) — y el conmutador es solo-velai (cliente → 403)
+  await assert.rejects(testing.adminRouter(adminReq(path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ token: 'x' }) }), env, ctx, path, new URL('https://x' + path), {}, OWN), (e) => e.code === 'not_found');
+  const flagPath = `/api/admin/tenants/${TID}/telegram`;
+  await assert.rejects(testing.adminRouter(adminReq(flagPath, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ whitelabel: true }) }), env, ctx, flagPath, new URL('https://x' + flagPath), {}, OWN), (e) => e.code === 'not_authorized');
+  // Velai la activa…
+  const on = await (await testing.adminRouter(adminReq(flagPath, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ whitelabel: true }) }), env, ctx, flagPath, new URL('https://x' + flagPath), {}, VELAI)).json();
+  assert.deepEqual(on, { ok: true, whitelabel: true });
+  row.telegram_whitelabel = 1; // la fila real la actualizó el UPDATE; el stub la refleja
   const botToken = '123456789:AAHfakefakefakefakefakefake_fake';
   const calls = [];
   const realFetch = globalThis.fetch;
@@ -1997,5 +2006,12 @@ test('bot propio (marca blanca): se valida con getMe, se cifra, registra su webh
     assert.equal(res.ok, undefined === res.skipped ? res.ok : res.ok); // deliver devuelve {ok:true}
     assert.ok(calls.some((u) => u.includes(`bot${botToken}/sendMessage`)), 'aviso del cliente por SU bot');
     assert.ok(calls.some((u) => u.includes('bottg-velai/sendMessage')), 'copia de Velai por el bot de Velai');
+    // …y si Velai DESACTIVA la marca blanca con bot configurado, se retira todo
+    row.telegram_bot_token_enc = saved.args[0]; row.telegram_bot_username = 'MiNegocioBot';
+    db.writes.length = 0;
+    const off = await (await testing.adminRouter(adminReq(flagPath, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ whitelabel: false }) }), env, ctx, flagPath, new URL('https://x' + flagPath), {}, VELAI)).json();
+    assert.deepEqual(off, { ok: true, whitelabel: false });
+    const cleared = db.writes.find((w) => w.sql.includes('telegram_whitelabel=0'));
+    assert.ok(cleared && cleared.sql.includes('telegram_bot_token_enc=NULL') && cleared.sql.includes('telegram_chat_id=NULL'), 'desactivar retira el bot y desvincula el chat');
   } finally { globalThis.fetch = realFetch; }
 });

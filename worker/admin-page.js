@@ -368,7 +368,7 @@ body.cliente .cliente-only{display:flex}
 <p class="mb6">O en un chat directo contigo: <a id="tgDmUrl" href="#" target="_blank" rel="noopener">abrir el chat con el bot</a> y pulsar INICIAR.</p>
 <p class="muted">Cuando Telegram confirme la vinculación, esta tarjeta lo mostrará al recargar.</p>
 </div>
-<div class="mt6"><b>Bot propio (marca blanca)</b>
+<div class="mt6" id="tgBotBlock" hidden><b>Bot propio (marca blanca)</b> <span id="tgWlState" class="flag off velai-only">desactivada</span> <button class="btn alt btnsm velai-only" id="tgWlToggle" type="button">Activar</button>
 <p class="muted">Por defecto los avisos llegan desde el bot de Velai. Para que lleguen desde el bot DEL NEGOCIO (p. ej. @MiNegocioBot): créalo en Telegram con @BotFather (comando /newbot), copia el token que te da y pégalo aquí. Al guardarlo hay que volver a vincular el chat (es el bot nuevo el que debe entrar al grupo).</p>
 <div id="tgBotState" class="mb6 muted">—</div>
 <div class="actions actions0"><input id="tgBotToken" type="password" autocomplete="new-password" placeholder="token de @BotFather (solo se escribe, nunca se muestra)" class="grow inpill"><button class="btn alt" id="tgBotSave" type="button">Guardar bot</button><button class="btn alt" id="tgBotDel" type="button" hidden>Quitar</button></div></div></div>

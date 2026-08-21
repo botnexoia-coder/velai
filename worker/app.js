@@ -2131,8 +2131,34 @@ async function adminRouter(request, env, ctx, path, url, config, scope) {
     const tenantId = tgMatch[1];
     // Autoservicio: el cliente solo SU tenant — ajeno = 404, ANTES de tocar D1.
     if (scope.role !== 'velai' && scope.tenantId !== tenantId) throw new HttpError(404, 'not_found');
-    const tenantRow = await env.DB.prepare('SELECT id, slug, name, channel_address, telegram_chat_id, telegram_chat_title, telegram_linked_at, telegram_bot_username, telegram_bot_token_enc FROM tenants WHERE id=?').bind(tenantId).first();
+    const tenantRow = await env.DB.prepare('SELECT id, slug, name, channel_address, telegram_chat_id, telegram_chat_title, telegram_linked_at, telegram_bot_username, telegram_bot_token_enc, telegram_whitelabel FROM tenants WHERE id=?').bind(tenantId).first();
     if (!tenantRow) throw new HttpError(404, 'not_found');
+    // La marca blanca es una feature que ACTIVA VELAI por cliente: sin el flag, para
+    // el rol cliente el bot propio no existe (404, ni confirmación de la feature).
+    if (tgMatch[2] === 'bot' && scope.role !== 'velai' && !tenantRow.telegram_whitelabel) throw new HttpError(404, 'not_found');
+    if (!tgMatch[2] && request.method === 'PATCH') {
+      // Conmutador de marca blanca: SOLO Velai (fuera de clienteAllowed).
+      if (scope.role !== 'velai') throw new HttpError(403, 'not_authorized');
+      const body = await readJson(request, 2000);
+      const enable = body.whitelabel === true;
+      const now = new Date().toISOString();
+      if (!enable && tenantRow.telegram_bot_token_enc) {
+        // Desactivarla con un bot configurado lo retira también (y desvincula el
+        // chat): lo que el cliente ve y lo que el worker hace no pueden divergir.
+        try {
+          const oldToken = await tenantTelegramToken(env, tenantRow);
+          if (oldToken) ctx.waitUntil(fetch(`https://api.telegram.org/bot${oldToken}/deleteWebhook`, { method: 'POST', signal: AbortSignal.timeout(8000) }).catch(() => {}));
+        } catch (_) {}
+        await env.DB.prepare('UPDATE tenants SET telegram_whitelabel=0, telegram_bot_token_enc=NULL, telegram_bot_username=NULL, telegram_chat_id=NULL, telegram_chat_title=NULL, telegram_linked_at=NULL, updated_at=? WHERE id=?').bind(now, tenantId).run();
+      } else {
+        await env.DB.prepare('UPDATE tenants SET telegram_whitelabel=?, updated_at=? WHERE id=?').bind(enable ? 1 : 0, now, tenantId).run();
+      }
+      await invalidateTenantCache(env, [tenantRow]);
+      console.log(JSON.stringify({ level: 'info', code: 'telegram_whitelabel_toggled', tenant: tenantRow.slug, enabled: enable }));
+      ctx.waitUntil(env.DB.prepare('INSERT INTO tenant_versions (tenant_id,actor_email,field,previous_value,note,created_at) VALUES (?,?,?,?,?,?)')
+        .bind(tenantId, actor, 'telegram', null, enable ? 'marca blanca activada' : 'marca blanca desactivada', now).run().catch(() => {}));
+      return json({ ok: true, whitelabel: enable }, 200, NO_STORE);
+    }
     if (tgMatch[2] === 'bot' && request.method === 'POST') {
       // Marca blanca: guardar el bot PROPIO del cliente. El token es write-only y va
       // cifrado (AAD telegram:<id>); se valida con getMe y se registra su webhook
@@ -2190,7 +2216,7 @@ async function adminRouter(request, env, ctx, path, url, config, scope) {
     }
     if (!tgMatch[2] && request.method === 'GET') {
       // botUsername sí; el token cifrado JAMÁS sale del worker.
-      return json({ telegram: { linked: Boolean(tenantRow.telegram_chat_id), title: tenantRow.telegram_chat_title || null, linked_at: tenantRow.telegram_linked_at || null, botUsername: tenantRow.telegram_bot_username || null } }, 200, NO_STORE);
+      return json({ telegram: { linked: Boolean(tenantRow.telegram_chat_id), title: tenantRow.telegram_chat_title || null, linked_at: tenantRow.telegram_linked_at || null, botUsername: tenantRow.telegram_bot_username || null, whitelabel: Boolean(tenantRow.telegram_whitelabel) } }, 200, NO_STORE);
     }
     if (!tgMatch[2] && request.method === 'DELETE') {
       const now = new Date().toISOString();
