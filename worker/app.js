@@ -642,8 +642,14 @@ async function telegramBotUsername(env) {
 // en su Telegram; aquí solo se registra el mapa tema→hilo para clasificar avisos.
 async function registerTelegramTopic(env, ctx, chatId, threadId, name) {
   if (!threadId || !name) return json({ ok: true }, 200, NO_STORE);
-  const tenant = await env.DB.prepare('SELECT id, slug, name, channel_address, telegram_topics, telegram_bot_token_enc FROM tenants WHERE telegram_chat_id = ?').bind(chatId).first();
+  const tenant = await env.DB.prepare('SELECT id, slug, name, channel_address, telegram_topics, telegram_bot_token_enc, telegram_whitelabel FROM tenants WHERE telegram_chat_id = ?').bind(chatId).first();
   if (!tenant) return json({ ok: true }, 200, NO_STORE);
+  // Los Temas son parte del paquete de marca blanca (decisión de Juan 2026-08-22):
+  // sin el flag, el tema del grupo se ignora — nada se registra ni clasifica.
+  if (!tenant.telegram_whitelabel) {
+    console.log(JSON.stringify({ level: 'info', code: 'telegram_topic_ignored', tenant: tenant.slug }));
+    return json({ ok: true }, 200, NO_STORE);
+  }
   let topics = [];
   try { topics = JSON.parse(tenant.telegram_topics || '[]'); } catch (_) {}
   if (!Array.isArray(topics)) topics = [];
@@ -687,6 +693,7 @@ async function createTelegramTopic(env, tenant, chatId, name) {
 // el modelo responde el nombre EXACTO de un tema o GENERAL, y ante cualquier duda
 // o fallo la respuesta es null (chat General) — un aviso jamás se pierde por esto.
 async function telegramThreadFor(env, tenant, lead) {
+  if (!tenant.telegram_whitelabel) return null; // Temas = marca blanca
   let topics = [];
   try { topics = JSON.parse(tenant.telegram_topics || '[]'); } catch (_) {}
   topics = Array.isArray(topics) ? topics.filter((t) => t && t.thread_id && t.name) : [];
@@ -2224,12 +2231,13 @@ async function adminRouter(request, env, ctx, path, url, config, scope) {
     if (!UUID_RE.test(tgTopicMatch[1])) throw new HttpError(404, 'not_found');
     const tenantId = tgTopicMatch[1];
     if (scope.role !== 'velai' && scope.tenantId !== tenantId) throw new HttpError(404, 'not_found');
-    const row = await env.DB.prepare('SELECT id, slug, name, channel_address, telegram_chat_id, telegram_topics, telegram_bot_token_enc FROM tenants WHERE id=?').bind(tenantId).first();
+    const row = await env.DB.prepare('SELECT id, slug, name, channel_address, telegram_chat_id, telegram_topics, telegram_bot_token_enc, telegram_whitelabel FROM tenants WHERE id=?').bind(tenantId).first();
     if (!row) throw new HttpError(404, 'not_found');
     let topics = [];
     try { topics = JSON.parse(row.telegram_topics || '[]'); } catch (_) {}
     if (!Array.isArray(topics)) topics = [];
     if (!tgTopicMatch[2] && request.method === 'POST') {
+      if (!row.telegram_whitelabel) throw scope.role === 'velai' ? new HttpError(400, 'marca_blanca_requerida') : new HttpError(404, 'not_found');
       if (!row.telegram_chat_id) throw new HttpError(400, 'telegram_no_vinculado');
       if (topics.length >= 25) throw new HttpError(400, 'demasiados_temas');
       if (await rateLimited(env, actor, 'tgtopic', 10)) throw new HttpError(429, 'rate_limited');
@@ -2249,6 +2257,7 @@ async function adminRouter(request, env, ctx, path, url, config, scope) {
       return json({ ok: true, topics }, 200, NO_STORE);
     }
     if (tgTopicMatch[2] && request.method === 'PATCH') {
+      if (!row.telegram_whitelabel) throw scope.role === 'velai' ? new HttpError(400, 'marca_blanca_requerida') : new HttpError(404, 'not_found');
       const body = await readJson(request, 4000);
       const topic = topics.find((t) => String(t.thread_id) === tgTopicMatch[2]);
       if (!topic) throw new HttpError(404, 'not_found');
@@ -2291,9 +2300,11 @@ async function adminRouter(request, env, ctx, path, url, config, scope) {
           const oldToken = await tenantTelegramToken(env, tenantRow);
           if (oldToken) ctx.waitUntil(fetch(`https://api.telegram.org/bot${oldToken}/deleteWebhook`, { method: 'POST', signal: AbortSignal.timeout(8000) }).catch(() => {}));
         } catch (_) {}
-        await env.DB.prepare('UPDATE tenants SET telegram_whitelabel=0, telegram_bot_token_enc=NULL, telegram_bot_username=NULL, telegram_chat_id=NULL, telegram_chat_title=NULL, telegram_linked_at=NULL, updated_at=? WHERE id=?').bind(now, tenantId).run();
+        await env.DB.prepare('UPDATE tenants SET telegram_whitelabel=0, telegram_bot_token_enc=NULL, telegram_bot_username=NULL, telegram_topics=NULL, telegram_chat_id=NULL, telegram_chat_title=NULL, telegram_linked_at=NULL, updated_at=? WHERE id=?').bind(now, tenantId).run();
       } else {
-        await env.DB.prepare('UPDATE tenants SET telegram_whitelabel=?, updated_at=? WHERE id=?').bind(enable ? 1 : 0, now, tenantId).run();
+        await env.DB.prepare(enable
+          ? 'UPDATE tenants SET telegram_whitelabel=1, updated_at=? WHERE id=?'
+          : 'UPDATE tenants SET telegram_whitelabel=0, telegram_topics=NULL, updated_at=? WHERE id=?').bind(now, tenantId).run();
       }
       await invalidateTenantCache(env, [tenantRow]);
       console.log(JSON.stringify({ level: 'info', code: 'telegram_whitelabel_toggled', tenant: tenantRow.slug, enabled: enable }));

@@ -2018,7 +2018,7 @@ test('bot propio (marca blanca): se valida con getMe, se cifra, registra su webh
 
 test('temas de Telegram: el grupo los registra solo (servicio y /tema) y Vai clasifica cada lead a su tema', async () => {
   const TID = '00000000-0000-4000-8000-0000000000d1';
-  const row = { id: TID, slug: 'mio', name: 'Mi Negocio', channel_address: 'web:mio', telegram_chat_id: '-777', telegram_topics: null, telegram_bot_token_enc: null };
+  const row = { id: TID, slug: 'mio', name: 'Mi Negocio', channel_address: 'web:mio', telegram_chat_id: '-777', telegram_topics: null, telegram_bot_token_enc: null, telegram_whitelabel: 1 };
   const updates = [];
   const env = {
     KV: mapKV(), TELEGRAM_WEBHOOK_SECRET: 'S3CRETO', TELEGRAM_TOKEN: 'tg-velai', TELEGRAM_CHAT_ID: '-100999', ANTHROPIC_API_KEY: 'k',
@@ -2043,6 +2043,11 @@ test('temas de Telegram: el grupo los registra solo (servicio y /tema) y Vai cla
     return new Response('{}', { status: 200 });
   };
   try {
+    // 0) SIN marca blanca, el tema del grupo se ignora (Temas = feature premium)
+    row.telegram_whitelabel = 0;
+    await worker.fetch(tgReq({ message: { chat: { id: -777 }, message_thread_id: 41, forum_topic_created: { name: 'Colado' } } }), env, ctx);
+    assert.equal(row.telegram_topics, null, 'sin marca blanca no se registra nada');
+    row.telegram_whitelabel = 1;
     // 1) el cliente crea el Tema en su grupo → mensaje de servicio → registrado
     await worker.fetch(tgReq({ message: { chat: { id: -777 }, message_thread_id: 42, forum_topic_created: { name: 'Presupuestos' } } }), env, ctx);
     // 2) un tema que ya existía: '/tema' dentro del tema, con el nombre en el reply
@@ -2053,7 +2058,12 @@ test('temas de Telegram: el grupo los registra solo (servicio y /tema) y Vai cla
     assert.ok(telegramSends.some((s) => s.message_thread_id === 42 && String(s.text).includes('Tema registrado')), 'confirma DENTRO del tema');
     // 3) el aviso del lead va al tema que el clasificador elige (thread 42)
     telegramSends.length = 0;
-    const tenant = { id: TID, slug: 'mio', telegram_chat_id: '-777', telegram_topics: row.telegram_topics, telegram_bot_token_enc: null };
+    const tenant = { id: TID, slug: 'mio', telegram_chat_id: '-777', telegram_topics: row.telegram_topics, telegram_bot_token_enc: null, telegram_whitelabel: 1 };
+    // sin marca blanca el clasificador está apagado aunque queden temas guardados
+    const off = await testing.deliver(env, 'telegram', { id: 'ld0', source: 'chat web' }, { ...tenant, telegram_whitelabel: 0 });
+    assert.equal(off.ok, true);
+    assert.equal(telegramSends.find((s) => String(s.chat_id) === '-777').message_thread_id, undefined, 'apagado: al chat General');
+    telegramSends.length = 0;
     const out = await testing.deliver(env, 'telegram', { id: 'ld1', source: 'chat web', need: 'quiero un presupuesto' }, tenant);
     assert.equal(out.ok, true);
     const aviso = telegramSends.find((s) => String(s.chat_id) === '-777');
@@ -2085,7 +2095,7 @@ test('temas de Telegram: el grupo los registra solo (servicio y /tema) y Vai cla
     assert.equal(fallback.ok, true, 'el aviso nunca se pierde por un tema roto');
     // 6) quitar un tema del enrutado (cliente, autoservicio)
     const dbDel = { prepare: (sql) => ({ bind: (...args) => ({
-      first: async () => sql.includes('FROM tenants WHERE id=') ? { id: TID, slug: 'mio', channel_address: 'web:mio', telegram_topics: row.telegram_topics } : null,
+      first: async () => sql.includes('FROM tenants WHERE id=') ? { id: TID, slug: 'mio', channel_address: 'web:mio', telegram_topics: row.telegram_topics, telegram_whitelabel: 1 } : null,
       run: async () => { updates.push({ sql, args }); return { meta: { changes: 1 } }; }, all: async () => ({ results: [] }),
     }) }) };
     const OWN = { role: 'cliente', tenantId: TID, email: 'cliente@x.com' };
@@ -2097,7 +2107,7 @@ test('temas de Telegram: el grupo los registra solo (servicio y /tema) y Vai cla
 
 test('temas desde el panel: se crean en el Telegram del cliente con descripción, y la descripción guía al clasificador', async () => {
   const TID = '00000000-0000-4000-8000-0000000000d1';
-  const row = { id: TID, slug: 'mio', name: 'Mi Negocio', channel_address: 'web:mio', telegram_chat_id: '-777', telegram_topics: null, telegram_bot_token_enc: null };
+  const row = { id: TID, slug: 'mio', name: 'Mi Negocio', channel_address: 'web:mio', telegram_chat_id: '-777', telegram_topics: null, telegram_bot_token_enc: null, telegram_whitelabel: 1 };
   const env = {
     KV: mapKV(), TELEGRAM_TOKEN: 'tg-velai', ANTHROPIC_API_KEY: 'k',
     DB: { prepare: (sql) => ({ bind: (...args) => ({
@@ -2123,6 +2133,10 @@ test('temas desde el panel: se crean en el Telegram del cliente con descripción
     return new Response('{}', { status: 200 });
   };
   try {
+    // sin marca blanca, para el CLIENTE la feature no existe (404)
+    row.telegram_whitelabel = 0;
+    await assert.rejects(call('POST', base, { name: 'X' }), (e) => e.code === 'not_found');
+    row.telegram_whitelabel = 1;
     // grupo sin Temas activados → error traducible, nada guardado
     forum = false;
     await assert.rejects(call('POST', base, { name: 'Presupuestos' }), (e) => e.code === 'group_sin_temas');
@@ -2132,7 +2146,7 @@ test('temas desde el panel: se crean en el Telegram del cliente con descripción
     const out = await (await call('POST', base, { name: 'Presupuestos', description: 'clientes que piden precio o cotización' })).json();
     assert.deepEqual(out.topics, [{ thread_id: 77, name: 'Presupuestos', description: 'clientes que piden precio o cotización' }]);
     // el clasificador recibe la DESCRIPCIÓN, no solo el nombre
-    const tenant = { id: TID, slug: 'mio', telegram_chat_id: '-777', telegram_topics: row.telegram_topics, telegram_bot_token_enc: null };
+    const tenant = { id: TID, slug: 'mio', telegram_chat_id: '-777', telegram_topics: row.telegram_topics, telegram_bot_token_enc: null, telegram_whitelabel: 1 };
     await testing.deliver({ ...env, TELEGRAM_CHAT_ID: '-100999' }, 'telegram', { id: 'ldx', source: 'chat web', need: 'precio del servicio' }, tenant);
     assert.ok(classifierSystem.includes('clientes que piden precio o cotización'), 'la descripción viaja en el prompt');
     // editar la descripción desde el panel
