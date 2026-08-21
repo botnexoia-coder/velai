@@ -85,14 +85,14 @@ document.querySelectorAll('.tab[data-view]').forEach(b=>b.onclick=()=>{document.
 // ── Conexiones (SPEC-CONEXIONES PR1): Telegram de avisos en autoservicio ──
 // El cliente abre SU tarjeta; Velai elige tenant con el selector de la cabecera.
 let cxTenant=null;
-async function cxMenu(){if(ME&&ME.tenantId){cxTenant=ME.tenantId;return loadConexiones()}
+async function cxMenu(){tgWizOpen=null;if(ME&&ME.tenantId){cxTenant=ME.tenantId;return loadConexiones()}
  try{if(!tenantList.length){const d=await api('/api/admin/tenants');tenantList=d.tenants}
   if(!tenantList.length)return toast('Aún no hay clientes dados de alta',false);
   cxTenant=cxTenant||((tenantList.find(t=>t.slug==='velai')||tenantList[0]).id);
   $('#cxTenantSel').innerHTML=tenantList.map(x=>'<option value="'+esc(x.id)+'"'+(x.id===cxTenant?' selected':'')+'>'+esc(x.name)+'</option>').join('');
   loadConexiones()}
  catch(e){toast('No se pudieron cargar las conexiones: '+e.message,false)}}
-$('#cxTenantSel').onchange=e=>{cxTenant=e.target.value;loadConexiones()};
+$('#cxTenantSel').onchange=e=>{cxTenant=e.target.value;tgWizOpen=null;loadConexiones()};
 async function loadConexiones(){$('#tgLinkBox').hidden=true;
  try{const d=await api('/api/admin/tenants/'+cxTenant+'/telegram');const t=d.telegram;
   $('#tgState').innerHTML=t.linked
@@ -111,35 +111,55 @@ async function loadConexiones(){$('#tgLinkBox').hidden=true;
    :'Aún no hay temas: crea el primero arriba.';
   tgRenderWiz(t)}
  catch(e){$('#tgState').textContent=e.message}}
-// ── Stepper (el cliente "que no sabe" no debe perderse): el estado real (bot,
-// vínculo, temas) marca los pasos hechos; los pasos sin señal del servidor (crear
-// el grupo, activar Temas) se confirman con su botón. Tocar una cabecera reabre
-// ese paso.
+// ── Asistente horizontal (canvas «Conexión de Telegram guiada», 2026-08-21): el
+// estado real del servidor (bot, vínculo, temas) marca los pasos hechos; los pasos
+// sin señal del servidor (grupo, permisos) se confirman con su botón; el riel de
+// arriba salta a cualquier paso. Solo clases — la CSP no cubre style="" dinámico.
 const tgManual={};let tgWizOpen=null;
 function tgRenderWiz(t){
  const soyVelai=!(ME&&ME.tenantId);
+ const wl=!!t.whitelabel;
+ const nTemas=(t.topics&&t.topics.length)||0;
  const steps=[
-  {el:'tgs1',visible:soyVelai||!!t.whitelabel,done:!t.whitelabel?true:!!t.botUsername,label:!t.whitelabel?(soyVelai?'desactivada':''):(t.botUsername?'@'+t.botUsername+' ✓':'pendiente')},
-  {el:'tgs2',visible:true,done:!!t.linked||!!tgManual[cxTenant+':2'],label:''},
-  {el:'tgs3',visible:true,done:!!t.linked,label:t.linked?esc(t.title||'conectado')+' ✓':''},
-  {el:'tgs4',visible:true,done:!!(t.topics&&t.topics.length)||!!tgManual[cxTenant+':4'],label:''},
-  {el:'tgs5',visible:true,done:!!(t.topics&&t.topics.length),label:(t.topics&&t.topics.length)?t.topics.length+(t.topics.length===1?' tema ✓':' temas ✓'):''},
+  {id:'tgs1',visible:soyVelai||wl,done:!wl?true:(!!t.botUsername||!!tgManual[cxTenant+':1'])},
+  {id:'tgs2',visible:true,done:!!t.linked||!!tgManual[cxTenant+':2']},
+  {id:'tgs3',visible:true,done:!!t.linked},
+  {id:'tgs4',visible:true,done:nTemas>0||!!tgManual[cxTenant+':4']},
+  {id:'tgs5',visible:true,done:nTemas>0},
  ];
- let cur=null;
- for(const s of steps)if(s.visible&&!s.done&&cur===null)cur=s.el;
- for(const s of steps){const el=$('#'+s.el);
-  el.hidden=!s.visible;
-  el.className='wstep'+(s.done?' done':'')+(s.el===cur?' cur':'');
-  $('#'+s.el+'st').textContent=s.done?(s.label||'hecho ✓'):(s.el===cur?(s.label||''):'pendiente');
-  $('#'+s.el+'b').hidden=!(s.el===cur||s.el===tgWizOpen)}
- $('#tgWizDone').hidden=cur!==null}
-document.querySelectorAll('.wstep .wh').forEach(h=>{h.onclick=()=>{const step=h.parentElement&&h.parentElement.id;if(!step)return;tgWizOpen=tgWizOpen===step?null:step;loadConexiones()}});
+ const vis=steps.filter(s=>s.visible);
+ const pending=vis.find(s=>!s.done);
+ let open=tgWizOpen||(pending?pending.id:'tgsFin');
+ if(open!=='tgsFin'&&!vis.some(s=>s.id===open))open=pending?pending.id:'tgsFin';
+ let num=0;
+ for(let i=0;i<steps.length;i++){const s=steps[i];const node=$('#tgn'+(i+1));
+  node.hidden=!s.visible;
+  if(i<4)$('#tgbar'+(i+1)).hidden=!s.visible;
+  if(!s.visible){$('#'+s.id+'b').hidden=true;continue}
+  num++;
+  node.className='tgnode'+(s.done?' done':'')+(s.id===open?' cur':'');
+  node.querySelector('.tgnum').textContent=s.done?'✓':String(num);
+  if(i<4)$('#tgbar'+(i+1)).className='tgbar'+(s.done?' done':'');
+  $('#'+s.id+'b').hidden=s.id!==open}
+ $('#tgsFinb').hidden=open!=='tgsFin';
+ $('#tgProgress').textContent=pending?('Paso '+(vis.indexOf(pending)+1)+' de '+vis.length):'Completado ✓';
+ if(open==='tgsFin')$('#tgFinMsg').textContent='Los próximos leads llegarán a '+(t.title?('«'+t.title+'»'):'tu grupo')+(nTemas?(', clasificados en '+nTemas+(nTemas===1?' tema.':' temas.')):'.');
+}
+document.querySelectorAll('.tgnode').forEach(n=>{n.onclick=()=>{tgWizOpen=n.dataset.tgo;loadConexiones()}});
+function tgGoto(id){tgWizOpen=id;loadConexiones()}
+$('#tgSkipBot').onclick=()=>{tgManual[cxTenant+':1']=1;tgWizOpen=null;loadConexiones()};
 $('#tgs2ok').onclick=()=>{tgManual[cxTenant+':2']=1;tgWizOpen=null;loadConexiones()};
 $('#tgs4ok').onclick=()=>{tgManual[cxTenant+':4']=1;tgWizOpen=null;loadConexiones()};
+$('#tgBack2').onclick=()=>tgGoto('tgs1');
+$('#tgBack3').onclick=()=>tgGoto('tgs2');
+$('#tgBack4').onclick=()=>tgGoto('tgs3');
+$('#tgBack5').onclick=()=>tgGoto('tgs4');
+$('#tgFinish').onclick=()=>{tgWizOpen=null;loadConexiones()};
+$('#tgMoreTopics').onclick=()=>tgGoto('tgs5');
 $('#tgTopicAdd').onclick=async()=>{const name=$('#tgTopicName').value.trim();const description=$('#tgTopicDesc').value.trim();
  if(!name)return toast('Ponle nombre al tema',false);
  try{await api('/api/admin/tenants/'+cxTenant+'/telegram/topics',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name,description})});
-  $('#tgTopicName').value='';$('#tgTopicDesc').value='';toast('Tema creado en el grupo de Telegram ✓');loadConexiones()}
+  $('#tgTopicName').value='';$('#tgTopicDesc').value='';toast('Tema creado en el grupo de Telegram ✓');tgWizOpen='tgs5';loadConexiones()}
  catch(e){toast('No se pudo crear el tema: '+(TERRS[e.message]||e.message),false)}};
 $('#tgTopics').onclick=async e=>{const t=e.target;if(!t||!t.dataset)return;
  if(t.dataset.tdesc){e.preventDefault();
@@ -155,20 +175,20 @@ let cxWl=false;
 $('#tgWlToggle').onclick=async()=>{const enable=!cxWl;
  if(!enable&&!confirm('¿Desactivar la marca blanca? Si el cliente tiene bot propio, se retira y se desvincula su chat.'))return;
  try{await api('/api/admin/tenants/'+cxTenant+'/telegram',{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({whitelabel:enable})});
-  toast(enable?'Marca blanca activada ✓ — el cliente ya ve el bloque de bot propio':'Marca blanca desactivada');loadConexiones()}
+  toast(enable?'Marca blanca activada ✓ — el cliente ya ve el paso de bot propio':'Marca blanca desactivada');tgWizOpen='tgs1';loadConexiones()}
  catch(e){toast('No se pudo cambiar: '+(TERRS[e.message]||e.message),false)}};
 $('#tgBotSave').onclick=async()=>{const token=$('#tgBotToken').value.trim();if(!token)return toast('Pega primero el token de @BotFather',false);
  try{const d=await api('/api/admin/tenants/'+cxTenant+'/telegram/bot',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token})});
-  toast('Bot propio guardado ✓ (@'+d.botUsername+'). Ahora vincula el chat: el bot NUEVO es el que debe entrar al grupo.');loadConexiones()}
+  toast('Bot propio guardado ✓ (@'+d.botUsername+'). Ahora vincula el chat: el bot NUEVO es el que debe entrar al grupo.');tgWizOpen=null;loadConexiones()}
  catch(e){toast('No se pudo guardar el bot: '+(TERRS[e.message]||e.message),false)}};
 $('#tgBotDel').onclick=async()=>{if(!confirm('¿Quitar el bot propio? Se desvincula el chat y los avisos volverán a salir por el bot de Velai cuando se vuelva a vincular.'))return;
- try{await api('/api/admin/tenants/'+cxTenant+'/telegram/bot',{method:'DELETE'});toast('Bot propio retirado');loadConexiones()}
+ try{await api('/api/admin/tenants/'+cxTenant+'/telegram/bot',{method:'DELETE'});toast('Bot propio retirado');tgWizOpen='tgs1';loadConexiones()}
  catch(e){toast('No se pudo quitar: '+(TERRS[e.message]||e.message),false)}};
 $('#tgLink').onclick=async()=>{try{const d=await api('/api/admin/tenants/'+cxTenant+'/telegram/link',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'});
- $('#tgGroupUrl').href=d.groupUrl;$('#tgDmUrl').href=d.dmUrl;$('#tgCmd').textContent='/start '+d.token;$('#tgLinkBox').hidden=false}
+ $('#tgGroupUrl').href=d.groupUrl;$('#tgDmUrl').href=d.dmUrl;$('#tgCmd').textContent='/start '+d.token;tgWizOpen='tgs3';$('#tgLinkBox').hidden=false}
  catch(e){toast('No se pudo generar el enlace: '+(TERRS[e.message]||e.message),false)}};
 $('#tgUnlink').onclick=async()=>{if(!confirm('¿Desvincular el Telegram? Los avisos de leads dejarán de llegar a ese chat.'))return;
- try{await api('/api/admin/tenants/'+cxTenant+'/telegram',{method:'DELETE'});toast('Telegram desvinculado');loadConexiones()}
+ try{await api('/api/admin/tenants/'+cxTenant+'/telegram',{method:'DELETE'});toast('Telegram desvinculado');tgWizOpen=null;loadConexiones()}
  catch(e){toast('No se pudo desvincular: '+(TERRS[e.message]||e.message),false)}};
 $('#tgSetup').onclick=async()=>{try{const d=await api('/api/admin/telegram/setup',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'});
  $('#tgSetupOut').textContent='Webhook registrado ✓ (bot @'+(d.botUsername||'?')+')'}

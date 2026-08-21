@@ -293,17 +293,40 @@ body.cliente .cliente-only{display:flex}
 .calchip{display:block;font-size:10.5px;line-height:1.45;margin:2px 3px 0;padding:1px 6px 1px 5px;border-radius:4px;background:rgba(255,107,26,.15);color:var(--chip-t);border-left:3px solid var(--orange);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-align:left}
 .calmore{display:block;font-size:10px;color:var(--muted);margin-top:2px;text-align:left;padding-left:6px}
 .btnsm{padding:4px 10px;font-size:12px}
-/* Stepper de Conexiones (pedido de Juan: guiar al cliente que "no sabe", paso a paso) */
-.wstep{border:1px solid var(--line);border-radius:var(--r-sm);margin-bottom:8px;background:var(--bg2)}
-.wstep .wh{display:flex;align-items:center;gap:10px;padding:11px 13px;cursor:pointer}
-.wnum{display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;border-radius:50%;background:rgba(var(--ink),.08);color:var(--muted);font-size:12px;font-weight:700;flex-shrink:0}
-.wstep.cur{border-color:var(--orange)}
-.wstep.cur .wnum{background:var(--orange);color:#fff}
-.wstep.done .wnum{background:var(--ok);color:#fff}
-.wst{margin-left:auto;font-size:11.5px;color:var(--muted);white-space:nowrap}
-.wb{padding:2px 14px 13px 47px}
-.wol{margin:6px 0 10px;padding-left:18px}
-.wol li{margin-bottom:7px}
+/* Asistente horizontal de Conexiones (canvas «Conexión de Telegram guiada»,
+   aprobado por Juan 2026-08-21): riel de progreso clicable + una tarjeta por paso.
+   Estados SOLO por clases (la CSP no cubre style="" dinámico). */
+.tgw-top{display:flex;align-items:flex-start;gap:16px}
+.tgw-top .grow{flex:1}
+.tgh{font-family:var(--font-d);font-weight:700;font-size:19px;letter-spacing:-.02em}
+.tgh2{font-family:var(--font-d);font-weight:700;font-size:16px;letter-spacing:-.01em}
+.tgsub{margin:4px 0 0;color:var(--muted);font-size:13px}
+.tgchip{font-size:12px;color:var(--muted);background:var(--bg);border:1px solid var(--border2);border-radius:999px;padding:5px 12px;white-space:nowrap}
+.tgrail{display:flex;align-items:flex-start;margin:20px 0 4px}
+.tgnode{display:flex;flex-direction:column;align-items:center;gap:7px;width:86px;flex-shrink:0;border:0;background:none;cursor:pointer;padding:0;font-family:inherit}
+.tgnum{display:inline-flex;align-items:center;justify-content:center;width:32px;height:32px;border-radius:50%;font-weight:700;font-size:13.5px;background:rgba(var(--ink),.08);color:var(--muted)}
+.tgnode.cur .tgnum{background:var(--orange);color:#fff;box-shadow:0 0 0 4px rgba(255,107,26,.18)}
+.tgnode.done .tgnum{background:var(--ok);color:#fff}
+.tgnlbl{font-size:11.5px;font-weight:500;color:var(--muted);text-align:center}
+.tgnode:hover .tgnlbl{color:var(--white)}
+.tgnode.cur .tgnlbl{color:var(--chip-t);font-weight:700}
+.tgnode.done .tgnlbl{color:var(--white)}
+.tgbar{flex:1;height:3px;border-radius:2px;margin-top:15px;background:rgba(var(--ink),.12)}
+.tgbar.done{background:var(--ok)}
+.tgpanel{background:var(--bg);border:1px solid var(--line);border-radius:12px;padding:20px 22px;margin-top:14px;min-height:250px;display:flex;flex-direction:column}
+.tgstep{flex:1;display:flex;flex-direction:column}
+.tgstep[hidden]{display:none}
+.tgbody{flex:1}
+.tgcards{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin-top:14px}
+.tgcards.two{grid-template-columns:repeat(2,minmax(0,1fr))}
+.tgcard{background:var(--bg2);border:1px solid rgba(var(--ink),.10);border-radius:10px;padding:13px 15px}
+.tgcard b{font-size:12.5px}
+.tgcard p{margin:6px 0 0;color:var(--muted);font-size:12.5px}
+.tgnav{display:flex;justify-content:space-between;gap:10px;margin-top:16px;align-items:center}
+.tgfinbody{display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center}
+.tgfinico{display:inline-flex;align-items:center;justify-content:center;width:54px;height:54px;border-radius:50%;background:rgba(25,158,112,.12);color:var(--ok)}
+.tgfinico svg{width:26px;height:26px}
+@media(max-width:900px){.tgcards,.tgcards.two{grid-template-columns:1fr}.tgnlbl{display:none}.tgnode{width:44px}}
 .caldaylist>div{padding:9px 0;border-bottom:1px solid var(--line)}
 .caldaylist>div:last-child{border-bottom:0}
 </style></head><body>
@@ -369,53 +392,76 @@ body.cliente .cliente-only{display:flex}
 </div>
 <div id="viewConexiones" hidden>
 <div class="vhead"><div><h1>Conexiones</h1><p>Canales de aviso y estado de WhatsApp del negocio</p></div><div class="actions actions0"><select id="cxTenantSel" class="inpill velai-only"></select></div></div>
-<div class="card"><b>Avisos por Telegram</b>
-<p class="muted mt6">Sigue estos pasos una sola vez (5–10 minutos) y el aviso de cada lead llegará al Telegram del negocio al momento, clasificado por temas. Puedes volver a cualquier paso tocándolo.</p>
-<div class="mt6">
+<div class="card">
+<div class="tgw-top"><div class="grow"><b class="tgh">Recibe tus leads en Telegram</b>
+<p class="tgsub">Una sola vez, 5–10 minutos. El asistente detecta lo que ya está hecho y guarda tu avance.</p></div>
+<span class="tgchip" id="tgProgress">—</span></div>
 
-<div class="wstep" id="tgs1" hidden><div class="wh"><span class="wnum">1</span><b>El bot del negocio (marca blanca)</b><span class="wst" id="tgs1st"></span></div>
-<div class="wb" id="tgs1b" hidden>
-<span class="velai-only mb6" id="tgWlRow"><span id="tgWlState" class="flag off">desactivada</span> <button class="btn alt btnsm" id="tgWlToggle" type="button">Activar</button></span>
-<p class="muted">Con esto los avisos llegarán desde el bot con el nombre del negocio (p. ej. @MiNegocioBot):</p>
-<ol class="wol muted"><li>Abre Telegram y busca <b>@BotFather</b> (el que tiene la insignia azul de verificado).</li>
-<li>Escríbele <code>/newbot</code>. Te hará dos preguntas: el <b>nombre visible</b> (p. ej. «Mi Negocio Avisos») y el <b>usuario</b>, que debe terminar en <code>bot</code> (p. ej. <code>MiNegocioBot</code>).</li>
-<li>BotFather te responderá con un <b>token</b> (una línea larga de números y letras). Cópialo y pégalo aquí abajo.</li></ol>
-<div id="tgBotState" class="mb6 muted">—</div>
+<div class="tgrail">
+<button class="tgnode" id="tgn1" type="button" data-tgo="tgs1"><span class="tgnum">1</span><span class="tgnlbl">Tu bot</span></button><i class="tgbar" id="tgbar1"></i>
+<button class="tgnode" id="tgn2" type="button" data-tgo="tgs2"><span class="tgnum">2</span><span class="tgnlbl">El grupo</span></button><i class="tgbar" id="tgbar2"></i>
+<button class="tgnode" id="tgn3" type="button" data-tgo="tgs3"><span class="tgnum">3</span><span class="tgnlbl">Conectar</span></button><i class="tgbar" id="tgbar3"></i>
+<button class="tgnode" id="tgn4" type="button" data-tgo="tgs4"><span class="tgnum">4</span><span class="tgnlbl">Permisos</span></button><i class="tgbar" id="tgbar4"></i>
+<button class="tgnode" id="tgn5" type="button" data-tgo="tgs5"><span class="tgnum">5</span><span class="tgnlbl">Temas</span></button>
+</div>
+
+<div class="tgpanel">
+<div class="tgstep" id="tgs1b" hidden><div class="tgbody">
+<div class="tgh2">Crea el bot de tu negocio <span class="velai-only"><span id="tgWlState" class="flag off">desactivada</span> <button class="btn alt btnsm" id="tgWlToggle" type="button">Activar</button></span></div>
+<p class="tgsub">Así los avisos llegarán firmados por tu marca (p. ej. @MiNegocioBot).</p>
+<div class="tgcards">
+<div class="tgcard"><b>1 · Abre @BotFather</b><p>En Telegram, busca <b>@BotFather</b> — el que tiene la insignia azul de verificado.</p></div>
+<div class="tgcard"><b>2 · Escríbele /newbot</b><p>Te pedirá un nombre visible («Mi Negocio Avisos») y un usuario que termine en <b>bot</b>.</p></div>
+<div class="tgcard"><b>3 · Copia el token</b><p>BotFather te dará una línea larga de números y letras: pégala aquí abajo.</p></div>
+</div>
+<div id="tgBotState" class="muted mt6">—</div>
 <div class="actions actions0"><input id="tgBotToken" type="password" autocomplete="new-password" placeholder="pega aquí el token de @BotFather" class="grow inpill"><button class="btn" id="tgBotSave" type="button">Guardar bot</button><button class="btn alt" id="tgBotDel" type="button" hidden>Quitar</button></div>
-</div></div>
+</div><div class="tgnav"><span></span><button class="btn alt" id="tgSkipBot" type="button">Prefiero usar el bot de Velai →</button></div></div>
 
-<div class="wstep" id="tgs2"><div class="wh"><span class="wnum">2</span><b>Crea el grupo de tu equipo</b><span class="wst" id="tgs2st"></span></div>
-<div class="wb" id="tgs2b" hidden>
-<ol class="wol muted"><li>En Telegram: menú → <b>Nuevo grupo</b>.</li>
-<li>Añade a las personas del negocio que deben ver los leads (puedes añadir más después).</li>
-<li>Ponle un nombre claro, p. ej. <b>«Mi Negocio · Leads»</b>.</li></ol>
-<div class="actions actions0"><button class="btn" id="tgs2ok" type="button">Ya tengo el grupo →</button></div>
-</div></div>
+<div class="tgstep" id="tgs2b" hidden><div class="tgbody">
+<div class="tgh2">Crea el grupo de tu equipo</div>
+<p class="tgsub">Ahí llegarán los avisos, para ti y para quien tú añadas.</p>
+<div class="tgcards">
+<div class="tgcard"><b>1 · Nuevo grupo</b><p>En Telegram: menú → <b>Nuevo grupo</b>.</p></div>
+<div class="tgcard"><b>2 · Tu equipo</b><p>Añade a quien deba ver los leads (puedes añadir más luego).</p></div>
+<div class="tgcard"><b>3 · Nombre claro</b><p>P. ej. <b>«Mi Negocio · Leads»</b>.</p></div>
+</div>
+</div><div class="tgnav"><button class="btn alt" id="tgBack2" type="button">← Anterior</button><button class="btn" id="tgs2ok" type="button">Ya tengo el grupo →</button></div></div>
 
-<div class="wstep" id="tgs3"><div class="wh"><span class="wnum">3</span><b>Conecta el grupo con Vai</b><span class="wst" id="tgs3st"></span></div>
-<div class="wb" id="tgs3b" hidden>
-<div id="tgState" class="muted mb6">—</div>
+<div class="tgstep" id="tgs3b" hidden><div class="tgbody">
+<div class="tgh2">Conecta el grupo con Vai</div>
+<p class="tgsub">Un toque desde el móvil y el bot queda dentro de tu grupo.</p>
+<div id="tgState" class="muted mt6">—</div>
 <div class="actions actions0"><button class="btn" id="tgLink" type="button">Generar enlace de conexión</button><button class="btn alt" id="tgUnlink" type="button" hidden>Desconectar</button></div>
 <div id="tgLinkBox" class="note mt6" hidden>
-<p class="mb6">Abre este enlace <b>desde el móvil</b> donde tienes Telegram: <a id="tgGroupUrl" href="#" target="_blank" rel="noopener"><b>conectar mi grupo</b></a> → Telegram te preguntará a qué grupo añadir el bot → elige el del paso 2. En el grupo aparecerá la confirmación «✅ Listo…».</p>
-<p class="mb6 muted">¿No llegó la confirmación? Escribe esto dentro del grupo: <code id="tgCmd"></code> · ¿Prefieres un chat directo contigo en vez de grupo? <a id="tgDmUrl" href="#" target="_blank" rel="noopener">usa este enlace</a>. El enlace caduca en 15 minutos.</p>
-</div></div></div>
+<p class="mb6"><b>Abre este enlace desde el móvil</b> donde tienes Telegram: <a id="tgGroupUrl" href="#" target="_blank" rel="noopener"><b>conectar mi grupo</b></a> → elige el grupo del paso anterior. En el grupo aparecerá la confirmación «✅ Listo…» y este paso avanzará solo al recargar.</p>
+<p class="muted mb6">¿No llega la confirmación? Escribe dentro del grupo: <code id="tgCmd"></code> · ¿Prefieres un chat directo contigo? <a id="tgDmUrl" href="#" target="_blank" rel="noopener">usa este enlace</a>. Caduca en 15 minutos.</p>
+</div>
+</div><div class="tgnav"><button class="btn alt" id="tgBack3" type="button">← Anterior</button><span></span></div></div>
 
-<div class="wstep" id="tgs4"><div class="wh"><span class="wnum">4</span><b>Activa los «Temas» y dale permiso al bot</b><span class="wst" id="tgs4st"></span></div>
-<div class="wb" id="tgs4b" hidden>
-<ol class="wol muted"><li>Abre el grupo → toca su <b>nombre</b> (arriba) → <b>Editar</b> → activa el interruptor <b>«Temas»</b>.</li>
-<li>En esa misma pantalla: <b>Administradores</b> → <b>Añadir administrador</b> → elige el bot (el del paso 1, o el bot de Velai) → activa el permiso <b>«Gestionar temas»</b> → guarda.</li></ol>
-<div class="actions actions0"><button class="btn" id="tgs4ok" type="button">Ya lo activé →</button></div>
-</div></div>
+<div class="tgstep" id="tgs4b" hidden><div class="tgbody">
+<div class="tgh2">Activa los «Temas» y dale permiso al bot</div>
+<p class="tgsub">Los Temas son las pestañas del grupo donde llegarán tus leads clasificados.</p>
+<div class="tgcards two">
+<div class="tgcard"><b>1 · Activa los Temas</b><p>Abre el grupo → toca su <b>nombre</b> (arriba) → <b>Editar</b> → interruptor <b>«Temas»</b>.</p></div>
+<div class="tgcard"><b>2 · Bot administrador</b><p><b>Administradores</b> → añade el bot (el del paso 1, o el de Velai) → activa <b>«Gestionar temas»</b> → guarda.</p></div>
+</div>
+<p class="muted mt6">Si al crear un tema falta algo, te lo diremos con palabras claras.</p>
+</div><div class="tgnav"><button class="btn alt" id="tgBack4" type="button">← Anterior</button><button class="btn" id="tgs4ok" type="button">Ya lo activé →</button></div></div>
 
-<div class="wstep" id="tgs5"><div class="wh"><span class="wnum">5</span><b>Crea los temas para clasificar tus leads</b><span class="wst" id="tgs5st"></span></div>
-<div class="wb" id="tgs5b" hidden>
-<p class="muted">Escribe el nombre y una <b>descripción clara</b> de qué leads deben caer ahí — la descripción es lo que Vai usa para decidir. Vai abrirá el tema en tu grupo automáticamente. Lo que no encaje con ningún tema irá al chat General.</p>
+<div class="tgstep" id="tgs5b" hidden><div class="tgbody">
+<div class="tgh2">Crea los temas para clasificar tus leads</div>
+<p class="tgsub">La <b>descripción</b> es lo que Vai usa para decidir qué lead va a cada tema. Lo que no encaje irá al chat General.</p>
 <div class="actions actions0"><input id="tgTopicName" placeholder="Nombre, p. ej. Presupuestos" class="inpill"><input id="tgTopicDesc" placeholder="Descripción, p. ej. clientes que piden precio o cotización" class="grow inpill"><button class="btn" id="tgTopicAdd" type="button">Crear tema</button></div>
 <div id="tgTopics" class="muted mt6">—</div>
-</div></div>
+</div><div class="tgnav"><button class="btn alt" id="tgBack5" type="button">← Anterior</button><button class="btn" id="tgFinish" type="button">Terminar →</button></div></div>
 
-<div class="note mt6" id="tgWizDone" hidden><b>✅ Todo listo.</b> Los próximos leads llegarán al grupo, clasificados por temas — y puedes afinar las descripciones cuando quieras en el paso 5.</div>
+<div class="tgstep tgfin" id="tgsFinb" hidden><div class="tgbody tgfinbody">
+<span class="tgfinico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg></span>
+<div class="tgh2 mt6">Todo listo</div>
+<p class="tgsub" id="tgFinMsg">Los próximos leads llegarán al grupo, clasificados por temas.</p>
+<div class="actions actions0"><button class="btn alt btnsm" id="tgMoreTopics" type="button">Añadir o editar temas</button></div>
+</div></div>
 </div></div>
 <div class="card mt12 velai-only"><b>Webhook del bot (solo Velai, una vez)</b>
 <p class="muted mt6">Registra el webhook de Telegram apuntando al worker. OJO: con el webhook activo, getUpdates deja de funcionar para ese bot.</p>
