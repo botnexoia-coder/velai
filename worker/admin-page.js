@@ -202,11 +202,11 @@ dialog::backdrop{background:rgba(5,3,6,.78);backdrop-filter:blur(3px)}
 .stpill i{width:8px;height:8px;border-radius:50%;flex-shrink:0}
 .stpill.sm{padding:4px 11px;font-size:11.5px;gap:6px}
 .stpill.sm i{width:6px;height:6px}
-.stpill.ok{background:rgba(25,158,112,.10);border-color:rgba(25,158,112,.30);color:#7fd7b2}
+.stpill.ok{background:rgba(25,158,112,.10);border-color:rgba(25,158,112,.30);color:var(--stt-won)}
 .stpill.ok i{background:var(--ok);box-shadow:0 0 8px rgba(25,158,112,.8)}
-.stpill.warn{background:rgba(255,170,0,.10);border-color:rgba(255,170,0,.30);color:#ffce7a}
+.stpill.warn{background:rgba(255,170,0,.10);border-color:rgba(255,170,0,.30);color:var(--amber-t)}
 .stpill.warn i{background:var(--amber)}
-.stpill.bad{background:rgba(230,103,103,.10);border-color:rgba(230,103,103,.35);color:#f2a4a4}
+.stpill.bad{background:rgba(230,103,103,.10);border-color:rgba(230,103,103,.35);color:var(--stt-lost)}
 .stpill.bad i{background:var(--bad)}
 .cfgtoken{background:var(--bg3);border:1px solid rgba(var(--ink),.08);border-radius:12px;padding:18px 20px;margin-top:14px}
 .cfgtoken.ok{border-color:rgba(25,158,112,.25)}
@@ -249,7 +249,7 @@ dialog::backdrop{background:rgba(5,3,6,.78);backdrop-filter:blur(3px)}
 .prewrap{white-space:pre-wrap;margin-top:8px}.preline{margin:8px 0;white-space:pre-line}
 .promptbox{width:100%;font-family:ui-monospace,monospace;font-size:12.5px}
 .inpill{background:var(--bg3);border:1px solid rgba(var(--ink),.10);border-radius:var(--r-sm);padding:9px 12px}
-.mt6{margin-top:6px}.okmsg{color:var(--ok)}.mb6{margin:6px 0}.actions0{margin:4px 0 0;align-items:center}
+.mt6{margin-top:6px}.okmsg{color:var(--stt-won)}.mb6{margin:6px 0}.actions0{margin:4px 0 0;align-items:center}
 .legend .d-new{background:var(--st-new)}.legend .d-contacted{background:var(--st-contacted)}.legend .d-qualified{background:var(--st-qualified)}.legend .d-won{background:var(--st-won)}.legend .d-lost{background:var(--st-lost)}
 /* Previsualización de la marca del widget: mini-mock del chat con los valores del form */
 #brandPrev{margin-top:8px;max-width:300px;border-radius:12px;overflow:hidden;border:1px solid var(--border2);background:#ece5dd}
