@@ -83,8 +83,8 @@ Sin esto, las campañas gastarían presupuesto a ciegas (sin medir conversiones)
 
 - [ ] 🔴 Pulsar **«Registrar webhook»** en el panel → Conexiones (una vez; secret ya cargado). OJO: desde ese momento `getUpdates` deja de funcionar para el bot — los chat ids ya no se leen a mano, que es el punto.
 - [ ] Probar el ciclo real: generar enlace para GOgestión → su `/start` en un grupo → el aviso de un lead de prueba llega AL GRUPO y la copia a Velai.
-- [ ] **PR 2** — WhatsApp `sender/sync` (leer el sender de la subcuenta por API y rellenar la fila) + tarjeta de estado para el cliente. ⚠️ verificar en la 1ª ejecución real el shape de la respuesta de Twilio y `webhookOk` (el Self Sign-up NO configura nuestro webhook: es el fallo más probable del alta).
-- [ ] **PR 3** — `team_whatsapp`/`wa_number` editables por el cliente + guarda del `63031` (From ∈ team_whatsapp) también en el PATCH general.
+- [x] **PR 2** desplegado (36ad269): `sender/sync` rellena la fila y REPARA el webhook; tarjeta de estado del cliente. ⚠️ QUEDA verificar en la 1ª ejecución real (alta de GOgestión) el shape de la respuesta de Twilio en Workers Logs y que la reparación del webhook funciona en vivo.
+- [x] **PR 3** desplegado: `PATCH …/notify` en autoservicio + guarda del `63031` en los dos caminos.
 - [ ] **PR 4 (Fase B, NO implementar aún)** — Embedded Signup real en el panel. Precondiciones, en orden, todas de Juan: (1) S.L./alta censal para la verificación de negocio de Velai en Meta; (2) 2FA + verificación del portfolio `949061711290882` («several weeks»); (3) app de Meta NUEVA enviada a App Review; (4) alta en el programa Tech Provider de Twilio. Reevaluar a ~10 clientes junto a la comparativa 360dialog.
 
 ### 2h. Seguimiento del sprint de blindaje (desplegado 2026-08-20)

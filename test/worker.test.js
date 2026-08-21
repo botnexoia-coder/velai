@@ -2226,3 +2226,34 @@ test('whatsapp del cliente: estado propio sin secretos, ajeno 404, y sender/sync
   const prov = `/api/admin/tenants/${TID}/provision/sender/sync`;
   await assert.rejects(testing.adminRouter(adminReq(prov, { method: 'POST' }), env, ctx, prov, new URL('https://x' + prov), {}, OWN), (e) => e.code === 'not_authorized');
 });
+
+test('números de aviso (PR3): el cliente edita los suyos y la guarda del 63031 cierra los dos caminos', async () => {
+  const TID = '00000000-0000-4000-8000-0000000000e1';
+  const row = { id: TID, slug: 'mio', channel_address: 'whatsapp:+34624121930', twilio_from: 'whatsapp:+34624121930', team_whatsapp: null, wa_number: null, updated_at: 'T0' };
+  const writes = [];
+  const db = { prepare: (sql) => ({ bind: (...args) => ({
+    first: async () => sql.includes('FROM tenants WHERE id=') ? { ...row } : null,
+    run: async () => { writes.push({ sql, args }); return { meta: { changes: 1 } }; },
+    all: async () => ({ results: [] }),
+  }) }) };
+  const env = { DB: db, KV: { async get() { return null; }, async put() {}, async delete() {}, async list() { return { keys: [] }; } } };
+  const ctx = { waitUntil(p) { if (p && p.catch) p.catch(() => {}); } };
+  const OWN = { role: 'cliente', tenantId: TID, email: 'cliente@x.com' };
+  const path = `/api/admin/tenants/${TID}/notify`;
+  const call = (scope, body) => testing.adminRouter(adminReq(path, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }), env, ctx, path, new URL('https://x' + path), {}, scope);
+  // el cliente guarda sus números y queda auditado con su rol
+  const ok = await (await call(OWN, { team_whatsapp: 'whatsapp:+34600111222,whatsapp:+34600333444', wa_number: '624121930' })).json();
+  assert.equal(ok.ok, true);
+  assert.ok(writes.some((w) => w.sql.includes('SET team_whatsapp=?')), 'guarda los campos');
+  assert.ok(writes.some((w) => w.sql.includes('tenant_versions') && String(w.args[4]).includes('rol cliente')), 'auditado con el rol');
+  // 63031 por el endpoint de autoservicio: el número del bot no puede ser destinatario
+  await assert.rejects(call(OWN, { team_whatsapp: 'whatsapp:+34624121930' }), (e) => e.code === 'team_whatsapp_equals_from');
+  // …y por el PATCH general de admin (el agujero es de la fila, no del formulario)
+  const gen = `/api/admin/tenants/${TID}`;
+  await assert.rejects(
+    testing.adminRouter(adminReq(gen, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ team_whatsapp: 'whatsapp:+34624121930', expected_updated_at: 'T0' }) }), env, ctx, gen, new URL('https://x' + gen), {}, VELAI),
+    (e) => e.code === 'team_whatsapp_equals_from');
+  // ajeno → 404
+  const foreign = `/api/admin/tenants/${LEADS[1].id}/notify`;
+  await assert.rejects(testing.adminRouter(adminReq(foreign, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ wa_number: '1' }) }), env, ctx, foreign, new URL('https://x' + foreign), {}, OWN), (e) => e.code === 'not_found');
+});

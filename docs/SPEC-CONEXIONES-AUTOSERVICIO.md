@@ -10,7 +10,7 @@
 >
 > **Aplica PR por PR, en orden. No pases al siguiente sin `npm run check` verde.**
 >
-> **ESTADO (CLI, 2026-08-21): PR 1 IMPLEMENTADO** (suite 92/92) con tres ajustes acordados con Juan:
+> **ESTADO (CLI, 2026-08-22): PR 1, 2 y 3 IMPLEMENTADOS** (suite 98/98; PR 4 documentado en TAREAS §2j). Ampliaciones sobre la spec, pedidas por Juan durante la validación: marca blanca de bot POR CLIENTE conmutable por Velai (0014-0015), TEMAS del grupo con clasificación IA como parte del paquete de marca blanca (0016; básico = un solo chat), temas creados desde el panel con descripción (createForumTopic), asistente HORIZONTAL guiado en la UI del cliente, y sender/sync REPARA el webhook además de detectarlo. PR 1 detalle original: (suite 92/92) con tres ajustes acordados con Juan:
 > (1) **Entrega DUAL** en vez del fix a secas — se descubrió que NINGÚN tenant tenía
 > `telegram_chat_id` y TODOS los avisos dependían del fallback buggy: ahora el aviso del
 > cliente va a SU chat (sin chat = skip visible) y Velai recibe SIEMPRE una copia operativa

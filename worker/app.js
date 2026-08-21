@@ -361,6 +361,15 @@ const ACCOUNT_SID_RE = /^AC[0-9a-f]{32}$/i;
 const WABA_RE = /^\d{10,20}$/;
 const PARTNER_STATUS = new Set(['pendiente', 'concedido', 'revocado']);
 const WA_RE = /^whatsapp:\+[1-9]\d{6,14}$/;
+// Twilio rechaza con 63031 cuando From y To son el MISMO número: si team_whatsapp
+// incluye el número del bot, TODOS los avisos de ese cliente caen en silencio
+// (5 reintentos → failed, sin error legible). El agujero es de la FILA, no de un
+// formulario: la guarda corre en el PATCH general Y en el endpoint de autoservicio.
+function assertTeamNotFrom(fields, previous) {
+  const from = String(fields.twilio_from ?? previous.twilio_from ?? '');
+  const list = String(fields.team_whatsapp ?? previous.team_whatsapp ?? '').split(',').map((x) => x.trim()).filter(Boolean);
+  if (from && list.includes(from)) throw new HttpError(400, 'team_whatsapp_equals_from');
+}
 const TEMPLATE_RE = /^HX[0-9a-f]{32}$/i;
 const SLUG_RE = /^[a-z0-9][a-z0-9-]{1,39}$/;
 const CHAT_ID_RE = /^-?\d{5,20}$/;
@@ -1955,6 +1964,7 @@ function clienteAllowed(path, method) {
   if (/^\/api\/admin\/tenants\/[0-9a-f-]+\/telegram\/link$/i.test(path) && method === 'POST') return true;
   if (/^\/api\/admin\/tenants\/[0-9a-f-]+\/telegram\/bot$/i.test(path) && ['POST', 'DELETE'].includes(method)) return true;
   if (/^\/api\/admin\/tenants\/[0-9a-f-]+\/whatsapp$/i.test(path) && method === 'GET') return true;
+  if (/^\/api\/admin\/tenants\/[0-9a-f-]+\/notify$/i.test(path) && method === 'PATCH') return true;
   if (/^\/api\/admin\/tenants\/[0-9a-f-]+\/telegram\/topics$/i.test(path) && method === 'POST') return true;
   if (/^\/api\/admin\/tenants\/[0-9a-f-]+\/telegram\/topics\/\d+$/i.test(path) && ['PATCH', 'DELETE'].includes(method)) return true;
   if (path === '/api/admin/stats' && method === 'GET') return true;
@@ -2264,6 +2274,31 @@ async function adminRouter(request, env, ctx, path, url, config, scope) {
     const row = await env.DB.prepare('SELECT channel_address, twilio_from, (waba_id IS NOT NULL) AS has_waba, sender_status, lead_template_status, meta_partner_status, team_whatsapp, wa_number, (twilio_auth_token_enc IS NOT NULL) AS has_token, (twilio_subaccount_sid IS NOT NULL) AS has_subaccount FROM tenants WHERE id=?').bind(waMatch[1]).first();
     if (!row) throw new HttpError(404, 'not_found');
     return json({ whatsapp: row }, 200, NO_STORE);
+  }
+
+  // ── Números de aviso (SPEC-CONEXIONES PR3): el cliente edita SUS destinos ──
+  const notifyMatch = path.match(/^\/api\/admin\/tenants\/([0-9a-f-]+)\/notify$/i);
+  if (notifyMatch && request.method === 'PATCH') {
+    if (!UUID_RE.test(notifyMatch[1])) throw new HttpError(404, 'not_found');
+    const tenantId = notifyMatch[1];
+    if (scope.role !== 'velai' && scope.tenantId !== tenantId) throw new HttpError(404, 'not_found');
+    const previous = await env.DB.prepare('SELECT id, slug, channel_address, twilio_from, team_whatsapp, wa_number FROM tenants WHERE id=?').bind(tenantId).first();
+    if (!previous) throw new HttpError(404, 'not_found');
+    const body = await readJson(request, 4000);
+    const subset = {};
+    if (body.team_whatsapp !== undefined) subset.team_whatsapp = body.team_whatsapp;
+    if (body.wa_number !== undefined) subset.wa_number = body.wa_number;
+    if (!Object.keys(subset).length) throw new HttpError(400, 'nothing_to_update');
+    const fields = validateTenant(subset, { partial: true }); // WA_RE / WA_DIGITS_RE de siempre
+    assertTeamNotFrom(fields, previous);
+    const now = new Date().toISOString();
+    const columns = Object.keys(fields);
+    await env.DB.prepare(`UPDATE tenants SET ${columns.map((c) => `${c}=?`).join(',')}, updated_at=? WHERE id=?`)
+      .bind(...columns.map((c) => fields[c]), now, tenantId).run();
+    await invalidateTenantCache(env, [previous]);
+    ctx.waitUntil(env.DB.prepare('INSERT INTO tenant_versions (tenant_id,actor_email,field,previous_value,note,created_at) VALUES (?,?,?,?,?,?)')
+      .bind(tenantId, actor, 'config', JSON.stringify(Object.fromEntries(columns.map((c) => [c, previous[c]]))), `avisos (autoservicio, rol ${scope.role})`, now).run().catch(() => {}));
+    return json({ ok: true }, 200, NO_STORE);
   }
 
   // ── Telegram del tenant (SPEC-CONEXIONES PR1): vinculación en autoservicio ──
@@ -2606,6 +2641,7 @@ async function adminRouter(request, env, ctx, path, url, config, scope) {
       const tokenColumn = await tenantTokenColumn(env, tenantId, body);
       if (!Object.keys(fields).length && !tokenColumn) throw new HttpError(400, 'nothing_to_update');
       assertNotActivePending(fields.channel_address ?? previous.channel_address, fields.active ?? previous.active);
+      assertTeamNotFrom(fields, previous);
       const now = new Date().toISOString();
       // `columns` alimenta también el versionado: el token va aparte y jamás entra ahí.
       const columns = Object.keys(fields);

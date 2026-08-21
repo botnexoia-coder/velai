@@ -475,6 +475,10 @@ body.cliente .cliente-only{display:flex}
 <p class="tgsub">El estado de tu número de WhatsApp con Vai. La conexión inicial la hacemos juntos en una sesión corta — te avisaremos.</p>
 <div id="waState" class="mt6 muted">—</div>
 <div class="actions actions0 velai-only"><button class="btn alt" id="waSync" type="button">Sincronizar desde Twilio</button><span id="waSyncOut" class="muted"></span></div></div>
+<div class="card mt12"><b class="tgh tgh-sm">Números de aviso por WhatsApp</b>
+<p class="tgsub">A qué WhatsApp del equipo llega el aviso de cada lead (además de Telegram). Varios números separados por coma, formato whatsapp:+34…</p>
+<div class="actions actions0"><input id="nfTeam" placeholder="whatsapp:+34600111222,whatsapp:+34600333444" class="grow inpill"><input id="nfWa" placeholder="nº de errores (solo dígitos)" class="inpill"><button class="btn alt" id="nfSave" type="button">Guardar</button></div>
+<small class="muted field-err" data-f="team_whatsapp"></small></div>
 <div class="card mt12 velai-only"><b>Webhook del bot (solo Velai, una vez)</b>
 <p class="muted mt6">Registra el webhook de Telegram apuntando al worker. OJO: con el webhook activo, getUpdates deja de funcionar para ese bot.</p>
 <div class="actions actions0"><button class="btn alt" id="tgSetup" type="button">Registrar webhook</button><span id="tgSetupOut" class="muted"></span></div></div>
