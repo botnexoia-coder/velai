@@ -1950,7 +1950,7 @@ test('telegram: GET de estado y DELETE de desvinculación (rol cliente, solo lo 
   const OWN = { role: 'cliente', tenantId: TID, email: 'cliente@x.com' };
   const path = `/api/admin/tenants/${TID}/telegram`;
   const got = await (await testing.adminRouter(adminReq(path), env, ctx, path, new URL('https://x' + path), {}, OWN)).json();
-  assert.deepEqual(got.telegram, { linked: true, title: 'Mi grupo', linked_at: '2026-08-21T10:00:00Z', botUsername: null, whitelabel: false });
+  assert.deepEqual(got.telegram, { linked: true, title: 'Mi grupo', linked_at: '2026-08-21T10:00:00Z', botUsername: null, whitelabel: false, topics: [] });
   const del = await (await testing.adminRouter(adminReq(path, { method: 'DELETE' }), env, ctx, path, new URL('https://x' + path), {}, OWN)).json();
   assert.equal(del.ok, true);
   const cleared = db.writes.find((w) => w.sql.includes('SET telegram_chat_id=NULL'));
@@ -2013,5 +2013,84 @@ test('bot propio (marca blanca): se valida con getMe, se cifra, registra su webh
     assert.deepEqual(off, { ok: true, whitelabel: false });
     const cleared = db.writes.find((w) => w.sql.includes('telegram_whitelabel=0'));
     assert.ok(cleared && cleared.sql.includes('telegram_bot_token_enc=NULL') && cleared.sql.includes('telegram_chat_id=NULL'), 'desactivar retira el bot y desvincula el chat');
+  } finally { globalThis.fetch = realFetch; }
+});
+
+test('temas de Telegram: el grupo los registra solo (servicio y /tema) y Vai clasifica cada lead a su tema', async () => {
+  const TID = '00000000-0000-4000-8000-0000000000d1';
+  const row = { id: TID, slug: 'mio', name: 'Mi Negocio', channel_address: 'web:mio', telegram_chat_id: '-777', telegram_topics: null, telegram_bot_token_enc: null };
+  const updates = [];
+  const env = {
+    KV: mapKV(), TELEGRAM_WEBHOOK_SECRET: 'S3CRETO', TELEGRAM_TOKEN: 'tg-velai', TELEGRAM_CHAT_ID: '-100999', ANTHROPIC_API_KEY: 'k',
+    DB: { prepare: (sql) => ({ bind: (...args) => ({
+      first: async () => sql.includes('WHERE telegram_chat_id') && args[0] === '-777' ? { ...row } : null,
+      run: async () => { updates.push({ sql, args }); if (sql.includes('SET telegram_topics=')) row.telegram_topics = args[0]; return { meta: { changes: 1 } }; },
+      all: async () => ({ results: [] }),
+    }) }) },
+  };
+  const worker = createWorker({ SYSTEM: 's', DEMOS: {}, SUMMARY_PROMPT: '', GUARDRAILS: '' });
+  const waits = [];
+  const ctx = { waitUntil(p) { waits.push(p.catch(() => {})); } };
+  const tgReq = (body) => new Request('https://vai-worker.botnexo-ia.workers.dev/telegram/webhook', {
+    method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Telegram-Bot-Api-Secret-Token': 'S3CRETO' }, body: JSON.stringify(body),
+  });
+  const telegramSends = [];
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = async (url, init) => {
+    const u = String(url);
+    if (u.includes('api.telegram.org')) { telegramSends.push(JSON.parse(init.body)); return new Response('{"ok":true}', { status: 200 }); }
+    if (u.includes('api.anthropic.com')) return new Response(JSON.stringify({ content: [{ text: 'Presupuestos' }] }), { status: 200 });
+    return new Response('{}', { status: 200 });
+  };
+  try {
+    // 1) el cliente crea el Tema en su grupo → mensaje de servicio → registrado
+    await worker.fetch(tgReq({ message: { chat: { id: -777 }, message_thread_id: 42, forum_topic_created: { name: 'Presupuestos' } } }), env, ctx);
+    // 2) un tema que ya existía: '/tema' dentro del tema, con el nombre en el reply
+    await worker.fetch(tgReq({ message: { chat: { id: -777 }, message_thread_id: 43, text: '/tema', reply_to_message: { forum_topic_created: { name: 'Urgente' } } } }), env, ctx);
+    await Promise.all(waits);
+    const topics = JSON.parse(row.telegram_topics);
+    assert.deepEqual(topics, [{ thread_id: 42, name: 'Presupuestos' }, { thread_id: 43, name: 'Urgente' }]);
+    assert.ok(telegramSends.some((s) => s.message_thread_id === 42 && String(s.text).includes('Tema registrado')), 'confirma DENTRO del tema');
+    // 3) el aviso del lead va al tema que el clasificador elige (thread 42)
+    telegramSends.length = 0;
+    const tenant = { id: TID, slug: 'mio', telegram_chat_id: '-777', telegram_topics: row.telegram_topics, telegram_bot_token_enc: null };
+    const out = await testing.deliver(env, 'telegram', { id: 'ld1', source: 'chat web', need: 'quiero un presupuesto' }, tenant);
+    assert.equal(out.ok, true);
+    const aviso = telegramSends.find((s) => String(s.chat_id) === '-777');
+    assert.equal(aviso.message_thread_id, 42, 'clasificado al tema Presupuestos');
+    // 4) si el clasificador responde GENERAL (o falla), el aviso va SIN hilo
+    globalThis.fetch = async (url, init) => {
+      const u = String(url);
+      if (u.includes('api.telegram.org')) { telegramSends.push(JSON.parse(init.body)); return new Response('{"ok":true}', { status: 200 }); }
+      if (u.includes('api.anthropic.com')) return new Response(JSON.stringify({ content: [{ text: 'GENERAL' }] }), { status: 200 });
+      return new Response('{}', { status: 200 });
+    };
+    telegramSends.length = 0;
+    await testing.deliver(env, 'telegram', { id: 'ld2', source: 'chat web' }, tenant);
+    assert.equal(telegramSends.find((s) => String(s.chat_id) === '-777').message_thread_id, undefined, 'GENERAL = chat principal');
+    // 5) tema borrado en Telegram: el primer envío falla y el aviso cae al General
+    let first = true;
+    globalThis.fetch = async (url, init) => {
+      const u = String(url);
+      if (u.includes('api.anthropic.com')) return new Response(JSON.stringify({ content: [{ text: 'Urgente' }] }), { status: 200 });
+      if (u.includes('api.telegram.org')) {
+        const body = JSON.parse(init.body); telegramSends.push(body);
+        if (body.message_thread_id && first) { first = false; return new Response('{"ok":false}', { status: 400 }); }
+        return new Response('{"ok":true}', { status: 200 });
+      }
+      return new Response('{}', { status: 200 });
+    };
+    telegramSends.length = 0;
+    const fallback = await testing.deliver(env, 'telegram', { id: 'ld3', source: 'chat web' }, tenant);
+    assert.equal(fallback.ok, true, 'el aviso nunca se pierde por un tema roto');
+    // 6) quitar un tema del enrutado (cliente, autoservicio)
+    const dbDel = { prepare: (sql) => ({ bind: (...args) => ({
+      first: async () => sql.includes('FROM tenants WHERE id=') ? { id: TID, slug: 'mio', channel_address: 'web:mio', telegram_topics: row.telegram_topics } : null,
+      run: async () => { updates.push({ sql, args }); return { meta: { changes: 1 } }; }, all: async () => ({ results: [] }),
+    }) }) };
+    const OWN = { role: 'cliente', tenantId: TID, email: 'cliente@x.com' };
+    const delPath = `/api/admin/tenants/${TID}/telegram/topics/42`;
+    const res = await (await testing.adminRouter(adminReq(delPath, { method: 'DELETE' }), { DB: dbDel, KV: env.KV }, ctx, delPath, new URL('https://x' + delPath), {}, OWN)).json();
+    assert.deepEqual(res.topics, [{ thread_id: 43, name: 'Urgente' }]);
   } finally { globalThis.fetch = realFetch; }
 });

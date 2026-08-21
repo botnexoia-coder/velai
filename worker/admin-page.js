@@ -371,7 +371,10 @@ body.cliente .cliente-only{display:flex}
 <div class="mt6" id="tgBotBlock" hidden><b>Bot propio (marca blanca)</b> <span id="tgWlState" class="flag off velai-only">desactivada</span> <button class="btn alt btnsm velai-only" id="tgWlToggle" type="button">Activar</button>
 <p class="muted">Por defecto los avisos llegan desde el bot de Velai. Para que lleguen desde el bot DEL NEGOCIO (p. ej. @MiNegocioBot): créalo en Telegram con @BotFather (comando /newbot), copia el token que te da y pégalo aquí. Al guardarlo hay que volver a vincular el chat (es el bot nuevo el que debe entrar al grupo).</p>
 <div id="tgBotState" class="mb6 muted">—</div>
-<div class="actions actions0"><input id="tgBotToken" type="password" autocomplete="new-password" placeholder="token de @BotFather (solo se escribe, nunca se muestra)" class="grow inpill"><button class="btn alt" id="tgBotSave" type="button">Guardar bot</button><button class="btn alt" id="tgBotDel" type="button" hidden>Quitar</button></div></div></div>
+<div class="actions actions0"><input id="tgBotToken" type="password" autocomplete="new-password" placeholder="token de @BotFather (solo se escribe, nunca se muestra)" class="grow inpill"><button class="btn alt" id="tgBotSave" type="button">Guardar bot</button><button class="btn alt" id="tgBotDel" type="button" hidden>Quitar</button></div></div>
+<div class="mt6" id="tgTopicsBlock" hidden><b>Temas del grupo (clasificación automática de leads)</b>
+<p class="muted">Activa los «Temas» en los ajustes de tu grupo de Telegram y crea uno por categoría con el nombre que quieras — «Presupuestos», «Citas», «Urgente»… El bot los registra al crearlos; para registrar un tema que ya existía, escribe <code>/tema</code> dentro de ese tema. Vai lee cada lead y lo publica en el tema que mejor encaje; si ninguno encaja, va al chat General.</p>
+<div id="tgTopics" class="muted">—</div></div></div>
 <div class="card mt12 velai-only"><b>Webhook del bot (solo Velai, una vez)</b>
 <p class="muted mt6">Registra el webhook de Telegram apuntando al worker. OJO: con el webhook activo, getUpdates deja de funcionar para ese bot.</p>
 <div class="actions actions0"><button class="btn alt" id="tgSetup" type="button">Registrar webhook</button><span id="tgSetupOut" class="muted"></span></div></div>

@@ -638,11 +638,69 @@ async function telegramBotUsername(env) {
   } catch (_) { return null; }
 }
 
+// Alta/actualización de un Tema del grupo vinculado. El nombre lo pone EL CLIENTE
+// en su Telegram; aquí solo se registra el mapa tema→hilo para clasificar avisos.
+async function registerTelegramTopic(env, ctx, chatId, threadId, name) {
+  if (!threadId || !name) return json({ ok: true }, 200, NO_STORE);
+  const tenant = await env.DB.prepare('SELECT id, slug, name, channel_address, telegram_topics, telegram_bot_token_enc FROM tenants WHERE telegram_chat_id = ?').bind(chatId).first();
+  if (!tenant) return json({ ok: true }, 200, NO_STORE);
+  let topics = [];
+  try { topics = JSON.parse(tenant.telegram_topics || '[]'); } catch (_) {}
+  if (!Array.isArray(topics)) topics = [];
+  const existing = topics.find((t) => t && String(t.thread_id) === String(threadId));
+  if (existing) existing.name = name; else topics.push({ thread_id: Number(threadId), name });
+  topics = topics.slice(0, 25); // tope defensivo: nadie clasifica contra 200 temas
+  const now = new Date().toISOString();
+  await env.DB.prepare('UPDATE tenants SET telegram_topics=?, updated_at=? WHERE id=?').bind(JSON.stringify(topics), now, tenant.id).run();
+  await invalidateTenantCache(env, [tenant]);
+  console.log(JSON.stringify({ level: 'info', code: 'telegram_topic_registered', tenant: tenant.slug, topics: topics.length }));
+  if (!existing) {
+    const botToken = await tenantTelegramToken(env, tenant);
+    ctx.waitUntil(sendTelegramText(env, `📌 Tema registrado: los leads que encajen con «${escapeHtml(name)}» llegarán aquí.`, chatId, { botToken, threadId }).catch(() => {}));
+  }
+  return json({ ok: true }, 200, NO_STORE);
+}
+
+// Clasifica el lead en uno de los Temas que el cliente creó en su grupo. Estricto:
+// el modelo responde el nombre EXACTO de un tema o GENERAL, y ante cualquier duda
+// o fallo la respuesta es null (chat General) — un aviso jamás se pierde por esto.
+async function telegramThreadFor(env, tenant, lead) {
+  let topics = [];
+  try { topics = JSON.parse(tenant.telegram_topics || '[]'); } catch (_) {}
+  topics = Array.isArray(topics) ? topics.filter((t) => t && t.thread_id && t.name) : [];
+  if (!topics.length) return null;
+  try {
+    const reply = await callAnthropic(env, {
+      model: 'claude-haiku-4-5-20251001', max_tokens: 20,
+      system: `Clasifica el lead en UNO de estos temas de Telegram definidos por el negocio y responde SOLO con el nombre exacto del tema, sin nada más. Si ninguno encaja claramente, responde GENERAL.\nTemas: ${topics.map((t) => t.name).join(' | ')}`,
+      messages: [{ role: 'user', content: JSON.stringify({ fuente: lead.source, sector: lead.sector, necesidad: lead.need, contexto: lead.context, nota: lead.note }) }],
+    }, { tenant, retries: 0, timeoutMs: 8000 });
+    const pick = String(reply).trim().toLowerCase();
+    const hit = topics.find((t) => String(t.name).trim().toLowerCase() === pick);
+    return hit ? hit.thread_id : null;
+  } catch (_) { return null; }
+}
+
 async function handleTelegramWebhook(request, env, ctx) {
   const update = await readJson(request, 16000).catch(() => null);
   const message = update && update.message;
   const text = clean(message && message.text, 200);
-  // En grupos el cliente llega como '/start@NombreDelBot <token>': aceptar ambas formas.
+  const chatOk = message && message.chat && message.chat.id !== undefined;
+  const threadId = (chatOk && message.message_thread_id) || null;
+  // 1) El cliente creó o renombró un Tema en su grupo: Telegram lo cuenta con un
+  //    mensaje de servicio — se registra solo, sin que nadie copie nada.
+  const topicEvent = message && (message.forum_topic_created || message.forum_topic_edited);
+  if (topicEvent && chatOk) {
+    return registerTelegramTopic(env, ctx, String(message.chat.id), threadId, clean(topicEvent.name, 64));
+  }
+  // 2) '/tema' DENTRO de un tema que ya existía antes de añadir el bot: el mensaje
+  //    trae el hilo y (vía reply_to_message) el nombre del tema.
+  if (chatOk && threadId && /^\/tema(?:@\w+)?\s*$/i.test(text)) {
+    const topicName = clean(message.reply_to_message && message.reply_to_message.forum_topic_created && message.reply_to_message.forum_topic_created.name, 64);
+    return registerTelegramTopic(env, ctx, String(message.chat.id), threadId, topicName);
+  }
+  // 3) Vinculación por token de un solo uso. En grupos el cliente llega como
+  //    '/start@NombreDelBot <token>': aceptar ambas formas.
   const match = text.match(/^\/start(?:@\w+)?\s+([0-9a-f]{32})\b/i);
   if (!match || !message.chat || message.chat.id === undefined) return json({ ok: true }, 200, NO_STORE);
   const token = match[1].toLowerCase();
@@ -765,13 +823,14 @@ function notificationText(lead) {
 // cliente: ahí un chat id vacío tiene que ser un skip visible, no un mensaje que
 // acaba en el Telegram de Velai diciendo ok:true (SPEC-CONEXIONES §1.2).
 // botToken: bot PROPIO del tenant (marca blanca) — sin él, el bot de Velai.
-async function sendTelegramText(env, text, chatId, { allowFallback = true, botToken = null } = {}) {
+// threadId: Tema del grupo (message_thread_id) al que va el mensaje.
+async function sendTelegramText(env, text, chatId, { allowFallback = true, botToken = null, threadId = null } = {}) {
   const bot = botToken || env.TELEGRAM_TOKEN;
   const target = chatId || (allowFallback ? env.TELEGRAM_CHAT_ID : null);
   if (!bot || !target) return { skipped: true, error: 'not_configured' };
   const response = await fetch(`https://api.telegram.org/bot${bot}/sendMessage`, {
     method: 'POST', headers: JSON_HEADERS,
-    body: JSON.stringify({ chat_id: target, text, parse_mode: 'HTML' }),
+    body: JSON.stringify({ chat_id: target, text, parse_mode: 'HTML', ...(threadId ? { message_thread_id: Number(threadId) } : {}) }),
     signal: AbortSignal.timeout(8000),
   });
   if (!response.ok) return { error: `telegram_${response.status}` };
@@ -818,9 +877,16 @@ async function deliver(env, channel, lead, tenant) {
       } catch (_) { /* la copia de Velai jamás decide el estado del aviso del cliente */ }
     }
     if (tenant && !chatId) return { skipped: true, error: 'telegram_not_configured' };
-    // Marca blanca: el aviso del cliente sale desde SU bot si lo configuró.
+    // Marca blanca: el aviso del cliente sale desde SU bot si lo configuró; y si el
+    // grupo tiene Temas registrados, Vai clasifica el lead hacia el que encaje.
     const botToken = tenant ? await tenantTelegramToken(env, tenant) : null;
-    return sendTelegramText(env, notificationText(lead), chatId, { allowFallback: false, botToken });
+    const threadId = tenant ? await telegramThreadFor(env, tenant, lead) : null;
+    let outcome = await sendTelegramText(env, notificationText(lead), chatId, { allowFallback: false, botToken, threadId });
+    if (!outcome.ok && threadId) {
+      // Tema borrado o hilo cerrado: el aviso cae al chat General, nunca se pierde.
+      outcome = await sendTelegramText(env, notificationText(lead), chatId, { allowFallback: false, botToken });
+    }
+    return outcome;
   }
   const sub = tenant && tenant.twilio_subaccount_sid;
   const recipientsRaw = (tenant && tenant.team_whatsapp) || env.TEAM_WHATSAPP;
@@ -1819,6 +1885,7 @@ function clienteAllowed(path, method) {
   if (/^\/api\/admin\/tenants\/[0-9a-f-]+\/telegram$/i.test(path) && ['GET', 'DELETE'].includes(method)) return true;
   if (/^\/api\/admin\/tenants\/[0-9a-f-]+\/telegram\/link$/i.test(path) && method === 'POST') return true;
   if (/^\/api\/admin\/tenants\/[0-9a-f-]+\/telegram\/bot$/i.test(path) && ['POST', 'DELETE'].includes(method)) return true;
+  if (/^\/api\/admin\/tenants\/[0-9a-f-]+\/telegram\/topics\/\d+$/i.test(path) && method === 'DELETE') return true;
   if (path === '/api/admin/stats' && method === 'GET') return true;
   if (path === '/api/admin/me' && method === 'GET') return true;
   if (path === '/api/admin/escalations' && method === 'GET') return true;
@@ -2125,13 +2192,29 @@ async function adminRouter(request, env, ctx, path, url, config, scope) {
     console.log(JSON.stringify({ level: 'info', code: 'telegram_webhook_registered', actor }));
     return json({ ok: true, botUsername: await telegramBotUsername(env) }, 200, NO_STORE);
   }
+  // Quitar un Tema del enrutado (el cliente, en autoservicio): solo deja de
+  // clasificarse hacia él — el Tema sigue existiendo en su Telegram.
+  const tgTopicMatch = path.match(/^\/api\/admin\/tenants\/([0-9a-f-]+)\/telegram\/topics\/(\d+)$/i);
+  if (tgTopicMatch && request.method === 'DELETE') {
+    if (!UUID_RE.test(tgTopicMatch[1])) throw new HttpError(404, 'not_found');
+    const tenantId = tgTopicMatch[1];
+    if (scope.role !== 'velai' && scope.tenantId !== tenantId) throw new HttpError(404, 'not_found');
+    const row = await env.DB.prepare('SELECT id, slug, channel_address, telegram_topics FROM tenants WHERE id=?').bind(tenantId).first();
+    if (!row) throw new HttpError(404, 'not_found');
+    let topics = [];
+    try { topics = JSON.parse(row.telegram_topics || '[]'); } catch (_) {}
+    const remaining = (Array.isArray(topics) ? topics : []).filter((t) => String(t.thread_id) !== tgTopicMatch[2]);
+    await env.DB.prepare('UPDATE tenants SET telegram_topics=?, updated_at=? WHERE id=?').bind(JSON.stringify(remaining), new Date().toISOString(), tenantId).run();
+    await invalidateTenantCache(env, [row]);
+    return json({ ok: true, topics: remaining }, 200, NO_STORE);
+  }
   const tgMatch = path.match(/^\/api\/admin\/tenants\/([0-9a-f-]+)\/telegram(?:\/(link|bot))?$/i);
   if (tgMatch) {
     if (!UUID_RE.test(tgMatch[1])) throw new HttpError(404, 'not_found');
     const tenantId = tgMatch[1];
     // Autoservicio: el cliente solo SU tenant — ajeno = 404, ANTES de tocar D1.
     if (scope.role !== 'velai' && scope.tenantId !== tenantId) throw new HttpError(404, 'not_found');
-    const tenantRow = await env.DB.prepare('SELECT id, slug, name, channel_address, telegram_chat_id, telegram_chat_title, telegram_linked_at, telegram_bot_username, telegram_bot_token_enc, telegram_whitelabel FROM tenants WHERE id=?').bind(tenantId).first();
+    const tenantRow = await env.DB.prepare('SELECT id, slug, name, channel_address, telegram_chat_id, telegram_chat_title, telegram_linked_at, telegram_bot_username, telegram_bot_token_enc, telegram_whitelabel, telegram_topics FROM tenants WHERE id=?').bind(tenantId).first();
     if (!tenantRow) throw new HttpError(404, 'not_found');
     // La marca blanca es una feature que ACTIVA VELAI por cliente: sin el flag, para
     // el rol cliente el bot propio no existe (404, ni confirmación de la feature).
@@ -2216,7 +2299,9 @@ async function adminRouter(request, env, ctx, path, url, config, scope) {
     }
     if (!tgMatch[2] && request.method === 'GET') {
       // botUsername sí; el token cifrado JAMÁS sale del worker.
-      return json({ telegram: { linked: Boolean(tenantRow.telegram_chat_id), title: tenantRow.telegram_chat_title || null, linked_at: tenantRow.telegram_linked_at || null, botUsername: tenantRow.telegram_bot_username || null, whitelabel: Boolean(tenantRow.telegram_whitelabel) } }, 200, NO_STORE);
+      let topics = [];
+      try { topics = JSON.parse(tenantRow.telegram_topics || '[]'); } catch (_) {}
+      return json({ telegram: { linked: Boolean(tenantRow.telegram_chat_id), title: tenantRow.telegram_chat_title || null, linked_at: tenantRow.telegram_linked_at || null, botUsername: tenantRow.telegram_bot_username || null, whitelabel: Boolean(tenantRow.telegram_whitelabel), topics: Array.isArray(topics) ? topics : [] } }, 200, NO_STORE);
     }
     if (!tgMatch[2] && request.method === 'DELETE') {
       const now = new Date().toISOString();
@@ -2724,4 +2809,4 @@ export function createWorker(config) {
   };
 }
 
-export const testing = { clean, normalizePhone, extractPhone, safeUtm, publicCors, validTwilioSignature, callAnthropic, callAnthropicRaw, runToolLoop, calendarExecutor, calendarSystem, tenantCalendar, validCalendarDate, availableSlots, handleCalendarCallback, calendarCallbackFor, sendTwilioText, timingSafeEqual, telegramBotUsername, handleTelegramWebhook, sendTelegramText, tenantTelegramToken, csvCell, expiryDate, leadFilters, isDemoKey, templateVar, leadTemplateVariables, readJson, deliver, drainQueuedLeads, verifyTurnstile, systemFor, validateTenant, invalidateTenantCache, tenantWriteError, assertNotActivePending, handleProvision, pollProvisioning, fillSeries, resolveScope, scopeClause, clienteAllowed, adminRouter, recordAuthFailure, handleAdmin, handleWidgetBoot, allowedOrigins, envOrigins, syncPanelGate, envAdmins, syncAdminGate, getSetting, setSetting, withCfToken };
+export const testing = { clean, normalizePhone, extractPhone, safeUtm, publicCors, validTwilioSignature, callAnthropic, callAnthropicRaw, runToolLoop, calendarExecutor, calendarSystem, tenantCalendar, validCalendarDate, availableSlots, handleCalendarCallback, calendarCallbackFor, sendTwilioText, timingSafeEqual, telegramBotUsername, handleTelegramWebhook, sendTelegramText, tenantTelegramToken, telegramThreadFor, registerTelegramTopic, csvCell, expiryDate, leadFilters, isDemoKey, templateVar, leadTemplateVariables, readJson, deliver, drainQueuedLeads, verifyTurnstile, systemFor, validateTenant, invalidateTenantCache, tenantWriteError, assertNotActivePending, handleProvision, pollProvisioning, fillSeries, resolveScope, scopeClause, clienteAllowed, adminRouter, recordAuthFailure, handleAdmin, handleWidgetBoot, allowedOrigins, envOrigins, syncPanelGate, envAdmins, syncAdminGate, getSetting, setSetting, withCfToken };

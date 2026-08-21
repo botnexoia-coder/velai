@@ -108,8 +108,17 @@ async function loadConexiones(){$('#tgLinkBox').hidden=true;
   $('#tgWlState').className='flag velai-only '+(t.whitelabel?'ok':'off');
   $('#tgWlToggle').textContent=t.whitelabel?'Desactivar':'Activar';
   $('#tgBotState').innerHTML=t.botUsername?'<span class="flag ok">Bot propio: @'+esc(t.botUsername)+'</span>':'<span class="flag off">Usando el bot de Velai</span>';
-  $('#tgBotDel').hidden=!t.botUsername;$('#tgBotToken').value=''}
+  $('#tgBotDel').hidden=!t.botUsername;$('#tgBotToken').value='';
+  // Temas: los crea el cliente en SU grupo; aquí solo se ven y se quitan del enrutado.
+  $('#tgTopicsBlock').hidden=!t.linked;
+  $('#tgTopics').innerHTML=(t.topics&&t.topics.length)
+   ?t.topics.map(tp=>'<span class="flag off">'+esc(tp.name)+' <a href="#" data-tdel="'+esc(String(tp.thread_id))+'" title="Quitar del enrutado">✕</a></span>').join(' ')
+   :'Aún no hay temas registrados: créalos en el grupo de Telegram y aparecerán aquí.'}
  catch(e){$('#tgState').textContent=e.message}}
+$('#tgTopics').onclick=async e=>{const id=e.target&&e.target.dataset&&e.target.dataset.tdel;if(!id)return;e.preventDefault();
+ if(!confirm('¿Quitar este tema del enrutado? El tema sigue en Telegram, pero los leads dejarán de clasificarse hacia él.'))return;
+ try{await api('/api/admin/tenants/'+cxTenant+'/telegram/topics/'+id,{method:'DELETE'});toast('Tema quitado del enrutado');loadConexiones()}
+ catch(e2){toast('No se pudo quitar: '+(TERRS[e2.message]||e2.message),false)}};
 let cxWl=false;
 $('#tgWlToggle').onclick=async()=>{const enable=!cxWl;
  if(!enable&&!confirm('¿Desactivar la marca blanca? Si el cliente tiene bot propio, se retira y se desvincula su chat.'))return;
