@@ -367,7 +367,11 @@ body.cliente .cliente-only{display:flex}
 <p class="mb6"><b>Recomendado — en un grupo del negocio:</b> crea primero en Telegram un grupo tuyo con tu equipo (p. ej. «Mi Negocio · Leads») y luego <a id="tgGroupUrl" href="#" target="_blank" rel="noopener">añade el bot de avisos a ese grupo</a> — Telegram te pedirá elegir cuál. Si al añadirlo no llega la confirmación, escribe en el grupo: <code id="tgCmd"></code></p>
 <p class="mb6">O en un chat directo contigo: <a id="tgDmUrl" href="#" target="_blank" rel="noopener">abrir el chat con el bot</a> y pulsar INICIAR.</p>
 <p class="muted">Cuando Telegram confirme la vinculación, esta tarjeta lo mostrará al recargar.</p>
-</div></div>
+</div>
+<div class="mt6"><b>Bot propio (marca blanca)</b>
+<p class="muted">Por defecto los avisos llegan desde el bot de Velai. Para que lleguen desde el bot DEL NEGOCIO (p. ej. @MiNegocioBot): créalo en Telegram con @BotFather (comando /newbot), copia el token que te da y pégalo aquí. Al guardarlo hay que volver a vincular el chat (es el bot nuevo el que debe entrar al grupo).</p>
+<div id="tgBotState" class="mb6 muted">—</div>
+<div class="actions actions0"><input id="tgBotToken" type="password" autocomplete="new-password" placeholder="token de @BotFather (solo se escribe, nunca se muestra)" class="grow inpill"><button class="btn alt" id="tgBotSave" type="button">Guardar bot</button><button class="btn alt" id="tgBotDel" type="button" hidden>Quitar</button></div></div></div>
 <div class="card mt12 velai-only"><b>Webhook del bot (solo Velai, una vez)</b>
 <p class="muted mt6">Registra el webhook de Telegram apuntando al worker. OJO: con el webhook activo, getUpdates deja de funcionar para ese bot.</p>
 <div class="actions actions0"><button class="btn alt" id="tgSetup" type="button">Registrar webhook</button><span id="tgSetupOut" class="muted"></span></div></div>

@@ -1950,10 +1950,52 @@ test('telegram: GET de estado y DELETE de desvinculación (rol cliente, solo lo 
   const OWN = { role: 'cliente', tenantId: TID, email: 'cliente@x.com' };
   const path = `/api/admin/tenants/${TID}/telegram`;
   const got = await (await testing.adminRouter(adminReq(path), env, ctx, path, new URL('https://x' + path), {}, OWN)).json();
-  assert.deepEqual(got.telegram, { linked: true, title: 'Mi grupo', linked_at: '2026-08-21T10:00:00Z' });
+  assert.deepEqual(got.telegram, { linked: true, title: 'Mi grupo', linked_at: '2026-08-21T10:00:00Z', botUsername: null });
   const del = await (await testing.adminRouter(adminReq(path, { method: 'DELETE' }), env, ctx, path, new URL('https://x' + path), {}, OWN)).json();
   assert.equal(del.ok, true);
   const cleared = db.writes.find((w) => w.sql.includes('SET telegram_chat_id=NULL'));
   assert.ok(cleared, 'limpia las tres columnas');
   assert.ok(db.writes.some((w) => w.sql.includes('tenant_versions')), 'queda auditado');
+});
+
+test('bot propio (marca blanca): se valida con getMe, se cifra, registra su webhook y desvincula el chat anterior', async () => {
+  const TID = '00000000-0000-4000-8000-0000000000d1';
+  const row = { id: TID, slug: 'mio', name: 'Mi Negocio', channel_address: 'web:mio', telegram_chat_id: '-555', telegram_chat_title: 'Viejo', telegram_bot_username: null, telegram_bot_token_enc: null };
+  const db = tgDb(row);
+  const env = { DB: db, KV: mapKV(), SECRETS_KEK: TEST_KEK, TELEGRAM_WEBHOOK_SECRET: 'S3CRETO', TELEGRAM_TOKEN: 'tg-velai' };
+  const ctx = { waitUntil(p) { if (p && p.catch) p.catch(() => {}); } };
+  const OWN = { role: 'cliente', tenantId: TID, email: 'cliente@x.com' };
+  const path = `/api/admin/tenants/${TID}/telegram/bot`;
+  const botToken = '123456789:AAHfakefakefakefakefakefake_fake';
+  const calls = [];
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = async (url) => {
+    const u = String(url); calls.push(u);
+    if (u.includes('/getMe')) return new Response(JSON.stringify({ ok: true, result: { is_bot: true, username: 'MiNegocioBot' } }), { status: 200 });
+    if (u.includes('/setWebhook')) return new Response('{"ok":true}', { status: 200 });
+    return new Response('{}', { status: 200 });
+  };
+  try {
+    // formato inválido → 400 sin llamar a Telegram
+    await assert.rejects(testing.adminRouter(adminReq(path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ token: 'basura' }) }), env, ctx, path, new URL('https://x' + path), {}, OWN), (e) => e.code === 'invalid_bot_token');
+    assert.equal(calls.length, 0);
+    const out = await (await testing.adminRouter(adminReq(path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ token: botToken }) }), env, ctx, path, new URL('https://x' + path), {}, OWN)).json();
+    assert.deepEqual(out, { ok: true, botUsername: 'MiNegocioBot' });
+    assert.ok(calls.some((u) => u.includes(`bot${botToken}/getMe`)) && calls.some((u) => u.includes(`bot${botToken}/setWebhook`)), 'valida y registra el webhook DEL bot del cliente');
+    const saved = db.writes.find((w) => w.sql.includes('SET telegram_bot_token_enc=?'));
+    assert.ok(saved, 'guarda el bot');
+    assert.ok(String(saved.args[0]).startsWith('v1:') && !String(saved.args[0]).includes(botToken), 'el token va CIFRADO');
+    assert.equal(saved.args[1], 'MiNegocioBot');
+    assert.ok(saved.sql.includes('telegram_chat_id=NULL'), 'el chat vinculado con el bot anterior se limpia');
+    // el AAD es telegram:<id>: descifra con él y NO con el de twilio (el id a secas)
+    assert.equal((await decryptSecret(env, `telegram:${TID}`, saved.args[0])).value, botToken);
+    await assert.rejects(decryptSecret(env, TID, saved.args[0]), /cipher_undecryptable/);
+    // y el aviso del cliente sale desde SU bot; la copia de Velai, desde el de Velai
+    calls.length = 0;
+    const tenant = { id: TID, slug: 'mio', telegram_chat_id: '-777', telegram_bot_token_enc: saved.args[0] };
+    const res = await testing.deliver({ ...env, TELEGRAM_CHAT_ID: '-100999' }, 'telegram', { id: 'lead-9', source: 'chat web' }, tenant);
+    assert.equal(res.ok, undefined === res.skipped ? res.ok : res.ok); // deliver devuelve {ok:true}
+    assert.ok(calls.some((u) => u.includes(`bot${botToken}/sendMessage`)), 'aviso del cliente por SU bot');
+    assert.ok(calls.some((u) => u.includes('bottg-velai/sendMessage')), 'copia de Velai por el bot de Velai');
+  } finally { globalThis.fetch = realFetch; }
 });

@@ -99,8 +99,17 @@ async function loadConexiones(){$('#tgLinkBox').hidden=true;
    ?'<span class="flag ok">Conectado'+(t.title?': '+esc(t.title):'')+'</span>'+(t.linked_at?' <span class="muted">desde '+fmt(t.linked_at)+'</span>':'')
    :'Sin conectar. Los avisos de este negocio aún no llegan a su Telegram.';
   $('#tgLink').textContent=t.linked?'Vincular otro chat':'Conectar Telegram';
-  $('#tgUnlink').hidden=!t.linked}
+  $('#tgUnlink').hidden=!t.linked;
+  $('#tgBotState').innerHTML=t.botUsername?'<span class="flag ok">Bot propio: @'+esc(t.botUsername)+'</span>':'<span class="flag off">Usando el bot de Velai</span>';
+  $('#tgBotDel').hidden=!t.botUsername;$('#tgBotToken').value=''}
  catch(e){$('#tgState').textContent=e.message}}
+$('#tgBotSave').onclick=async()=>{const token=$('#tgBotToken').value.trim();if(!token)return toast('Pega primero el token de @BotFather',false);
+ try{const d=await api('/api/admin/tenants/'+cxTenant+'/telegram/bot',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token})});
+  toast('Bot propio guardado ✓ (@'+d.botUsername+'). Ahora vincula el chat: el bot NUEVO es el que debe entrar al grupo.');loadConexiones()}
+ catch(e){toast('No se pudo guardar el bot: '+(TERRS[e.message]||e.message),false)}};
+$('#tgBotDel').onclick=async()=>{if(!confirm('¿Quitar el bot propio? Se desvincula el chat y los avisos volverán a salir por el bot de Velai cuando se vuelva a vincular.'))return;
+ try{await api('/api/admin/tenants/'+cxTenant+'/telegram/bot',{method:'DELETE'});toast('Bot propio retirado');loadConexiones()}
+ catch(e){toast('No se pudo quitar: '+(TERRS[e.message]||e.message),false)}};
 $('#tgLink').onclick=async()=>{try{const d=await api('/api/admin/tenants/'+cxTenant+'/telegram/link',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'});
  $('#tgGroupUrl').href=d.groupUrl;$('#tgDmUrl').href=d.dmUrl;$('#tgCmd').textContent='/start '+d.token;$('#tgLinkBox').hidden=false}
  catch(e){toast('No se pudo generar el enlace: '+(TERRS[e.message]||e.message),false)}};
