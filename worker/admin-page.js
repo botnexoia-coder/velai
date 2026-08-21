@@ -364,8 +364,8 @@ body.cliente .cliente-only{display:flex}
 <div class="actions actions0"><button class="btn" id="tgLink" type="button">Conectar Telegram</button><button class="btn alt" id="tgUnlink" type="button" hidden>Desconectar</button></div>
 <div id="tgLinkBox" class="note mt6" hidden>
 <p class="mb6"><b>Elige dónde recibir los avisos</b> — el enlace caduca en 15 minutos:</p>
-<p class="mb6">En un grupo: <a id="tgGroupUrl" href="#" target="_blank" rel="noopener">añadir el bot al grupo</a>. Si al añadirlo no llega la confirmación, escribe en el grupo: <code id="tgCmd"></code></p>
-<p class="mb6">En un chat directo: <a id="tgDmUrl" href="#" target="_blank" rel="noopener">abrir el chat con el bot</a> y pulsar INICIAR.</p>
+<p class="mb6"><b>Recomendado — en un grupo del negocio:</b> crea primero en Telegram un grupo tuyo con tu equipo (p. ej. «Mi Negocio · Leads») y luego <a id="tgGroupUrl" href="#" target="_blank" rel="noopener">añade el bot de avisos a ese grupo</a> — Telegram te pedirá elegir cuál. Si al añadirlo no llega la confirmación, escribe en el grupo: <code id="tgCmd"></code></p>
+<p class="mb6">O en un chat directo contigo: <a id="tgDmUrl" href="#" target="_blank" rel="noopener">abrir el chat con el bot</a> y pulsar INICIAR.</p>
 <p class="muted">Cuando Telegram confirme la vinculación, esta tarjeta lo mostrará al recargar.</p>
 </div></div>
 <div class="card mt12 velai-only"><b>Webhook del bot (solo Velai, una vez)</b>
