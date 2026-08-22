@@ -24,7 +24,7 @@
    idéntica a la de siempre. Bilingüe ES/EN por <html lang> o navigator.language.
 
    Config opcional (antes de cargar este script):
-     window.VELAI_WORKER = 'https://vai-worker.botnexo-ia.workers.dev';
+     window.VELAI_WORKER = 'https://api.hirevai.com';
      window.VELAI_CHAT   = { teaserDelay: 18000, disabled: false };
 
    MODO DEMO (rol-play). El worker YA lo soporta en el chat web
@@ -49,7 +49,7 @@
   var CFG = window.VELAI_CHAT || {};
   if (CFG.disabled) return;
 
-  var WORKER = (window.VELAI_WORKER || 'https://vai-worker.botnexo-ia.workers.dev').replace(/\/$/, '');
+  var WORKER = (window.VELAI_WORKER || 'https://api.hirevai.com').replace(/\/$/, '');
   var TEASER_DELAY = typeof CFG.teaserDelay === 'number' ? CFG.teaserDelay : 18000;
   var SS_TEASER = 'velai-chat-teaser';
   var SS_OPENED = 'velai-chat-opened';
