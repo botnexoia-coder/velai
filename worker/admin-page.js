@@ -559,7 +559,7 @@ body.cliente .cliente-only{display:flex}
 <div class="card" id="tProv" hidden><b>Aprovisionamiento Twilio (automático)</b>
 <div id="tProvState" class="muted preline"></div>
 <div class="actions actions0">
-<button class="btn alt" id="pSub" type="button">1· Crear subcuenta</button>
+<button class="btn alt" id="pSub" type="button">1· Crear o adoptar subcuenta</button>
 <button class="btn alt" id="pTpl" type="button">2· Plantilla → aprobación</button>
 <input id="pPhone" placeholder="+34910000000" class="w150">
 <button class="btn alt" id="pSender" type="button">3· Crear sender</button>

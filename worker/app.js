@@ -1,7 +1,7 @@
 import { ADMIN_HEADERS, ADMIN_HTML } from './admin-page.js';
 import { encryptSecret, decryptSecret } from './crypto.js';
 import { cloudflareConfigured, syncTurnstileDomains, syncAccessGroup, syncAdminGroup, verifyCfToken } from './cloudflare.js';
-import { createSubaccount, createLeadTemplate, submitTemplateApproval, fetchApprovalStatus, createWhatsAppSender, verifySender, fetchSenderStatus, listWhatsAppSenders, updateSenderWebhook } from './twilio.js';
+import { createSubaccount, fetchSubaccount, findSubaccountByName, createLeadTemplate, submitTemplateApproval, fetchApprovalStatus, createWhatsAppSender, verifySender, fetchSenderStatus, listWhatsAppSenders, updateSenderWebhook } from './twilio.js';
 import { CALENDAR_TOOLS, CALENDAR_GUARDRAILS, DEFAULT_BUSINESS_HOURS, freeSlots, localToUtcMs, localDateStr, localWeekday, googleAuthUrl, exchangeGoogleCode, refreshGoogleToken, revokeGoogleToken, googleBusy, createGoogleEvent } from './calendar.js';
 
 const JSON_HEADERS = { 'Content-Type': 'application/json; charset=utf-8' };
@@ -1794,12 +1794,38 @@ async function runProvisionStep(request, env, ctx, tenant, tenantId, step, actor
   }
 
   if (step === 'subaccount') {
-    if (tenant.twilio_subaccount_sid) throw new HttpError(409, 'already_provisioned');
+    // CREAR-O-ADOPTAR (pedido de Juan, 2026-08-22, tras topar con la subcuenta vieja
+    // de gogestion): (a) SID en la fila sin token → se recupera el token de Twilio y
+    // se cifra, sin pegar nada a mano; (b) sin SID pero ya existe cliente-<slug> en
+    // Twilio → se ADOPTA en vez de duplicar; (c) solo se crea si no hay nada.
+    if (tenant.twilio_subaccount_sid && tenant.twilio_auth_token_enc) throw new HttpError(409, 'already_provisioned');
     if (!env.TWILIO_ACCOUNT_SID || !env.TWILIO_AUTH_TOKEN) throw new HttpError(503, 'twilio_not_configured');
     // La KEK se comprueba ANTES de gastar dinero: si no puede cifrar, no se crea nada
     // (una subcuenta no se borra, solo se cierra con eliminación a 30 días).
     try { await encryptSecret(env, tenantId, 'probe'); }
     catch (_) { throw new HttpError(503, 'kek_not_configured'); }
+    if (tenant.twilio_subaccount_sid) {
+      // (a) recuperar el token de la subcuenta ya anotada en la fila
+      const found = await fetchSubaccount(env, tenant.twilio_subaccount_sid);
+      if (!found || !found.authToken || found.status !== 'active') throw new HttpError(400, 'subaccount_unusable');
+      const enc = await encryptSecret(env, tenantId, found.authToken);
+      await env.DB.prepare('UPDATE tenants SET twilio_auth_token_enc=?, updated_at=? WHERE id=? AND twilio_auth_token_enc IS NULL')
+        .bind(enc, now, tenantId).run();
+      await invalidateTenantCache(env, [tenant]);
+      await provisionAudit(env, ctx, tenantId, actor, `token de la subcuenta ${found.sid} recuperado de Twilio y cifrado (adopción)`);
+      return json({ ok: true, sid: found.sid, adopted: true }, 200, NO_STORE);
+    }
+    const existing = await findSubaccountByName(env, `cliente-${tenant.slug}`);
+    if (existing && existing.authToken) {
+      // (b) adoptar la subcuenta preexistente con ese nombre — cero duplicados
+      const enc = await encryptSecret(env, tenantId, existing.authToken);
+      const res = await env.DB.prepare('UPDATE tenants SET twilio_subaccount_sid=?, twilio_auth_token_enc=?, provisioned_at=?, updated_at=? WHERE id=? AND twilio_subaccount_sid IS NULL')
+        .bind(existing.sid, enc, now, now, tenantId).run();
+      if (!res.meta.changes) throw new HttpError(409, 'already_provisioned');
+      await invalidateTenantCache(env, [tenant]);
+      await provisionAudit(env, ctx, tenantId, actor, `subcuenta preexistente ${existing.sid} (cliente-${tenant.slug}) adoptada con su token cifrado`);
+      return json({ ok: true, sid: existing.sid, adopted: true }, 200, NO_STORE);
+    }
     const created = await createSubaccount(env, `cliente-${tenant.slug}`);
     let encrypted = null;
     try { encrypted = await encryptSecret(env, tenantId, created.authToken); }

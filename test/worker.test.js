@@ -488,10 +488,38 @@ test('provision/subaccount: idempotente, cifra el token y no lo devuelve', async
     return new Response(JSON.stringify({ sid: 'AC' + 'n'.repeat(32), auth_token: 'a1b2c3d4e5f60718293a4b5c6d7e8f90' }), { status: 201 });
   };
   try {
-    // fila ya provisionada → 409 SIN llamar a Twilio
-    const done = provisionHarness({ tenant: { id: '00000000-0000-4000-8000-00000000000a', slug: 'acme', name: 'Acme', twilio_subaccount_sid: 'AC' + 'x'.repeat(32) } });
+    // fila ya provisionada (SID + token) → 409 SIN llamar a Twilio
+    const done = provisionHarness({ tenant: { id: '00000000-0000-4000-8000-00000000000a', slug: 'acme', name: 'Acme', twilio_subaccount_sid: 'AC' + 'x'.repeat(32), twilio_auth_token_enc: 'v1:x:y' } });
     await assert.rejects(testing.handleProvision(provReq(), done.env, done.ctx, done.row.id, 'subaccount', 'juan@x'), (e) => e.code === 'already_provisioned');
     assert.equal(twilioCalls.length, 0);
+    // SID pegado a mano SIN token (caso gogestion): se RECUPERA el token de Twilio,
+    // se cifra, y no se crea ninguna subcuenta nueva
+    globalThis.fetch = async (url, init) => {
+      twilioCalls.push(String(url));
+      return new Response(JSON.stringify({ sid: 'AC' + 'x'.repeat(32), auth_token: 'a1b2c3d4e5f60718293a4b5c6d7e8f90', friendly_name: 'cliente-acme', status: 'active' }), { status: 200 });
+    };
+    const adopt = provisionHarness({ tenant: { id: '00000000-0000-4000-8000-00000000000a', slug: 'acme', name: 'Acme', twilio_subaccount_sid: 'AC' + 'x'.repeat(32), twilio_auth_token_enc: null } });
+    const adoptRes = await (await testing.handleProvision(provReq(), adopt.env, adopt.ctx, adopt.row.id, 'subaccount', 'juan@x')).json();
+    assert.deepEqual([adoptRes.ok, adoptRes.adopted], [true, true]);
+    assert.ok(twilioCalls.some((u) => u.includes('/Accounts/AC' + 'x'.repeat(32) + '.json')), 'lee ESA subcuenta, no crea otra');
+    const tokUp = adopt.updates.find((u) => u.sql.includes('SET twilio_auth_token_enc=?'));
+    assert.ok(String(tokUp.args[0]).startsWith('v1:'), 'token recuperado y cifrado');
+    // sin SID pero con subcuenta preexistente cliente-<slug> en Twilio → se ADOPTA (cero duplicados)
+    globalThis.fetch = async (url) => {
+      twilioCalls.push(String(url));
+      if (String(url).includes('FriendlyName=')) return new Response(JSON.stringify({ accounts: [{ sid: 'AC' + 'z'.repeat(32), auth_token: 'a1b2c3d4e5f60718293a4b5c6d7e8f90', friendly_name: 'cliente-acme' }] }), { status: 200 });
+      return new Response(JSON.stringify({ sid: 'AC' + 'n'.repeat(32), auth_token: 'a1b2c3d4e5f60718293a4b5c6d7e8f90' }), { status: 201 });
+    };
+    const reuse = provisionHarness();
+    reuse.row.slug = 'acme';
+    const reuseRes = await (await testing.handleProvision(provReq(), reuse.env, reuse.ctx, reuse.row.id, 'subaccount', 'juan@x')).json();
+    assert.deepEqual([reuseRes.adopted, reuseRes.sid], [true, 'AC' + 'z'.repeat(32)], 'adopta la existente en vez de crear');
+    // creación de verdad: sin SID y sin subcuenta preexistente
+    globalThis.fetch = async (url) => {
+      twilioCalls.push(String(url));
+      if (String(url).includes('FriendlyName=')) return new Response(JSON.stringify({ accounts: [] }), { status: 200 });
+      return new Response(JSON.stringify({ sid: 'AC' + 'n'.repeat(32), auth_token: 'a1b2c3d4e5f60718293a4b5c6d7e8f90' }), { status: 201 });
+    };
     // creación correcta: SID guardado, token cifrado v1:, respuesta sin token
     const ok = provisionHarness();
     const res = await testing.handleProvision(provReq(), ok.env, ok.ctx, ok.row.id, 'subaccount', 'juan@x');
@@ -634,7 +662,7 @@ test('el UPDATE de aprovisionamiento exige columna vacía (carrera → provision
 
 test('el cerrojo de aprovisionamiento se libera al fallar el paso', async () => {
   const kvOps = { puts: [], deletes: [] };
-  const h = provisionHarness({ tenant: { id: '00000000-0000-4000-8000-00000000000a', slug: 'acme', name: 'Acme', twilio_subaccount_sid: 'AC' + 'x'.repeat(32) } });
+  const h = provisionHarness({ tenant: { id: '00000000-0000-4000-8000-00000000000a', slug: 'acme', name: 'Acme', twilio_subaccount_sid: 'AC' + 'x'.repeat(32), twilio_auth_token_enc: 'v1:x:y' } });
   h.env.KV = { async get() { return null; }, async put(k) { kvOps.puts.push(k); }, async delete(k) { kvOps.deletes.push(k); } };
   await assert.rejects(testing.handleProvision(provReq(), h.env, h.ctx, h.row.id, 'subaccount', 'juan@x'), (e) => e.code === 'already_provisioned');
   assert.ok(kvOps.deletes.includes(`provision:${h.row.id}:subaccount`), 'la clave del cerrojo se borra aunque el paso falle');

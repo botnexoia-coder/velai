@@ -25,6 +25,24 @@ export async function createSubaccount(env, friendlyName) {
   return { sid: data.sid, authToken: data.auth_token };
 }
 
+// El padre puede LEER sus subcuentas (auth token incluido): permite ADOPTAR una
+// subcuenta preexistente en vez de crear duplicados — pedido de Juan tras topar
+// con la de gogestion ya creada en la era de los bots viejos.
+export async function fetchSubaccount(env, sid) {
+  const data = await twilioRequest(`https://api.twilio.com/2010-04-01/Accounts/${sid}.json`,
+    { sid: env.TWILIO_ACCOUNT_SID, token: env.TWILIO_AUTH_TOKEN }, { method: 'GET' });
+  return { sid: data.sid, authToken: data.auth_token, friendlyName: data.friendly_name, status: data.status };
+}
+
+// Busca una subcuenta activa por nombre exacto (cliente-<slug>): si ya existe, se
+// adopta; solo se crea cuando de verdad no hay ninguna.
+export async function findSubaccountByName(env, friendlyName) {
+  const data = await twilioRequest(`https://api.twilio.com/2010-04-01/Accounts.json?FriendlyName=${encodeURIComponent(friendlyName)}&Status=active`,
+    { sid: env.TWILIO_ACCOUNT_SID, token: env.TWILIO_AUTH_TOKEN }, { method: 'GET' });
+  const hit = (data.accounts || []).find((a) => a.friendly_name === friendlyName && a.sid !== env.TWILIO_ACCOUNT_SID);
+  return hit ? { sid: hit.sid, authToken: hit.auth_token, friendlyName: hit.friendly_name } : null;
+}
+
 // Plantilla de aviso de lead con las 4 variables en el orden fijado por
 // leadTemplateVariables (1 WhatsApp, 2 Nombre, 3 Negocio, 4 Necesidad).
 export async function createLeadTemplate(credentials, slug, businessName) {
