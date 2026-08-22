@@ -14,7 +14,12 @@ workers_dev = true
 
 # Dominio del panel admin (Cloudflare Access delante; el Worker valida el JWT).
 routes = [
-  { pattern = "admin.hirevai.com", custom_domain = true }
+  { pattern = "admin.hirevai.com", custom_domain = true },
+  # api.hirevai.com: el widget llama aquí desde v=8 — workers.dev está en listas de
+  # bloqueo (EasyPrivacy y afines) y a los visitantes con adblock el widget les salía
+  # sin marca y con el chat muerto (descubierto en dialogosqueensenan.com, 2026-08-22).
+  # workers_dev sigue true: los widgets v<=7 cacheados (immutable, 1 año) siguen vivos.
+  { pattern = "api.hirevai.com", custom_domain = true }
 ]
 
 [vars]
