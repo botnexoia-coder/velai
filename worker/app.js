@@ -1724,11 +1724,13 @@ async function panelUserAudit(env, ctx, tenantId, actor, role, note) {
   ctx.waitUntil(sendTelegramText(env, `👤 <b>${escapeHtml(actor)}</b> · ${escapeHtml(note)}`).catch(() => {}));
 }
 
-async function provisionAudit(env, ctx, tenantId, actor, note) {
+// Recibe el tenant entero (no solo el id): el aviso de Telegram DEBE decir de qué
+// cliente es el paso — Juan recibió «token recuperado (adopción)» sin saber de quién.
+async function provisionAudit(env, ctx, tenant, actor, note) {
   const now = new Date().toISOString();
   await env.DB.prepare('INSERT INTO tenant_versions (tenant_id,actor_email,field,previous_value,note,created_at) VALUES (?,?,?,?,?,?)')
-    .bind(tenantId, actor, 'provision', null, note, now).run();
-  ctx.waitUntil(sendTelegramText(env, `🛠 <b>${escapeHtml(actor)}</b> · ${escapeHtml(note)}`).catch(() => {}));
+    .bind(tenant.id, actor, 'provision', null, note, now).run();
+  ctx.waitUntil(sendTelegramText(env, `🛠 <b>${escapeHtml(tenant.name)}</b> (${escapeHtml(tenant.slug)}) · ${escapeHtml(note)}\n<i>${escapeHtml(actor)}</i>`).catch(() => {}));
 }
 
 // Twilio respondió OK pero D1 no guardó: recurso huérfano con su token perdido.
@@ -1789,7 +1791,7 @@ async function runProvisionStep(request, env, ctx, tenant, tenantId, step, actor
       ctx.waitUntil(sendTelegramText(env, `⚠️ <b>Velai</b>: el PUT a Turnstile falló al sincronizar dominios para <b>${escapeHtml(tenant.name)}</b>. D1 acepta el origen pero Turnstile no emitirá token: reintentar «Sincronizar Turnstile» o revisar CF_API_TOKEN.`).catch(() => {}));
       throw new HttpError(502, 'turnstile_sync_failed');
     }
-    await provisionAudit(env, ctx, tenantId, actor, `Turnstile sincronizado desde D1: ${hosts.length} hostnames`);
+    await provisionAudit(env, ctx, tenant, actor, `Turnstile sincronizado desde D1: ${hosts.length} hostnames`);
     return json({ ok: true, hostnames: hosts.length }, 200, NO_STORE);
   }
 
@@ -1812,7 +1814,7 @@ async function runProvisionStep(request, env, ctx, tenant, tenantId, step, actor
       await env.DB.prepare('UPDATE tenants SET twilio_auth_token_enc=?, updated_at=? WHERE id=? AND twilio_auth_token_enc IS NULL')
         .bind(enc, now, tenantId).run();
       await invalidateTenantCache(env, [tenant]);
-      await provisionAudit(env, ctx, tenantId, actor, `token de la subcuenta ${found.sid} recuperado de Twilio y cifrado (adopción)`);
+      await provisionAudit(env, ctx, tenant, actor, `token de la subcuenta ${found.sid} recuperado de Twilio y cifrado (adopción)`);
       return json({ ok: true, sid: found.sid, adopted: true }, 200, NO_STORE);
     }
     const existing = await findSubaccountByName(env, `cliente-${tenant.slug}`);
@@ -1823,7 +1825,7 @@ async function runProvisionStep(request, env, ctx, tenant, tenantId, step, actor
         .bind(existing.sid, enc, now, now, tenantId).run();
       if (!res.meta.changes) throw new HttpError(409, 'already_provisioned');
       await invalidateTenantCache(env, [tenant]);
-      await provisionAudit(env, ctx, tenantId, actor, `subcuenta preexistente ${existing.sid} (cliente-${tenant.slug}) adoptada con su token cifrado`);
+      await provisionAudit(env, ctx, tenant, actor, `subcuenta preexistente ${existing.sid} (cliente-${tenant.slug}) adoptada con su token cifrado`);
       return json({ ok: true, sid: existing.sid, adopted: true }, 200, NO_STORE);
     }
     const created = await createSubaccount(env, `cliente-${tenant.slug}`);
@@ -1842,7 +1844,7 @@ async function runProvisionStep(request, env, ctx, tenant, tenantId, step, actor
       await provisionOrphan(env, ctx, tenant, 'subcuenta', created.sid, error);
     }
     await invalidateTenantCache(env, [tenant]);
-    await provisionAudit(env, ctx, tenantId, actor, `subcuenta ${created.sid} creada para ${tenant.name} (token cifrado en el acto)`);
+    await provisionAudit(env, ctx, tenant, actor, `subcuenta ${created.sid} creada (token cifrado en el acto)`);
     return json({ ok: true, sid: created.sid }, 201, NO_STORE);
   }
 
@@ -1864,7 +1866,7 @@ async function runProvisionStep(request, env, ctx, tenant, tenantId, step, actor
       if (error instanceof HttpError) throw error;
       await provisionOrphan(env, ctx, tenant, 'plantilla', contentSid, error);
     }
-    await provisionAudit(env, ctx, tenantId, actor, `plantilla nuevo_lead_${tenant.slug} (${contentSid}) enviada a aprobación Utility`);
+    await provisionAudit(env, ctx, tenant, actor, `plantilla nuevo_lead_${tenant.slug} (${contentSid}) enviada a aprobación Utility`);
     await invalidateTenantCache(env, [tenant]);
     return json({ ok: true, sid: contentSid, status: 'pending' }, 201, NO_STORE);
   }
@@ -1899,7 +1901,7 @@ async function runProvisionStep(request, env, ctx, tenant, tenantId, step, actor
       try { await updateSenderWebhook(credentials, s.senderSid, WORKER_PUBLIC_URL); webhookOk = true; webhookFixed = true; }
       catch (error) { console.log(JSON.stringify({ level: 'error', code: 'sender_webhook_fix_failed', tenant: tenant.slug, error: clean(error.message, 60) })); }
     }
-    await provisionAudit(env, ctx, tenantId, actor, `sender sincronizado desde Twilio (${s.senderSid}, ${s.status})${webhookFixed ? ' + webhook reparado' : ''}`);
+    await provisionAudit(env, ctx, tenant, actor, `sender sincronizado desde Twilio (${s.senderSid}, ${s.status})${webhookFixed ? ' + webhook reparado' : ''}`);
     return json({
       ok: true, applied: sets.length, sender: { senderSid: s.senderSid, senderId: s.senderId, status: s.status, wabaId: s.wabaId },
       conflicts: ['channel_address', 'twilio_from'].filter((c) => tenant[c] && tenant[c] !== phone).map((c) => ({ field: c, current: tenant[c], fromTwilio: phone })),
@@ -1922,7 +1924,7 @@ async function runProvisionStep(request, env, ctx, tenant, tenantId, step, actor
       if (error instanceof HttpError) throw error;
       await provisionOrphan(env, ctx, tenant, 'sender', created.senderSid, error);
     }
-    await provisionAudit(env, ctx, tenantId, actor, `sender whatsapp:${phone} creado (${created.senderSid})`);
+    await provisionAudit(env, ctx, tenant, actor, `sender whatsapp:${phone} creado (${created.senderSid})`);
     await invalidateTenantCache(env, [tenant]);
     return json({ ok: true, sid: created.senderSid, status: created.status }, 201, NO_STORE);
   }
@@ -1935,7 +1937,7 @@ async function runProvisionStep(request, env, ctx, tenant, tenantId, step, actor
     if (!/^\d{4,8}$/.test(code)) throw new HttpError(400, 'invalid_code');
     const result = await verifySender(credentials, tenant.sender_sid, code);
     await env.DB.prepare('UPDATE tenants SET sender_status=?, updated_at=? WHERE id=?').bind(result.status || 'VERIFYING', now, tenantId).run();
-    await provisionAudit(env, ctx, tenantId, actor, `OTP del sender enviado (estado ${result.status})`);
+    await provisionAudit(env, ctx, tenant, actor, `OTP del sender enviado (estado ${result.status})`);
     await invalidateTenantCache(env, [tenant]);
     return json({ ok: true, status: result.status }, 200, NO_STORE);
   }

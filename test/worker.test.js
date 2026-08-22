@@ -498,10 +498,25 @@ test('provision/subaccount: idempotente, cifra el token y no lo devuelve', async
       twilioCalls.push(String(url));
       return new Response(JSON.stringify({ sid: 'AC' + 'x'.repeat(32), auth_token: 'a1b2c3d4e5f60718293a4b5c6d7e8f90', friendly_name: 'cliente-acme', status: 'active' }), { status: 200 });
     };
+    const tgBodies = [];
+    const twFetch = globalThis.fetch;
+    globalThis.fetch = async (url, init) => {
+      if (String(url).includes('api.telegram.org')) { tgBodies.push(JSON.parse(init.body)); return new Response('{"ok":true}', { status: 200 }); }
+      return twFetch(url, init);
+    };
     const adopt = provisionHarness({ tenant: { id: '00000000-0000-4000-8000-00000000000a', slug: 'acme', name: 'Acme', twilio_subaccount_sid: 'AC' + 'x'.repeat(32), twilio_auth_token_enc: null } });
+    adopt.env.TELEGRAM_TOKEN = '123:abc';
+    adopt.env.TELEGRAM_CHAT_ID = '-100';
+    const pending = [];
+    adopt.ctx.waitUntil = (p2) => pending.push(p2.catch(() => {}));
     const adoptRes = await (await testing.handleProvision(provReq(), adopt.env, adopt.ctx, adopt.row.id, 'subaccount', 'juan@x')).json();
+    await Promise.all(pending);
     assert.deepEqual([adoptRes.ok, adoptRes.adopted], [true, true]);
     assert.ok(twilioCalls.some((u) => u.includes('/Accounts/AC' + 'x'.repeat(32) + '.json')), 'lee ESA subcuenta, no crea otra');
+    // el aviso de auditoría en Telegram DEBE decir de qué cliente es el paso
+    const audit = tgBodies.find((b) => String(b.text).includes('adopción'));
+    assert.ok(audit && audit.text.includes('Acme') && audit.text.includes('(acme)'), 'la auditoría nombra al cliente');
+    globalThis.fetch = twFetch;
     const tokUp = adopt.updates.find((u) => u.sql.includes('SET twilio_auth_token_enc=?'));
     assert.ok(String(tokUp.args[0]).startsWith('v1:'), 'token recuperado y cifrado');
     // sin SID pero con subcuenta preexistente cliente-<slug> en Twilio → se ADOPTA (cero duplicados)
