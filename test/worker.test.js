@@ -2225,7 +2225,7 @@ test('sender/sync: reconcilia desde Twilio sin pisar el canal, repara el webhook
   const realFetch = globalThis.fetch;
   globalThis.fetch = async (url, init) => {
     const u = String(url); twilioCalls.push({ u, method: (init && init.method) || 'POST', body: init && init.body });
-    if (u.includes('/v2/Channels/Senders?Channel=whatsapp') && (!init || init.method === 'GET')) return new Response(JSON.stringify({ senders }), { status: 200 });
+    if (u.includes('/v2/Channels/Senders?Channel=whatsapp') && (!init || init.method === 'GET')) return new Response(JSON.stringify({ senders: [{ sid: 'XEsandbox', sender_id: 'whatsapp:+14155238886', status: 'OFFLINE' }, ...senders] }), { status: 200 });
     if (u.includes('/v2/Channels/Senders/')) return new Response(JSON.stringify({ status: 'ONLINE' }), { status: 200 });
     return new Response('{}', { status: 200 });
   };

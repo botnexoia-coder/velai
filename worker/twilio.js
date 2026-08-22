@@ -95,6 +95,10 @@ export async function listWhatsAppSenders(credentials) {
   const items = Array.isArray(data.senders) ? data.senders : (Array.isArray(data.data) ? data.data : []);
   return items
     .filter((s) => String(s.sender_id || '').startsWith('whatsapp:'))
+    // El Sandbox de Twilio (+14155238886) aparece listado como un sender más en toda
+    // subcuenta: en la primera sync real (gogestion) se coló como sender del cliente
+    // (OFFLINE y sin WABA) y ensució la fila. Nunca es un sender de un cliente.
+    .filter((s) => s.sender_id !== 'whatsapp:+14155238886')
     .map((s) => ({
       senderSid: s.sid,
       senderId: s.sender_id,                                        // 'whatsapp:+34624121930'
