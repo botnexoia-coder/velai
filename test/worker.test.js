@@ -2349,6 +2349,9 @@ test('la identidad del bot (nombre y marca) viaja en el system de TODOS los cana
   const sys = testing.systemFor(cfg, t);
   assert.ok(sys.startsWith('Te llamas Alma y eres el asistente de Diálogos que Enseñan.'), 'identidad al frente');
   assert.ok(sys.includes('contexto del cliente') && sys.includes('reglas'));
+  // el saludo de marca viaja como personalidad a todos los canales
+  const conSaludo = testing.systemFor(cfg, { ...t, greeting: '¡Hola! Soy Alma 💛' });
+  assert.ok(conSaludo.includes('¡Hola! Soy Alma 💛') && conSaludo.includes('TODOS los canales'), 'saludo como referencia de tono');
   // sin bot_name no se inventa nada; sin brand_name cae al nombre del tenant
   assert.ok(!testing.systemFor(cfg, { system_prompt: 'x' }).includes('Te llamas'));
   assert.ok(testing.systemFor(cfg, { system_prompt: 'x', bot_name: 'Faby', name: 'GOgestión' }).includes('asistente de GOgestión'));

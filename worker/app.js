@@ -832,7 +832,13 @@ function systemFor(config, tenant) {
   const who = tenant && tenant.bot_name
     ? `Te llamas ${tenant.bot_name} y eres el asistente de ${tenant.brand_name || tenant.name}. Preséntate por tu nombre.\n`
     : '';
-  return `${who}${base}\n${config.GUARDRAILS || ''}`.trim();
+  // El saludo de marca del widget también es la personalidad del bot en el resto de
+  // canales: sin esto, la web sonaba a Alma y WhatsApp a un genérico educado. Es
+  // referencia de tono, no un guion: si la conversación ya está en marcha no se repite.
+  const tone = tenant && tenant.greeting
+    ? `Tu saludo característico, y la referencia de tu tono y personalidad en TODOS los canales: «${tenant.greeting}». Al iniciar una conversación nueva saluda en ese estilo; si la persona ya plantea algo concreto, responde directo manteniendo esa personalidad, sin repetir el saludo.\n`
+    : '';
+  return `${who}${tone}${base}\n${config.GUARDRAILS || ''}`.trim();
 }
 
 // Guarda contra claves heredadas del prototipo ('constructor', '__proto__', …):
