@@ -83,7 +83,7 @@ Sin esto, las campañas gastarían presupuesto a ciegas (sin medir conversiones)
 
 - [ ] 🔴 Pulsar **«Registrar webhook»** en el panel → Conexiones (una vez; secret ya cargado). OJO: desde ese momento `getUpdates` deja de funcionar para el bot — los chat ids ya no se leen a mano, que es el punto.
 - [ ] Probar el ciclo real: generar enlace para GOgestión → su `/start` en un grupo → el aviso de un lead de prueba llega AL GRUPO y la copia a Velai.
-- [x] **PR 2** desplegado (36ad269): `sender/sync` rellena la fila y REPARA el webhook; tarjeta de estado del cliente. ⚠️ QUEDA verificar en la 1ª ejecución real (alta de GOgestión) el shape de la respuesta de Twilio en Workers Logs y que la reparación del webhook funciona en vivo.
+- [x] **PR 2** desplegado (36ad269) y VERIFICADO en vivo (gogestion, 2026-08-22): shape confirmado (`senders`, ruta `/v2/Channels/Senders` con mayúsculas + `Channel=whatsapp`), reparación de webhook ejecutada en vivo, y sandbox (+14155238886) filtrado tras colarse en la 1ª sync (425cdaa).
 - [x] **PR 3** desplegado: `PATCH …/notify` en autoservicio + guarda del `63031` en los dos caminos.
 - [ ] **PR 4 (Fase B, NO implementar aún)** — Embedded Signup real en el panel. Precondiciones, en orden, todas de Juan: (1) S.L./alta censal para la verificación de negocio de Velai en Meta; (2) 2FA + verificación del portfolio `949061711290882` («several weeks»); (3) app de Meta NUEVA enviada a App Review; (4) alta en el programa Tech Provider de Twilio. Reevaluar a ~10 clientes junto a la comparativa 360dialog.
 

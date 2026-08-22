@@ -307,9 +307,12 @@ export async function listWhatsAppSenders(credentials) {
 }
 ```
 
-> ⚠️ **El nombre del array de la respuesta no está verificado contra una llamada real** (`senders`
-> vs `data`). El `filter`/`map` de arriba tolera ambos, pero **la primera ejecución real hay que
-> mirarla en Workers Logs** y dejar solo la forma correcta. No dar por bueno el shape sin verlo.
+> ✅ **Verificado contra la API real (gogestion, 2026-08-22):** la ruta es
+> `/v2/Channels/Senders` **con mayúsculas** (en minúsculas responde 404 20404), el listado exige
+> `Channel=whatsapp`, y el array de la respuesta se llama `senders`. Además, el **Sandbox de
+> Twilio (`whatsapp:+14155238886`) aparece listado como un sender más en toda subcuenta** y hay
+> que filtrarlo siempre — la primera sync real lo adoptó como sender del cliente (OFFLINE, sin
+> WABA) y hubo que limpiar la fila a mano.
 
 ### 2.3 Endpoint `POST /api/admin/tenants/:id/provision/sender/sync` — **solo rol velai**
 
