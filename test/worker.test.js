@@ -2283,6 +2283,44 @@ test('whatsapp del cliente: estado propio sin secretos, ajeno 404, y sender/sync
   await assert.rejects(testing.adminRouter(adminReq(prov, { method: 'POST' }), env, ctx, prov, new URL('https://x' + prov), {}, OWN), (e) => e.code === 'not_authorized');
 });
 
+test('tenant_channels: el webhook enruta por la tabla ADEMÁS del canal primario, y el PATCH mantiene el espejo', async () => {
+  // (a) el enrutado consulta la tabla nueva sin abandonar el fallback histórico
+  const sqls = [];
+  const envA = { DB: { prepare: (sql) => { sqls.push(sql); return { bind: () => ({
+    first: async () => ({ id: 't-ch', slug: 'ch', active: 1 }), run: async () => ({ meta: { changes: 1 } }), all: async () => ({ results: [] }),
+  }) }; } } };
+  const hit = await testing.tenantByAddress(envA, 'whatsapp:+34600000001');
+  assert.equal(hit.id, 't-ch');
+  assert.ok(sqls[0].includes('tenant_channels') && sqls[0].includes('channel_address'), 'tabla nueva + fallback en la misma consulta');
+  // (b) cambiar el canal primario en el PATCH refleja la tabla: borra el viejo e inserta el nuevo
+  const TID = '00000000-0000-4000-8000-0000000000f1';
+  const row = { id: TID, slug: 'mio', channel_address: 'web:mio', twilio_from: null, team_whatsapp: null, updated_at: 'T0' };
+  const writes = [];
+  let takenBy = null;
+  const db = { prepare: (sql) => ({ bind: (...args) => ({
+    first: async () => {
+      if (sql.includes('FROM tenants WHERE id=')) return { ...row };
+      if (sql.includes('FROM tenant_channels WHERE address=')) return takenBy ? { tenant_id: takenBy } : null;
+      return null;
+    },
+    run: async () => { writes.push({ sql, args }); return { meta: { changes: 1 } }; },
+    all: async () => ({ results: [] }),
+  }) }) };
+  const env = { DB: db, KV: { async get() { return null; }, async put() {}, async delete() {}, async list() { return { keys: [] }; } } };
+  const ctx = { waitUntil(p) { if (p && p.catch) p.catch(() => {}); } };
+  const path = `/api/admin/tenants/${TID}`;
+  const call = (body) => testing.adminRouter(adminReq(path, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }), env, ctx, path, new URL('https://x' + path), {}, VELAI);
+  const ok = await (await call({ channel_address: 'whatsapp:+34600000002', expected_updated_at: 'T0' })).json();
+  assert.equal(ok.ok, true);
+  const ins = writes.find((w) => w.sql.includes('INSERT INTO tenant_channels'));
+  assert.ok(ins && ins.args[0] === 'whatsapp:+34600000002' && ins.args[2] === 'whatsapp', 'el canal nuevo entra al espejo con su tipo');
+  assert.ok(writes.some((w) => w.sql.includes('DELETE FROM tenant_channels WHERE tenant_id=? AND kind=?')), 'sin duplicar el tipo');
+  // (c) un canal que ya enruta a OTRO cliente se rechaza ANTES de tocar la fila
+  writes.length = 0; takenBy = 'otro-tenant';
+  await assert.rejects(call({ channel_address: 'whatsapp:+34600000003', expected_updated_at: 'T0' }), (e) => e.code === 'address_taken');
+  assert.equal(writes.length, 0, 'ni UPDATE ni espejo: la fila no se toca');
+});
+
 test('números de aviso (PR3): el cliente edita los suyos y la guarda del 63031 cierra los dos caminos', async () => {
   const TID = '00000000-0000-4000-8000-0000000000e1';
   const row = { id: TID, slug: 'mio', channel_address: 'whatsapp:+34624121930', twilio_from: 'whatsapp:+34624121930', team_whatsapp: null, wa_number: null, updated_at: 'T0' };

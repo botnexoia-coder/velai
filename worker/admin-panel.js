@@ -268,10 +268,19 @@ $('#adminsList').onclick=async e=>{const email=e.target&&e.target.dataset&&e.tar
   loadAdmins()}
  catch(e2){toast('NO quitado: '+(TERRS[e2.message]||e2.message),false)}};
 function flags(list,cls){return list.map(f=>'<span class="flag'+(cls?' '+cls:'')+'">'+esc(f)+'</span>').join('')}
+// Un chip por canal REAL (la web entra por slug y está siempre) + avisos de configuración.
+// El viejo «socio pendiente» (era Ruta B con socio Meta) se retiró: con Self Sign-up el
+// estado veraz del canal WhatsApp es el del sender.
 function semaforo(t){if(!t.active&&String(t.channel_address).startsWith('pending:'))return '<span class="flag off">prospecto</span>';
- const long=t.prompt_len>8000?['contexto muy largo']:[];
- if(String(t.channel_address).startsWith('web:')){const f=[...long];if(t.prompt_len<200)f.push('contexto corto');if(!t.has_team&&!t.has_telegram)f.push('sin canal de aviso');return '<span class="flag web">solo web</span>'+(f.length?flags(f):' <span class="flag ok">listo</span>')}
- const f=[...long];if(!t.has_template)f.push('sin plantilla');if(!t.has_team)f.push('sin equipo');if(t.prompt_len<200)f.push('contexto corto');if(t.has_subaccount&&!t.has_twilio_token)f.push('sin token');if(t.has_subaccount&&!t.has_from)f.push('sin From');if(t.meta_partner_status==='pendiente'&&t.has_subaccount)f.push('socio pendiente');return f.length?flags(f):'<span class="flag ok">listo</span>'}
+ const kinds=new Set(String(t.channels||'').split(',').filter(Boolean));
+ const m=/^(whatsapp|messenger):/.exec(String(t.channel_address));if(m)kinds.add(m[1]);
+ let chips='<span class="flag web">web</span>';
+ if(kinds.has('whatsapp'))chips+=(t.sender_status==='ONLINE'||(t.has_from&&!t.has_subaccount))?'<span class="flag ok">whatsapp</span>':'<span class="flag">whatsapp: verificando</span>';
+ if(kinds.has('messenger'))chips+='<span class="flag ok">messenger</span>';
+ const f=[];if(t.prompt_len>8000)f.push('contexto muy largo');if(t.prompt_len<200)f.push('contexto corto');
+ if(!t.has_team&&!t.has_telegram)f.push('sin canal de aviso');
+ if(kinds.has('whatsapp')){if(!t.has_template)f.push('sin plantilla');if(t.has_subaccount&&!t.has_twilio_token)f.push('sin token');if(t.has_subaccount&&!t.has_from)f.push('sin From')}
+ return chips+(f.length?flags(f):' <span class="flag ok">listo</span>')}
 function meter(chars){const w=Math.min(100,Math.round(chars/12000*100));return '<span class="meter" title="El contexto viaja al modelo en CADA mensaje"><i data-w="'+w+'"></i></span><span class="muted">'+chars+' car.</span>'}
 async function loadTenantList(){try{const d=await api('/api/admin/tenants');tenantList=d.tenants;$('#tenantRows').innerHTML=d.tenants.map(t=>'<tr data-tid="'+t.id+'"><td>'+tenantChip(t.id,t.name)+'</td><td class="muted">'+esc(t.channel_address)+'</td><td>'+t.lead_count+'</td><td>'+meter(t.prompt_len)+'</td><td>'+semaforo(t)+'</td><td>'+(t.active?'<span class="flag ok">activo</span>':'<span class="flag off">inactivo</span>')+'</td><td><button type="button" class="btn alt btnsm" data-cal="'+t.id+'">Abrir</button></td></tr>').join('')||'<tr><td colspan="7" class="empty">Sin clientes.</td></tr>';paint($('#tenantRows'))}catch(e){toast('No se pudo cargar la lista de clientes: '+e.message,false)}}
 $('#tenantRows').onclick=e=>{const cal=e.target.closest('[data-cal]');if(cal)return openCalendar(cal.dataset.cal);const tr=e.target.closest('[data-tid]');if(tr)openTenant(tr.dataset.tid)};

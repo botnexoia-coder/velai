@@ -314,7 +314,36 @@ async function tenantCached(env, cacheKey, query, bindValue) {
 
 async function tenantByAddress(env, address) {
   if (!env.DB) throw new HttpError(503, 'tenant_storage_not_configured');
-  return tenantCached(env, `tenant:addr:${address}`, 'SELECT * FROM tenants WHERE channel_address = ? AND active = 1', address);
+  // tenant_channels permite N canales por cliente (0017); tenants.channel_address se
+  // mantiene como fallback y fuente del canal primario. El SQL conserva el prefijo
+  // histórico a propósito: los mocks de tests casan por startsWith.
+  return tenantCached(env, `tenant:addr:${address}`, `SELECT * FROM tenants WHERE channel_address = ?1 AND active = 1
+    UNION ALL SELECT t.* FROM tenants t JOIN tenant_channels c ON c.tenant_id = t.id WHERE c.address = ?1 AND t.active = 1
+    LIMIT 1`, address);
+}
+
+// El canal es la llave que enruta TODOS los mensajes entrantes del cliente: antes de
+// escribirlo hay que saber que no desviaría las conversaciones de otro.
+async function assertChannelFree(env, address, tenantId) {
+  if (!/^(whatsapp|messenger):/.test(String(address || ''))) return;
+  const row = await env.DB.prepare('SELECT tenant_id FROM tenant_channels WHERE address=?').bind(address).first();
+  if (row && row.tenant_id !== tenantId) throw new HttpError(409, 'address_taken');
+}
+
+// Mantiene tenant_channels como espejo del canal primario (tenants.channel_address).
+// Secuencial y tolerante: si el INSERT fallara a mitad, el enrutado sigue vivo por el
+// fallback a channel_address — la tabla nunca es un punto único de fallo.
+async function syncPrimaryChannel(env, tenantId, previousAddress, newAddress) {
+  const kindOf = (a) => { const m = /^(whatsapp|messenger):/.exec(String(a || '')); return m ? m[1] : null; };
+  const oldKind = kindOf(previousAddress);
+  const newKind = kindOf(newAddress);
+  if (oldKind) await env.DB.prepare('DELETE FROM tenant_channels WHERE address=? AND tenant_id=?').bind(previousAddress, tenantId).run();
+  if (!newKind) return;
+  await env.DB.prepare('DELETE FROM tenant_channels WHERE tenant_id=? AND kind=?').bind(tenantId, newKind).run();
+  try {
+    await env.DB.prepare('INSERT INTO tenant_channels (address,tenant_id,kind,created_at) VALUES (?,?,?,?)')
+      .bind(newAddress, tenantId, newKind, new Date().toISOString()).run();
+  } catch (error) { throw tenantWriteError(error); }
 }
 
 async function tenantBySlug(env, slug) {
@@ -567,6 +596,7 @@ function tenantWriteError(error) {
   const msg = String(error);
   if (/UNIQUE.*slug/i.test(msg)) return new HttpError(409, 'slug_taken');
   if (/UNIQUE.*channel_address/i.test(msg)) return new HttpError(409, 'address_taken');
+  if (/UNIQUE.*tenant_channels/i.test(msg)) return new HttpError(409, 'address_taken');
   if (/UNIQUE.*twilio_subaccount_sid/i.test(msg)) return new HttpError(409, 'subaccount_taken');
   return error;
 }
@@ -2127,6 +2157,8 @@ async function adminRouter(request, env, ctx, path, url, config, scope) {
              t.twilio_from IS NOT NULL AS has_from,
              t.telegram_chat_id IS NOT NULL AS has_telegram,
              t.meta_partner_status,
+             t.sender_status,
+             (SELECT group_concat(kind) FROM tenant_channels c WHERE c.tenant_id = t.id) AS channels,
              length(t.system_prompt) AS prompt_len,
              COUNT(l.id) AS lead_count
       FROM tenants t LEFT JOIN leads l ON l.tenant_id = t.id
@@ -2156,6 +2188,7 @@ async function adminRouter(request, env, ctx, path, url, config, scope) {
           fields.wa_number ?? null, fields.theme ?? null, fields.web_origins ?? null,
           fields.active ?? 1, now, now).run();
     } catch (error) { throw tenantWriteError(error); }
+    await syncPrimaryChannel(env, tenantId, null, fields.channel_address);
     // Invalidar ANTES del versionado: si el INSERT de la versión fallara, la caché
     // no puede quedarse 5 minutos sirviendo el estado anterior.
     await invalidateTenantCache(env, [fields]);
@@ -2686,6 +2719,8 @@ async function adminRouter(request, env, ctx, path, url, config, scope) {
       if (!Object.keys(fields).length && !tokenColumn) throw new HttpError(400, 'nothing_to_update');
       assertNotActivePending(fields.channel_address ?? previous.channel_address, fields.active ?? previous.active);
       assertTeamNotFrom(fields, previous);
+      const channelChanged = fields.channel_address !== undefined && fields.channel_address !== previous.channel_address;
+      if (channelChanged) await assertChannelFree(env, fields.channel_address, tenantId);
       const now = new Date().toISOString();
       // `columns` alimenta también el versionado: el token va aparte y jamás entra ahí.
       const columns = Object.keys(fields);
@@ -2705,6 +2740,7 @@ async function adminRouter(request, env, ctx, path, url, config, scope) {
           changedPrompt ? previous.system_prompt : JSON.stringify(
             Object.fromEntries(columns.filter((c) => c !== 'system_prompt').map((c) => [c, previous[c]]))),
           clean(body.note, 200) || null, now).run();
+      if (channelChanged) await syncPrimaryChannel(env, tenantId, previous.channel_address, fields.channel_address);
       await invalidateTenantCache(env, [previous, fields]);
       if (changedPrompt) {
         ctx.waitUntil(sendTelegramText(env, `✏️ <b>${escapeHtml(actor)}</b> cambió el contexto de <b>${escapeHtml(previous.name)}</b>`).catch(() => {}));
@@ -3009,4 +3045,4 @@ export function createWorker(config) {
   };
 }
 
-export const testing = { clean, errorResponseParts, normalizePhone, extractPhone, safeUtm, publicCors, validTwilioSignature, callAnthropic, callAnthropicRaw, runToolLoop, calendarExecutor, calendarSystem, tenantCalendar, validCalendarDate, availableSlots, handleCalendarCallback, calendarCallbackFor, sendTwilioText, timingSafeEqual, telegramBotUsername, handleTelegramWebhook, sendTelegramText, tenantTelegramToken, telegramThreadFor, registerTelegramTopic, csvCell, expiryDate, leadFilters, isDemoKey, templateVar, leadTemplateVariables, readJson, deliver, drainQueuedLeads, verifyTurnstile, systemFor, validateTenant, invalidateTenantCache, tenantWriteError, assertNotActivePending, handleProvision, pollProvisioning, fillSeries, resolveScope, scopeClause, clienteAllowed, adminRouter, recordAuthFailure, handleAdmin, handleWidgetBoot, allowedOrigins, envOrigins, syncPanelGate, envAdmins, syncAdminGate, getSetting, setSetting, withCfToken };
+export const testing = { clean, errorResponseParts, tenantByAddress, syncPrimaryChannel, assertChannelFree, normalizePhone, extractPhone, safeUtm, publicCors, validTwilioSignature, callAnthropic, callAnthropicRaw, runToolLoop, calendarExecutor, calendarSystem, tenantCalendar, validCalendarDate, availableSlots, handleCalendarCallback, calendarCallbackFor, sendTwilioText, timingSafeEqual, telegramBotUsername, handleTelegramWebhook, sendTelegramText, tenantTelegramToken, telegramThreadFor, registerTelegramTopic, csvCell, expiryDate, leadFilters, isDemoKey, templateVar, leadTemplateVariables, readJson, deliver, drainQueuedLeads, verifyTurnstile, systemFor, validateTenant, invalidateTenantCache, tenantWriteError, assertNotActivePending, handleProvision, pollProvisioning, fillSeries, resolveScope, scopeClause, clienteAllowed, adminRouter, recordAuthFailure, handleAdmin, handleWidgetBoot, allowedOrigins, envOrigins, syncPanelGate, envAdmins, syncAdminGate, getSetting, setSetting, withCfToken };

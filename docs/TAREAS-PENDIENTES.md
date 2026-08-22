@@ -87,6 +87,11 @@ Sin esto, las campañas gastarían presupuesto a ciegas (sin medir conversiones)
 - [x] **PR 3** desplegado: `PATCH …/notify` en autoservicio + guarda del `63031` en los dos caminos.
 - [ ] **PR 4 (Fase B, NO implementar aún)** — Embedded Signup real en el panel. Precondiciones, en orden, todas de Juan: (1) S.L./alta censal para la verificación de negocio de Velai en Meta; (2) 2FA + verificación del portfolio `949061711290882` («several weeks»); (3) app de Meta NUEVA enviada a App Review; (4) alta en el programa Tech Provider de Twilio. Reevaluar a ~10 clientes junto a la comparativa 360dialog.
 
+### 2k. Canales múltiples por cliente (tenant_channels — fase 1 desplegada 2026-08-22)
+
+- [x] Tabla `tenant_channels` (migración 0017, backfill) + enrutado del webhook canales-primero con fallback a `tenants.channel_address`; el PATCH/POST mantienen el espejo del canal primario; chips de la lista por canal real (web siempre + whatsapp con estado del sender + messenger).
+- [ ] **Fase 2 (cuando un cliente pida 2 canales de mensajería a la vez):** UI para añadir canales secundarios (hoy solo escribe el primario), respuesta saliente por el canal de llegada, y fusionar «Velai (Messenger)» en la fila de Velai como primer caso real.
+
 ### 2h. Seguimiento del sprint de blindaje (desplegado 2026-08-20)
 
 - [ ] **Webhook 100% asíncrono (TwiML vacío + `waitUntil` + Messages API de Twilio)**: evaluado y descartado en el sprint — solo abordarlo si los logs `ai_usage` muestran p95 > ~9 s en el canal WhatsApp (hoy el webhook va con timeout 10 s / 0 reintentos + dedupe por `MessageSid`, suficiente). Nota: SPEC-CALENDARIO ya contempla este patrón para el bucle de tools, que lo necesitará de verdad.
