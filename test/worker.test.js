@@ -2225,8 +2225,8 @@ test('sender/sync: reconcilia desde Twilio sin pisar el canal, repara el webhook
   const realFetch = globalThis.fetch;
   globalThis.fetch = async (url, init) => {
     const u = String(url); twilioCalls.push({ u, method: (init && init.method) || 'POST', body: init && init.body });
-    if (u.endsWith('/v2/channels/senders') && (!init || init.method === 'GET')) return new Response(JSON.stringify({ senders }), { status: 200 });
-    if (u.includes('/v2/channels/senders/')) return new Response(JSON.stringify({ status: 'ONLINE' }), { status: 200 });
+    if (u.includes('/v2/Channels/Senders?Channel=whatsapp') && (!init || init.method === 'GET')) return new Response(JSON.stringify({ senders }), { status: 200 });
+    if (u.includes('/v2/Channels/Senders/')) return new Response(JSON.stringify({ status: 'ONLINE' }), { status: 200 });
     return new Response('{}', { status: 200 });
   };
   try {
@@ -2256,7 +2256,7 @@ test('sender/sync: reconcilia desde Twilio sin pisar el canal, repara el webhook
     assert.ok(up.sql.includes('waba_id=?') && up.sql.includes('sender_sid=?') && up.sql.includes('sender_status=?') && up.sql.includes('twilio_from=?'), 'campos vacíos rellenados');
     assert.ok(!up.sql.includes('channel_address=?'), 'channel_address ya tenía valor (web:) y NO se pisa');
     assert.deepEqual(res.conflicts, [{ field: 'channel_address', current: 'web:gogestion', fromTwilio: 'whatsapp:+34624121930' }]);
-    assert.ok(twilioCalls.some((c) => c.u.includes('/v2/channels/senders/XE') && String(c.body).includes(WORKER_URL_TEST)), 'el PUT del webhook apunta al worker');
+    assert.ok(twilioCalls.some((c) => c.u.includes('/v2/Channels/Senders/XE') && String(c.body).includes(WORKER_URL_TEST)), 'el PUT del webhook apunta al worker');
   } finally { globalThis.fetch = realFetch; }
 });
 const WORKER_URL_TEST = 'vai-worker.botnexo-ia.workers.dev';
