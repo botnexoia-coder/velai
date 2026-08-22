@@ -1,129 +1,63 @@
-# Sebas — activar el chat de Vai en las webs de los 4 clientes (v2)
+# Sebas — widget de Vai en las webs de los 4 clientes (v3)
 
-> **v2 (2026-08-18).** El widget ahora es **autosuficiente** (ya no depende de nada de
-> hirevai.com en la página) y **lleva la marca de cada cliente**: su logo, su nombre, su
-> saludo y sus colores, servidos desde nuestro panel. Tu parte sigue siendo la misma:
-> **pegar dos líneas en cada web**. La versión buena es **`?v=7`** — si en algún sitio
-> quedó `?v=5`, cámbialo.
+> **v3 (2026-08-22).** Cambio pequeño pero importante: la versión buena ahora es **`?v=8`**.
+> El `v=7` llamaba a un dominio (`workers.dev`) que los bloqueadores de anuncios cortan: a esos
+> visitantes el chat les salía sin la marca del cliente (decía `Vai · Velai`) **y no enviaba
+> mensajes**. El v=8 llama a `api.hirevai.com` y no tiene ese problema. Lo comprobamos en
+> `dialogosqueensenan.com`: con adblock salía el genérico; con el v=8, sale Alma siempre.
 >
-> Los cuatro dominios (apex y `www`) están en la allowlist del worker. No necesitas pedir
-> nada ni desplegar nada del worker: en cuanto el snippet esté en la web, funciona.
+> Tu parte sigue siendo pegar (o corregir) **dos líneas por web**. Nada más ha cambiado.
 
 ---
 
-## Lo que hay que pegar en cada web
+## 1. El snippet (igual que siempre, con `v=8`)
 
-Dos líneas, **en este orden** (la primera declara el cliente, la segunda carga el widget), justo
-**antes de `</body>`**:
+Dos líneas, **en este orden**, justo **antes de `</body>`**, en TODAS las páginas de cada web
+(si hay footer/layout compartido, ese es el sitio):
 
 ```html
 <script>window.VELAI_TENANT='<SLUG>';</script>
-<script src="https://hirevai.com/assets/vai-widget.js?v=7" defer></script>
+<script src="https://hirevai.com/assets/vai-widget.js?v=8" defer></script>
 ```
 
 El `<SLUG>` es distinto en cada web. **No los mezcles**: si te equivocas, el bot de un cliente
-contesta con el contexto de otro (o con el de Velai) y el lead se guarda en la ficha equivocada.
+contesta con el contexto de otro y el lead se guarda en la ficha equivocada.
 
-| Web | Repo | `<SLUG>` a usar |
-|---|---|---|
-| `hiredatavision.com` | `botnexoia-coder/hiredatavision` | `hiredatavision` |
-| `gogestion.es` | `CronoSeb/gogestion-demo` | `gogestion` |
-| `zoetravelspain.com` | `botnexoia-coder/Zoe` | `zoe` |
-| `dialogosqueensenan.com` | `botnexoia-coder/Dialogos` | `dialogos` |
+| Web | Repo | `<SLUG>` | Estado actual |
+|---|---|---|---|
+| `dialogosqueensenan.com` | `botnexoia-coder/Dialogos` | `dialogos` | Snippet YA puesto y correcto — solo cambiar `?v=7` → `?v=8` |
+| `hiredatavision.com` | `botnexoia-coder/hiredatavision` | `hiredatavision` | Poner/actualizar a `?v=8` |
+| `gogestion.es` | `CronoSeb/gogestion-demo` | `gogestion` | Poner/actualizar a `?v=8` |
+| `zoetravelspain.com` | `botnexoia-coder/Zoe` | `zoe` | Poner/actualizar a `?v=8` (incluida la página `/prueba-vai/` si sigue con v=5) |
 
-Ejemplo completo para Zoe:
+La marca (logo, colores, saludo, chips, WhatsApp) **no se toca en el HTML**: la editamos desde
+el panel y el widget la pide solo al cargar. Los 4 dominios ya están autorizados en el worker —
+no hay que pedir ni desplegar nada más.
 
-```html
-  <script>window.VELAI_TENANT='zoe';</script>
-  <script src="https://hirevai.com/assets/vai-widget.js?v=7" defer></script>
-</body>
-```
+## 2. Cómo verificar cada web (1 minuto)
 
-Va en **todas** las páginas de cada web, no solo en la home. Si la web tiene un footer o layout
-compartido, ese es el sitio; si son HTML independientes, hay que repetirlo en cada uno (hirevai.com
-carga el widget así en sus 26 páginas; allí no lleva la línea del tenant porque el worker usa
-`velai` por defecto — en las webs de cliente la primera línea es **obligatoria**).
+1. Abre la web en una pestaña normal (con tus extensiones de siempre, mejor aún si tienes adblock).
+2. El botón del chat debe abrir con **la marca del cliente** en la cabecera (p. ej. `Alma ·
+   Diálogos que Enseñan`), su saludo y sus chips — **no** `Vai · Velai`.
+3. Manda un "hola" de prueba: debe responder. Si contesta con el negocio equivocado, el `<SLUG>`
+   está mal.
+4. Si tras cambiar a v=8 sigues viendo lo viejo: recarga forzada (Ctrl+Shift+R) — el v=7 se
+   cachea un año en el navegador y solo el cambio de versión en la página lo suelta.
 
-Nada más: la marca (logo, colores, saludo, chips, WhatsApp de contacto) **no se toca en el HTML**
-— la editamos nosotros desde el panel y el widget la pide sola al cargar. Si un cliente quiere
-cambiar su saludo, no es un ticket para ti.
+## 3. Chats viejos: ya se pueden retirar (donde se cumpla la regla)
 
----
+La regla sigue siendo la misma: **el chat viejo no se quita hasta que el nuevo muestre la marca
+del cliente en esa web** (verificación del punto 2).
 
-## Orden importante: no quites ningún chat viejo todavía
+- `dialogosqueensenan.com`: la marca de Alma ya carga → **retira su chat viejo** (se ve su botón
+  flotante naranja detrás del widget nuevo).
+- `gogestion.es`, `zoetravelspain.com`, `hiredatavision.com`: pon el v=8, verifica la marca, y
+  entonces retira el suyo en la misma pasada.
 
-`gogestion.es`, `zoetravelspain.com` y `hiredatavision.com` tienen su propio chat con su marca
-(Faby granate, Zoe azul/naranja bilingüe…). **La regla es: el chat viejo no se quita hasta que el
-nuevo muestre la marca del cliente en esa web** — su logo y su nombre en la cabecera, no
-`Vai · Velai`. Mientras tanto pueden convivir un momento en una página de prueba, pero no
-sustituyas nada aún.
+## 4. Si algo no cuadra
 
-Cuando toque quitarlos, las pistas de qué buscar: `<script>` que apunte a `*.workers.dev`, a un
-`chat.js`/`bot.js`/`widget.js` propio, o un bloque de widget embebido en la página.
-
-**No apagues los workers viejos** (`hiredatavision-bot`, `gogestion-bot`): eso lo hacemos nosotros
-después, cuando el tenant nuevo responda igual o mejor **y con su marca**.
-
-En `zoetravelspain.com/prueba-vai/` quedó el snippet con `?v=5`: **cámbialo a `?v=7`** y vuelve a
-probar — con la v7 el chat ya funciona ahí (la v5 fallaba porque dependía de un script que solo
-existe en hirevai.com; era un defecto nuestro, tu snippet estaba bien puesto).
-
----
-
-## Cómo comprobar que funciona (2 minutos por web)
-
-1. Abre la web y busca la burbuja de chat abajo a la derecha.
-2. **Mira la cabecera del chat**: debe mostrar el logo y el nombre del cliente
-   (`Zoe · Zoe Travel Spain`, `Faby · GOgestión`…). Si ves `Vai · Velai`, el slug está mal,
-   falta la primera línea del snippet, o aún no hemos cargado la marca de ese cliente en el
-   panel — dinos cuál de las webs es y lo miramos.
-3. Escribe algo propio del negocio. Cada bot debe responder **como su negocio**, no como Velai:
-   - **HireDataVision** → se presenta como *Dara* y habla de datos, BI, pipelines.
-   - **GOgestión** → se presenta como *Faby* y habla de trámites de extranjería.
-   - **Zoe Travel** → se presenta como *Zoe* y pregunta a dónde quieres viajar (y contesta en
-     inglés si la página está en inglés).
-   - **Diálogos que Enseñan** → tono cálido, podcast e historias de migrantes.
-4. Sigue la conversación hasta que te pida el WhatsApp y dáselo: debe aparecer un lead nuevo en
-   `admin.hirevai.com`, en la pestaña **Leads**, con el nombre del cliente en la columna *Cliente*.
-
----
-
-## Si algo falla, qué significa cada error
-
-Abre la consola del navegador (F12 → Console) y mira el error:
-
-| Lo que ves | Qué pasa | Cómo se arregla |
-|---|---|---|
-| El chat no aparece | El script no carga | Comprueba la ruta exacta y que las dos líneas estén antes de `</body>` |
-| Cabecera `Vai · Velai` o responde como Velai | Falta o está mal `window.VELAI_TENANT` | Debe ir **antes** del `<script src=…>`, con el slug exacto de la tabla |
-| `invalid_tenant` | El slug no existe en el panel | Revisa que no haya una errata (es `zoe`, no `zoe-travel`) |
-| Error de CORS / `origin_not_allowed` | El dominio no está en la allowlist del worker | Nos lo dices: pasa si la web sirve desde un dominio distinto al de la tabla (un subdominio, un `.pages.dev`…) |
-| `human_verification_failed` | Turnstile no reconoce el hostname | Igual: nos lo dices y lo añadimos. Solo están los apex y `www` de los 4 dominios |
-
-Los tres últimos **no los puedes arreglar tú**: son configuración nuestra. Mándanos el dominio
-exacto desde el que carga la web y el error de consola, y lo añadimos en un minuto.
-
----
-
-## Una cosa importante sobre los avisos
-
-Cuando el bot de un cliente capta un lead, el aviso por WhatsApp sale **desde el número de Velai y
-con la plantilla de Velai** (dice "Nuevo lead – Velai") hasta que ese cliente tenga su propio
-número y su plantilla aprobada. El lead se guarda perfectamente y se ve en el panel con su cliente
-asignado; lo que aún no es "de marca blanca" es el mensaje de aviso. **No es algo que tengas que
-tocar tú** — solo para que no te sorprenda si lo ves.
-
----
-
-## Resumen
-
-- [ ] `zoetravelspain.com/prueba-vai/` → subir a `?v=7` y probar (desbloqueada por la v7)
-- [ ] `hiredatavision.com` → snippet slug `hiredatavision` en todas las páginas
-- [ ] `gogestion.es` → snippet slug `gogestion` en todas las páginas
-- [ ] `zoetravelspain.com` → snippet slug `zoe` en todas las páginas
-- [ ] `dialogosqueensenan.com` → snippet slug `dialogos` en todas las páginas
-- [ ] Probar cada una: cabecera con la marca del cliente + lead de prueba en `admin.hirevai.com`
-- [ ] Solo DESPUÉS de ver la marca del cliente: quitar el chat viejo de esa web
-
-Cualquier duda o error de los de la tabla, escríbenos con el dominio exacto y lo resolvemos desde
-nuestro lado.
+- Marca genérica (`Vai · Velai`) **en incógnito también** → avísanos: es cosa nuestra (panel/worker).
+- Marca genérica solo con extensiones → asegúrate de que la página carga `?v=8` (mira el código
+  fuente); si carga v=8 y sigue mal, avísanos con una captura de la pestaña Red (F12) filtrada
+  por `api.hirevai.com`.
+- El chat no responde al enviar → captura de la consola (F12) y nos la mandas.

@@ -330,3 +330,41 @@ Suite 79→88. **Sobrevive como pendiente** (TAREAS §2i): verificación de la a
 Google (en Testing los refresh caducan a 7 días), Microsoft (fase 2), picker de
 calendarios, aviso Telegram por cita, enlace cita↔lead, recordatorios, y los nuevos
 canales Telegram/Instagram como spec aparte.
+
+
+## Conexiones en autoservicio + alta WhatsApp e2e (`SPEC-CONEXIONES-AUTOSERVICIO.md`, 2026-08-21/22)
+
+**PR 1 — Telegram en autoservicio** (commits 7f00fd1→f827d3c, migraciones 0013-0016): vista Conexiones
+para ambos roles (admin con selector de cliente), enlace `t.me` con token de un solo uso (KV 15 min),
+webhook público `/telegram/webhook` (secreto en header + `timingSafeEqual`, 200 mudo). **Entrega DUAL**:
+el aviso va al chat del cliente (sin chat = skip visible) y Velai recibe SIEMPRE copia operativa
+deduplicada por lead (`opsping:` 30 días). **Marca blanca por cliente** (conmutador que solo activa
+Velai): bot propio de @BotFather (token cifrado AAD `telegram:<id>`) + **Temas** del grupo creados
+desde el panel con nombre y descripción (`createForumTopic`) y clasificación de cada lead con Haiku
+(nombre-exacto-o-General, nunca se pierde); plan básico = 2 pasos, un solo chat con el bot de Velai.
+UI: asistente horizontal de 5 pasos (riel clicable, confirmaciones manuales, pantalla final).
+
+**PR 2 — sender/sync** (36ad269, verificado EN VIVO el 2026-08-22 con gogestion): el botón
+«Sincronizar desde Twilio» lee el sender de la subcuenta, rellena `waba_id/sender_sid/sender_status/
+twilio_from` sin pisar `channel_address`/`twilio_from` con valor (informa `conflicts[]`) y **repara el
+webhook** si quedó en el default de Twilio. Verificado contra la API real: ruta `/v2/Channels/Senders`
+CON mayúsculas + `Channel=whatsapp` (en minúsculas 404 20404), array `senders`, y el **Sandbox
+(+14155238886) se filtra siempre** (la 1ª sync real lo adoptó como sender del cliente).
+**PR 3** (99b08ac): `PATCH …/notify` en autoservicio + guarda del 63031 en los dos caminos.
+**PR 4** (Embedded Signup en el panel) NO implementado: precondiciones y distinción Self Sign-up vs
+Tech Provider en TAREAS §2j — clave: la URL del popup de Twilio NO es compartible con el cliente.
+
+**Del rodaje real salieron además** (2026-08-22, 58d9096→9a0d533): subcuenta **crear-o-adoptar**
+(SID sin token → recupera y cifra el token vía el padre; `cliente-<slug>` preexistente → se adopta;
+cero duplicados en Twilio), auditoría de aprovisionamiento titulada con el cliente, `errorResponseParts`
+(los errores de Twilio salen con su código, nunca `server_error` mudo; los 500 loguean el mensaje real),
+y el aviso de lead en Telegram titula con el NOMBRE del cliente dueño.
+
+**Primer alta e2e completada — Diálogos** (2026-08-22): Self Sign-up real (la página WhatsApp senders
+no sale en el menú de la subcuenta: llegar por URL directa o el buscador de la consola; «Try out
+WhatsApp» es el sandbox, no el alta), sender ONLINE `whatsapp:+34641586513` (WABA 963253983463170),
+canal cambiado desde la ficha y **primer lead real de un cliente en producción**. De ahí: tabla
+**`tenant_channels`** (migración 0017, N canales por cliente, enrutado canales-primero con fallback,
+chips de la lista por canal real — «socio pendiente» retirado) y **`api.hirevai.com`** como dominio
+del worker + widget v=8 (workers.dev está en listas de adblock: a esos visitantes el widget les salía
+sin marca y con el chat muerto).

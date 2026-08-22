@@ -79,7 +79,7 @@ Sin esto, las campañas gastarían presupuesto a ciegas (sin medir conversiones)
 - [ ] Validar con asesoría los textos de `/condiciones/` y la sección Google Calendar de `/privacidad/` (junto al bloque LSSI).
 - [ ] Pospuesto conscientemente: **Microsoft 365** (fase 2), picker de calendarios (hoy campo `calendar_id`), aviso Telegram por cita, enlace cita↔lead, recordatorios por plantilla, cancelación desde el panel, y canales Telegram/Instagram (spec aparte).
 
-### 2j. Conexiones en autoservicio (SPEC-CONEXIONES — PR1 Telegram desplegado 2026-08-21)
+### 2j. Conexiones en autoservicio (spec consolidada en IMPLEMENTADO.md el 2026-08-22 — quedan estos flecos)
 
 - [ ] 🔴 Pulsar **«Registrar webhook»** en el panel → Conexiones (una vez; secret ya cargado). OJO: desde ese momento `getUpdates` deja de funcionar para el bot — los chat ids ya no se leen a mano, que es el punto.
 - [ ] Probar el ciclo real: generar enlace para GOgestión → su `/start` en un grupo → el aviso de un lead de prueba llega AL GRUPO y la copia a Velai.
@@ -103,7 +103,7 @@ Sin esto, las campañas gastarían presupuesto a ciegas (sin medir conversiones)
 - [ ] **Webhook 100% asíncrono (TwiML vacío + `waitUntil` + Messages API de Twilio)**: evaluado y descartado en el sprint — solo abordarlo si los logs `ai_usage` muestran p95 > ~9 s en el canal WhatsApp (hoy el webhook va con timeout 10 s / 0 reintentos + dedupe por `MessageSid`, suficiente). Nota: SPEC-CALENDARIO ya contempla este patrón para el bucle de tools, que lo necesitará de verdad.
 - [ ] Exponer `tenants.ai_daily_limit` en la ficha del panel (hoy se edita por SQL; el default es `AI_TENANT_DAILY_LIMIT`=300).
 
-### 2f. Widget con marca en las webs de los clientes (desplegado `?v=7` el 2026-08-18 — ver `IMPLEMENTADO.md`)
+### 2f. Widget con marca en las webs de los clientes (v=7 del 2026-08-18, superado por v=8 — los flecos de versión viven en §2l)
 
 - [x] **Hostnames del widget de Turnstile verificados por API (2026-08-18)**: los 4 apex de los clientes + `hirevai.com`/`www` + `velai-dey.pages.dev` + `gogestion-demo.pages.dev` están en el widget `velai-web`. Los `www.` de los clientes quedan cubiertos: Turnstile permite automáticamente los subdominios de los dominios listados. Ojo servidor: `verifyTurnstile` cruza contra `ALLOWED_WEB_ORIGINS`, que sí lista los `www` explícitos — las dos listas alineadas.
 - [x] **Marca de los 4 clientes cargada y verificada por `/widget/boot` (2026-08-18)**: Zoe 🐱, Faby (GOgestión), Dara (HireDataVision) y **Alma** (Diálogos — nombre decidido), con logo, colores, saludo y chips. Los repos externos ya no hacen falta: la marca se sacó por otra vía.
