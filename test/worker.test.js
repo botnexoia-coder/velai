@@ -2321,6 +2321,28 @@ test('tenant_channels: el webhook enruta por la tabla ADEMÁS del canal primario
   assert.equal(writes.length, 0, 'ni UPDATE ni espejo: la fila no se toca');
 });
 
+test('el aviso de lead en Telegram lleva el NOMBRE del cliente dueño, y VELAI solo sin tenant', async () => {
+  const sent = [];
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = async (url, init) => {
+    if (String(url).includes('api.telegram.org')) { sent.push(JSON.parse(init.body)); return new Response('{"ok":true}', { status: 200 }); }
+    return new Response('{}', { status: 200 });
+  };
+  try {
+    const env = { TELEGRAM_TOKEN: '1:a', TELEGRAM_CHAT_ID: '-100', KV: mapKV(), DB: { prepare: () => ({ bind: () => ({ first: async () => null, run: async () => ({ meta: { changes: 1 } }), all: async () => ({ results: [] }) }) }) } };
+    const lead = { id: 'l-1', source: 'whatsapp', name: 'Ana', whatsapp: '+34600000009' };
+    const tenant = { id: 't-d', name: 'Diálogos que Enseñan', slug: 'dialogos', telegram_chat_id: '-200', telegram_whitelabel: 0 };
+    await testing.deliver(env, 'telegram', lead, tenant);
+    // copia operativa a Velai Y aviso del cliente: ambos nombran al dueño del lead
+    assert.equal(sent.length, 2);
+    for (const m of sent) assert.ok(m.text.includes('DIÁLOGOS QUE ENSEÑAN (whatsapp)'), 'título con el cliente: ' + m.text.slice(0, 60));
+    // lead propio (sin tenant): VELAI como siempre
+    sent.length = 0;
+    await testing.deliver(env, 'telegram', { ...lead, id: 'l-2' }, null);
+    assert.ok(sent.length === 1 && sent[0].text.includes('VELAI (whatsapp)'));
+  } finally { globalThis.fetch = realFetch; }
+});
+
 test('números de aviso (PR3): el cliente edita los suyos y la guarda del 63031 cierra los dos caminos', async () => {
   const TID = '00000000-0000-4000-8000-0000000000e1';
   const row = { id: TID, slug: 'mio', channel_address: 'whatsapp:+34624121930', twilio_from: 'whatsapp:+34624121930', team_whatsapp: null, wa_number: null, updated_at: 'T0' };

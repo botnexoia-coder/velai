@@ -876,8 +876,12 @@ function escapeHtml(value) {
   return String(value ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
-function notificationText(lead) {
-  let text = `📨 <b>NUEVO LEAD — VELAI (${escapeHtml(lead.source)})</b>\n\n`;
+// El título lleva el NOMBRE del cliente dueño del lead (pedido de Juan, 2026-08-22:
+// el primer lead real de Diálogos llegó como «VELAI»); sin tenant (leads de la web
+// propia), Velai.
+function notificationText(lead, tenant) {
+  const owner = (tenant && tenant.name) ? String(tenant.name).toUpperCase() : 'VELAI';
+  let text = `📨 <b>NUEVO LEAD — ${escapeHtml(owner)} (${escapeHtml(lead.source)})</b>\n\n`;
   if (lead.name) text += `👤 Nombre: ${escapeHtml(lead.name)}\n`;
   if (lead.whatsapp) text += `📱 WhatsApp: ${escapeHtml(lead.whatsapp)}\n`;
   if (lead.sector) text += `🏪 Sector: ${escapeHtml(lead.sector)}\n`;
@@ -942,7 +946,7 @@ async function deliver(env, channel, lead, tenant) {
         const opsKey = `opsping:${dedupeId}`;
         if (!dedupeId || !env.KV || !(await env.KV.get(opsKey))) {
           if (dedupeId && env.KV) await env.KV.put(opsKey, '1', { expirationTtl: 30 * 86400 });
-          await sendTelegramText(env, notificationText(lead), env.TELEGRAM_CHAT_ID);
+          await sendTelegramText(env, notificationText(lead, tenant), env.TELEGRAM_CHAT_ID);
         }
       } catch (_) { /* la copia de Velai jamás decide el estado del aviso del cliente */ }
     }
@@ -951,10 +955,10 @@ async function deliver(env, channel, lead, tenant) {
     // grupo tiene Temas registrados, Vai clasifica el lead hacia el que encaje.
     const botToken = tenant ? await tenantTelegramToken(env, tenant) : null;
     const threadId = tenant ? await telegramThreadFor(env, tenant, lead) : null;
-    let outcome = await sendTelegramText(env, notificationText(lead), chatId, { allowFallback: false, botToken, threadId });
+    let outcome = await sendTelegramText(env, notificationText(lead, tenant), chatId, { allowFallback: false, botToken, threadId });
     if (!outcome.ok && threadId) {
       // Tema borrado o hilo cerrado: el aviso cae al chat General, nunca se pierde.
-      outcome = await sendTelegramText(env, notificationText(lead), chatId, { allowFallback: false, botToken });
+      outcome = await sendTelegramText(env, notificationText(lead, tenant), chatId, { allowFallback: false, botToken });
     }
     return outcome;
   }
