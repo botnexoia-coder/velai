@@ -1741,6 +1741,17 @@ async function provisionOrphan(env, ctx, tenant, resource, sid, error) {
   throw new HttpError(500, 'provision_orphan');
 }
 
+// TwilioError (y cualquier error tipado con status+code) no es HttpError: sin este
+// duck-typing, TODO fallo de la API de Twilio salía al panel como «server_error» sin
+// pista (así se perdió el fallo real del primer sender/sync de gogestion). Los 500
+// auténticos registran además el mensaje real para no volver a diagnosticar a ciegas.
+function errorResponseParts(error) {
+  const typed = error instanceof HttpError || (Number.isInteger(error && error.status) && typeof (error && error.code) === 'string');
+  const status = typed ? error.status : 500;
+  const code = typed ? error.code : 'server_error';
+  return { status, code, detail: status >= 500 ? { error: String((error && error.message) || error).slice(0, 200) } : {} };
+}
+
 async function handleProvision(request, env, ctx, tenantId, step, actor) {
   if (!env.DB) throw new HttpError(503, 'lead_storage_not_configured');
   const tenant = await env.DB.prepare('SELECT * FROM tenants WHERE id=?').bind(tenantId).first();
@@ -2989,9 +3000,8 @@ export function createWorker(config) {
         if (path === '/' && request.method === 'POST' && contentType.includes('application/json')) throw new HttpError(410, 'legacy_chat_retired');
         throw new HttpError(404, 'not_found');
       } catch (error) {
-        const status = error instanceof HttpError ? error.status : 500;
-        const code = error instanceof HttpError ? error.code : 'server_error';
-        console.log(JSON.stringify({ level: status >= 500 ? 'error' : 'warn', code, status, path, requestId: request.headers.get('cf-ray') || crypto.randomUUID() }));
+        const { status, code, detail } = errorResponseParts(error);
+        console.log(JSON.stringify({ level: status >= 500 ? 'error' : 'warn', code, status, path, ...detail, requestId: request.headers.get('cf-ray') || crypto.randomUUID() }));
         return json({ ok: false, error: code }, status, (await publicCors(request, env).catch(() => null)) || {});
       }
     },
@@ -2999,4 +3009,4 @@ export function createWorker(config) {
   };
 }
 
-export const testing = { clean, normalizePhone, extractPhone, safeUtm, publicCors, validTwilioSignature, callAnthropic, callAnthropicRaw, runToolLoop, calendarExecutor, calendarSystem, tenantCalendar, validCalendarDate, availableSlots, handleCalendarCallback, calendarCallbackFor, sendTwilioText, timingSafeEqual, telegramBotUsername, handleTelegramWebhook, sendTelegramText, tenantTelegramToken, telegramThreadFor, registerTelegramTopic, csvCell, expiryDate, leadFilters, isDemoKey, templateVar, leadTemplateVariables, readJson, deliver, drainQueuedLeads, verifyTurnstile, systemFor, validateTenant, invalidateTenantCache, tenantWriteError, assertNotActivePending, handleProvision, pollProvisioning, fillSeries, resolveScope, scopeClause, clienteAllowed, adminRouter, recordAuthFailure, handleAdmin, handleWidgetBoot, allowedOrigins, envOrigins, syncPanelGate, envAdmins, syncAdminGate, getSetting, setSetting, withCfToken };
+export const testing = { clean, errorResponseParts, normalizePhone, extractPhone, safeUtm, publicCors, validTwilioSignature, callAnthropic, callAnthropicRaw, runToolLoop, calendarExecutor, calendarSystem, tenantCalendar, validCalendarDate, availableSlots, handleCalendarCallback, calendarCallbackFor, sendTwilioText, timingSafeEqual, telegramBotUsername, handleTelegramWebhook, sendTelegramText, tenantTelegramToken, telegramThreadFor, registerTelegramTopic, csvCell, expiryDate, leadFilters, isDemoKey, templateVar, leadTemplateVariables, readJson, deliver, drainQueuedLeads, verifyTurnstile, systemFor, validateTenant, invalidateTenantCache, tenantWriteError, assertNotActivePending, handleProvision, pollProvisioning, fillSeries, resolveScope, scopeClause, clienteAllowed, adminRouter, recordAuthFailure, handleAdmin, handleWidgetBoot, allowedOrigins, envOrigins, syncPanelGate, envAdmins, syncAdminGate, getSetting, setSetting, withCfToken };

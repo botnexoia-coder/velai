@@ -546,6 +546,19 @@ test('provision/subaccount: idempotente, cifra el token y no lo devuelve', async
   } finally { globalThis.fetch = realFetch; }
 });
 
+test('un error de Twilio sale al panel con su código (502), nunca como server_error mudo', () => {
+  // error tipado 4xx: se respeta status+code y no lleva detalle
+  const he = new Error('not_found'); he.status = 404; he.code = 'not_found';
+  assert.deepEqual(testing.errorResponseParts(he), { status: 404, code: 'not_found', detail: {} });
+  // TwilioError (status+code sin ser HttpError): duck-typing, y al ser 5xx lleva detalle
+  const tw = new Error('twilio_400_21404'); tw.status = 502; tw.code = 'twilio_400_21404';
+  const parts = testing.errorResponseParts(tw);
+  assert.deepEqual([parts.status, parts.code, parts.detail.error], [502, 'twilio_400_21404', 'twilio_400_21404']);
+  // error sin tipar: 500 server_error PERO con el mensaje real en el log
+  const raw = testing.errorResponseParts(new TypeError('x is not a function'));
+  assert.deepEqual([raw.status, raw.code, raw.detail.error], [500, 'server_error', 'x is not a function']);
+});
+
 test('provision: Twilio 400 → 502 sin tocar la fila; D1 caída tras crear → provision_orphan', async () => {
   const realFetch = globalThis.fetch;
   try {
