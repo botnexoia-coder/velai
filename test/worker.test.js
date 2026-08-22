@@ -2343,6 +2343,17 @@ test('el aviso de lead en Telegram lleva el NOMBRE del cliente dueño, y VELAI s
   } finally { globalThis.fetch = realFetch; }
 });
 
+test('la identidad del bot (nombre y marca) viaja en el system de TODOS los canales', () => {
+  const cfg = { SYSTEM: 'base velai', GUARDRAILS: 'reglas' };
+  const t = { system_prompt: 'contexto del cliente', bot_name: 'Alma', brand_name: 'Diálogos que Enseñan', name: 'Diálogos' };
+  const sys = testing.systemFor(cfg, t);
+  assert.ok(sys.startsWith('Te llamas Alma y eres el asistente de Diálogos que Enseñan.'), 'identidad al frente');
+  assert.ok(sys.includes('contexto del cliente') && sys.includes('reglas'));
+  // sin bot_name no se inventa nada; sin brand_name cae al nombre del tenant
+  assert.ok(!testing.systemFor(cfg, { system_prompt: 'x' }).includes('Te llamas'));
+  assert.ok(testing.systemFor(cfg, { system_prompt: 'x', bot_name: 'Faby', name: 'GOgestión' }).includes('asistente de GOgestión'));
+});
+
 test('números de aviso (PR3): el cliente edita los suyos y la guarda del 63031 cierra los dos caminos', async () => {
   const TID = '00000000-0000-4000-8000-0000000000e1';
   const row = { id: TID, slug: 'mio', channel_address: 'whatsapp:+34624121930', twilio_from: 'whatsapp:+34624121930', team_whatsapp: null, wa_number: null, updated_at: 'T0' };

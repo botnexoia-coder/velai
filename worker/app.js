@@ -825,7 +825,14 @@ async function escalateToHuman(env, tenant, from, lastMessage) {
 function systemFor(config, tenant) {
   const base = tenant && tenant.system_prompt && tenant.system_prompt !== 'PENDIENTE'
     ? tenant.system_prompt : config.SYSTEM;
-  return `${base}\n${config.GUARDRAILS || ''}`.trim();
+  // La identidad de la marca viaja SIEMPRE con el contexto: en la web el saludo fijo
+  // del widget la disimulaba, pero en WhatsApp/Telegram el primer mensaje lo genera el
+  // modelo y se presentaba sin nombre (visto con Alma/Diálogos, 2026-08-22). Va al
+  // principio del bloque estable: cachea igual que el resto del system.
+  const who = tenant && tenant.bot_name
+    ? `Te llamas ${tenant.bot_name} y eres el asistente de ${tenant.brand_name || tenant.name}. Preséntate por tu nombre.\n`
+    : '';
+  return `${who}${base}\n${config.GUARDRAILS || ''}`.trim();
 }
 
 // Guarda contra claves heredadas del prototipo ('constructor', '__proto__', …):
