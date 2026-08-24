@@ -2466,11 +2466,58 @@ async function adminRouter(request, env, ctx, path, url, config, scope) {
     return json({ ok: true, logo_url: logoUrl, store }, 200, NO_STORE);
   }
 
+  // ── Canales vivos: visibilidad del ENRUTADO (2026-08-24) ──────────────────
+  // El panel mostraba la opinión de TWILIO (sender ONLINE) y las columnas de la ficha,
+  // nunca la tabla que de verdad enruta. Resultado: gogestion con el sender en verde,
+  // la ficha impecable y el bot MUDO, porque no existía su fila en tenant_channels y
+  // nada en el panel podía delatarlo. Esta vista contesta la única pregunta que
+  // importa: qué direcciones atiende el worker, y para quién.
+  if (path === '/api/admin/channels' && request.method === 'GET') {
+    const rows = (await env.DB.prepare(`SELECT c.address, c.kind, c.created_at, c.tenant_id,
+             t.slug, t.name, t.active, t.twilio_from, t.sender_status
+      FROM tenant_channels c LEFT JOIN tenants t ON t.id = c.tenant_id
+      ORDER BY t.name IS NULL DESC, t.name ASC, c.kind ASC`).all()).results || [];
+    // El diagnóstico se calcula AQUÍ, no en el navegador: es la MISMA pregunta que se
+    // hace tenantByAddress en cada mensaje entrante (¿resuelve un tenant activo?), así
+    // que vive junto a ella y se puede testear.
+    // Dos formatos conviven en la columna: el backfill de la 0017 usó datetime('now')
+    // (UTC sin marca) y syncPrimaryChannel escribe ISO con Z. Sin normalizar, el panel
+    // pinta las viejas como hora local y se van 2 h.
+    const isoish = (v) => (/^\d{4}-\d\d-\d\d \d\d:\d\d:\d\d$/.test(String(v || '')) ? `${String(v).replace(' ', 'T')}Z` : v);
+    const channels = rows.map((r) => {
+      let state = 'live';
+      if (!r.slug) state = 'orphan';                                                            // fila apuntando a un tenant borrado
+      else if (!r.active) state = 'inactive';                                                   // tenantByAddress exige active = 1
+      else if (r.kind === 'whatsapp' && r.twilio_from && r.twilio_from !== r.address) state = 'from_mismatch'; // entra por aquí, responde por otro
+      return { ...r, created_at: isoish(r.created_at), state };
+    });
+    // El caso gogestion al revés: sender de WhatsApp vivo en Twilio y NINGUNA fila que
+    // lo enrute. El webhook responde 404 unknown_tenant y el bot calla, en verde.
+    // COALESCE: un channel_address nulo no puede esconder el hueco (NULL <> x es NULL).
+    // sender_sid IS NOT NULL es el filtro que separa «tiene sender propio» de «usa el
+    // número de la cuenta padre»: velai-messenger lleva el From de Velai para los avisos
+    // de salida y NO es un WhatsApp sin atender — sin esta línea salía como alarma falsa.
+    const unrouted = (await env.DB.prepare(`SELECT t.id AS tenant_id, t.slug, t.name, t.active,
+             t.channel_address, t.twilio_from, t.sender_status
+      FROM tenants t
+      WHERE t.sender_sid IS NOT NULL
+        AND t.twilio_from IS NOT NULL
+        AND COALESCE(t.channel_address, '') <> t.twilio_from
+        AND NOT EXISTS (SELECT 1 FROM tenant_channels c WHERE c.tenant_id = t.id AND c.address = t.twilio_from)
+      ORDER BY t.active DESC, t.name ASC`).all()).results || [];
+    return json({ channels, unrouted }, 200, NO_STORE);
+  }
+
   const waMatch = path.match(/^\/api\/admin\/tenants\/([0-9a-f-]+)\/whatsapp$/i);
   if (waMatch && request.method === 'GET') {
     if (!UUID_RE.test(waMatch[1])) throw new HttpError(404, 'not_found');
     if (scope.role !== 'velai' && scope.tenantId !== waMatch[1]) throw new HttpError(404, 'not_found');
-    const row = await env.DB.prepare('SELECT channel_address, twilio_from, (waba_id IS NOT NULL) AS has_waba, sender_status, lead_template_status, meta_partner_status, team_whatsapp, wa_number, (twilio_auth_token_enc IS NOT NULL) AS has_token, (twilio_subaccount_sid IS NOT NULL) AS has_subaccount FROM tenants WHERE id=?').bind(waMatch[1]).first();
+    // `routed`: existe la fila de tenant_channels que hace que el webhook entrante
+    // resuelva a este cliente. Sin ella el sender puede estar ONLINE y el bot mudo, así
+    // que el estado que ve el cliente NO puede salir solo de sender_status.
+    const row = await env.DB.prepare(`SELECT channel_address, twilio_from, (waba_id IS NOT NULL) AS has_waba, sender_status, lead_template_status, meta_partner_status, team_whatsapp, wa_number, (twilio_auth_token_enc IS NOT NULL) AS has_token, (twilio_subaccount_sid IS NOT NULL) AS has_subaccount,
+             (twilio_from IS NOT NULL AND (channel_address = twilio_from OR EXISTS (SELECT 1 FROM tenant_channels c WHERE c.tenant_id = tenants.id AND c.address = tenants.twilio_from))) AS routed
+      FROM tenants WHERE id=?`).bind(waMatch[1]).first();
     if (!row) throw new HttpError(404, 'not_found');
     return json({ whatsapp: row }, 200, NO_STORE);
   }

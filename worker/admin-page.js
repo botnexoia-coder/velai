@@ -347,6 +347,7 @@ body.cliente .cliente-only{display:flex}
 <button class="tab" role="tab" aria-selected="false" data-view="calendario" id="calNavBtn" type="button"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="5" width="18" height="16" rx="2"></rect><line x1="8" y1="3" x2="8" y2="7"></line><line x1="16" y1="3" x2="16" y2="7"></line><line x1="3" y1="10" x2="21" y2="10"></line></svg>Calendario</button>
 <button class="tab" role="tab" aria-selected="false" data-view="conexiones" id="cxNavBtn" type="button"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"></path><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"></path></svg>Conexiones</button>
 <button class="tab velai-only" role="tab" aria-selected="false" data-view="tenants" type="button"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="7" width="18" height="13" rx="2"></rect><path d="M8 7V5a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>Clientes</button>
+<button class="tab velai-only" role="tab" aria-selected="false" data-view="canales" id="chNavBtn" type="button"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7h10"></path><circle cx="18" cy="7" r="2.4"></circle><path d="M4 17h10"></path><circle cx="18" cy="17" r="2.4"></circle><path d="M4 12h6"></path></svg>Canales</button>
 </nav>
 <div class="navlabel velai-only">Sistema</div>
 <nav class="tabs">
@@ -483,6 +484,13 @@ body.cliente .cliente-only{display:flex}
 <div class="card mt12 velai-only"><b>Webhook del bot (solo Velai, una vez)</b>
 <p class="muted mt6">Registra el webhook de Telegram apuntando al worker. OJO: con el webhook activo, getUpdates deja de funcionar para ese bot.</p>
 <div class="actions actions0"><button class="btn alt" id="tgSetup" type="button">Registrar webhook</button><span id="tgSetupOut" class="muted"></span></div></div>
+</div>
+<div id="viewCanales" hidden>
+<div class="vhead"><div><h1>Canales</h1><p>Las direcciones que el worker atiende de verdad</p></div><span class="stpill ok" id="chOverall" hidden><i></i></span></div>
+<div id="chAlarm"></div>
+<p class="muted mt12">Cada mensaje entrante se enruta por su direcci&oacute;n: el worker la busca en esta tabla (y en el canal primario de la ficha) y exige que el cliente est&eacute; activo. Si una direcci&oacute;n no sale aqu&iacute;, ese n&uacute;mero no lo atiende nadie &mdash; por muy verde que est&eacute; en Twilio. La web no aparece: entra por slug y funciona siempre.</p>
+<div class="table mt6"><table><thead><tr><th>Direcci&oacute;n</th><th>Cliente</th><th>Tipo</th><th>Estado</th><th>Enrutado desde</th></tr></thead><tbody id="chRows"></tbody></table></div>
+<div class="legend"><span><i class="lg-ok"></i>atendido</span><span><i class="lg-warn"></i>requiere atenci&oacute;n</span><span><i class="lg-bad"></i>no atendido</span></div>
 </div>
 <div id="viewConfig" hidden>
 <div class="vhead"><div><h1>Configuración</h1><p>Admins de Velai y estado de las integraciones</p></div><span class="stpill ok" id="cfgOverall" hidden><i></i></span></div>

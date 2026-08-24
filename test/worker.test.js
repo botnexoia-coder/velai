@@ -2257,6 +2257,12 @@ test('sender/sync: reconcilia desde Twilio sin pisar el canal, repara el webhook
     assert.ok(!up.sql.includes('channel_address=?'), 'channel_address ya tenía valor (web:) y NO se pisa');
     assert.deepEqual(res.conflicts, [{ field: 'channel_address', current: 'web:gogestion', fromTwilio: 'whatsapp:+34624121930' }]);
     assert.ok(twilioCalls.some((c) => c.u.includes('/v2/Channels/Senders/XE') && String(c.body).includes(WORKER_URL_TEST)), 'el PUT del webhook apunta al worker');
+    // El paso que de verdad ENCIENDE WhatsApp: sin esta fila el sender queda ONLINE y el
+    // bot mudo (gogestion, 2026-08-24). Va aunque channel_address no se pise.
+    assert.equal(res.channelRegistered, true);
+    const ins = h.updates.find((u) => u.sql.includes('INSERT INTO tenant_channels'));
+    assert.ok(ins, 'registra el número en la tabla de enrutado');
+    assert.ok(ins.args.includes('whatsapp:+34624121930') && ins.args.includes('whatsapp'), 'la fila enruta el número del sender');
   } finally { globalThis.fetch = realFetch; }
 });
 const WORKER_URL_TEST = 'vai-worker.botnexo-ia.workers.dev';
@@ -2281,6 +2287,41 @@ test('whatsapp del cliente: estado propio sin secretos, ajeno 404, y sender/sync
   // provision/* sigue siendo 403 para el cliente, ANTES de tocar D1
   const prov = `/api/admin/tenants/${TID}/provision/sender/sync`;
   await assert.rejects(testing.adminRouter(adminReq(prov, { method: 'POST' }), env, ctx, prov, new URL('https://x' + prov), {}, OWN), (e) => e.code === 'not_authorized');
+});
+
+test('canales: la vista diagnostica el enrutado real y delata el sender vivo SIN fila (bot mudo en verde)', async () => {
+  const CH = [
+    // atendido: fila, cliente activo y el From coincide
+    { address: 'whatsapp:+15706160059', kind: 'whatsapp', created_at: '2026-08-22 20:02:20', tenant_id: 't1', slug: 'velai', name: 'Velai', active: 1, twilio_from: 'whatsapp:+15706160059', sender_status: 'ONLINE' },
+    // el webhook exige active=1: con el cliente apagado, la fila NO atiende
+    { address: 'whatsapp:+34600000000', kind: 'whatsapp', created_at: '2026-08-22T20:02:20.000Z', tenant_id: 't2', slug: 'off', name: 'Apagado', active: 0, twilio_from: 'whatsapp:+34600000000', sender_status: 'ONLINE' },
+    // entra por aquí pero responde desde otro número
+    { address: 'whatsapp:+34611111111', kind: 'whatsapp', created_at: '2026-08-22 20:02:20', tenant_id: 't3', slug: 'mix', name: 'Desalineado', active: 1, twilio_from: 'whatsapp:+34699999999', sender_status: 'ONLINE' },
+    // fila apuntando a un tenant que ya no existe
+    { address: 'messenger:999', kind: 'messenger', created_at: '2026-08-22 20:02:20', tenant_id: 'tzz', slug: null, name: null, active: null, twilio_from: null, sender_status: null },
+  ];
+  const UNROUTED = [{ tenant_id: 'tg', slug: 'gogestion', name: 'GOgestión', active: 1, channel_address: 'web:gogestion', twilio_from: 'whatsapp:+34624121930', sender_status: 'ONLINE' }];
+  const seen = [];
+  const env = { DB: { prepare: (sql) => { seen.push(sql); return { bind: () => ({ all: async () => ({ results: [] }), first: async () => null }),
+    all: async () => ({ results: sql.includes('NOT EXISTS') ? UNROUTED : CH }), first: async () => null }; } } };
+  const ctx = { waitUntil() {} };
+  const VELAI = { role: 'velai', email: 'admin@velai' };
+  const out = await (await testing.adminRouter(adminReq('/api/admin/channels'), env, ctx, '/api/admin/channels', new URL('https://x/api/admin/channels'), {}, VELAI)).json();
+  assert.deepEqual(out.channels.map((c) => c.state), ['live', 'inactive', 'from_mismatch', 'orphan']);
+  // El sender vivo sin fila es EL fallo que nadie veía: tiene que salir en su propia lista
+  assert.deepEqual(out.unrouted.map((u) => [u.slug, u.twilio_from]), [['gogestion', 'whatsapp:+34624121930']]);
+  // La consulta del hueco exige las dos vías del enrutado (tabla y canal primario)
+  const q = seen.find((x) => x.includes('NOT EXISTS'));
+  assert.ok(q.includes('tenant_channels') && q.includes('channel_address'), 'no da por mudo a quien enruta por el canal primario');
+  // Alarma falsa que salió con los datos reales: velai-messenger lleva el From de Velai
+  // para los avisos de SALIDA y no tiene sender propio — no es un WhatsApp sin atender.
+  assert.ok(q.includes('sender_sid IS NOT NULL'), 'solo alarma a quien tiene sender propio');
+  // Fechas normalizadas: las dos formas de la columna salen comparables
+  assert.ok(out.channels.every((c) => !/^\d{4}-\d\d-\d\d \d\d/.test(c.created_at)), 'created_at normalizado a ISO');
+  // Es vista de Velai: el cliente no ve el mapa de canales de los demás
+  await assert.rejects(
+    testing.adminRouter(adminReq('/api/admin/channels'), env, ctx, '/api/admin/channels', new URL('https://x/api/admin/channels'), {}, { role: 'cliente', tenantId: 't1', email: 'c@x.com' }),
+    (e) => e.code === 'not_authorized');
 });
 
 test('tenant_channels: el webhook enruta por la tabla ADEMÁS del canal primario, y el PATCH mantiene el espejo', async () => {
