@@ -757,7 +757,7 @@ test('el panel rediseñado: sin dominios externos salvo las fuentes, nonce y tod
   const links = [...ADMIN_HTML.matchAll(/<a href="https:\/\/hirevai\.com\/([a-z]+)\//g)];
   assert.ok(links.length && links.every((m) => ['privacidad', 'condiciones'].includes(m[1])), 'enlaces solo a páginas legales');
   assert.ok(ADMIN_HTML.includes('__NONCE__'));
-  for (const id of ['tName', 'tSlug', 'tChannels', 'tFrom', 'tTeam', 'tChat', 'tTpl', 'tSub', 'tWaba', 'tToken', 'tPartner', 'tActive', 'tPrompt', 'tNote', 'pSub', 'pTpl', 'pPhone', 'pSender', 'pCode', 'pVerify', 'tenantFilter', 'newTenant', 'export', 'tTokenState', 'tBotName', 'tBrandName', 'tLogo', 'tColor1', 'tColor2', 'tGreeting', 'tGreetingEn', 'tChips', 'tPlaceholder', 'tWa', 'tTheme', 'brandPrev', 'toasts', 'tOrigins', 'tSyncDomains', 'logout', 'themeBtn', 'themeLabel', 'adminsCard', 'adminsList', 'aEmail', 'aAdd', 'configCard', 'configState', 'cfgToken', 'cfgTokenSave', 'cfgTokenClear']) {
+  for (const id of ['tName', 'tSlug', 'tChannels', 'tFrom', 'tTeam', 'tChat', 'tTpl', 'tSub', 'tWaba', 'tToken', 'tPartner', 'tActive', 'tPrompt', 'tNote', 'pSub', 'pTpl', 'pPhone', 'pSender', 'pCode', 'pVerify', 'tenantFilter', 'newTenant', 'export', 'tTokenState', 'tBotName', 'tBrandName', 'tLogo', 'tColor1', 'tColor2', 'tGreeting', 'tGreetingEn', 'tChips', 'tPlaceholder', 'tWa', 'tTheme', 'brandPrev', 'toasts', 'tOrigins', 'tSyncDomains', 'logout', 'themeBtn', 'themeLabel', 'adminsCard', 'adminsList', 'aEmail', 'aAdd', 'configCard', 'configState', 'cfgToken', 'cfgTokenSave', 'cfgTokenClear', 'chRows', 'chAlarm', 'chQ', 'chTenant', 'chState', 'chCount']) {
     assert.ok(ADMIN_HTML.includes(`id="${id}"`), `falta #${id}`);
   }
   assert.ok(!/localStorage/.test(ADMIN_HTML), 'sin localStorage');

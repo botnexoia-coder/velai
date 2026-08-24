@@ -289,20 +289,44 @@ function semaforo(t){if(!t.active&&String(t.channel_address).startsWith('pending
 // Los estados los decide el worker (misma pregunta que tenantByAddress); aquí solo se
 // pintan, para que panel y enrutado real no puedan discrepar.
 const CHST={live:['ok','atendido'],inactive:['off','cliente inactivo'],from_mismatch:['','responde con otro número'],orphan:['off','cliente borrado']};
-async function loadChannels(){try{const d=await api('/api/admin/channels');
- const bad=d.unrouted.length+d.channels.filter(c=>c.state!=='live').length;
- $('#chRows').innerHTML=d.channels.map(c=>{const st=CHST[c.state]||['','—'];
+// El filtrado es en cliente sobre lo ya cargado: la tabla tiene una fila por canal y
+// cliente, así que cabe entera en una respuesta y filtrar sin ir al servidor es instantáneo.
+// La píldora de arriba sigue contando el TOTAL, no lo filtrado: es el estado del sistema.
+let chData={channels:[],unrouted:[]};
+// El buscador casa contra el número CON y SIN prefijo (nadie teclea «whatsapp:») y sin
+// acentos en los dos lados: buscar «gogestion» tiene que encontrar «GOgestión».
+const chNorm=(v)=>String(v||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase();
+const chHay=(o)=>[o.address,o.twilio_from,o.name,o.slug,o.kind].map(v=>chNorm(v).replace(/^whatsapp:/,'')).join(' ');
+function chPaint(){const q=chNorm($('#chQ').value.trim()),tid=$('#chTenant').value,st=$('#chState').value;
+ const keep=(o,state)=>(!q||chHay(o).includes(q))&&(!tid||o.tenant_id===tid)
+  &&(!st||(st==='alert'?state!=='live':state===st));
+ const rows=chData.channels.filter(c=>keep(c,c.state));
+ // Los sin enrutar son SIEMPRE «requieren atención»: nunca los esconde el filtro de estado.
+ const un=chData.unrouted.filter(u=>keep(u,'unrouted'));
+ $('#chRows').innerHTML=rows.map(c=>{const s=CHST[c.state]||['','—'];
   const who=c.name?tenantChip(c.tenant_id,c.name):'<span class="muted">— (id '+esc(String(c.tenant_id))+')</span>';
   const extra=c.state==='from_mismatch'?' <span class="muted">· responde desde '+esc(String(c.twilio_from).replace('whatsapp:',''))+'</span>':'';
-  return '<tr><td class="tel">'+esc(c.address)+'</td><td>'+who+'</td><td class="muted">'+esc(c.kind)+'</td><td><span class="flag '+st[0]+'">'+st[1]+'</span>'+extra+'</td><td class="muted">'+fmt(c.created_at)+'</td></tr>'}).join('')
-  ||'<tr><td colspan="5" class="empty">Ninguna dirección enrutada todavía.</td></tr>';
- $('#chAlarm').innerHTML=d.unrouted.length?'<div class="panelcard mt12"><b>Números vivos en Twilio que el worker NO atiende<span class="pt-count">'+d.unrouted.length+'</span></b>'
+  return '<tr><td class="tel">'+esc(c.address)+'</td><td>'+who+'</td><td class="muted">'+esc(c.kind)+'</td><td><span class="flag '+s[0]+'">'+s[1]+'</span>'+extra+'</td><td class="muted">'+fmt(c.created_at)+'</td></tr>'}).join('')
+  ||'<tr><td colspan="5" class="empty">'+(chData.channels.length?'Ningún canal casa con el filtro.':'Ninguna dirección enrutada todavía.')+'</td></tr>';
+ $('#chAlarm').innerHTML=un.length?'<div class="panelcard mt12"><b>Números vivos en Twilio que el worker NO atiende<span class="pt-count">'+un.length+'</span></b>'
   +'<p class="muted mt6">El sender está de alta y en verde, pero ninguna fila lo enruta: el webhook responde 404 y el bot calla. Se arregla con «Sincronizar sender» en Conexiones → WhatsApp de esa ficha, que registra el canal.</p>'
-  +d.unrouted.map(u=>'<div class="mb6"><span class="flag off">'+esc(String(u.twilio_from).replace('whatsapp:',''))+'</span> '+tenantChip(u.tenant_id,u.name)
+  +un.map(u=>'<div class="mb6"><span class="flag off">'+esc(String(u.twilio_from).replace('whatsapp:',''))+'</span> '+tenantChip(u.tenant_id,u.name)
    +' <span class="muted">· sender '+esc(u.sender_status||'—')+(u.active?'':' · cliente inactivo')+'</span></div>').join('')+'</div>':'';
+ const tot=chData.channels.length,filtered=q||tid||st;
+ $('#chCount').textContent=filtered?rows.length+' de '+tot+(tot===1?' canal':' canales'):tot+(tot===1?' canal':' canales')}
+async function loadChannels(){try{const d=await api('/api/admin/channels');chData=d;
+ // El selector se puebla con los clientes que TIENEN canales: los demás no dicen nada aquí.
+ const who=new Map();for(const o of d.channels.concat(d.unrouted))if(o.tenant_id&&o.name)who.set(o.tenant_id,o.name);
+ const sel=$('#chTenant'),keepSel=sel.value;
+ sel.innerHTML='<option value="">Todos los clientes</option>'+[...who.entries()].sort((a,b)=>a[1].localeCompare(b[1],'es'))
+  .map(([id,name])=>'<option value="'+esc(id)+'">'+esc(name)+'</option>').join('');
+ if(who.has(keepSel))sel.value=keepSel;
+ const bad=d.unrouted.length+d.channels.filter(c=>c.state!=='live').length;
  const pill=$('#chOverall');pill.hidden=false;pill.className='stpill '+(bad?'warn':'ok');
- pill.innerHTML='<i></i>'+(bad?bad+(bad===1?' canal requiere atención':' canales requieren atención'):'todo atendido')}
+ pill.innerHTML='<i></i>'+(bad?bad+(bad===1?' canal requiere atención':' canales requieren atención'):'todo atendido');
+ chPaint()}
  catch(e){$('#chRows').innerHTML='<tr><td colspan="5" class="empty">'+esc(e.message)+'</td></tr>'}}
+$('#chQ').oninput=chPaint;$('#chTenant').onchange=chPaint;$('#chState').onchange=chPaint;
 function meter(chars){const w=Math.min(100,Math.round(chars/12000*100));return '<span class="meter" title="El contexto viaja al modelo en CADA mensaje"><i data-w="'+w+'"></i></span><span class="muted">'+chars+' car.</span>'}
 async function loadTenantList(){try{const d=await api('/api/admin/tenants');tenantList=d.tenants;$('#tenantRows').innerHTML=d.tenants.map(t=>'<tr data-tid="'+t.id+'"><td>'+tenantChip(t.id,t.name)+'</td><td class="muted">'+esc(t.channel_address)+'</td><td>'+t.lead_count+'</td><td>'+meter(t.prompt_len)+'</td><td>'+semaforo(t)+'</td><td>'+(t.active?'<span class="flag ok">activo</span>':'<span class="flag off">inactivo</span>')+'</td><td><button type="button" class="btn alt btnsm" data-cal="'+t.id+'">Abrir</button></td></tr>').join('')||'<tr><td colspan="7" class="empty">Sin clientes.</td></tr>';paint($('#tenantRows'))}catch(e){toast('No se pudo cargar la lista de clientes: '+e.message,false)}}
 $('#tenantRows').onclick=e=>{const cal=e.target.closest('[data-cal]');if(cal)return openCalendar(cal.dataset.cal);const tr=e.target.closest('[data-tid]');if(tr)openTenant(tr.dataset.tid)};

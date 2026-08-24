@@ -106,7 +106,7 @@ main{flex:1;min-width:0;position:relative;padding:30px clamp(20px,3vw,42px) 60px
 .sel select{appearance:none;-webkit-appearance:none;background:var(--bg2);color:rgba(var(--ink),.80);border:1px solid rgba(var(--ink),.10);border-radius:var(--r-sm);padding:10px 32px 10px 13px;font-size:13px;cursor:pointer}
 .sel:hover select{border-color:var(--orange)}
 .sel::after{content:'';position:absolute;right:13px;top:50%;width:7px;height:7px;border-right:1.5px solid rgba(var(--ink),.45);border-bottom:1.5px solid rgba(var(--ink),.45);transform:translateY(-70%) rotate(45deg);pointer-events:none}
-#resultCount{margin-left:auto;color:var(--muted);font-size:12.5px;white-space:nowrap}
+#resultCount,#chCount{margin-left:auto;color:var(--muted);font-size:12.5px;white-space:nowrap}
 /* ── Tablas ── */
 .table{border:1px solid var(--border);border-radius:var(--r);overflow:auto;background:var(--bg2)}
 table{width:100%;border-collapse:collapse;min-width:960px}
@@ -496,6 +496,7 @@ body.cliente .cliente-only{display:flex}
 </div>
 <div id="viewCanales" hidden>
 <div class="vhead"><div><h1>Canales</h1><p>Las direcciones que el worker atiende de verdad</p></div><span class="stpill ok" id="chOverall" hidden><i></i></span></div>
+<div class="filters" id="chFilters"><label class="search"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"></circle><path d="m21 21-4.3-4.3"></path></svg><input id="chQ" placeholder="Buscar n&uacute;mero, cliente o tipo&hellip;"></label><span class="sel"><select id="chTenant"><option value="">Todos los clientes</option></select></span><span class="sel"><select id="chState"><option value="">Todos los estados</option><option value="alert">Solo los que requieren atenci&oacute;n</option><option value="live">Atendidos</option></select></span><span id="chCount"></span></div>
 <div id="chAlarm"></div>
 <p class="muted mt12">Cada mensaje entrante se enruta por su direcci&oacute;n: el worker la busca en esta tabla (y en el canal primario de la ficha) y exige que el cliente est&eacute; activo. Si una direcci&oacute;n no sale aqu&iacute;, ese n&uacute;mero no lo atiende nadie &mdash; por muy verde que est&eacute; en Twilio. La web no aparece: entra por slug y funciona siempre.</p>
 <div class="table mt6"><table><thead><tr><th>Direcci&oacute;n</th><th>Cliente</th><th>Tipo</th><th>Estado</th><th>Enrutado desde</th></tr></thead><tbody id="chRows"></tbody></table></div>
