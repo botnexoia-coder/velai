@@ -2357,6 +2357,69 @@ test('la identidad del bot (nombre y marca) viaja en el system de TODOS los cana
   assert.ok(testing.systemFor(cfg, { system_prompt: 'x', bot_name: 'Faby', name: 'GOgestión' }).includes('asistente de GOgestión'));
 });
 
+test('logo del negocio: se sube por bytes, valida el tipo real y queda servido por /media', async () => {
+  const TID = '00000000-0000-4000-8000-0000000000d1';
+  const put = [];
+  const kv = { store: new Map(),
+    async put(k, v, o) { put.push({ k, o }); this.store.set(k, { value: v, metadata: o && o.metadata }); },
+    async getWithMetadata(k) { return this.store.get(k) || { value: null }; },
+    async get() { return null; }, async delete() {}, async list() { return { keys: [] }; } };
+  const writes = [];
+  const env = { KV: kv, DB: { prepare: (sql) => ({ bind: (...args) => ({
+    first: async () => (sql.includes('FROM tenants WHERE id=') ? { id: TID, slug: 'mio', name: 'Mío', logo_url: null } : null),
+    run: async () => { writes.push({ sql, args }); return { meta: { changes: 1 } }; }, all: async () => ({ results: [] }),
+  }) }) } };
+  const ctx = { waitUntil() {} };
+  const path = `/api/admin/tenants/${TID}/logo`;
+  const post = (bytes) => testing.adminRouter(adminReq(path, { method: 'POST', body: bytes }), env, ctx, path, new URL('https://x' + path), {}, VELAI);
+  // un PNG de verdad (magic bytes) entra
+  const png = new Uint8Array(200); png.set([0x89, 0x50, 0x4e, 0x47], 0);
+  const okRes = await (await post(png)).json();
+  assert.match(okRes.logo_url, /^https:\/\/api\.hirevai\.com\/media\/logos\/[0-9a-f-]+\.png\?v=\d+$/);
+  assert.ok(writes.some((w) => w.sql.includes('SET logo_url=?')), 'la URL queda en la fila');
+  assert.equal(put[0].o.metadata.contentType, 'image/png');
+  // un archivo que dice ser imagen pero no lo es → 400 y NADA guardado
+  const before = put.length;
+  await assert.rejects(post(new Uint8Array(200)), (e) => e.code === 'invalid_image');
+  assert.equal(put.length, before, 'no se guarda basura');
+  // un cliente NO puede subir logos (la ruta no está en clienteAllowed)
+  await assert.rejects(
+    testing.adminRouter(adminReq(path, { method: 'POST', body: png }), env, ctx, path, new URL('https://x' + path), {}, { role: 'cliente', tenantId: TID }),
+    (e) => e.code === 'not_authorized');
+});
+
+test('perfil de WhatsApp: manda la marca de la ficha y NUNCA cambia el nombre visible', async () => {
+  const calls = [];
+  const realFetch = globalThis.fetch;
+  const sub = 'AC' + 'c'.repeat(32);
+  try {
+    globalThis.fetch = async (url, init) => {
+      calls.push({ u: String(url), m: (init && init.method) || 'GET', body: init && init.body });
+      if (String(url).includes('api.telegram.org')) return new Response('{"ok":true}', { status: 200 });
+      if (!init || init.method === 'GET') return new Response(JSON.stringify({ status: 'ONLINE', profile: { name: 'Nombre Aprobado', vertical: 'Other' } }), { status: 200 });
+      return new Response('{"status":"ONLINE"}', { status: 200 });
+    };
+    const h = provisionHarness({ tenant: {
+      id: '00000000-0000-4000-8000-0000000000d2', slug: 'mio', name: 'Mío', brand_name: 'Marca Mía',
+      greeting: 'Hola, soy Alma', logo_url: 'https://api.hirevai.com/media/logos/x.png?v=1',
+      web_origins: '["https://www.mio.com","https://mio.com"]',
+      twilio_subaccount_sid: sub, sender_sid: 'XE' + 'a'.repeat(32),
+      twilio_auth_token_enc: await encryptSecret({ SECRETS_KEK: TEST_KEK }, '00000000-0000-4000-8000-0000000000d2', 'a1b2c3d4e5f60718293a4b5c6d7e8f90'),
+    } });
+    const res = await (await testing.handleProvision(provReq(), h.env, h.ctx, h.row.id, 'sender/profile', 'juan@x')).json();
+    assert.deepEqual(res.applied, { logo: true, websites: 1, description: true });
+    const post = calls.find((c) => c.m === 'POST' && c.u.includes('/v2/Channels/Senders/XE'));
+    const sent = JSON.parse(post.body).profile;
+    assert.equal(sent.name, 'Nombre Aprobado', 'el display name se reenvía intacto');
+    assert.equal(sent.logo_url, 'https://api.hirevai.com/media/logos/x.png?v=1');
+    assert.deepEqual(sent.websites, [{ website: 'https://mio.com', label: 'Web' }], 'el apex, no el www');
+    assert.equal(sent.vertical, 'Other', 'lo que ya había en el perfil no se pierde');
+    // sin sender no hay nada que perfilar
+    const sin = provisionHarness({ tenant: { id: '00000000-0000-4000-8000-0000000000d3', slug: 'x', name: 'X', brand_name: 'X', twilio_subaccount_sid: sub, sender_sid: null, twilio_auth_token_enc: await encryptSecret({ SECRETS_KEK: TEST_KEK }, '00000000-0000-4000-8000-0000000000d3', 'a1b2c3d4e5f60718293a4b5c6d7e8f90') } });
+    await assert.rejects(testing.handleProvision(provReq(), sin.env, sin.ctx, sin.row.id, 'sender/profile', 'juan@x'), (e) => e.code === 'sender_required');
+  } finally { globalThis.fetch = realFetch; }
+});
+
 test('números de aviso (PR3): el cliente edita los suyos y la guarda del 63031 cierra los dos caminos', async () => {
   const TID = '00000000-0000-4000-8000-0000000000e1';
   const row = { id: TID, slug: 'mio', channel_address: 'whatsapp:+34624121930', twilio_from: 'whatsapp:+34624121930', team_whatsapp: null, wa_number: null, updated_at: 'T0' };

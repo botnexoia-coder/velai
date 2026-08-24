@@ -80,6 +80,15 @@ head_sampling_rate = 1
 [triggers]
 crons = ["*/5 * * * *"]
 
+# Medios (logos de marca → widget + foto de perfil de WhatsApp). Hoy viven en KV con
+# prefijo `media:`; R2 es el sitio natural pero exige activarlo UNA VEZ en el dashboard
+# (la API responde 10042 «Please enable R2» mientras no lo esté). Cuando se active:
+# `npx wrangler@4 r2 bucket create vai-media` y descomentar — las subidas nuevas irán a
+# R2 y las viejas se siguen sirviendo desde KV (mediaGet mira los dos).
+# [[r2_buckets]]
+# binding = "MEDIA"
+# bucket_name = "vai-media"
+
 [[kv_namespaces]]
 binding = "KV"
 id = "14fbc395a218428bb677f61243c9e3f6"

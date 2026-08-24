@@ -118,6 +118,17 @@ export async function updateSenderWebhook(credentials, senderSid, callbackUrl) {
   return { status: data.status };
 }
 
+
+// Perfil de NEGOCIO del sender (la foto que ve el usuario en WhatsApp, descripción,
+// web). OJO: nunca se envía profile.name — cambiar el display name dispara una
+// revisión de Meta; solo campos cosméticos.
+export async function updateSenderProfile(credentials, senderSid, profile) {
+  const data = await twilioRequest(`https://messaging.twilio.com/v2/Channels/Senders/${senderSid}`, credentials, {
+    json: { profile },
+  });
+  return { status: data.status };
+}
+
 export async function verifySender(credentials, senderSid, code) {
   const data = await twilioRequest(`https://messaging.twilio.com/v2/Channels/Senders/${senderSid}`, credentials, {
     json: { configuration: { verification_code: code } },
@@ -128,4 +139,12 @@ export async function verifySender(credentials, senderSid, code) {
 export async function fetchSenderStatus(credentials, senderSid) {
   const data = await twilioRequest(`https://messaging.twilio.com/v2/Channels/Senders/${senderSid}`, credentials, { method: 'GET' });
   return { status: data.status };
+}
+
+// Igual que fetchSenderStatus pero devuelve TAMBIÉN el perfil: hace falta para no
+// perder el display name al actualizar los campos cosméticos (la API pide profile.name
+// en los senders de WhatsApp y cambiarlo dispara revisión de Meta).
+export async function fetchSender(credentials, senderSid) {
+  const data = await twilioRequest(`https://messaging.twilio.com/v2/Channels/Senders/${senderSid}`, credentials, { method: 'GET' });
+  return { status: data.status, profile: data.profile || {} };
 }

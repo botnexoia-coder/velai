@@ -474,7 +474,8 @@ body.cliente .cliente-only{display:flex}
 <div class="card mt12"><b class="tgh tgh-sm">WhatsApp del negocio</b>
 <p class="tgsub">El estado de tu número de WhatsApp con Vai. La conexión inicial la hacemos juntos en una sesión corta — te avisaremos.</p>
 <div id="waState" class="mt6 muted">—</div>
-<div class="actions actions0 velai-only"><button class="btn alt" id="waSync" type="button">Sincronizar desde Twilio</button><span id="waSyncOut" class="muted"></span></div></div>
+<div class="actions actions0 velai-only"><button class="btn alt" id="waSync" type="button">Sincronizar desde Twilio</button><button class="btn alt" id="waProfile" type="button">Aplicar marca al perfil</button><span id="waSyncOut" class="muted"></span></div>
+<small class="muted velai-only">«Aplicar marca al perfil» manda el logo, la descripción y la web de la ficha a WhatsApp: es la foto que ve el cliente final. El nombre visible NO se toca (cambiarlo exige revisión de Meta).</small></div>
 <div class="card mt12"><b class="tgh tgh-sm">Números de aviso por WhatsApp</b>
 <p class="tgsub">A qué WhatsApp del equipo llega el aviso de cada lead (además de Telegram). Varios números separados por coma, formato whatsapp:+34…</p>
 <div class="actions actions0"><input id="nfTeam" placeholder="whatsapp:+34600111222,whatsapp:+34600333444" class="grow inpill"><input id="nfWa" placeholder="nº de errores (solo dígitos)" class="inpill"><button class="btn alt" id="nfSave" type="button">Guardar</button></div>
@@ -541,7 +542,7 @@ body.cliente .cliente-only{display:flex}
 <div class="grid">
 <div class="card"><b>Nombre del bot</b><input id="tBotName" placeholder="Zoe"><small class="muted field-err" data-f="bot_name"></small></div>
 <div class="card"><b>Nombre de marca</b><input id="tBrandName" placeholder="Zoe Travel Spain"><small class="muted field-err" data-f="brand_name"></small></div>
-<div class="card"><b>Logo (URL https)</b><input id="tLogo" placeholder="https://… (el logo que ya usa su web)"><small class="muted field-err" data-f="logo_url"></small></div>
+<div class="card"><b>Logo del negocio</b><input id="tLogo" placeholder="https://… o sube una imagen aquí abajo"><div class="note mt6"><input type="file" id="tLogoFile" accept="image/png,image/jpeg,image/webp"><button class="btn alt btnsm" id="tLogoUp" type="button">Subir imagen</button><span id="tLogoOut" class="muted"></span></div><small class="muted">Se guarda en nuestro almacenamiento y sirve para el widget y para la <b class="tgh">foto de perfil de WhatsApp</b>. Cuadrada, 640×640 o más, máx. 2 MB (PNG/JPG/WebP).</small><small class="muted field-err" data-f="logo_url"></small></div>
 <div class="card"><b>Colores (#rrggbb · el 2º opcional, degradado)</b><div class="note mt6"><input id="tColor1" placeholder="#1a4fd0" class="w150"><input id="tColor2" placeholder="#f57a1f" class="w150"></div><small class="muted field-err" data-f="brand_color"></small><small class="muted field-err" data-f="brand_color_2"></small></div>
 <div class="card"><b>Saludo (ES)</b><textarea id="tGreeting" rows="2" placeholder="¡Hola! Soy Zoe 🐱 ¿A dónde sueñas viajar?"></textarea><small class="muted field-err" data-f="greeting"></small></div>
 <div class="card"><b>Saludo (EN, opcional)</b><textarea id="tGreetingEn" rows="2" placeholder="Hi! I'm Zoe 🐱 Where do you dream of travelling?"></textarea><small class="muted field-err" data-f="greeting_en"></small></div>

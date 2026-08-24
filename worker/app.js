@@ -1,12 +1,13 @@
 import { ADMIN_HEADERS, ADMIN_HTML } from './admin-page.js';
 import { encryptSecret, decryptSecret } from './crypto.js';
 import { cloudflareConfigured, syncTurnstileDomains, syncAccessGroup, syncAdminGroup, verifyCfToken } from './cloudflare.js';
-import { createSubaccount, fetchSubaccount, findSubaccountByName, createLeadTemplate, submitTemplateApproval, fetchApprovalStatus, createWhatsAppSender, verifySender, fetchSenderStatus, listWhatsAppSenders, updateSenderWebhook } from './twilio.js';
+import { createSubaccount, fetchSubaccount, findSubaccountByName, createLeadTemplate, submitTemplateApproval, fetchApprovalStatus, createWhatsAppSender, verifySender, fetchSenderStatus, listWhatsAppSenders, updateSenderWebhook, updateSenderProfile, fetchSender } from './twilio.js';
 import { CALENDAR_TOOLS, CALENDAR_GUARDRAILS, DEFAULT_BUSINESS_HOURS, freeSlots, localToUtcMs, localDateStr, localWeekday, googleAuthUrl, exchangeGoogleCode, refreshGoogleToken, revokeGoogleToken, googleBusy, createGoogleEvent } from './calendar.js';
 
 const JSON_HEADERS = { 'Content-Type': 'application/json; charset=utf-8' };
 // URL pública del worker: webhook de Twilio (senders) y de Telegram apuntan aquí.
 const WORKER_PUBLIC_URL = 'https://vai-worker.botnexo-ia.workers.dev';
+const PUBLIC_MEDIA_BASE = 'https://api.hirevai.com'; // dominio propio: no lo cortan los adblock
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const STATUSES = new Set(['new', 'contacted', 'qualified', 'won', 'lost', 'spam']);
 const UTM_KEYS = ['utm_source', 'utm_medium', 'utm_campaign', 'utm_content', 'utm_term', 'gclid', 'fbclid'];
@@ -520,6 +521,30 @@ function validateTenant(body, { partial = false } = {}) {
 // Devuelve null en lo no configurado y el WIDGET aplica sus defaults de Velai: así
 // hirevai.com (fila velai sin marca) queda idéntico byte a byte. La caché es la misma
 // fila que tenantBySlug (KV 5 min) y se invalida con invalidateTenantCache.
+// Almacén de medios (logos de marca). R2 es el sitio natural, pero exige activarlo una
+// vez en el dashboard (error 10042 si no): mientras no esté, los logos viven en KV, que
+// admite valores de hasta 25 MB y ya está enlazado. En cuanto exista el binding MEDIA,
+// las subidas NUEVAS van a R2 y las viejas se siguen sirviendo desde KV.
+const MEDIA_KEY_RE = /^[a-z0-9][a-z0-9/_.-]{0,120}$/i;
+
+async function mediaPut(env, key, bytes, contentType) {
+  if (env.MEDIA) { await env.MEDIA.put(key, bytes, { httpMetadata: { contentType } }); return 'r2'; }
+  if (!env.KV) throw new HttpError(503, 'media_not_configured');
+  await env.KV.put(`media:${key}`, bytes, { metadata: { contentType } });
+  return 'kv';
+}
+
+async function mediaGet(env, key) {
+  if (env.MEDIA) {
+    const obj = await env.MEDIA.get(key);
+    if (obj) return { body: obj.body, contentType: (obj.httpMetadata && obj.httpMetadata.contentType) || 'application/octet-stream', etag: obj.httpEtag };
+  }
+  if (!env.KV) return null;
+  const hit = await env.KV.getWithMetadata(`media:${key}`, 'arrayBuffer');
+  if (!hit || !hit.value) return null;
+  return { body: hit.value, contentType: (hit.metadata && hit.metadata.contentType) || 'application/octet-stream', etag: null };
+}
+
 async function handleWidgetBoot(request, env, url) {
   const origin = request.headers.get('Origin') || '';
   // GET simple: el navegador no hace preflight, pero el Allow-Origin es obligatorio.
@@ -609,11 +634,22 @@ async function invalidateTenantCache(env, tenants) {
   // 'origins:all' cae con CUALQUIER edición: activar/desactivar un tenant o tocar sus
   // web_origins cambia la allowlist de CORS y no puede esperar 5 minutos.
   const keys = new Set(['origins:all']);
+  const ids = [];
   for (const t of tenants) {
     if (!t) continue;
     if (t.channel_address) keys.add(`tenant:addr:${t.channel_address}`);
     if (t.slug) keys.add(`tenant:slug:${t.slug}`);
-    if (t.id) keys.add(`calcfg:${t.id}`); // la config de calendario se cachea aparte
+    if (t.id) { keys.add(`calcfg:${t.id}`); ids.push(t.id); } // la config de calendario se cachea aparte
+  }
+  // channel_address es UNO; el enrutado real vive en tenant_channels (N por cliente) y
+  // tenantByAddress cachea CADA dirección — el fallo incluido (objeto vacío, 5 min). Sin
+  // barrer esas claves, registrar un canal nuevo deja al bot mudo hasta que el negativo
+  // caduque, y editar la ficha deja atendiendo a la versión vieja por WhatsApp.
+  if (ids.length && env.DB) {
+    try {
+      const rows = (await env.DB.prepare(`SELECT address FROM tenant_channels WHERE tenant_id IN (${ids.map(() => '?').join(',')})`).bind(...ids).all()).results || [];
+      for (const r of rows) if (r.address) keys.add(`tenant:addr:${r.address}`);
+    } catch (_) { /* la caché caduca sola en 5 min: no se rompe la escritura por esto */ }
   }
   await Promise.all([...keys].map((k) => env.KV.delete(k).catch(() => {})));
 }
@@ -1929,6 +1965,34 @@ async function runProvisionStep(request, env, ctx, tenant, tenantId, step, actor
     return json({ ok: true, sid: contentSid, status: 'pending' }, 201, NO_STORE);
   }
 
+  // Perfil de negocio del sender: la MISMA marca de la ficha (logo, descripción, web)
+  // pasa a ser la foto y los datos que ve el cliente final en WhatsApp. Un solo sitio de
+  // configuración para todos los canales (pedido de Juan, 2026-08-22).
+  if (step === 'sender/profile') {
+    if (!tenant.sender_sid) throw new HttpError(400, 'sender_required');
+    if (!tenant.logo_url && !tenant.brand_name) throw new HttpError(400, 'brand_empty');
+    // El display name NO se toca: la API lo exige en el cuerpo y cambiarlo dispara una
+    // revisión de Meta — se relee del sender y se reenvía igual.
+    const current = await fetchSender(credentials, tenant.sender_sid);
+    const webs = [];
+    try {
+      const origins = JSON.parse(tenant.web_origins || '[]');
+      const first = (Array.isArray(origins) ? origins : []).find((o) => /^https:\/\//.test(o) && !/^https:\/\/www\./.test(o)) || (Array.isArray(origins) ? origins[0] : null);
+      if (first) webs.push({ website: first, label: 'Web' });
+    } catch (_) { /* web_origins corrupto no bloquea el perfil */ }
+    const profile = {
+      ...current.profile,
+      name: (current.profile && current.profile.name) || tenant.brand_name || tenant.name,
+      about: clean(tenant.brand_name || tenant.name, 139),
+      description: clean(tenant.greeting || tenant.brand_name || tenant.name, 512),
+      ...(tenant.logo_url && /^https:\/\//.test(tenant.logo_url) ? { logo_url: tenant.logo_url } : {}),
+      ...(webs.length ? { websites: webs } : {}),
+    };
+    await updateSenderProfile(credentials, tenant.sender_sid, profile);
+    await provisionAudit(env, ctx, tenant, actor, `perfil de WhatsApp actualizado con la marca de la ficha${profile.logo_url ? ' (con foto)' : ' (sin foto: falta el logo)'}`);
+    return json({ ok: true, applied: { logo: !!profile.logo_url, websites: webs.length, description: !!profile.description } }, 200, NO_STORE);
+  }
+
   if (step === 'sender/sync') {
     // Reconciliación de LECTURA (SPEC-CONEXIONES PR2): tras el Self Sign-up del
     // cliente en la consola, el worker lee el sender de la subcuenta y rellena la
@@ -1951,6 +2015,23 @@ async function runProvisionStep(request, env, ctx, tenant, tenantId, step, actor
       await env.DB.prepare(`UPDATE tenants SET ${sets.join(',')}, updated_at=? WHERE id=?`).bind(...args, now, tenantId).run();
       await invalidateTenantCache(env, [tenant]);
     }
+    // El ENRUTADO vive en tenant_channels, no en las columnas de arriba. Un tenant que
+    // ya tenía canal web (channel_address='web:<slug>') no recibe el número por el
+    // bucle anterior — se lo salta a propósito para no pisarlo — y sin fila aquí el
+    // webhook entrante no resuelve tenant: 404 unknown_tenant y bot MUDO con el sender
+    // en ONLINE (le pasó a gogestion, 2026-08-24). Registrar el canal es el paso que
+    // de verdad enciende WhatsApp, así que va siempre, no solo cuando sets.length.
+    let channelRegistered = false;
+    try {
+      await assertChannelFree(env, phone, tenantId);
+      await syncPrimaryChannel(env, tenantId, null, phone);
+      channelRegistered = true;
+      await invalidateTenantCache(env, [tenant]); // ahora sí barre `tenant:addr:<numero>`
+    } catch (error) {
+      // 409 address_taken: el número enruta a OTRO cliente. No se toca — se informa.
+      if (!(error instanceof HttpError)) throw error;
+      console.log(JSON.stringify({ level: 'error', code: 'sender_channel_not_registered', tenant: tenant.slug, error: error.code }));
+    }
     // El Self Sign-up deja el webhook en el default de Twilio: sender verde y bot
     // mudo. Si no apunta al worker, se repara AQUÍ y se informa del resultado.
     let webhookOk = s.webhookUrl === WORKER_PUBLIC_URL;
@@ -1959,11 +2040,11 @@ async function runProvisionStep(request, env, ctx, tenant, tenantId, step, actor
       try { await updateSenderWebhook(credentials, s.senderSid, WORKER_PUBLIC_URL); webhookOk = true; webhookFixed = true; }
       catch (error) { console.log(JSON.stringify({ level: 'error', code: 'sender_webhook_fix_failed', tenant: tenant.slug, error: clean(error.message, 60) })); }
     }
-    await provisionAudit(env, ctx, tenant, actor, `sender sincronizado desde Twilio (${s.senderSid}, ${s.status})${webhookFixed ? ' + webhook reparado' : ''}`);
+    await provisionAudit(env, ctx, tenant, actor, `sender sincronizado desde Twilio (${s.senderSid}, ${s.status})${webhookFixed ? ' + webhook reparado' : ''}${channelRegistered ? ` + canal ${phone} enrutado` : ''}`);
     return json({
       ok: true, applied: sets.length, sender: { senderSid: s.senderSid, senderId: s.senderId, status: s.status, wabaId: s.wabaId },
       conflicts: ['channel_address', 'twilio_from'].filter((c) => tenant[c] && tenant[c] !== phone).map((c) => ({ field: c, current: tenant[c], fromTwilio: phone })),
-      webhookOk, webhookFixed,
+      webhookOk, webhookFixed, channelRegistered,
     }, 200, NO_STORE);
   }
 
@@ -2241,7 +2322,7 @@ async function adminRouter(request, env, ctx, path, url, config, scope) {
       porDia: fillSeries(serieRows.results || [], 14),
     }, 200, NO_STORE);
   }
-  const provMatch = path.match(/^\/api\/admin\/tenants\/([0-9a-f-]+)\/provision(?:\/(subaccount|template|sender\/verify|sender\/sync|sender|domains))?$/i);
+  const provMatch = path.match(/^\/api\/admin\/tenants\/([0-9a-f-]+)\/provision(?:\/(subaccount|template|sender\/verify|sender\/sync|sender\/profile|sender|domains))?$/i);
   if (provMatch) {
     if (!UUID_RE.test(provMatch[1])) throw new HttpError(404, 'not_found');
     return await handleProvision(request, env, ctx, provMatch[1], provMatch[2] || '', actor);
@@ -2356,6 +2437,35 @@ async function adminRouter(request, env, ctx, path, url, config, scope) {
   // ── WhatsApp del tenant (SPEC-CONEXIONES PR2): estado de SOLO LECTURA para el
   // cliente, en columnas explícitas — ni el token cifrado ni el SID de la subcuenta
   // (eso es infraestructura de Velai, no dato del cliente).
+  // Logo de marca subido AL BUCKET (R2): una sola imagen alimenta el widget web y la
+  // foto de perfil de WhatsApp. Se guarda bajo logos/<tenantId>.<ext> y se sirve por
+  // /media/ del propio worker (api.hirevai.com) — nada de dominios de terceros.
+  const logoMatch = path.match(/^\/api\/admin\/tenants\/([0-9a-f-]+)\/logo$/i);
+  if (logoMatch && request.method === 'POST') {
+    if (!UUID_RE.test(logoMatch[1])) throw new HttpError(404, 'not_found');
+    const tenantId = logoMatch[1];
+    const tenant = await env.DB.prepare('SELECT id, slug, name, logo_url FROM tenants WHERE id=?').bind(tenantId).first();
+    if (!tenant) throw new HttpError(404, 'not_found');
+    const body = new Uint8Array(await request.arrayBuffer());
+    if (body.byteLength < 64) throw new HttpError(400, 'invalid_image');
+    if (body.byteLength > 2 * 1024 * 1024) throw new HttpError(413, 'image_too_large');
+    // El tipo lo deciden los MAGIC BYTES, no el header: png/jpeg/webp y nada más.
+    let ext = null, mime = null;
+    if (body[0] === 0x89 && body[1] === 0x50 && body[2] === 0x4e && body[3] === 0x47) { ext = 'png'; mime = 'image/png'; }
+    else if (body[0] === 0xff && body[1] === 0xd8 && body[2] === 0xff) { ext = 'jpg'; mime = 'image/jpeg'; }
+    else if (body[0] === 0x52 && body[1] === 0x49 && body[2] === 0x46 && body[3] === 0x46 && body[8] === 0x57 && body[9] === 0x45 && body[10] === 0x42 && body[11] === 0x50) { ext = 'webp'; mime = 'image/webp'; }
+    if (!ext) throw new HttpError(400, 'invalid_image');
+    const key = `logos/${tenantId}.${ext}`;
+    const store = await mediaPut(env, key, body, mime);
+    const now = new Date().toISOString();
+    const logoUrl = `${PUBLIC_MEDIA_BASE}/media/${key}?v=${now.replace(/[^0-9]/g, '').slice(0, 14)}`;
+    await env.DB.prepare('UPDATE tenants SET logo_url=?, updated_at=? WHERE id=?').bind(logoUrl, now, tenantId).run();
+    await env.DB.prepare('INSERT INTO tenant_versions (tenant_id,actor_email,field,previous_value,note,created_at) VALUES (?,?,?,?,?,?)')
+      .bind(tenantId, actor, 'config', JSON.stringify({ logo_url: tenant.logo_url }), `logo subido a ${store} (${ext}, ${Math.round(body.byteLength / 1024)} KB)`, now).run();
+    await invalidateTenantCache(env, [tenant]);
+    return json({ ok: true, logo_url: logoUrl, store }, 200, NO_STORE);
+  }
+
   const waMatch = path.match(/^\/api\/admin\/tenants\/([0-9a-f-]+)\/whatsapp$/i);
   if (waMatch && request.method === 'GET') {
     if (!UUID_RE.test(waMatch[1])) throw new HttpError(404, 'not_found');
@@ -3040,6 +3150,17 @@ export function createWorker(config) {
         }
         if (path === '/widget/boot' && request.method === 'GET') {
           return await handleWidgetBoot(request, env, url);
+        }
+        if (path.startsWith('/media/') && request.method === 'GET') {
+          const key = path.slice('/media/'.length);
+          if (!MEDIA_KEY_RE.test(key) || key.includes('..')) throw new HttpError(404, 'not_found');
+          const obj = await mediaGet(env, key);
+          if (!obj) throw new HttpError(404, 'not_found');
+          // La URL va versionada (?v=): cachear un año es seguro y la foto la lee
+          // también Meta al aplicar el perfil de WhatsApp — tiene que ser pública.
+          const headers = { 'Content-Type': obj.contentType, 'Cache-Control': 'public, max-age=31536000, immutable', 'Access-Control-Allow-Origin': '*' };
+          if (obj.etag) headers.ETag = obj.etag;
+          return new Response(obj.body, { headers });
         }
         if (path === '/lead' || path === '/chat') {
           const cors = await publicCors(request, env);
