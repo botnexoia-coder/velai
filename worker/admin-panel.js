@@ -90,6 +90,7 @@ document.querySelectorAll('.tab[data-view]').forEach(b=>b.onclick=()=>{document.
 // ── Conexiones (SPEC-CONEXIONES PR1): Telegram de avisos en autoservicio ──
 // El cliente abre SU tarjeta; Velai elige tenant con el selector de la cabecera.
 let cxTenant=null;
+let cxLogo='';  // logo actual del cliente en Conexiones (para la miniatura)
 async function cxMenu(){tgWizOpen=null;if(ME&&ME.tenantId){cxTenant=ME.tenantId;return loadConexiones()}
  try{if(!tenantList.length){const d=await api('/api/admin/tenants');tenantList=d.tenants}
   if(!tenantList.length)return toast('Aún no hay clientes dados de alta',false);
@@ -144,7 +145,10 @@ async function loadConexiones(){$('#tgLinkBox').hidden=true;
   else if(['CREATING','PENDING_VERIFICATION','VERIFYING'].indexOf(st)>=0)msg='<span class="flag">Verificando tu número con WhatsApp…</span>';
   else msg='<span class="flag off">Revisando un problema con tu número.</span>';
   $('#waState').innerHTML=msg+(w.twilio_from?' <span class="muted">· '+esc(String(w.twilio_from).replace('whatsapp:',''))+'</span>':'');
-  $('#nfTeam').value=w.team_whatsapp||'';$('#nfWa').value=w.wa_number||''}
+  $('#nfTeam').value=w.team_whatsapp||'';$('#nfWa').value=w.wa_number||'';
+  cxLogo=w.logo_url||'';
+  $('#cxLogoPrev').innerHTML=/^https:\/\//i.test(cxLogo)?'<img src="'+esc(cxLogo)+'" alt="">':'sin logo';
+  $('#cxLogoOut').textContent=cxLogo?'':'Aún no has subido tu imagen.'}
  catch(e){$('#waState').textContent=e.message}}
 // ── Asistente horizontal (canvas «Conexión de Telegram guiada», 2026-08-21): el
 // estado real del servidor (bot, vínculo, temas) marca los pasos hechos; los pasos
@@ -643,6 +647,17 @@ $('#waProfile').onclick=async()=>{$('#waSyncOut').textContent='aplicando marca�
   $('#waSyncOut').textContent='Perfil actualizado ✓'+(d.applied&&d.applied.logo?' · con foto':' · SIN foto (sube el logo en la ficha)')+(d.applied&&d.applied.websites?' · con web':'');
   toast('Perfil de WhatsApp actualizado')}
  catch(e){$('#waSyncOut').textContent='Error: '+(TERRS[e.message]||e.message)}};
+// Logo en AUTOSERVICIO (pedido de Juan, 2026-08-24): es su marca, la sube el propio
+// cliente. Al guardarse, el worker se lo aplica también a su foto de WhatsApp.
+$('#cxLogoUp').onclick=async()=>{const f=$('#cxLogoFile').files&&$('#cxLogoFile').files[0];
+ if(!f)return $('#cxLogoOut').textContent='Elige una imagen primero.';
+ if(f.size>2*1024*1024)return $('#cxLogoOut').textContent='La imagen no puede pasar de 2 MB.';
+ $('#cxLogoOut').textContent='subiendo…';
+ try{const d=await api('/api/admin/tenants/'+cxTenant+'/logo',{method:'POST',headers:{'Content-Type':f.type||'application/octet-stream'},body:f});
+  $('#cxLogoPrev').innerHTML='<img src="'+esc(d.logo_url)+'" alt="">';
+  $('#cxLogoOut').textContent='Listo ✓ Ya se ve en el chat de tu web'+(d.whatsapp?' y en tu WhatsApp (puede tardar unos minutos en actualizarse).':'.');
+  toast('Logo actualizado')}
+ catch(e){$('#cxLogoOut').textContent='Error: '+(TERRS[e.message]||e.message)}};
 // Números de aviso (PR3): autoservicio con la guarda del 63031 en el worker.
 $('#nfSave').onclick=async()=>{try{
  await api('/api/admin/tenants/'+cxTenant+'/notify',{method:'PATCH',headers:{'Content-Type':'application/json'},

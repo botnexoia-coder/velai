@@ -98,7 +98,8 @@ Sin esto, las campañas gastarían presupuesto a ciegas (sin medir conversiones)
 - [x] Subida del logo desde la ficha (Marca del widget → «Subir imagen»): valida el tipo por magic bytes, máx. 2 MB, se guarda en nuestro almacenamiento y se sirve por `api.hirevai.com/media/logos/<id>.<ext>?v=…` (URL versionada, caché de un año).
 - [x] Botón **«Aplicar marca al perfil»** en Conexiones → WhatsApp (solo Velai): manda logo, descripción y web de la ficha al perfil de negocio del sender. El display name se relee y se reenvía intacto — cambiarlo dispara revisión de Meta.
 - [ ] **Juan (opcional, 1 clic):** activar **R2** en el dashboard (dash.cloudflare.com → R2 → habilitar; 10 GB gratis). Hoy los logos viven en KV y funciona igual; con R2 activo, `npx wrangler@4 r2 bucket create vai-media` + descomentar el binding en `wrangler.toml` y las subidas nuevas van allí.
-- [ ] Subir un logo grande de Diálogos (su favicon actual es pequeño y se verá pixelado como foto de WhatsApp) y pulsar «Aplicar marca al perfil».
+- [x] **Autoservicio (2026-08-24):** el propio cliente sube su logo desde Conexiones → «Tu logo» (ruta en `clienteAllowed` con guarda own-only: ajeno = 404) y el worker se lo aplica SOLO a su foto de WhatsApp en segundo plano (`sender_profile_synced` / `sender_profile_sync_failed` en los logs). El botón manual de Velai sigue como red de seguridad.
+- [ ] Subir un logo grande de Diálogos (su favicon actual es pequeño y se verá pixelado como foto de WhatsApp): ahora basta con subirlo, el perfil se actualiza solo.
 
 ### 2k. Canales múltiples por cliente (tenant_channels — fase 1 desplegada 2026-08-22)
 

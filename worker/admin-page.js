@@ -318,6 +318,8 @@ body.cliente .cliente-only{display:flex}
 .card b.tgh{display:block;font-family:var(--font-d);font-size:19px;letter-spacing:-.02em;color:var(--white)}
 .card b.tgh-sm{font-size:16px}
 .card .tgcard>b{display:block;font-size:12.5px;color:var(--white);margin-bottom:2px}
+.cxlogo{width:44px;height:44px;border-radius:10px;display:inline-flex;align-items:center;justify-content:center;background:rgba(var(--ink),.06);overflow:hidden;flex:none;font-size:11px;color:rgba(var(--ink),.5)}
+.cxlogo img{width:100%;height:100%;object-fit:cover}
 .tgnode[hidden],.tgbar[hidden],.tgstep[hidden]{display:none}
 .tgh{font-family:var(--font-d);font-weight:700;font-size:19px;letter-spacing:-.02em}
 .tgh2{font-family:var(--font-d);font-weight:700;font-size:16px;letter-spacing:-.01em}
@@ -496,6 +498,10 @@ body.cliente .cliente-only{display:flex}
 <div class="card mt12"><b class="tgh tgh-sm">¿Dónde llegan tus leads?</b>
 <p class="tgsub">Un lead siempre se guarda en el panel. Esto es quién recibe además un aviso al momento.</p>
 <div class="chlist" id="cxAlerts"></div></div>
+<div class="card mt12"><b class="tgh tgh-sm">Tu logo</b>
+<p class="tgsub">La imagen de tu negocio: sale en el chat de tu web y como <b class="tgh">foto de perfil de tu WhatsApp</b>. Cuadrada, 640×640 o más, máximo 2 MB (PNG, JPG o WebP).</p>
+<div class="actions actions0"><span id="cxLogoPrev" class="cxlogo">—</span><input type="file" id="cxLogoFile" accept="image/png,image/jpeg,image/webp" class="grow"><button class="btn alt" id="cxLogoUp" type="button">Subir imagen</button></div>
+<small class="muted" id="cxLogoOut"></small></div>
 <div class="card mt12"><b class="tgh tgh-sm">Números de aviso por WhatsApp</b>
 <p class="tgsub">A qué WhatsApp del equipo llega el aviso de cada lead (además de Telegram). Varios números separados por coma, formato whatsapp:+34…</p>
 <div class="actions actions0"><input id="nfTeam" placeholder="whatsapp:+34600111222,whatsapp:+34600333444" class="grow inpill"><input id="nfWa" placeholder="nº de errores (solo dígitos)" class="inpill"><button class="btn alt" id="nfSave" type="button">Guardar</button></div>

@@ -2713,10 +2713,54 @@ test('logo del negocio: se sube por bytes, valida el tipo real y queda servido p
   const before = put.length;
   await assert.rejects(post(new Uint8Array(200)), (e) => e.code === 'invalid_image');
   assert.equal(put.length, before, 'no se guarda basura');
-  // un cliente NO puede subir logos (la ruta no está en clienteAllowed)
+  // AUTOSERVICIO: el cliente sube el SUYO (es su marca)…
+  const own = await (await testing.adminRouter(adminReq(path, { method: 'POST', body: png }), env, ctx, path, new URL('https://x' + path), {}, { role: 'cliente', tenantId: TID })).json();
+  assert.equal(own.ok, true, 'el cliente sube su propio logo');
+  // …y el de OTRO es 404, nunca 403 (no se confirma que exista)
+  const foreign = '/api/admin/tenants/00000000-0000-4000-8000-0000000000d9/logo';
   await assert.rejects(
-    testing.adminRouter(adminReq(path, { method: 'POST', body: png }), env, ctx, path, new URL('https://x' + path), {}, { role: 'cliente', tenantId: TID }),
-    (e) => e.code === 'not_authorized');
+    testing.adminRouter(adminReq(foreign, { method: 'POST', body: png }), env, ctx, foreign, new URL('https://x' + foreign), {}, { role: 'cliente', tenantId: TID }),
+    (e) => e.status === 404);
+});
+
+test('al subir el logo, la foto de WhatsApp se actualiza sola (y un fallo de Twilio no rompe la subida)', async () => {
+  const TID = '00000000-0000-4000-8000-0000000000d4';
+  const realFetch = globalThis.fetch;
+  const posts = [];
+  try {
+    globalThis.fetch = async (url, init) => {
+      if (String(url).includes('api.telegram.org')) return new Response('{"ok":true}', { status: 200 });
+      if (!init || init.method === 'GET') return new Response(JSON.stringify({ status: 'ONLINE', profile: { name: 'Nombre Aprobado' } }), { status: 200 });
+      posts.push({ u: String(url), body: init.body });
+      return new Response('{"status":"ONLINE"}', { status: 200 });
+    };
+    const row = { id: TID, slug: 'mio', name: 'Mío', brand_name: 'Marca Mía', greeting: 'Hola', logo_url: null,
+      web_origins: '["https://mio.com"]', sender_sid: 'XE' + 'b'.repeat(32), twilio_subaccount_sid: 'AC' + 'c'.repeat(32),
+      twilio_auth_token_enc: await encryptSecret({ SECRETS_KEK: TEST_KEK }, TID, 'a1b2c3d4e5f60718293a4b5c6d7e8f90') };
+    const kv = { store: new Map(), async put(k, v, o) { this.store.set(k, { value: v, metadata: o && o.metadata }); },
+      async getWithMetadata(k) { return this.store.get(k) || { value: null }; },
+      async get() { return null; }, async delete() {}, async list() { return { keys: [] }; } };
+    const env = { SECRETS_KEK: TEST_KEK, KV: kv, DB: { prepare: (sql) => ({ bind: () => ({
+      first: async () => (sql.includes('FROM tenants WHERE id=') ? { ...row } : null),
+      run: async () => ({ meta: { changes: 1 } }), all: async () => ({ results: [] }),
+    }) }) } };
+    const pending = [];
+    const ctx = { waitUntil: (p2) => pending.push(p2) };
+    const png = new Uint8Array(200); png.set([0x89, 0x50, 0x4e, 0x47], 0);
+    const path = `/api/admin/tenants/${TID}/logo`;
+    const res = await (await testing.adminRouter(adminReq(path, { method: 'POST', body: png }), env, ctx, path, new URL('https://x' + path), {}, VELAI)).json();
+    assert.equal(res.whatsapp, true, 'avisa de que también va a WhatsApp');
+    await Promise.all(pending);
+    const sent = JSON.parse(posts[0].body).profile;
+    assert.match(sent.logo_url, /^https:\/\/api\.hirevai\.com\/media\/logos\//, 'la foto nueva llega a Twilio');
+    assert.equal(sent.name, 'Nombre Aprobado', 'sin tocar el nombre visible');
+    // si Twilio falla, la subida ya respondió OK y el error solo queda en el log
+    globalThis.fetch = async () => new Response('{"code":20003}', { status: 401 });
+    const pend2 = [];
+    const res2 = await (await testing.adminRouter(adminReq(path, { method: 'POST', body: png }), env, { waitUntil: (p2) => pend2.push(p2) }, path, new URL('https://x' + path), {}, VELAI)).json();
+    assert.equal(res2.ok, true);
+    await Promise.all(pend2); // no lanza: el fallo se registra, no rompe
+  } finally { globalThis.fetch = realFetch; }
 });
 
 test('perfil de WhatsApp: manda la marca de la ficha y NUNCA cambia el nombre visible', async () => {

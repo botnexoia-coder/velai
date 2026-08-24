@@ -1956,6 +1956,29 @@ async function handleProvision(request, env, ctx, tenantId, step, actor) {
   }
 }
 
+// Perfil de negocio del sender a partir de la marca de la FICHA (una sola fuente para
+// widget web y WhatsApp). El display name se relee y se reenvía intacto: la API lo exige
+// en el cuerpo y cambiarlo dispara una revisión de Meta.
+async function applySenderProfile(env, tenant, credentials) {
+  const current = await fetchSender(credentials, tenant.sender_sid);
+  const webs = [];
+  try {
+    const origins = JSON.parse(tenant.web_origins || '[]');
+    const first = (Array.isArray(origins) ? origins : []).find((o) => /^https:\/\//.test(o) && !/^https:\/\/www\./.test(o)) || (Array.isArray(origins) ? origins[0] : null);
+    if (first) webs.push({ website: first, label: 'Web' });
+  } catch (_) { /* web_origins corrupto no bloquea el perfil */ }
+  const profile = {
+    ...current.profile,
+    name: (current.profile && current.profile.name) || tenant.brand_name || tenant.name,
+    about: clean(tenant.brand_name || tenant.name, 139),
+    description: clean(tenant.greeting || tenant.brand_name || tenant.name, 512),
+    ...(tenant.logo_url && /^https:\/\//.test(tenant.logo_url) ? { logo_url: tenant.logo_url } : {}),
+    ...(webs.length ? { websites: webs } : {}),
+  };
+  await updateSenderProfile(credentials, tenant.sender_sid, profile);
+  return { logo: !!profile.logo_url, websites: webs.length, description: !!profile.description };
+}
+
 async function runProvisionStep(request, env, ctx, tenant, tenantId, step, actor) {
   const now = new Date().toISOString();
 
@@ -2089,26 +2112,9 @@ async function runProvisionStep(request, env, ctx, tenant, tenantId, step, actor
   if (step === 'sender/profile') {
     if (!tenant.sender_sid) throw new HttpError(400, 'sender_required');
     if (!tenant.logo_url && !tenant.brand_name) throw new HttpError(400, 'brand_empty');
-    // El display name NO se toca: la API lo exige en el cuerpo y cambiarlo dispara una
-    // revisión de Meta — se relee del sender y se reenvía igual.
-    const current = await fetchSender(credentials, tenant.sender_sid);
-    const webs = [];
-    try {
-      const origins = JSON.parse(tenant.web_origins || '[]');
-      const first = (Array.isArray(origins) ? origins : []).find((o) => /^https:\/\//.test(o) && !/^https:\/\/www\./.test(o)) || (Array.isArray(origins) ? origins[0] : null);
-      if (first) webs.push({ website: first, label: 'Web' });
-    } catch (_) { /* web_origins corrupto no bloquea el perfil */ }
-    const profile = {
-      ...current.profile,
-      name: (current.profile && current.profile.name) || tenant.brand_name || tenant.name,
-      about: clean(tenant.brand_name || tenant.name, 139),
-      description: clean(tenant.greeting || tenant.brand_name || tenant.name, 512),
-      ...(tenant.logo_url && /^https:\/\//.test(tenant.logo_url) ? { logo_url: tenant.logo_url } : {}),
-      ...(webs.length ? { websites: webs } : {}),
-    };
-    await updateSenderProfile(credentials, tenant.sender_sid, profile);
-    await provisionAudit(env, ctx, tenant, actor, `perfil de WhatsApp actualizado con la marca de la ficha${profile.logo_url ? ' (con foto)' : ' (sin foto: falta el logo)'}`);
-    return json({ ok: true, applied: { logo: !!profile.logo_url, websites: webs.length, description: !!profile.description } }, 200, NO_STORE);
+    const applied = await applySenderProfile(env, tenant, credentials);
+    await provisionAudit(env, ctx, tenant, actor, `perfil de WhatsApp actualizado con la marca de la ficha${applied.logo ? ' (con foto)' : ' (sin foto: falta el logo)'}`);
+    return json({ ok: true, applied }, 200, NO_STORE);
   }
 
   // Comprobar la plantilla AHORA, sin esperar al cron de 5 min, y con el crudo de Twilio
@@ -2271,6 +2277,9 @@ function clienteAllowed(path, method) {
   // números y nombres de otros clientes.
   if (/^\/api\/admin\/tenants\/[0-9a-f-]+\/channels$/i.test(path) && method === 'GET') return true;
   if (/^\/api\/admin\/tenants\/[0-9a-f-]+\/notify$/i.test(path) && method === 'PATCH') return true;
+  // Su logo es SU marca: el cliente lo sube desde Conexiones (el handler exige que el
+  // :id sea el suyo — ajeno = 404) y de paso se aplica a su foto de WhatsApp.
+  if (/^\/api\/admin\/tenants\/[0-9a-f-]+\/logo$/i.test(path) && method === 'POST') return true;
   if (/^\/api\/admin\/tenants\/[0-9a-f-]+\/telegram\/topics$/i.test(path) && method === 'POST') return true;
   if (/^\/api\/admin\/tenants\/[0-9a-f-]+\/telegram\/topics\/\d+$/i.test(path) && ['PATCH', 'DELETE'].includes(method)) return true;
   if (path === '/api/admin/stats' && method === 'GET') return true;
@@ -2595,8 +2604,11 @@ async function adminRouter(request, env, ctx, path, url, config, scope) {
   const logoMatch = path.match(/^\/api\/admin\/tenants\/([0-9a-f-]+)\/logo$/i);
   if (logoMatch && request.method === 'POST') {
     if (!UUID_RE.test(logoMatch[1])) throw new HttpError(404, 'not_found');
+    // Cliente ajeno = 404 ANTES de tocar D1 (nunca 403: no se confirma que exista).
+    if (scope.role !== 'velai' && scope.tenantId !== logoMatch[1]) throw new HttpError(404, 'not_found');
     const tenantId = logoMatch[1];
-    const tenant = await env.DB.prepare('SELECT id, slug, name, logo_url FROM tenants WHERE id=?').bind(tenantId).first();
+    const tenant = await env.DB.prepare(`SELECT id, slug, name, logo_url, brand_name, greeting, web_origins,
+      sender_sid, twilio_subaccount_sid, twilio_auth_token_enc FROM tenants WHERE id=?`).bind(tenantId).first();
     if (!tenant) throw new HttpError(404, 'not_found');
     const body = new Uint8Array(await request.arrayBuffer());
     if (body.byteLength < 64) throw new HttpError(400, 'invalid_image');
@@ -2615,7 +2627,22 @@ async function adminRouter(request, env, ctx, path, url, config, scope) {
     await env.DB.prepare('INSERT INTO tenant_versions (tenant_id,actor_email,field,previous_value,note,created_at) VALUES (?,?,?,?,?,?)')
       .bind(tenantId, actor, 'config', JSON.stringify({ logo_url: tenant.logo_url }), `logo subido a ${store} (${ext}, ${Math.round(body.byteLength / 1024)} KB)`, now).run();
     await invalidateTenantCache(env, [tenant]);
-    return json({ ok: true, logo_url: logoUrl, store }, 200, NO_STORE);
+    // La foto de WhatsApp se actualiza SOLA: el cliente sube su logo y ya está en los dos
+    // canales, sin entender de perfiles. En segundo plano porque Twilio puede tardar y la
+    // subida no debe fallar por ello — si falla, queda el botón manual de Velai.
+    if (tenant.sender_sid && tenant.twilio_subaccount_sid) {
+      ctx.waitUntil((async () => {
+        try {
+          const token = await twilioAuthTokenFor(env, tenant);
+          if (!token) return;
+          await applySenderProfile(env, { ...tenant, logo_url: logoUrl }, { sid: tenant.twilio_subaccount_sid, token });
+          console.log(JSON.stringify({ level: 'info', code: 'sender_profile_synced', tenant: tenant.slug }));
+        } catch (error) {
+          console.log(JSON.stringify({ level: 'warn', code: 'sender_profile_sync_failed', tenant: tenant.slug, error: clean(String(error.message || error), 80) }));
+        }
+      })());
+    }
+    return json({ ok: true, logo_url: logoUrl, store, whatsapp: !!(tenant.sender_sid && tenant.twilio_subaccount_sid) }, 200, NO_STORE);
   }
 
   // ── Canales vivos: visibilidad del ENRUTADO (2026-08-24) ──────────────────
@@ -2682,7 +2709,7 @@ async function adminRouter(request, env, ctx, path, url, config, scope) {
     // `routed`: existe la fila de tenant_channels que hace que el webhook entrante
     // resuelva a este cliente. Sin ella el sender puede estar ONLINE y el bot mudo, así
     // que el estado que ve el cliente NO puede salir solo de sender_status.
-    const row = await env.DB.prepare(`SELECT channel_address, twilio_from, (waba_id IS NOT NULL) AS has_waba, sender_status, lead_template_status, meta_partner_status, team_whatsapp, wa_number, (twilio_auth_token_enc IS NOT NULL) AS has_token, (twilio_subaccount_sid IS NOT NULL) AS has_subaccount,
+    const row = await env.DB.prepare(`SELECT channel_address, twilio_from, (waba_id IS NOT NULL) AS has_waba, sender_status, lead_template_status, meta_partner_status, team_whatsapp, wa_number, logo_url, (twilio_auth_token_enc IS NOT NULL) AS has_token, (twilio_subaccount_sid IS NOT NULL) AS has_subaccount,
              (twilio_from IS NOT NULL AND (channel_address = twilio_from OR EXISTS (SELECT 1 FROM tenant_channels c WHERE c.tenant_id = tenants.id AND c.address = tenants.twilio_from))) AS routed
       FROM tenants WHERE id=?`).bind(waMatch[1]).first();
     if (!row) throw new HttpError(404, 'not_found');
