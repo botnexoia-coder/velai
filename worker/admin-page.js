@@ -492,6 +492,9 @@ body.cliente .cliente-only{display:flex}
 <div id="waState" class="mt6 muted">—</div>
 <div class="actions actions0 velai-only"><button class="btn alt" id="waSync" type="button">Sincronizar desde Twilio</button><button class="btn alt" id="waProfile" type="button">Aplicar marca al perfil</button><span id="waSyncOut" class="muted"></span></div>
 <small class="muted velai-only">«Aplicar marca al perfil» manda el logo, la descripción y la web de la ficha a WhatsApp: es la foto que ve el cliente final. El nombre visible NO se toca (cambiarlo exige revisión de Meta).</small></div>
+<div class="card mt12"><b class="tgh tgh-sm">¿Dónde llegan tus leads?</b>
+<p class="tgsub">Un lead siempre se guarda en el panel. Esto es quién recibe además un aviso al momento.</p>
+<div class="chlist" id="cxAlerts"></div></div>
 <div class="card mt12"><b class="tgh tgh-sm">Números de aviso por WhatsApp</b>
 <p class="tgsub">A qué WhatsApp del equipo llega el aviso de cada lead (además de Telegram). Varios números separados por coma, formato whatsapp:+34…</p>
 <div class="actions actions0"><input id="nfTeam" placeholder="whatsapp:+34600111222,whatsapp:+34600333444" class="grow inpill"><input id="nfWa" placeholder="nº de errores (solo dígitos)" class="inpill"><button class="btn alt" id="nfSave" type="button">Guardar</button></div>

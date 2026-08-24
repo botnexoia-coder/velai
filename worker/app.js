@@ -1031,6 +1031,27 @@ function leadTemplateVariables(lead) {
 
 // Los canales de aviso se resuelven por tenant con respaldo a las variables de
 // entorno: Velai sigue funcionando aunque su fila falte o esté incompleta.
+// ¿A dónde llegan de verdad los leads de este cliente? El panel prometía «los avisos
+// llegan por Telegram mientras WhatsApp aprueba la plantilla» sin comprobar que hubiera un
+// Telegram vinculado: con gogestión y dialogos era MENTIRA — los dos canales salían
+// `skipped` y nadie se enteraba de sus leads (2026-08-24). Espeja las condiciones de
+// deliver() a propósito y vive pegado a ella: si una cambia, la otra se ve al lado.
+function leadAlertStatus(env, tenant) {
+  const telegram = Boolean(tenant.telegram_chat_id) ? 'on' : 'off';
+  const sub = Boolean(tenant.twilio_subaccount_sid);
+  // Con subcuenta NO hay respaldo con los recursos del padre: dentro de ella no existen.
+  const recipients = clean(tenant.team_whatsapp || env.TEAM_WHATSAPP, 1000).split(',').map((x) => x.trim()).filter(Boolean);
+  const templateSid = tenant.lead_template_sid || (sub ? null : env.TWILIO_LEAD_TEMPLATE_SID);
+  const fromAddress = tenant.twilio_from || (sub ? null : env.TWILIO_FROM);
+  let whatsapp = 'off';
+  if (recipients.length && fromAddress && templateSid && env.TWILIO_ACCOUNT_SID && env.TWILIO_AUTH_TOKEN) {
+    // Plantilla propia creada pero sin aprobar: Meta la rechaza, así que aún NO entrega.
+    whatsapp = (tenant.lead_template_status && tenant.lead_template_status !== 'approved'
+      && tenant.lead_template_sid === templateSid) ? 'pending_template' : 'on';
+  }
+  return { telegram, whatsapp, any: telegram === 'on' || whatsapp === 'on' };
+}
+
 async function deliver(env, channel, lead, tenant) {
   if (channel === 'telegram') {
     // Entrega DUAL (decisión de Juan, 2026-08-21): el aviso del cliente va a SU chat
@@ -2624,7 +2645,11 @@ async function adminRouter(request, env, ctx, path, url, config, scope) {
              (twilio_from IS NOT NULL AND (channel_address = twilio_from OR EXISTS (SELECT 1 FROM tenant_channels c WHERE c.tenant_id = tenants.id AND c.address = tenants.twilio_from))) AS routed
       FROM tenants WHERE id=?`).bind(waMatch[1]).first();
     if (!row) throw new HttpError(404, 'not_found');
-    return json({ whatsapp: row }, 200, NO_STORE);
+    // El estado de ENTREGA de los avisos, calculado con las mismas condiciones que deliver().
+    // La fila de arriba no lo trae: necesita telegram_chat_id y el SID de la plantilla.
+    const alertRow = await env.DB.prepare(`SELECT telegram_chat_id, twilio_subaccount_sid, team_whatsapp,
+             lead_template_sid, lead_template_status, twilio_from FROM tenants WHERE id=?`).bind(waMatch[1]).first();
+    return json({ whatsapp: row, alerts: leadAlertStatus(env, alertRow || {}) }, 200, NO_STORE);
   }
 
   // ── Números de aviso (SPEC-CONEXIONES PR3): el cliente edita SUS destinos ──
@@ -3344,4 +3369,4 @@ export function createWorker(config) {
   };
 }
 
-export const testing = { clean, persistLead, captureWhatsAppLead, leadFromSummary, leadCaptureDone, errorResponseParts, tenantByAddress, syncPrimaryChannel, assertChannelFree, normalizePhone, extractPhone, safeUtm, publicCors, validTwilioSignature, callAnthropic, callAnthropicRaw, runToolLoop, calendarExecutor, calendarSystem, tenantCalendar, validCalendarDate, availableSlots, handleCalendarCallback, calendarCallbackFor, sendTwilioText, timingSafeEqual, telegramBotUsername, handleTelegramWebhook, sendTelegramText, tenantTelegramToken, telegramThreadFor, registerTelegramTopic, csvCell, expiryDate, leadFilters, isDemoKey, templateVar, leadTemplateVariables, readJson, deliver, drainQueuedLeads, verifyTurnstile, systemFor, validateTenant, invalidateTenantCache, tenantWriteError, assertNotActivePending, tenantChannelSummary, channelsForScope, handleProvision, pollProvisioning, fillSeries, resolveScope, scopeClause, clienteAllowed, adminRouter, recordAuthFailure, handleAdmin, handleWidgetBoot, allowedOrigins, envOrigins, syncPanelGate, envAdmins, syncAdminGate, getSetting, setSetting, withCfToken };
+export const testing = { clean, persistLead, leadAlertStatus, captureWhatsAppLead, leadFromSummary, leadCaptureDone, errorResponseParts, tenantByAddress, syncPrimaryChannel, assertChannelFree, normalizePhone, extractPhone, safeUtm, publicCors, validTwilioSignature, callAnthropic, callAnthropicRaw, runToolLoop, calendarExecutor, calendarSystem, tenantCalendar, validCalendarDate, availableSlots, handleCalendarCallback, calendarCallbackFor, sendTwilioText, timingSafeEqual, telegramBotUsername, handleTelegramWebhook, sendTelegramText, tenantTelegramToken, telegramThreadFor, registerTelegramTopic, csvCell, expiryDate, leadFilters, isDemoKey, templateVar, leadTemplateVariables, readJson, deliver, drainQueuedLeads, verifyTurnstile, systemFor, validateTenant, invalidateTenantCache, tenantWriteError, assertNotActivePending, tenantChannelSummary, channelsForScope, handleProvision, pollProvisioning, fillSeries, resolveScope, scopeClause, clienteAllowed, adminRouter, recordAuthFailure, handleAdmin, handleWidgetBoot, allowedOrigins, envOrigins, syncPanelGate, envAdmins, syncAdminGate, getSetting, setSetting, withCfToken };

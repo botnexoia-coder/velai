@@ -481,9 +481,22 @@ resume conversaciones de TODOS los tenants: ahora habla del «asistente de un ne
 como el campo más importante (buscándolo en toda la conversación, incluso dicho de pasada) y aclara
 que `negocio` es el negocio DE LA PERSONA — no el que la atiende — o null si es un particular.
 
-**Hallazgo colateral, NO resuelto** (ver TAREAS §2): los leads de gogestión y dialogos se capturan pero
-**no llegan a nadie** — `telegram_not_configured` (sin grupo vinculado) + `template_not_approved`
-(plantilla `pending` en Meta). La tarjeta de Conexiones promete que «los avisos llegan por Telegram
-mientras WhatsApp aprueba la plantilla», y con Telegram sin vincular esa frase es falsa.
+**Y la promesa falsa que salió de ahí, corregida.** Los leads de gogestión y dialogos se capturan pero
+**no llegan a nadie**: `telegram_not_configured` (ningún grupo vinculado) + `template_not_approved`
+(plantilla `pending` en Meta). Y la tarjeta de Conexiones decía «los avisos de leads llegan por Telegram
+mientras WhatsApp aprueba la plantilla» **sin comprobar que hubiera un Telegram vinculado** — con esos dos
+clientes era mentira lisa. Ahora Conexiones tiene **«¿Dónde llegan tus leads?»** con el estado de entrega
+real por canal, calculado por `leadAlertStatus`, que **espeja las condiciones de `deliver()`** y vive
+pegado a ella para que un cambio en una se vea al lado de la otra: destinatarios, `twilio_from`, SID de
+plantilla, aprobación de Meta y — clave — que **con subcuenta NO hay respaldo con los recursos del padre**
+(dentro de ella no existen). Si no hay ningún canal activo se dice sin rodeos, con lo que importa primero
+(«se guardan aquí en el panel, pero hay que entrar a mirarlos») y la salida accionable: conectar Telegram,
+lo único que no depende de que Meta apruebe nada. La coletilla de la tarjeta de WhatsApp solo promete
+Telegram si de verdad está vinculado.
 
-Suite 109/109.
+**Verificado contra producción:** los veredictos del helper coinciden con los `skipped` recientes de los dos
+clientes. Ojo al matiz — gogestión tiene además avisos `sent` **antiguos**, de antes de tener subcuenta,
+cuando sí caía a los recursos de Velai; los recientes son los que reflejan su configuración actual.
+**Lo que queda es acción, no código:** vincular sus Telegram y seguir la aprobación de Meta (TAREAS §2).
+
+Suite 110/110.

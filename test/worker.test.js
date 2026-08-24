@@ -757,7 +757,7 @@ test('el panel rediseñado: sin dominios externos salvo las fuentes, nonce y tod
   const links = [...ADMIN_HTML.matchAll(/<a href="https:\/\/hirevai\.com\/([a-z]+)\//g)];
   assert.ok(links.length && links.every((m) => ['privacidad', 'condiciones'].includes(m[1])), 'enlaces solo a páginas legales');
   assert.ok(ADMIN_HTML.includes('__NONCE__'));
-  for (const id of ['tName', 'tSlug', 'tChannels', 'tFrom', 'tTeam', 'tChat', 'tTpl', 'tSub', 'tWaba', 'tToken', 'tPartner', 'tActive', 'tPrompt', 'tNote', 'pSub', 'pTpl', 'pPhone', 'pSender', 'pCode', 'pVerify', 'tenantFilter', 'newTenant', 'export', 'tTokenState', 'tBotName', 'tBrandName', 'tLogo', 'tColor1', 'tColor2', 'tGreeting', 'tGreetingEn', 'tChips', 'tPlaceholder', 'tWa', 'tTheme', 'brandPrev', 'toasts', 'tOrigins', 'tSyncDomains', 'logout', 'themeBtn', 'themeLabel', 'adminsCard', 'adminsList', 'aEmail', 'aAdd', 'configCard', 'configState', 'cfgToken', 'cfgTokenSave', 'cfgTokenClear', 'chRows', 'chAlarm', 'chQ', 'chTenant', 'chState', 'chCount', 'cxChannels']) {
+  for (const id of ['tName', 'tSlug', 'tChannels', 'tFrom', 'tTeam', 'tChat', 'tTpl', 'tSub', 'tWaba', 'tToken', 'tPartner', 'tActive', 'tPrompt', 'tNote', 'pSub', 'pTpl', 'pPhone', 'pSender', 'pCode', 'pVerify', 'tenantFilter', 'newTenant', 'export', 'tTokenState', 'tBotName', 'tBrandName', 'tLogo', 'tColor1', 'tColor2', 'tGreeting', 'tGreetingEn', 'tChips', 'tPlaceholder', 'tWa', 'tTheme', 'brandPrev', 'toasts', 'tOrigins', 'tSyncDomains', 'logout', 'themeBtn', 'themeLabel', 'adminsCard', 'adminsList', 'aEmail', 'aAdd', 'configCard', 'configState', 'cfgToken', 'cfgTokenSave', 'cfgTokenClear', 'chRows', 'chAlarm', 'chQ', 'chTenant', 'chState', 'chCount', 'cxChannels', 'cxAlerts']) {
     assert.ok(ADMIN_HTML.includes(`id="${id}"`), `falta #${id}`);
   }
   assert.ok(!/localStorage/.test(ADMIN_HTML), 'sin localStorage');
@@ -2349,6 +2349,31 @@ test('la dirección del canal se DERIVA: alta prospecto, promoción a web al act
   const envD = { DB: { prepare: () => ({ bind: () => ({ all: async () => ({ results: [{ address: 'whatsapp:+34624121930', kind: 'whatsapp' }] }), first: async () => null }) }) } };
   const sum2 = await testing.tenantChannelSummary(envD, tenant);
   assert.deepEqual(sum2.find((c) => c.kind === 'whatsapp'), { kind: 'whatsapp', address: 'whatsapp:+34624121930', state: 'live' });
+});
+
+test('¿dónde llegan los leads?: el panel deja de prometer un Telegram que no existe', async () => {
+  const ENV = { TWILIO_ACCOUNT_SID: 'AC1', TWILIO_AUTH_TOKEN: 't', TEAM_WHATSAPP: null,
+    TWILIO_FROM: 'whatsapp:+15706160059', TWILIO_LEAD_TEMPLATE_SID: 'HXvelai' };
+  // El caso REAL de gogestión: team_whatsapp puesto, plantilla propia creada pero `pending`
+  // en Meta, y NINGÚN Telegram vinculado. Los dos canales salían skipped y el panel decía
+  // que los avisos llegaban por Telegram: nadie se enteraba de sus leads.
+  const gog = { telegram_chat_id: null, twilio_subaccount_sid: 'ACsub', team_whatsapp: 'whatsapp:+34634167405',
+    lead_template_sid: 'HXgog', lead_template_status: 'pending', twilio_from: 'whatsapp:+34624121930' };
+  assert.deepEqual(testing.leadAlertStatus(ENV, gog), { telegram: 'off', whatsapp: 'pending_template', any: false });
+  // Con su Telegram vinculado ya hay un canal vivo, aunque Meta siga con la plantilla
+  assert.equal(testing.leadAlertStatus(ENV, { ...gog, telegram_chat_id: '-100123' }).any, true);
+  // Plantilla aprobada: WhatsApp entrega
+  assert.deepEqual(testing.leadAlertStatus(ENV, { ...gog, lead_template_status: 'approved' }),
+    { telegram: 'off', whatsapp: 'on', any: true });
+  // Con SUBCUENTA no hay respaldo con los recursos del padre: dentro de ella no existen.
+  // Sin From ni plantilla propios, WhatsApp no entrega aunque el env los tenga.
+  assert.equal(testing.leadAlertStatus(ENV, { ...gog, lead_template_sid: null, twilio_from: null }).whatsapp, 'off');
+  // Un tenant SIN subcuenta sí cae a los recursos de Velai (así avisa velai/hiredatavision)
+  assert.equal(testing.leadAlertStatus(ENV, { telegram_chat_id: null, twilio_subaccount_sid: null,
+    team_whatsapp: 'whatsapp:+34600', lead_template_sid: null, lead_template_status: null, twilio_from: null }).whatsapp, 'on');
+  // Y sin destinatarios no hay aviso posible
+  assert.equal(testing.leadAlertStatus({ ...ENV, TEAM_WHATSAPP: null }, { telegram_chat_id: null,
+    twilio_subaccount_sid: null, team_whatsapp: null, lead_template_sid: null, lead_template_status: null, twilio_from: null }).any, false);
 });
 
 test('leads sin nombre: se guardan YA para no perderlos y se ENRIQUECEN cuando llega el nombre', async () => {

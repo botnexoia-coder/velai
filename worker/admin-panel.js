@@ -124,12 +124,23 @@ async function loadConexiones(){$('#tgLinkBox').hidden=true;
     +'<span class="chaddr">'+(c.address?esc(String(c.address).replace(/^whatsapp:/,'')):'—')+'</span>'+s[1]+'</div>'}).join('')}
  catch(e){$('#cxChannels').innerHTML='<div class="chrow"><i></i><span class="chaddr">'+esc(e.message)+'</span></div>'}
  // Tarjeta de WhatsApp (PR2): estado en lenguaje de negocio, nunca jerga de Twilio.
- try{const w=(await api('/api/admin/tenants/'+cxTenant+'/whatsapp')).whatsapp;
+ try{const wr=await api('/api/admin/tenants/'+cxTenant+'/whatsapp');const w=wr.whatsapp,al=wr.alerts;
+  const AL={on:['on','<span class="flag ok">recibe avisos</span>'],
+   pending_template:['bad','<span class="flag">WhatsApp está aprobando la plantilla</span>'],
+   off:['','<span class="muted">sin configurar</span>']};
+  $('#cxAlerts').innerHTML=al?['telegram','whatsapp'].map(k=>{const s=AL[al[k]]||AL.off;
+    return '<div class="chrow"><i class="'+s[0]+'"></i><span class="chk">'+(k==='telegram'?'Telegram':'WhatsApp')+'</span><span class="chaddr"></span>'+s[1]+'</div>'}).join('')
+   +(al.any?'':'<p class="as-ctx mt6">Ahora mismo <b>nadie recibe un aviso</b> cuando entra un lead: se guardan aquí en el panel, pero hay que entrar a mirarlos. Conecta tu Telegram arriba y los tendrás al momento — es lo único que no depende de que WhatsApp apruebe nada.</p>'):'';
   const st=w.sender_status;
   let msg;
   if(!st)msg='Sin conectar todavía. La conexión la hacemos juntos en una sesión corta — te avisaremos para agendarla.';
   else if(st==='ONLINE'&&!w.routed)msg='<span class="flag off">Tu número está dado de alta pero aún no recibe mensajes</span> <span class="muted">· lo dejamos atendido en unos minutos; no hace falta que hagas nada</span>';
-  else if(st==='ONLINE')msg='<span class="flag ok">Activo</span>'+(w.lead_template_status==='approved'?'':' <span class="muted">· los avisos de leads llegan por Telegram mientras WhatsApp aprueba la plantilla</span>');
+  // La coletilla prometía Telegram SIN comprobar que hubiera un Telegram vinculado. Con
+  // gogestión era mentira: los dos canales salían skipped y nadie veía sus leads. Ahora la
+  // promesa depende del estado real de entrega, y si no hay ninguno se dice claro.
+  else if(st==='ONLINE')msg='<span class="flag ok">Activo</span>'+(w.lead_template_status==='approved'?''
+   :(al&&al.telegram==='on'?' <span class="muted">· mientras WhatsApp aprueba la plantilla, los avisos de leads te llegan por Telegram</span>'
+    :' <span class="muted">· WhatsApp aún está aprobando la plantilla de avisos</span>'));
   else if(['CREATING','PENDING_VERIFICATION','VERIFYING'].indexOf(st)>=0)msg='<span class="flag">Verificando tu número con WhatsApp…</span>';
   else msg='<span class="flag off">Revisando un problema con tu número.</span>';
   $('#waState').innerHTML=msg+(w.twilio_from?' <span class="muted">· '+esc(String(w.twilio_from).replace('whatsapp:',''))+'</span>':'');
