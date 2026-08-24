@@ -441,3 +441,49 @@ vetada al rol cliente (lleva números y nombres de otros); aquí solo su `:id` y
 input de dentro solo queda desnudo con `class="q"` (`.search input.q`). El buscador de Canales nació sin
 ella y salía una caja dentro de la caja. Hay test que recorre TODOS los `<label class="search">` del panel
 y exige la clase, para que el siguiente buscador no repita el fleco. Suite 107/107.
+
+## Calidad de los leads: nombre capturado y asunto visible (2026-08-24, sin MD previo)
+
+**Lo que Juan vio:** leads llegando «sin nombre y sin tema». Al mirar D1, dos fallos DISTINTOS
+escondidos bajo el mismo síntoma.
+
+**El «sin tema» era puro fallo de visualización.** `need` y `context` se guardan desde la migración
+0001 y el resumen de Haiku los llena bien en todos los leads reales (`"obtener certificado digital
+FNMT"` / `"cliente venezolano interesado en trámites de conducción y gestión digital en España"`).
+El modal de lead nunca los pintaba: su array de tarjetas listaba Sector, Canal, Mensajes/día,
+Puntuación, Nota y Página — justo los dos campos que dicen de qué iba la conversación, fuera. Ahora
+hay un bloque **«Qué buscaba»** arriba del todo (borde naranja, `need` grande y `context` debajo), el
+título cae al asunto cuando no hay nombre (`Sin nombre · obtener certificado FNMT`), la columna
+`Sector` del listado pasa a **Asunto** (`need || sector`, porque sector viene vacío en casi todo lead
+de cliente: es un concepto del embudo de Velai, no de una gestoría) y el CSV gana `need`/`context`
+DELANTE de sector — es de donde trabaja quien llama.
+
+**El «sin nombre» sí era de captura, y la causa está en el reparto de prompts.** La regla «antes de
+pedir el WhatsApp asegúrate de saber el nombre» vivía en el `SYSTEM` de Velai, y el prompt efectivo
+de un tenant es `system_prompt` de SU fila + `GUARDRAILS` de código: todo cliente con prompt propio
+(gogestión, dialogos) nunca recibió esa instrucción. La regla se mudó a **GUARDRAILS**, que es código
+y alcanza a todos los tenants y a los dos canales — pide el nombre una sola vez cuando hay interés
+real, no insiste si la persona no quiere darlo y NUNCA condiciona la ayuda a obtenerlo.
+
+**Y la guarda de almacenamiento, rediseñada.** El canal WhatsApp exigía `sector || need`; el canal
+**web no tenía guarda ninguna** y guardaba el resumen tal cual, vacíos incluidos. Diferir la captura
+hasta tener el nombre era la solución evidente y es **errónea**: si la conversación acaba antes, el
+lead se pierde — y un teléfono con una conversación real siempre es un lead. El diseño que quedó:
+se guarda YA (el equipo se entera al momento) y se **ENRIQUECE** en los turnos siguientes.
+`persistLead` en conflicto ya no se limita a devolver el id existente: rellena los huecos con
+`COALESCE(col,?)`, que nunca pisa un valor que ya está — puede haberlo corregido una persona en el
+panel. La marca de KV cierra la captura solo cuando el nombre llega o cuando se agotan
+`LEAD_PATIENCE = 8` turnos (y entonces se registra `lead_sin_nombre`), así que no se gastan resúmenes
+de Haiku indefinidamente. Los dos canales comparten ahora `leadFromSummary` + `leadCaptureDone`.
+
+**De paso, el SUMMARY_PROMPT** decía «conversación entre un cliente y Vai (asistente de Velai)» aunque
+resume conversaciones de TODOS los tenants: ahora habla del «asistente de un negocio», marca `nombre`
+como el campo más importante (buscándolo en toda la conversación, incluso dicho de pasada) y aclara
+que `negocio` es el negocio DE LA PERSONA — no el que la atiende — o null si es un particular.
+
+**Hallazgo colateral, NO resuelto** (ver TAREAS §2): los leads de gogestión y dialogos se capturan pero
+**no llegan a nadie** — `telegram_not_configured` (sin grupo vinculado) + `template_not_approved`
+(plantilla `pending` en Meta). La tarjeta de Conexiones promete que «los avisos llegan por Telegram
+mientras WhatsApp aprueba la plantilla», y con Telegram sin vincular esa frase es falsa.
+
+Suite 109/109.

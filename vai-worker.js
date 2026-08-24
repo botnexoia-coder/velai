@@ -59,7 +59,14 @@ plazos ni disponibilidad que no figuren arriba. No prometas canales ni servicios
 listados. Responde siempre en el idioma del cliente.
 Si la persona pide explícitamente hablar con alguien del equipo (una persona, un humano, que
 le llamen), responde con normalidad confirmando que avisas al equipo y termina tu respuesta con
-el marcador [[HUMANO]] — SOLO en ese caso, y solo al final.`;
+el marcador [[HUMANO]] — SOLO en ese caso, y solo al final.
+
+== EL NOMBRE DE LA PERSONA ==
+En cuanto la conversación pase de una duda suelta a interés real (pide precio, cita, presupuesto,
+disponibilidad, o datos para decidir), pregúntale su nombre con naturalidad y UNA sola vez, antes
+de cerrar la conversación: un contacto sin nombre no le sirve a nadie del equipo que tenga que
+atenderlo. Si ya te lo ha dicho, no lo vuelvas a pedir. Si no quiere darlo, sigue atendiendo con
+normalidad y no insistas. Nunca condiciones la ayuda a que te dé el nombre.`;
 
 // ── Personas de DEMO por sector ──
 // El prospecto "juega" a ser cliente de un negocio ficticio y experimenta a
@@ -144,7 +151,11 @@ Tu trabajo: atender al interesado como lo haría la agencia real — con natural
 Responde siempre en español. Mensajes cortos.`
 };
 
-const SUMMARY_PROMPT = `Analiza esta conversación entre un cliente y Vai (asistente de Velai). Extrae los datos del lead.
+const SUMMARY_PROMPT = `Analiza esta conversación entre una persona y el asistente de un negocio. Extrae los datos del contacto.
+
+El campo más importante es «nombre»: búscalo en TODA la conversación, incluso si la persona lo dijo
+de pasada ("soy Ana", "me llamo Ana", "Ana, encantada") o al firmar un mensaje. Solo si de verdad no
+aparece en ningún momento, ponlo a null — no lo inventes ni uses el nombre del negocio.
 
 Responde ÚNICAMENTE con un JSON válido, sin texto adicional antes ni después. Usa null (sin comillas) para campos desconocidos.
 
@@ -153,7 +164,8 @@ Ejemplo de respuesta:
 
 Campos:
 - nombre: nombre propio del cliente
-- negocio: tipo o nombre del negocio
+- negocio: tipo o nombre del negocio de la persona, SOLO si ella tiene un negocio (si es un
+  particular preguntando por un servicio, null — no pongas aquí el negocio que le atiende)
 - necesidad: problema principal (máx 10 palabras)
 - contexto: detalle relevante adicional (máx 15 palabras)`;
 

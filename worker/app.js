@@ -956,7 +956,17 @@ async function persistLead(env, input) {
     const existing = await env.DB.prepare('SELECT id FROM leads WHERE request_id = ? OR (conversation_id = ? AND whatsapp_normalized = ?) LIMIT 1')
       .bind(input.requestId, input.conversationId || '', input.phone || '').first();
     if (!existing) throw error;
-    return { id: existing.id, created: false };
+    // Recaptura sobre un lead YA guardado: rellena solo los HUECOS. El motivo se sabe al
+    // segundo mensaje pero el nombre llega más tarde, y antes la fila se quedaba «sin
+    // nombre» para siempre porque el conflicto no actualizaba nada. COALESCE es la regla:
+    // un valor que ya existe NO se pisa — puede haberlo corregido una persona en el panel.
+    const fill = [['name', input.name], ['sector', input.sector], ['need', input.need], ['context', input.context]]
+      .filter(([, val]) => val);
+    if (fill.length) {
+      await env.DB.prepare(`UPDATE leads SET ${fill.map(([col]) => `${col}=COALESCE(${col},?)`).join(',')}, updated_at=? WHERE id=?`)
+        .bind(...fill.map(([, val]) => val), now, existing.id).run();
+    }
+    return { id: existing.id, created: false, enriched: fill.length > 0 };
   }
 }
 
@@ -1228,23 +1238,48 @@ async function summarizeLead(config, env, tenant, messages) {
   } catch (_) { return {}; }
 }
 
+// Un lead sin NOMBRE no le sirve a quien tiene que llamar, y archivarlo en el primer turno
+// útil es lo que llenó el panel de «Lead sin nombre» (2026-08-24). Pero DIFERIR la captura
+// perdería el lead si la conversación acaba antes de dar el nombre — y un teléfono con una
+// conversación real siempre es un lead. Así que: se guarda ya (el equipo se entera al
+// momento) y se ENRIQUECE en los turnos siguientes, hasta que llegue el nombre o se agote
+// la paciencia. La marca de KV cierra la captura solo cuando ya no hay nada que ganar.
+const LEAD_PATIENCE = 8;
+function leadFromSummary(summary) {
+  return {
+    name: clean(summary.nombre, 100), sector: clean(summary.negocio, 100),
+    need: clean(summary.necesidad, 200), context: clean(summary.contexto, 300),
+  };
+}
+// Cerrar la captura: con nombre no hay más que buscar; sin él, se reintenta en cada mensaje
+// hasta LEAD_PATIENCE turnos — y ahí se deja de gastar resúmenes y se registra el hueco.
+function leadCaptureDone(env, tenant, fields, userTurns) {
+  if (fields.name) return true;
+  if (userTurns < LEAD_PATIENCE) return false;
+  console.log(JSON.stringify({ level: 'warn', code: 'lead_sin_nombre', tenant: tenant.slug, turns: userTurns }));
+  return true;
+}
+
 async function captureChatLead(config, env, ctx, tenant, body, phone, messages) {
   // Mismas guardas que el canal WhatsApp: una captura por conversación (marca en KV),
   // mínimo 2 turnos del usuario. Claves namespaceadas por tenant: dos clientes con el
   // mismo usuario final no se pisan el UNIQUE(request_id).
   const mark = `lead:web:${tenant.id}:${body.conversationId}`;
   if (env.KV && await env.KV.get(mark)) return;
-  if (messages.filter((m) => m.role === 'user').length < 2) return;
+  const userTurns = messages.filter((m) => m.role === 'user').length;
+  if (userTurns < 2) return;
   const summary = await summarizeLead(config, env, tenant, messages);
+  const fields = leadFromSummary(summary);
+  // Este canal NO tenía guarda: guardaba el resumen tal cual, vacíos incluidos. Sin motivo
+  // ni negocio no hay nada que contarle a nadie — se espera al siguiente mensaje.
+  if (!fields.need && !fields.sector) return;
   const result = await storeLead(env, ctx, {
     requestId: `chat:${tenant.id}:${body.conversationId}:${phone}`, conversationId: body.conversationId,
     tenantId: tenant.id, tenantIsDefault: tenant.slug === defaultTenantSlug(env),
-    source: 'chat web', name: clean(summary.nombre, 100), whatsapp: phone, phone,
-    sector: clean(summary.negocio, 100), need: clean(summary.necesidad, 200),
-    context: clean(summary.contexto, 300), pageUrl: clean(body.pageUrl, 500),
-    utm: safeUtm(body.utm), score: null,
+    source: 'chat web', whatsapp: phone, phone, ...fields,
+    pageUrl: clean(body.pageUrl, 500), utm: safeUtm(body.utm), score: null,
   });
-  if (result.ok && env.KV) await env.KV.put(mark, '1', { expirationTtl: 30 * 86400 });
+  if (result.ok && env.KV && leadCaptureDone(env, tenant, fields, userTurns)) await env.KV.put(mark, '1', { expirationTtl: 30 * 86400 });
 }
 
 // El canal WhatsApp también captura leads (regresión corregida): el teléfono es el
@@ -1255,18 +1290,17 @@ async function captureChatLead(config, env, ctx, tenant, body, phone, messages) 
 async function captureWhatsAppLead(config, env, ctx, tenant, from, phone, messages) {
   const mark = `lead:wa:${tenant.id}:${from}`;
   if (env.KV && await env.KV.get(mark)) return;
-  if (messages.filter((m) => m.role === 'user').length < 2) return;
+  const userTurns = messages.filter((m) => m.role === 'user').length;
+  if (userTurns < 2) return;
   const summary = await summarizeLead(config, env, tenant, messages);
-  const sector = clean(summary.negocio, 100);
-  const need = clean(summary.necesidad, 200);
-  if (!sector && !need) return;
+  const fields = leadFromSummary(summary);
+  if (!fields.need && !fields.sector) return;
   const result = await storeLead(env, ctx, {
     requestId: `wa:${tenant.id}:${phone}`, source: 'whatsapp',
     tenantId: tenant.id, tenantIsDefault: tenant.slug === defaultTenantSlug(env),
-    name: clean(summary.nombre, 100), whatsapp: from.replace(/^whatsapp:/i, ''), phone,
-    sector, need, context: clean(summary.contexto, 300), score: null,
+    whatsapp: from.replace(/^whatsapp:/i, ''), phone, ...fields, score: null,
   });
-  if (result.ok && env.KV) await env.KV.put(mark, '1', { expirationTtl: 30 * 86400 });
+  if (result.ok && env.KV && leadCaptureDone(env, tenant, fields, userTurns)) await env.KV.put(mark, '1', { expirationTtl: 30 * 86400 });
 }
 
 // ── Calendario por tenant (SPEC-CALENDARIO fase 1, solo Google) ──────────────
@@ -2279,10 +2313,12 @@ async function adminRouter(request, env, ctx, path, url, config, scope) {
   }
   if (path === '/api/admin/leads/export.csv' && request.method === 'GET') {
     const filters = leadFilters(url);
-    const rows = (await env.DB.prepare(`SELECT l.created_at,l.status,t.name AS tenant_name,l.source,l.name,l.whatsapp,l.sector,l.messages_per_day,l.channel,l.score,l.note,l.page_url FROM leads l LEFT JOIN tenants t ON t.id=l.tenant_id WHERE ${filters.sql}${sc.sql} ORDER BY l.created_at DESC LIMIT 5000`).bind(...filters.values, ...sc.args).all()).results;
+    const rows = (await env.DB.prepare(`SELECT l.created_at,l.status,t.name AS tenant_name,l.source,l.name,l.whatsapp,l.need,l.context,l.sector,l.messages_per_day,l.channel,l.score,l.note,l.page_url FROM leads l LEFT JOIN tenants t ON t.id=l.tenant_id WHERE ${filters.sql}${sc.sql} ORDER BY l.created_at DESC LIMIT 5000`).bind(...filters.values, ...sc.args).all()).results;
+    // need/context van DELANTE de sector: es lo que lee quien va a llamar, y sector viene
+    // vacío en casi todo lead de cliente (es un concepto del embudo de Velai).
     const keys = scope.role === 'velai'
-      ? ['created_at','status','tenant_name','source','name','whatsapp','sector','messages_per_day','channel','score','note','page_url']
-      : ['created_at','status','source','name','whatsapp','sector','messages_per_day','channel','score','note','page_url'];
+      ? ['created_at','status','tenant_name','source','name','whatsapp','need','context','sector','messages_per_day','channel','score','note','page_url']
+      : ['created_at','status','source','name','whatsapp','need','context','sector','messages_per_day','channel','score','note','page_url'];
     const csv = [keys.join(','), ...rows.map((row) => keys.map((key) => csvCell(row[key])).join(','))].join('\r\n');
     return new Response('\uFEFF' + csv, { headers: { 'Content-Type': 'text/csv; charset=utf-8', 'Content-Disposition': 'attachment; filename="velai-leads.csv"', 'Cache-Control': 'no-store' } });
   }
@@ -3308,4 +3344,4 @@ export function createWorker(config) {
   };
 }
 
-export const testing = { clean, errorResponseParts, tenantByAddress, syncPrimaryChannel, assertChannelFree, normalizePhone, extractPhone, safeUtm, publicCors, validTwilioSignature, callAnthropic, callAnthropicRaw, runToolLoop, calendarExecutor, calendarSystem, tenantCalendar, validCalendarDate, availableSlots, handleCalendarCallback, calendarCallbackFor, sendTwilioText, timingSafeEqual, telegramBotUsername, handleTelegramWebhook, sendTelegramText, tenantTelegramToken, telegramThreadFor, registerTelegramTopic, csvCell, expiryDate, leadFilters, isDemoKey, templateVar, leadTemplateVariables, readJson, deliver, drainQueuedLeads, verifyTurnstile, systemFor, validateTenant, invalidateTenantCache, tenantWriteError, assertNotActivePending, tenantChannelSummary, channelsForScope, handleProvision, pollProvisioning, fillSeries, resolveScope, scopeClause, clienteAllowed, adminRouter, recordAuthFailure, handleAdmin, handleWidgetBoot, allowedOrigins, envOrigins, syncPanelGate, envAdmins, syncAdminGate, getSetting, setSetting, withCfToken };
+export const testing = { clean, persistLead, captureWhatsAppLead, leadFromSummary, leadCaptureDone, errorResponseParts, tenantByAddress, syncPrimaryChannel, assertChannelFree, normalizePhone, extractPhone, safeUtm, publicCors, validTwilioSignature, callAnthropic, callAnthropicRaw, runToolLoop, calendarExecutor, calendarSystem, tenantCalendar, validCalendarDate, availableSlots, handleCalendarCallback, calendarCallbackFor, sendTwilioText, timingSafeEqual, telegramBotUsername, handleTelegramWebhook, sendTelegramText, tenantTelegramToken, telegramThreadFor, registerTelegramTopic, csvCell, expiryDate, leadFilters, isDemoKey, templateVar, leadTemplateVariables, readJson, deliver, drainQueuedLeads, verifyTurnstile, systemFor, validateTenant, invalidateTenantCache, tenantWriteError, assertNotActivePending, tenantChannelSummary, channelsForScope, handleProvision, pollProvisioning, fillSeries, resolveScope, scopeClause, clienteAllowed, adminRouter, recordAuthFailure, handleAdmin, handleWidgetBoot, allowedOrigins, envOrigins, syncPanelGate, envAdmins, syncAdminGate, getSetting, setSetting, withCfToken };

@@ -191,6 +191,9 @@ dialog::backdrop{background:rgba(5,3,6,.78);backdrop-filter:blur(3px)}
 @media(max-width:1000px){.marca{flex-direction:column}.marcaprev{width:100%;position:static}}
 .grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px}
 .card.cardwide{grid-column:1/-1}
+.asunto{border-left:3px solid var(--orange)}
+.asunto .as-need{margin:2px 0 0;font-size:15px;line-height:1.4}
+.asunto .as-ctx{margin:5px 0 0;color:var(--muted);font-size:13px;line-height:1.45}
 .chlist{display:grid;gap:6px;margin:8px 0 2px}
 .chrow{display:flex;align-items:center;gap:10px;padding:8px 11px;background:var(--bg3);border:1px solid var(--border);border-radius:8px}
 .chrow i{width:8px;height:8px;border-radius:50%;background:rgba(var(--ink),.20);flex-shrink:0}
@@ -379,7 +382,7 @@ body.cliente .cliente-only{display:flex}
 <div class="chartcard"><b>Leads por día · 14 días</b><div id="chart"></div><div class="chartlabels"><span id="chartFrom"></span><span id="chartTo"></span></div></div>
 <div id="escalations"></div>
 <form class="filters" id="filters"><label class="search"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"></circle><path d="m21 21-4.3-4.3"></path></svg><input name="q" class="q" placeholder="Buscar nombre, teléfono, sector…"></label><span class="sel"><select name="tenant" id="tenantFilter"><option value="">Todos los clientes</option></select></span><span class="sel"><select name="status"><option value="">Todos los estados</option><option>new</option><option>contacted</option><option>qualified</option><option>won</option><option>lost</option><option>spam</option></select></span><span class="sel"><select name="notification"><option value="">Todos los avisos</option><option>pending</option><option>sent</option><option>failed</option><option>skipped</option></select></span><input name="source" placeholder="Fuente"><input name="from" type="date" title="Desde"><input name="to" type="date" title="Hasta"><button class="btn">Filtrar</button><span id="resultCount"></span></form>
-<div id="message"></div><div class="table"><table><thead><tr><th>Fecha</th><th>Cliente</th><th>Estado</th><th>Nombre</th><th>WhatsApp</th><th>Sector</th><th>Fuente</th><th>Avisos</th></tr></thead><tbody id="rows"></tbody></table></div>
+<div id="message"></div><div class="table"><table><thead><tr><th>Fecha</th><th>Cliente</th><th>Estado</th><th>Nombre</th><th>WhatsApp</th><th>Asunto</th><th>Fuente</th><th>Avisos</th></tr></thead><tbody id="rows"></tbody></table></div>
 <div class="legend"><span><i class="d-new"></i>nuevo</span><span><i class="d-contacted"></i>contactado</span><span><i class="d-qualified"></i>cualificado</span><span><i class="d-won"></i>ganado</span><span><i class="d-lost"></i>perdido</span></div>
 <div class="pager"><button class="btn alt" id="more" hidden>Cargar más</button></div></div>
 <div id="viewTenants" hidden>

@@ -2351,6 +2351,76 @@ test('la dirección del canal se DERIVA: alta prospecto, promoción a web al act
   assert.deepEqual(sum2.find((c) => c.kind === 'whatsapp'), { kind: 'whatsapp', address: 'whatsapp:+34624121930', state: 'live' });
 });
 
+test('leads sin nombre: se guardan YA para no perderlos y se ENRIQUECEN cuando llega el nombre', async () => {
+  // (a) recaptura sobre un lead ya guardado: rellena huecos y NO pisa lo que ya hay.
+  //     Antes el conflicto no actualizaba nada y la fila se quedaba «sin nombre» para siempre.
+  const ups = [];
+  let clash = true;
+  const env = { DB: {
+    batch: async () => { if (clash) throw new Error('UNIQUE constraint failed: leads.request_id'); return []; },
+    prepare: (sql) => ({ bind: (...args) => ({
+      first: async () => (sql.includes('SELECT id FROM leads') ? { id: 'lead-1' } : null),
+      run: async () => { ups.push({ sql, args }); return { meta: { changes: 1 } }; },
+      all: async () => ({ results: [] }) }) }) } };
+  const out = await testing.persistLead(env, { requestId: 'wa:t:1', source: 'whatsapp', phone: '+34600',
+    name: 'Ana', need: 'canje de carnet', context: 'venezolana', sector: null });
+  assert.deepEqual([out.id, out.created, out.enriched], ['lead-1', false, true]);
+  const up = ups.find((u) => u.sql.includes('UPDATE leads SET'));
+  assert.ok(up, 'la recaptura actualiza la fila existente');
+  // COALESCE: lo que ya tiene valor NO se pisa — puede haberlo corregido una persona
+  assert.ok(/name=COALESCE\(name,\?\)/.test(up.sql) && /need=COALESCE\(need,\?\)/.test(up.sql));
+  assert.ok(!up.sql.includes('sector='), 'un campo vacío en el resumen no entra en el UPDATE');
+  assert.ok(up.args.includes('Ana') && up.args.includes('lead-1'));
+
+  // (b) la guarda: sin motivo NI negocio no hay lead que contar
+  assert.deepEqual(testing.leadFromSummary({ nombre: ' Ana ', necesidad: 'x'.repeat(300) }).name, 'Ana');
+  const tenant = { id: 't', slug: 'gog' };
+  // (c) la marca de KV cierra la captura solo cuando ya no hay nada que ganar: con nombre,
+  //     sí; sin nombre se reintenta en cada mensaje hasta agotar la paciencia.
+  assert.equal(testing.leadCaptureDone(env, tenant, { name: 'Ana' }, 2), true);
+  assert.equal(testing.leadCaptureDone(env, tenant, { name: null }, 2), false, 'sin nombre: se reintenta');
+  assert.equal(testing.leadCaptureDone(env, tenant, { name: null }, 8), true, 'agotada la paciencia, se deja de gastar resúmenes');
+});
+
+test('captura de lead: los DOS canales exigen un asunto y reintentan mientras falte el nombre', async () => {
+  const realFetch = globalThis.fetch;
+  let summary = {};
+  globalThis.fetch = async (url) => (String(url).includes('anthropic')
+    ? new Response(JSON.stringify({ content: [{ type: 'text', text: JSON.stringify(summary) }] }), { status: 200 })
+    : new Response('{}', { status: 200 }));
+  try {
+    const kv = new Map();
+    const stored = [];
+    const env = { ANTHROPIC_API_KEY: 'k', DB: {
+      batch: async (st) => { stored.push(st); return []; },
+      prepare: () => ({ bind: () => ({ first: async () => null, run: async () => ({ meta: { changes: 1 } }), all: async () => ({ results: [] }) }) }) },
+      KV: { async get(k) { return kv.get(k) ?? null; }, async put(k, v) { kv.set(k, v); }, async delete(k) { kv.delete(k); } } };
+    const ctx = { waitUntil() {} };
+    const tenant = { id: 't1', slug: 'gog' };
+    const turns = (n) => Array.from({ length: n }, () => [{ role: 'user', content: 'hola' }, { role: 'assistant', content: 'hey' }]).flat();
+    const cap = () => testing.captureWhatsAppLead({ SUMMARY_PROMPT: 'p' }, env, ctx, tenant, 'whatsapp:+34600', '+34600', turns(2));
+    const marked = () => kv.has('lead:wa:t1:whatsapp:+34600');
+
+    // Sin motivo ni negocio: no se guarda NADA (el canal web no tenía esta guarda)
+    summary = { nombre: null, negocio: null, necesidad: null, contexto: null };
+    await cap();
+    assert.equal(stored.length, 0, 'un resumen vacío no crea lead');
+    assert.equal(marked(), false, 'y no se marca: el siguiente mensaje reintenta');
+
+    // Con motivo pero SIN nombre: se guarda (no se pierde) y NO se cierra la captura
+    summary = { nombre: null, necesidad: 'obtener certificado FNMT', contexto: 'trámites' };
+    await cap();
+    assert.equal(stored.length, 1, 'el lead se guarda ya: un teléfono con conversación real no se pierde');
+    assert.equal(marked(), false, 'sigue abierto para enriquecerlo con el nombre');
+
+    // Cuando el nombre llega, se guarda de nuevo (enriquece) y ahí sí se cierra
+    summary = { nombre: 'Ana', necesidad: 'obtener certificado FNMT', contexto: 'trámites' };
+    await cap();
+    assert.equal(stored.length, 2);
+    assert.equal(marked(), true, 'con nombre ya no hay nada que ganar: captura cerrada');
+  } finally { globalThis.fetch = realFetch; }
+});
+
 test('canales del cliente: ve los suyos sin diagnóstico, el ajeno es 404, y la vista GLOBAL sigue siendo de Velai', async () => {
   const TID = '00000000-0000-4000-8000-0000000000d1';
   // Su WhatsApp está de alta en Twilio pero SIN fila que lo enrute: el peor caso.

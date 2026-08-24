@@ -35,7 +35,7 @@ async function loadStats(){try{const s=await api('/api/admin/stats');
  catch(e){/* las métricas no bloquean el listado */}}
 async function load(append=false){try{const p=params();if(append&&cursor)p.set('cursor',cursor);const d=await api('/api/admin/leads?'+p);if(!append){$('#rows').innerHTML='';loadedCount=0}
  if(!d.leads.length&&!append)$('#rows').innerHTML='<tr><td colspan="8" class="empty">No hay leads con estos filtros.</td></tr>';
- for(const l of d.leads)$('#rows').insertAdjacentHTML('beforeend','<tr data-id="'+l.id+'"><td>'+fmt(l.created_at)+'</td><td>'+tenantChip(l.tenant_id,l.tenant_name)+'</td><td>'+statusPill(l.status)+'</td><td>'+esc(l.name||'—')+'</td><td class="tel">'+esc(l.whatsapp||'—')+'</td><td>'+esc(l.sector||'—')+'</td><td>'+esc(l.source)+'</td><td>'+nbChips(l.notification_summary)+'</td></tr>');
+ for(const l of d.leads)$('#rows').insertAdjacentHTML('beforeend','<tr data-id="'+l.id+'"><td>'+fmt(l.created_at)+'</td><td>'+tenantChip(l.tenant_id,l.tenant_name)+'</td><td>'+statusPill(l.status)+'</td><td>'+esc(l.name||'—')+'</td><td class="tel">'+esc(l.whatsapp||'—')+'</td><td>'+esc(l.need||l.sector||'—')+'</td><td>'+esc(l.source)+'</td><td>'+nbChips(l.notification_summary)+'</td></tr>');
  paint($('#rows'));
  loadedCount+=d.leads.length;cursor=d.nextCursor;$('#more').hidden=!cursor;
  $('#resultCount').textContent=loadedCount+(cursor?'+':'')+' resultado'+((loadedCount===1&&!cursor)?'':'s');
@@ -58,10 +58,15 @@ $('#themeBtn').onclick=()=>applyTheme(!document.body.classList.contains('dark'))
 $('#filters').onsubmit=e=>{e.preventDefault();cursor=null;load()};$('#more').onclick=()=>load(true);$('#export').onclick=()=>location.href='/api/admin/leads/export.csv?'+params();$('#close').onclick=()=>$('#detail').close();
 $('#rows').onclick=e=>{const tr=e.target.closest('[data-id]');if(tr)openLead(tr.dataset.id)};
 async function openLead(id){try{const d=await api('/api/admin/leads/'+id);current=d.lead;const l=d.lead;
- $('#detailTitle').textContent=l.name||'Lead sin nombre';
+ $('#detailTitle').textContent=l.name||(l.need?'Sin nombre · '+l.need:'Lead sin nombre');
  // Contexto arriba en píldoras; abajo SOLO las tarjetas con dato (nada de parrilla de guiones).
  const meta='<div class="lead-meta">'+statusPill(l.status)+tenantChip(l.tenant_id,l.tenant_name)+'<span class="chip">'+fmt(l.created_at)+'</span><span class="chip">fuente: '+esc(l.source)+'</span></div>';
  const waCard='<div class="card"><b>WhatsApp</b><span class="tel">'+esc(l.whatsapp||'—')+'</span></div>';
+ // Lo PRIMERO que necesita quien atiende: qué buscaba la persona. Se guardaba en D1 desde
+ // el principio (need/context del resumen) y no se pintaba en ningún sitio.
+ const asunto=(l.need||l.context)?'<div class="card asunto mt12"><b>Qué buscaba</b>'
+  +(l.need?'<p class="as-need">'+esc(l.need)+'</p>':'')
+  +(l.context?'<p class="as-ctx">'+esc(l.context)+'</p>':'')+'</div>':'';
  const cards=[['Sector',l.sector],['Canal',l.channel],['Mensajes/día',l.messages_per_day],['Puntuación',l.score],['Nota del lead',l.note],['Página',l.page_url]]
   .filter(x=>x[1]!=null&&x[1]!=='').map(x=>'<div class="card"><b>'+x[0]+'</b>'+esc(x[1])+'</div>').join('');
  const options=['new','contacted','qualified','won','lost','spam'].map(s=>'<option value="'+s+'"'+(s===l.status?' selected':'')+'>'+ST_LABEL[s]+'</option>').join('');
@@ -70,7 +75,7 @@ async function openLead(id){try{const d=await api('/api/admin/leads/'+id);curren
  const events=d.events.map(n=>'<article><b>'+esc(n.event_type)+'</b><div>'+esc(n.detail||'')+'</div><small class="muted">'+fmt(n.created_at)+' · '+esc(n.actor_email)+'</small></article>').join('');
  const acts=notices+notes+events;
  const velaiBtns=ME.role==='velai'?'<button class="btn alt" id="retry">Reintentar avisos</button><button class="btn bad" id="delete">Borrar lead</button>':'';
- $('#detailBody').innerHTML=meta+'<div class="grid mt12">'+waCard+cards+'</div>'
+ $('#detailBody').innerHTML=meta+asunto+'<div class="grid mt12">'+waCard+cards+'</div>'
  +'<div class="actions"><span class="sel"><select id="status">'+options+'</select></span><button class="btn" id="saveStatus">Guardar estado</button><span class="grow"></span>'+velaiBtns+'</div>'
  +'<div class="card"><b>Añadir nota</b><div class="note mt6"><textarea id="note" rows="2" placeholder="Escribe la nota…"></textarea><button class="btn" id="addNote">Añadir</button></div></div>'
  +'<div class="timeline"><h3>Actividad</h3>'+(acts||'<p class="muted">Sin actividad todavía: ni avisos, ni notas, ni cambios.</p>')+'</div>';
