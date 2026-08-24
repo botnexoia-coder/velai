@@ -190,6 +190,15 @@ dialog::backdrop{background:rgba(5,3,6,.78);backdrop-filter:blur(3px)}
 .marcaprev{width:320px;flex-shrink:0;position:sticky;top:118px}
 @media(max-width:1000px){.marca{flex-direction:column}.marcaprev{width:100%;position:static}}
 .grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px}
+.card.cardwide{grid-column:1/-1}
+.chlist{display:grid;gap:6px;margin:8px 0 2px}
+.chrow{display:flex;align-items:center;gap:10px;padding:8px 11px;background:var(--bg3);border:1px solid var(--border);border-radius:8px}
+.chrow i{width:8px;height:8px;border-radius:50%;background:rgba(var(--ink),.20);flex-shrink:0}
+.chrow i.on{background:var(--ok)}
+.chrow i.bad{background:var(--bad)}
+.chrow .chk{min-width:92px;font-weight:600}
+.chrow .chaddr{color:var(--muted);flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+@media(max-width:560px){.chrow{flex-wrap:wrap;gap:6px}.chrow .chaddr{flex-basis:100%}}
 .card{background:var(--surface);border:1px solid var(--border);border-radius:calc(var(--r) - 4px);padding:14px 16px}
 .card b{display:block;color:var(--muted);font-size:11px;font-weight:500;letter-spacing:.07em;text-transform:uppercase;margin-bottom:5px}
 .card input,.card textarea,.card select{width:100%;background:var(--bg3);color:var(--white);border:1px solid rgba(var(--ink),.10);border-radius:8px;padding:9px 12px;margin-top:4px}
@@ -524,7 +533,7 @@ body.cliente .cliente-only{display:flex}
 <div class="grid">
 <div class="card"><b>Nombre</b><input id="tName" placeholder="Barbería López"><small class="muted field-err" data-f="name"></small></div>
 <div class="card"><b>Slug</b><input id="tSlug" placeholder="barberia-lopez"><small class="muted field-err" data-f="slug"></small></div>
-<div class="card"><b>Canal (To de Twilio)</b><input id="tAddress" placeholder="whatsapp:+34910000000 · messenger:12345 · web:mi-cliente · pending:mi-cliente"><small class="muted field-err" data-f="channel_address"></small></div>
+<div class="card cardwide"><b>Canales del cliente</b><div class="chlist" id="tChannels"></div><small class="muted">Se leen del enrutado real, no se escriben: cada canal se da de alta en Conexiones. La web funciona desde el primer d&iacute;a por el slug. <span class="field-err" data-f="channel_address"></span></small></div>
 <div class="card"><b>Twilio From</b><input id="tFrom" placeholder="whatsapp:+34910000000"><small class="muted field-err" data-f="twilio_from"></small></div>
 <div class="card"><b>Equipo WhatsApp (coma)</b><input id="tTeam" placeholder="whatsapp:+34600111222,whatsapp:+34600333444"><small class="muted field-err" data-f="team_whatsapp"></small></div>
 <div class="card"><b>Telegram chat_id</b><input id="tChat" placeholder="-100123456789"><small class="muted field-err" data-f="telegram_chat_id"></small></div>

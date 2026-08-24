@@ -609,6 +609,30 @@ async function tenantTokenColumn(env, tenantId, body) {
 
 // Activar un prospecto sin ponerle antes su dirección real dejaría una fila "activa"
 // que no atiende a nadie y que tapa el hueco del semáforo. Se rechaza explícitamente.
+// Los canales de un cliente, LEÍDOS de donde de verdad viven: la ficha ya no los
+// declara en una caja de texto. Web entra por slug y no tiene dirección que enrutar;
+// whatsapp y messenger viven en tenant_channels (con el canal primario como respaldo
+// histórico); telegram en su propia columna. Un solo sitio que conteste «qué canales
+// tiene este cliente» y que no pueda discrepar del enrutado real.
+async function tenantChannelSummary(env, tenant) {
+  const rows = (await env.DB.prepare('SELECT address, kind FROM tenant_channels WHERE tenant_id=?').bind(tenant.id).all()).results || [];
+  const byKind = {};
+  for (const r of rows) byKind[r.kind] = r.address;
+  const primary = /^(whatsapp|messenger):/.exec(String(tenant.channel_address || ''));
+  if (primary && !byKind[primary[1]]) byKind[primary[1]] = tenant.channel_address; // enruta por el fallback
+  const off = (kind) => ({ kind, address: null, state: 'off' });
+  const on = (kind, address) => ({ kind, address, state: tenant.active ? 'live' : 'inactive' });
+  const channels = [{ kind: 'web', address: tenant.slug, state: tenant.active ? 'live' : 'inactive' }];
+  // `unrouted` es el caso gogestion: sender propio en Twilio y ninguna fila que lo
+  // enrute. Aquí se ve en la ficha, no solo en la vista global de Canales.
+  if (byKind.whatsapp) channels.push(on('whatsapp', byKind.whatsapp));
+  else if (tenant.sender_sid && tenant.twilio_from) channels.push({ kind: 'whatsapp', address: tenant.twilio_from, state: 'unrouted' });
+  else channels.push(off('whatsapp'));
+  channels.push(tenant.telegram_chat_id ? on('telegram', String(tenant.telegram_chat_id)) : off('telegram'));
+  channels.push(byKind.messenger ? on('messenger', byKind.messenger) : off('messenger'));
+  return channels;
+}
+
 function assertNotActivePending(finalAddress, finalActive) {
   if (Number(finalActive) === 1 && PENDING_RE.test(String(finalAddress))) {
     throw new HttpError(400, 'pending_tenant_cannot_be_active');
@@ -2265,6 +2289,17 @@ async function adminRouter(request, env, ctx, path, url, config, scope) {
   }
   if (path === '/api/admin/tenants' && request.method === 'POST') {
     const body = await readJson(request, 32000);
+    // La dirección del canal ya no se teclea en el alta: un cliente nuevo nace prospecto
+    // (`pending:<slug>`) y pasa a `web:<slug>` en cuanto se marca Activo. El panel manda
+    // el slug y el worker deriva.
+    // El default de active en este endpoint es 1 (`fields.active ?? 1`): la derivación usa
+    // EXACTAMENTE el mismo, o alta y guarda se contradicen con un 400 imposible de
+    // entender desde el panel (un alta sin `active` nacería prospecto y activa a la vez).
+    if (!body.channel_address && body.slug) {
+      const base = String(body.slug).trim().toLowerCase();
+      const willBeActive = body.active === undefined ? 1 : (body.active ? 1 : 0);
+      body.channel_address = willBeActive === 1 ? `web:${base}` : `pending:${base}`;
+    }
     const fields = validateTenant(body, { partial: false });
     assertNotActivePending(fields.channel_address, fields.active ?? 1);
     const now = new Date().toISOString();
@@ -2878,11 +2913,11 @@ async function adminRouter(request, env, ctx, path, url, config, scope) {
       const tenant = await env.DB.prepare(`SELECT id, slug, name, channel_address, team_whatsapp, telegram_chat_id,
         lead_template_sid, twilio_from, twilio_subaccount_sid, waba_id, meta_partner_status, system_prompt,
         bot_name, brand_name, logo_url, brand_color, brand_color_2, greeting, greeting_en, chips_json,
-        placeholder, wa_number, theme, web_origins,
+        placeholder, wa_number, theme, web_origins, sender_sid, sender_status,
         active, created_at, updated_at, twilio_auth_token_enc IS NOT NULL AS has_twilio_token
         FROM tenants WHERE id=?`).bind(tenantId).first();
       if (!tenant) throw new HttpError(404, 'not_found');
-      return json({ tenant }, 200, NO_STORE);
+      return json({ tenant, channels: await tenantChannelSummary(env, tenant) }, 200, NO_STORE);
     }
     if (!tenantAction && request.method === 'PATCH') {
       const body = await readJson(request, 32000);   // el prompt es grande
@@ -2891,6 +2926,15 @@ async function adminRouter(request, env, ctx, path, url, config, scope) {
       const fields = validateTenant(body, { partial: true });
       const tokenColumn = await tenantTokenColumn(env, tenantId, body);
       if (!Object.keys(fields).length && !tokenColumn) throw new HttpError(400, 'nothing_to_update');
+      // Activar un prospecto obligaba a reescribir `pending:<slug>` → `web:<slug>` a mano
+      // en una caja de texto. Ese paso es el que dejó a gogestion con `web:gogestion`
+      // ocupando el canal primario y su WhatsApp sin enrutar. Ahora se promueve solo.
+      // Si el llamante manda EXPLÍCITAMENTE un `pending:` y active=1, sigue siendo 400:
+      // eso es una contradicción que pidió a mano, no un hueco que rellenar.
+      if (fields.channel_address === undefined && Number(fields.active ?? previous.active) === 1
+        && PENDING_RE.test(String(previous.channel_address))) {
+        fields.channel_address = `web:${previous.slug}`;
+      }
       assertNotActivePending(fields.channel_address ?? previous.channel_address, fields.active ?? previous.active);
       assertTeamNotFrom(fields, previous);
       const channelChanged = fields.channel_address !== undefined && fields.channel_address !== previous.channel_address;
@@ -3230,4 +3274,4 @@ export function createWorker(config) {
   };
 }
 
-export const testing = { clean, errorResponseParts, tenantByAddress, syncPrimaryChannel, assertChannelFree, normalizePhone, extractPhone, safeUtm, publicCors, validTwilioSignature, callAnthropic, callAnthropicRaw, runToolLoop, calendarExecutor, calendarSystem, tenantCalendar, validCalendarDate, availableSlots, handleCalendarCallback, calendarCallbackFor, sendTwilioText, timingSafeEqual, telegramBotUsername, handleTelegramWebhook, sendTelegramText, tenantTelegramToken, telegramThreadFor, registerTelegramTopic, csvCell, expiryDate, leadFilters, isDemoKey, templateVar, leadTemplateVariables, readJson, deliver, drainQueuedLeads, verifyTurnstile, systemFor, validateTenant, invalidateTenantCache, tenantWriteError, assertNotActivePending, handleProvision, pollProvisioning, fillSeries, resolveScope, scopeClause, clienteAllowed, adminRouter, recordAuthFailure, handleAdmin, handleWidgetBoot, allowedOrigins, envOrigins, syncPanelGate, envAdmins, syncAdminGate, getSetting, setSetting, withCfToken };
+export const testing = { clean, errorResponseParts, tenantByAddress, syncPrimaryChannel, assertChannelFree, normalizePhone, extractPhone, safeUtm, publicCors, validTwilioSignature, callAnthropic, callAnthropicRaw, runToolLoop, calendarExecutor, calendarSystem, tenantCalendar, validCalendarDate, availableSlots, handleCalendarCallback, calendarCallbackFor, sendTwilioText, timingSafeEqual, telegramBotUsername, handleTelegramWebhook, sendTelegramText, tenantTelegramToken, telegramThreadFor, registerTelegramTopic, csvCell, expiryDate, leadFilters, isDemoKey, templateVar, leadTemplateVariables, readJson, deliver, drainQueuedLeads, verifyTurnstile, systemFor, validateTenant, invalidateTenantCache, tenantWriteError, assertNotActivePending, tenantChannelSummary, handleProvision, pollProvisioning, fillSeries, resolveScope, scopeClause, clienteAllowed, adminRouter, recordAuthFailure, handleAdmin, handleWidgetBoot, allowedOrigins, envOrigins, syncPanelGate, envAdmins, syncAdminGate, getSetting, setSetting, withCfToken };

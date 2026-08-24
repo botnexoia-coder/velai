@@ -757,10 +757,13 @@ test('el panel rediseñado: sin dominios externos salvo las fuentes, nonce y tod
   const links = [...ADMIN_HTML.matchAll(/<a href="https:\/\/hirevai\.com\/([a-z]+)\//g)];
   assert.ok(links.length && links.every((m) => ['privacidad', 'condiciones'].includes(m[1])), 'enlaces solo a páginas legales');
   assert.ok(ADMIN_HTML.includes('__NONCE__'));
-  for (const id of ['tName', 'tSlug', 'tAddress', 'tFrom', 'tTeam', 'tChat', 'tTpl', 'tSub', 'tWaba', 'tToken', 'tPartner', 'tActive', 'tPrompt', 'tNote', 'pSub', 'pTpl', 'pPhone', 'pSender', 'pCode', 'pVerify', 'tenantFilter', 'newTenant', 'export', 'tTokenState', 'tBotName', 'tBrandName', 'tLogo', 'tColor1', 'tColor2', 'tGreeting', 'tGreetingEn', 'tChips', 'tPlaceholder', 'tWa', 'tTheme', 'brandPrev', 'toasts', 'tOrigins', 'tSyncDomains', 'logout', 'themeBtn', 'themeLabel', 'adminsCard', 'adminsList', 'aEmail', 'aAdd', 'configCard', 'configState', 'cfgToken', 'cfgTokenSave', 'cfgTokenClear']) {
+  for (const id of ['tName', 'tSlug', 'tChannels', 'tFrom', 'tTeam', 'tChat', 'tTpl', 'tSub', 'tWaba', 'tToken', 'tPartner', 'tActive', 'tPrompt', 'tNote', 'pSub', 'pTpl', 'pPhone', 'pSender', 'pCode', 'pVerify', 'tenantFilter', 'newTenant', 'export', 'tTokenState', 'tBotName', 'tBrandName', 'tLogo', 'tColor1', 'tColor2', 'tGreeting', 'tGreetingEn', 'tChips', 'tPlaceholder', 'tWa', 'tTheme', 'brandPrev', 'toasts', 'tOrigins', 'tSyncDomains', 'logout', 'themeBtn', 'themeLabel', 'adminsCard', 'adminsList', 'aEmail', 'aAdd', 'configCard', 'configState', 'cfgToken', 'cfgTokenSave', 'cfgTokenClear']) {
     assert.ok(ADMIN_HTML.includes(`id="${id}"`), `falta #${id}`);
   }
   assert.ok(!/localStorage/.test(ADMIN_HTML), 'sin localStorage');
+  // El canal dejó de ser una caja de texto: teclear `web:<slug>` a mano es lo que dejó a
+  // gogestion ocupando el canal primario con su WhatsApp sin enrutar (2026-08-24).
+  assert.ok(!ADMIN_HTML.includes('id="tAddress"'), 'el canal ya no se teclea en la ficha');
 });
 
 test('la serie de 14 días devuelve 14 entradas incluso sin leads y la respuesta de stats no lleva PII', async () => {
@@ -2287,6 +2290,60 @@ test('whatsapp del cliente: estado propio sin secretos, ajeno 404, y sender/sync
   // provision/* sigue siendo 403 para el cliente, ANTES de tocar D1
   const prov = `/api/admin/tenants/${TID}/provision/sender/sync`;
   await assert.rejects(testing.adminRouter(adminReq(prov, { method: 'POST' }), env, ctx, prov, new URL('https://x' + prov), {}, OWN), (e) => e.code === 'not_authorized');
+});
+
+test('la dirección del canal se DERIVA: alta prospecto, promoción a web al activar, y la ficha lista los 4 canales', async () => {
+  const TID = '00000000-0000-4000-8000-0000000000c1';
+  // (a) el alta ya no recibe channel_address: el worker lo deriva del slug
+  const ins = [];
+  const envA = { DB: { prepare: (sql) => ({ bind: (...args) => ({
+    first: async () => null, all: async () => ({ results: [] }),
+    run: async () => { ins.push({ sql, args }); return { meta: { changes: 1 } }; } }) }) },
+    KV: { async get() { return null; }, async put() {}, async delete() {} } };
+  const ctx = { waitUntil() {} };
+  const VELAI = { role: 'velai', email: 'admin@velai' };
+  const JH = { 'Content-Type': 'application/json' };
+  const post = (body) => testing.adminRouter(adminReq('/api/admin/tenants', { method: 'POST', headers: JH, body: JSON.stringify(body) }),
+    envA, ctx, '/api/admin/tenants', new URL('https://x/api/admin/tenants'), {}, VELAI);
+  await post({ name: 'Nuevo', slug: 'nuevo', active: false, system_prompt: 'x'.repeat(60) });
+  assert.ok(ins.find((u) => u.args.includes('pending:nuevo')), 'nace prospecto, que no enruta ni puede activarse');
+  ins.length = 0;
+  // Sin `active` el endpoint crea ACTIVO (fields.active ?? 1): la derivación usa el mismo
+  // default, o el alta se autocontradice con un 400 de pending+activo.
+  await post({ name: 'Def', slug: 'def', system_prompt: 'x'.repeat(60) });
+  assert.ok(ins.find((u) => u.args.includes('web:def')), 'el default de active y el de la derivación no pueden discrepar');
+  ins.length = 0;
+  // alta ya activa → nace directamente en web:<slug>, sin el 400 de pending+activo
+  await post({ name: 'Ya', slug: 'ya', active: 1, system_prompt: 'x'.repeat(60) });
+  assert.ok(ins.find((u) => u.args.includes('web:ya')), 'un alta activa no necesita la cadena mágica');
+
+  // (b) marcar Activo promueve pending:<slug> → web:<slug> sin teclear nada
+  const prev = { id: TID, slug: 'gog', name: 'G', channel_address: 'pending:gog', active: 0, updated_at: 't0', system_prompt: 'x'.repeat(60) };
+  const ups = [];
+  const envB = { DB: { prepare: (sql) => ({ bind: (...args) => ({
+    first: async () => (sql.includes('FROM tenants WHERE id=') ? prev : null), all: async () => ({ results: [] }),
+    run: async () => { ups.push({ sql, args }); return { meta: { changes: 1 } }; } }) }) },
+    KV: { async get() { return null; }, async put() {}, async delete() {} } };
+  const path = `/api/admin/tenants/${TID}`;
+  await testing.adminRouter(adminReq(path, { method: 'PATCH', headers: JH, body: JSON.stringify({ active: 1, updated_at: 't0' }) }),
+    envB, ctx, path, new URL('https://x' + path), {}, VELAI);
+  assert.ok(ups.find((u) => u.args.includes('web:gog')), 'la promoción la hace el worker, no el dedo de Juan');
+  // Pero un pending: EXPLÍCITO con active=1 sigue siendo contradicción, no hueco a rellenar
+  await assert.rejects(
+    testing.adminRouter(adminReq(path, { method: 'PATCH', headers: JH, body: JSON.stringify({ active: 1, channel_address: 'pending:gog', updated_at: 't0' }) }),
+      envB, ctx, path, new URL('https://x' + path), {}, VELAI),
+    (e) => e.code === 'pending_tenant_cannot_be_active');
+
+  // (c) la ficha LEE los 4 canales de donde viven; el sender sin fila sale «sin enrutar»
+  const tenant = { id: TID, slug: 'gog', active: 1, channel_address: 'web:gog', twilio_from: 'whatsapp:+34624121930', sender_sid: 'XE1', telegram_chat_id: null };
+  const envC = { DB: { prepare: () => ({ bind: () => ({ all: async () => ({ results: [] }), first: async () => null }) }) } };
+  const sum = await testing.tenantChannelSummary(envC, tenant);
+  assert.deepEqual(sum.map((c) => [c.kind, c.state]),
+    [['web', 'live'], ['whatsapp', 'unrouted'], ['telegram', 'off'], ['messenger', 'off']]);
+  // con su fila en tenant_channels, el mismo cliente pasa a atendido
+  const envD = { DB: { prepare: () => ({ bind: () => ({ all: async () => ({ results: [{ address: 'whatsapp:+34624121930', kind: 'whatsapp' }] }), first: async () => null }) }) } };
+  const sum2 = await testing.tenantChannelSummary(envD, tenant);
+  assert.deepEqual(sum2.find((c) => c.kind === 'whatsapp'), { kind: 'whatsapp', address: 'whatsapp:+34624121930', state: 'live' });
 });
 
 test('canales: la vista diagnostica el enrutado real y delata el sender vivo SIN fila (bot mudo en verde)', async () => {

@@ -318,7 +318,10 @@ $('#tenantModal').addEventListener('input',e=>{if(e.target.id==='tTestMsg')retur
 function confirmDiscard(){return !tenantDirty||confirm('Hay cambios sin guardar en esta ficha. ¿Cerrar y descartarlos?')}
 $('#tenantClose').onclick=()=>{if(confirmDiscard()){tenantDirty=false;$('#tenantModal').close()}};
 $('#tenantModal').addEventListener('cancel',e=>{if(!confirmDiscard())e.preventDefault();else tenantDirty=false});
-const TF={name:'#tName',slug:'#tSlug',channel_address:'#tAddress',twilio_from:'#tFrom',team_whatsapp:'#tTeam',telegram_chat_id:'#tChat',lead_template_sid:'#tTpl',twilio_subaccount_sid:'#tSub',waba_id:'#tWaba',meta_partner_status:'#tPartner',system_prompt:'#tPrompt',bot_name:'#tBotName',brand_name:'#tBrandName',logo_url:'#tLogo',brand_color:'#tColor1',brand_color_2:'#tColor2',greeting:'#tGreeting',greeting_en:'#tGreetingEn',placeholder:'#tPlaceholder',wa_number:'#tWa',theme:'#tTheme'};
+// channel_address NO está aquí a propósito: dejó de ser un campo que se teclea. El alta
+// lo deriva del slug en el worker y se promueve a web:<slug> al marcar Activo; los canales
+// de mensajería se dan de alta en Conexiones. La ficha solo los MUESTRA (renderChannels).
+const TF={name:'#tName',slug:'#tSlug',twilio_from:'#tFrom',team_whatsapp:'#tTeam',telegram_chat_id:'#tChat',lead_template_sid:'#tTpl',twilio_subaccount_sid:'#tSub',waba_id:'#tWaba',meta_partner_status:'#tPartner',system_prompt:'#tPrompt',bot_name:'#tBotName',brand_name:'#tBrandName',logo_url:'#tLogo',brand_color:'#tColor1',brand_color_2:'#tColor2',greeting:'#tGreeting',greeting_en:'#tGreetingEn',placeholder:'#tPlaceholder',wa_number:'#tWa',theme:'#tTheme'};
 // chips_json y web_origins van aparte: en el form son una línea por valor; al worker
 // viajan como array (el servidor valida y guarda JSON).
 function jsonToLines(json){try{const a=JSON.parse(json||'[]');return Array.isArray(a)?a.join('\n'):''}catch(e){return ''}}
@@ -361,19 +364,29 @@ function wizShow(){showPane(WIZ[wizStep]);renderWizSteps();$('#wizBack').hidden=
 function setWizard(on){wizard=on;$('#wizBar').hidden=!on;$('#ttabs').hidden=on;$('#wizSteps').hidden=!on;$('#tenantSave').hidden=on;$('#tNote').hidden=on;if(on){wizStep=0;wizShow()}}
 $('#wizBack').onclick=()=>{if(wizStep>0){wizStep--;wizShow()}};
 $('#wizNext').onclick=async()=>{
- // Paso 1 sin canal: se rellena pending:<slug> — un prospecto que no enruta (y no puede activarse).
- if(wizStep===0&&!$('#tAddress').value.trim()&&$('#tSlug').value.trim())$('#tAddress').value='pending:'+$('#tSlug').value.trim();
+ // El canal ya no se teclea: el worker deriva pending:<slug> (prospecto que no enruta) y
+ // lo promueve a web:<slug> en cuanto se marca Activo.
  const wasNew=!editing;
  if(tenantDirty||wasNew){const ok=await saveTenant();if(!ok)return}
  if(wasNew&&editing){$('#ttabProv').hidden=false;$('#ttabUsers').hidden=false;$('#ttabHist').hidden=false;$('#tProv').hidden=false;$('#tUsersCard').hidden=false;$('#tDup').hidden=true;loadProv(editing.id);loadUsers(editing.id);loadVersions(editing.id)}
  if(wizStep===WIZ.length-1){setWizard(false);showPane('identidad');toast('Alta completada ✓ — actívalo en «Identidad y canal» cuando su canal esté listo');return}
  wizStep++;wizShow()};
+// Los canales de la ficha se PINTAN, no se editan: el estado lo decide el worker leyendo
+// tenant_channels / twilio_from / telegram_chat_id. El estado «sin enrutar» es el caso
+// gogestion — sender propio en Twilio sin fila que lo enrute — y aquí se ve en la ficha.
+const CHK={web:'web',whatsapp:'whatsapp',telegram:'telegram',messenger:'messenger'};
+const CHSTATE={live:['on','<span class="flag ok">atendido</span>'],inactive:['','<span class="flag">cliente inactivo</span>'],
+ unrouted:['bad','<span class="flag off">sin enrutar</span>'],off:['','<span class="muted">sin conectar</span>']};
+function renderChannels(list){$('#tChannels').innerHTML=(list||[]).map(c=>{const st=CHSTATE[c.state]||CHSTATE.off;
+ const addr=c.address?esc(String(c.address).replace(/^whatsapp:/,'')):'—';
+ return '<div class="chrow"><i class="'+st[0]+'"></i><span class="chk">'+esc(CHK[c.kind]||c.kind)+'</span><span class="chaddr">'+addr+'</span>'+st[1]+'</div>'}).join('')
+ ||'<div class="chrow"><i></i><span class="chaddr">Sin canales todavía.</span></div>'}
 async function openTenant(id){clearTenantErrs();$('#tPreviewOut').textContent='';$('#tTestMsg').value='';$('#tNote').value='';
  $('#tToken').value='';clearDirtyDots();
  // provPost recarga la ficha del MISMO cliente en mitad del alta: se conserva el paso.
  const stayWiz=wizard&&editing&&editing.id===id;
- if(id){const d=await api('/api/admin/tenants/'+id);const t=d.tenant;editing={id:t.id,updated_at:t.updated_at};$('#tenantTitle').textContent=t.name;$('#tDup').hidden=true;for(const[k,sel]of Object.entries(TF))$(sel).value=t[k]??'';$('#tChips').value=chipsToLines(t.chips_json);$('#tOrigins').value=jsonToLines(t.web_origins);$('#tActive').checked=!!t.active;$('#tTokenState').textContent=t.has_twilio_token?'configurado ✓ (escribe solo para sustituirlo)':'sin configurar';$('#tProv').hidden=false;$('#tUsersCard').hidden=false;$('#ttabProv').hidden=false;$('#ttabUsers').hidden=false;$('#ttabHist').hidden=false;if(stayWiz)wizShow();else{setWizard(false);showPane('identidad')}loadProv(id);loadVersions(id);loadUsers(id)}
- else{editing=null;$('#tenantTitle').textContent='Nuevo cliente';$('#tDup').hidden=false;$('#tDupSel').innerHTML='<option value="">— empezar de cero —</option>'+tenantList.map(t=>'<option value="'+t.id+'">'+esc(t.name)+'</option>').join('');for(const sel of Object.values(TF))$(sel).value='';$('#tChips').value='';$('#tOrigins').value='';$('#tPartner').value='pendiente';$('#tActive').checked=false;$('#tTokenState').textContent='sin configurar';$('#tProv').hidden=true;$('#tUsersCard').hidden=true;$('#ttabProv').hidden=true;$('#ttabUsers').hidden=true;$('#ttabHist').hidden=true;$('#tVersions').textContent='—';setWizard(true)}
+ if(id){const d=await api('/api/admin/tenants/'+id);const t=d.tenant;renderChannels(d.channels);editing={id:t.id,updated_at:t.updated_at};$('#tenantTitle').textContent=t.name;$('#tDup').hidden=true;for(const[k,sel]of Object.entries(TF))$(sel).value=t[k]??'';$('#tChips').value=chipsToLines(t.chips_json);$('#tOrigins').value=jsonToLines(t.web_origins);$('#tActive').checked=!!t.active;$('#tTokenState').textContent=t.has_twilio_token?'configurado ✓ (escribe solo para sustituirlo)':'sin configurar';$('#tProv').hidden=false;$('#tUsersCard').hidden=false;$('#ttabProv').hidden=false;$('#ttabUsers').hidden=false;$('#ttabHist').hidden=false;if(stayWiz)wizShow();else{setWizard(false);showPane('identidad')}loadProv(id);loadVersions(id);loadUsers(id)}
+ else{editing=null;renderChannels([{kind:'web',address:'se activa con el slug',state:'off'}]);$('#tenantTitle').textContent='Nuevo cliente';$('#tDup').hidden=false;$('#tDupSel').innerHTML='<option value="">— empezar de cero —</option>'+tenantList.map(t=>'<option value="'+t.id+'">'+esc(t.name)+'</option>').join('');for(const sel of Object.values(TF))$(sel).value='';$('#tChips').value='';$('#tOrigins').value='';$('#tPartner').value='pendiente';$('#tActive').checked=false;$('#tTokenState').textContent='sin configurar';$('#tProv').hidden=true;$('#tUsersCard').hidden=true;$('#ttabProv').hidden=true;$('#ttabUsers').hidden=true;$('#ttabHist').hidden=true;$('#tVersions').textContent='—';setWizard(true)}
  updateCount();brandPreview();tenantDirty=false;$('#tenantModal').showModal()}
 $('#tDupSel').onchange=async e=>{if(!e.target.value)return;const d=await api('/api/admin/tenants/'+e.target.value);$('#tPrompt').value=d.tenant.system_prompt||'';updateCount()};
 async function saveTenant(){clearTenantErrs();
