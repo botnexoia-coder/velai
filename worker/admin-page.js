@@ -91,6 +91,12 @@ main{padding-bottom:74px}
 .btn.bad{background:#5d2626;border:1px solid rgba(230,103,103,.4);box-shadow:none;color:#fff}
 /* ── Contenido ── */
 main{flex:1;min-width:0;position:relative;padding:30px clamp(20px,3vw,42px) 60px;background:var(--bg);color:var(--white)}
+/* Ningún contenido puede empujar la página a lo ancho: las tablas ya scrollean dentro
+   de .table, y las URLs largas (logo, direcciones de canal) parten en vez de estirar la
+   tarjeta — el scroll horizontal de toda la vista era eso (Conexiones, 2026-08-24). */
+main{overflow-x:clip}
+.card,.grid,.actions,.tgw-top,.tgpanel{min-width:0}
+.card small,.card code,.tgsub,.chaddr,#cxLogoOut,#waSyncOut,#tgSetupOut{overflow-wrap:anywhere}
 .vhead{display:flex;align-items:flex-end;justify-content:space-between;gap:16px;flex-wrap:wrap;margin:0 0 22px}
 .vhead h1{margin:0;font-family:var(--font-d);font-weight:900;font-size:27px;letter-spacing:-.02em}
 .vhead p{margin:6px 0 0;color:var(--muted);font-size:13.5px}
@@ -351,7 +357,7 @@ body.cliente .cliente-only{display:flex}
 .tgnum{display:inline-flex;align-items:center;justify-content:center;width:32px;height:32px;border-radius:50%;font-weight:700;font-size:13.5px;background:rgba(var(--ink),.08);color:var(--muted)}
 .tgnode.cur .tgnum{background:var(--orange);color:#fff;box-shadow:0 0 0 4px rgba(255,107,26,.18)}
 .tgnode.done .tgnum{background:var(--ok);color:#fff}
-.tgnlbl{font-size:11.5px;font-weight:500;color:var(--muted);text-align:center}
+.tgnlbl{font-size:11.5px;font-weight:500;color:var(--muted);text-align:center;max-width:100%;overflow-wrap:anywhere}
 .tgnode:hover .tgnlbl{color:var(--white)}
 .tgnode.cur .tgnlbl{color:var(--chip-t);font-weight:700}
 .tgnode.done .tgnlbl{color:var(--white)}
