@@ -764,6 +764,11 @@ test('el panel rediseñado: sin dominios externos salvo las fuentes, nonce y tod
   // El canal dejó de ser una caja de texto: teclear `web:<slug>` a mano es lo que dejó a
   // gogestion ocupando el canal primario con su WhatsApp sin enrutar (2026-08-24).
   assert.ok(!ADMIN_HTML.includes('id="tAddress"'), 'el canal ya no se teclea en la ficha');
+  // `.search` es una pastilla con su propio fondo y borde; el input de dentro solo queda
+  // desnudo con class="q" (`.search input.q`). Sin ella sale una caja dentro de la caja.
+  for (const m of ADMIN_HTML.matchAll(/<label class="search">[\s\S]*?<\/label>/g)) {
+    assert.ok(/<input[^>]*class="q"/.test(m[0]), 'todo buscador lleva class="q": ' + m[0].slice(0, 90));
+  }
 });
 
 test('la serie de 14 días devuelve 14 entradas incluso sin leads y la respuesta de stats no lleva PII', async () => {

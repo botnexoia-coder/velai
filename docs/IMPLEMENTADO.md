@@ -404,3 +404,40 @@ las viejas 2 h desplazadas.
 **Verificado en producción:** fila insertada a mano para desbloquear a gogestion, **bot contestando en
 WhatsApp confirmado por Juan**, 4 canales (velai, velai-messenger, dialogos, gogestion) todos en
 `atendido` y cero senders sin enrutar. Suite 105/105.
+
+**La ficha dejó de DECLARAR el canal y pasó a LEERLO** (abacfe1). El campo «Canal (To de Twilio)» era una
+caja de texto libre haciendo tres trabajos: clave de enrutado de reserva, marcador de ciclo de vida
+(`pending:`) y relleno de una columna `NOT NULL UNIQUE`. Para gogestión contenía `web:gogestion`, que **no
+enruta nada** — la web entra por slug — mientras ocupaba el canal primario. Ahora `tenantChannelSummary`
+lee los 4 canales de donde viven (web del slug o del primer `web_origins`, whatsapp/messenger de
+`tenant_channels` con el primario como respaldo, telegram de su columna con el título del grupo) y la ficha
+los muestra en solo lectura. **Descartado a propósito:** JSON en una columna (perdería el `PRIMARY KEY`
+sobre `address`, que es lo que impide que dos clientes reclamen el mismo número) y multiselect de tipos (un
+canal es tipo+dirección, y la dirección la produce Twilio, no el teclado: declararla a mano ES el bug).
+**Y desapareció el paso que causó todo:** activar un prospecto exigía reescribir a mano `pending:<slug>` →
+`web:<slug>`; ahora el alta deriva del slug y el PATCH promueve al marcar Activo. Un `pending:` explícito
+con `active=1` sigue siendo 400 — contradicción pedida a mano, no hueco que rellenar. Ojo: la derivación usa
+el MISMO default de `active` que el endpoint (`?? 1`) o alta y guarda se contradicen con un 400 opaco.
+
+**Buscador y filtros en Canales** (e8ffb03): una fila por canal y cliente no se lee con cincuenta clientes.
+Buscador (número, cliente o tipo), selector de cliente y filtro de estado — «solo los que requieren
+atención» es la vista de diario. Filtrado en cliente sobre lo ya cargado (cabe en una respuesta; si algún
+día no cabe, el sitio a cambiar es `chPaint()` y el endpoint ya devuelve todo). El filtro afecta TAMBIÉN al
+bloque de alarma para que «ver solo este cliente» signifique lo mismo arriba y abajo, los sin enrutar nunca
+los esconde el filtro de estado, y la píldora de la cabecera sigue contando el TOTAL: es el estado del
+sistema, no de lo que estés mirando. El buscador normaliza acentos en los dos lados y casa el número con y
+sin prefijo (`gogestion` → GOgestión, `624` → su WhatsApp).
+
+**«Tus canales» en el espacio del CLIENTE** (917c513): tenía que leer tres tarjetas de Conexiones para
+deducir qué funciona, y su canal **web no aparecía en ninguna parte** pese a llevar el widget en su web.
+El criterio de qué se le cuenta: **lo que puede accionar, o lo que le tranquiliza**. Su WhatsApp de alta
+pero sin enrutar es trabajo pendiente NUESTRO, así que lee «lo estamos dejando listo», jamás «sin enrutar»
+ni un 404; un cliente desactivado lee «en pausa». Velai ve la misma tarjeta con el estado crudo. El colapso
+vive en el worker (`channelsForScope`), no en condicionales de la UI — lo que se le dice al cliente es una
+sola cosa testeable; las palabras sí viven en el panel como el resto de los mensajes. La vista GLOBAL sigue
+vetada al rol cliente (lleva números y nombres de otros); aquí solo su `:id` y el ajeno es 404, nunca 403.
+
+**Fleco de UI que salió al mirarlo en vivo:** `.search` es una pastilla con su propio fondo y borde, y el
+input de dentro solo queda desnudo con `class="q"` (`.search input.q`). El buscador de Canales nació sin
+ella y salía una caja dentro de la caja. Hay test que recorre TODOS los `<label class="search">` del panel
+y exige la clase, para que el siguiente buscador no repita el fleco. Suite 107/107.
