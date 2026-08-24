@@ -757,7 +757,7 @@ test('el panel rediseñado: sin dominios externos salvo las fuentes, nonce y tod
   const links = [...ADMIN_HTML.matchAll(/<a href="https:\/\/hirevai\.com\/([a-z]+)\//g)];
   assert.ok(links.length && links.every((m) => ['privacidad', 'condiciones'].includes(m[1])), 'enlaces solo a páginas legales');
   assert.ok(ADMIN_HTML.includes('__NONCE__'));
-  for (const id of ['tName', 'tSlug', 'tChannels', 'tFrom', 'tTeam', 'tChat', 'tTpl', 'tSub', 'tWaba', 'tToken', 'tPartner', 'tActive', 'tPrompt', 'tNote', 'pSub', 'pTpl', 'pPhone', 'pSender', 'pCode', 'pVerify', 'pTplChk', 'tTplRaw', 'tenantFilter', 'newTenant', 'export', 'tTokenState', 'tBotName', 'tBrandName', 'tLogo', 'tColor1', 'tColor2', 'tGreeting', 'tGreetingEn', 'tChips', 'tPlaceholder', 'tWa', 'tTheme', 'brandPrev', 'toasts', 'tOrigins', 'tSyncDomains', 'logout', 'themeBtn', 'themeLabel', 'adminsCard', 'adminsList', 'aEmail', 'aAdd', 'configCard', 'configState', 'cfgToken', 'cfgTokenSave', 'cfgTokenClear', 'chRows', 'chAlarm', 'chQ', 'chTenant', 'chState', 'chCount', 'cxChannels', 'cxAlerts']) {
+  for (const id of ['tName', 'tSlug', 'tChannels', 'tFrom', 'tTeam', 'tChat', 'tTpl', 'tSub', 'tWaba', 'tToken', 'tPartner', 'tActive', 'tPrompt', 'tNote', 'pSub', 'pTpl', 'pPhone', 'pSender', 'pCode', 'pVerify', 'pTplChk', 'pTplRe', 'tTplRaw', 'tenantFilter', 'newTenant', 'export', 'tTokenState', 'tBotName', 'tBrandName', 'tLogo', 'tColor1', 'tColor2', 'tGreeting', 'tGreetingEn', 'tChips', 'tPlaceholder', 'tWa', 'tTheme', 'brandPrev', 'toasts', 'tOrigins', 'tSyncDomains', 'logout', 'themeBtn', 'themeLabel', 'adminsCard', 'adminsList', 'aEmail', 'aAdd', 'configCard', 'configState', 'cfgToken', 'cfgTokenSave', 'cfgTokenClear', 'chRows', 'chAlarm', 'chQ', 'chTenant', 'chState', 'chCount', 'cxChannels', 'cxAlerts']) {
     assert.ok(ADMIN_HTML.includes(`id="${id}"`), `falta #${id}`);
   }
   assert.ok(!/localStorage/.test(ADMIN_HTML), 'sin localStorage');
@@ -2349,6 +2349,53 @@ test('la dirección del canal se DERIVA: alta prospecto, promoción a web al act
   const envD = { DB: { prepare: () => ({ bind: () => ({ all: async () => ({ results: [{ address: 'whatsapp:+34624121930', kind: 'whatsapp' }] }), first: async () => null }) }) } };
   const sum2 = await testing.tenantChannelSummary(envD, tenant);
   assert.deepEqual(sum2.find((c) => c.kind === 'whatsapp'), { kind: 'whatsapp', address: 'whatsapp:+34624121930', state: 'live' });
+});
+
+test('plantilla: se puede REENVIAR a aprobación (el paso 2 lanzaba 409 y dejaba el panel atascado)', async () => {
+  const subToken = 'f0e1d2c3b4a5968778695a4b3c2d1e0f';
+  const TID = '00000000-0000-4000-8000-0000000000f2';
+  let fail = false;
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = async (url) => (String(url).includes('/ApprovalRequests')
+    ? (fail ? new Response(JSON.stringify({ code: 63005, message: 'duplicate' }), { status: 400 })
+      : new Response(JSON.stringify({ status: 'received', name: 'nuevo_lead_gog' }), { status: 200 }))
+    : new Response('{}', { status: 200 }));
+  try {
+    const mk = async (env, sid) => ({ id: TID, slug: 'gog', name: 'G', twilio_subaccount_sid: 'AC' + 'c'.repeat(32),
+      lead_template_sid: sid, lead_template_status: 'pending', twilio_auth_token_enc: await encryptSecret(env, TID, subToken) });
+    const run = async (sid) => {
+      const h = provisionHarness({});
+      h.row = await mk(h.env, sid);
+      h.env.DB.prepare = (sql) => ({ bind: (...args) => ({
+        first: async () => (sql.startsWith('SELECT * FROM tenants') ? h.row : null),
+        run: async () => { h.updates.push({ sql, args }); return { meta: { changes: 1 } }; },
+        all: async () => ({ results: [] }) }) });
+      return { h, res: await testing.handleProvision(provReq(), h.env, h.ctx, TID, 'template/resubmit', 'admin@velai') };
+    };
+    // El caso gogestión: la plantilla existe en Twilio, Meta no la tiene. Se reenvía.
+    let out = await run('HXgog');
+    const body = await out.res.json();
+    assert.deepEqual([body.ok, body.sid, body.error], [true, 'HXgog', null]);
+    assert.ok(out.h.updates.find((u) => u.sql.includes("lead_template_status='pending'")), 'vuelve a quedar pendiente');
+    assert.ok(out.h.updates.find((u) => u.sql.includes('tenant_versions') && String(u.args).includes('REENVIADA')), 'queda auditado');
+    // Si Twilio rechaza el reenvío, el motivo VIAJA y la fila no se toca a mentira
+    fail = true;
+    out = await run('HXgog');
+    const bad = await out.res.json();
+    assert.equal(out.res.status, 502);
+    assert.equal(bad.ok, false);
+    assert.ok(bad.error && bad.error.includes('twilio_400'), 'el motivo de Twilio llega al panel: ' + bad.error);
+    assert.ok(!out.h.updates.some((u) => u.sql.includes("lead_template_status='pending'")), 'un reenvío fallido NO marca pending');
+    fail = false;
+    // Sin plantilla creada no hay nada que reenviar
+    const h = provisionHarness({});
+    h.row = await mk(h.env, null);
+    h.env.DB.prepare = (sql) => ({ bind: () => ({
+      first: async () => (sql.startsWith('SELECT * FROM tenants') ? h.row : null),
+      run: async () => ({ meta: { changes: 1 } }), all: async () => ({ results: [] }) }) });
+    await assert.rejects(testing.handleProvision(provReq(), h.env, h.ctx, TID, 'template/resubmit', 'admin@velai'),
+      (e) => e.code === 'template_required');
+  } finally { globalThis.fetch = realFetch; }
 });
 
 test('plantilla: comprobar a demanda aplica el veredicto de Twilio y delata la forma inesperada', async () => {

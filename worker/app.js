@@ -2042,6 +2042,30 @@ async function runProvisionStep(request, env, ctx, tenant, tenantId, step, actor
   if (!token) throw new HttpError(400, 'twilio_auth_token_missing');
   const credentials = { sid: tenant.twilio_subaccount_sid, token };
 
+  // REENVIAR a aprobación una plantilla que ya existe en Twilio. Descubierto con gogestión
+  // (2026-08-24): Twilio aceptó el submit —quedó su línea de auditoría— pero la WABA de Meta
+  // tenía CERO plantillas, así que el `pending` de la fila era una espera que no iba a
+  // resolverse jamás. Y el paso 2 lanza 409 si ya hay SID, con lo que el panel te dejaba
+  // atascado justo cuando había que reintentar. Devuelve el crudo: si Twilio rechaza el
+  // reenvío (duplicado, categoría, nombre), el motivo se ve en vez de deducirse.
+  if (step === 'template/resubmit') {
+    if (!tenant.lead_template_sid) throw new HttpError(400, 'template_required');
+    let sent = null; let error = null;
+    try {
+      sent = await submitTemplateApproval(credentials, tenant.lead_template_sid, `nuevo_lead_${tenant.slug}`);
+    } catch (e) {
+      if (e instanceof HttpError) throw e;
+      error = clean(e.message, 120);
+    }
+    if (!error) {
+      await env.DB.prepare("UPDATE tenants SET lead_template_status='pending', updated_at=? WHERE id=?").bind(now, tenantId).run();
+      await invalidateTenantCache(env, [tenant]);
+    }
+    await provisionAudit(env, ctx, tenant, actor,
+      `plantilla ${tenant.lead_template_sid} REENVIADA a aprobación${error ? ` — Twilio la rechazó: ${error}` : ''}`);
+    return json({ ok: !error, sid: tenant.lead_template_sid, error, raw: sent }, error ? 502 : 200, NO_STORE);
+  }
+
   if (step === 'template') {
     if (tenant.lead_template_sid || tenant.lead_template_status) throw new HttpError(409, 'already_provisioned');
     const { contentSid } = await createLeadTemplate(credentials, tenant.slug, tenant.name);
@@ -2450,7 +2474,7 @@ async function adminRouter(request, env, ctx, path, url, config, scope) {
       porDia: fillSeries(serieRows.results || [], 14),
     }, 200, NO_STORE);
   }
-  const provMatch = path.match(/^\/api\/admin\/tenants\/([0-9a-f-]+)\/provision(?:\/(subaccount|template\/check|template|sender\/verify|sender\/sync|sender\/profile|sender|domains))?$/i);
+  const provMatch = path.match(/^\/api\/admin\/tenants\/([0-9a-f-]+)\/provision(?:\/(subaccount|template\/check|template\/resubmit|template|sender\/verify|sender\/sync|sender\/profile|sender|domains))?$/i);
   if (provMatch) {
     if (!UUID_RE.test(provMatch[1])) throw new HttpError(404, 'not_found');
     return await handleProvision(request, env, ctx, provMatch[1], provMatch[2] || '', actor);

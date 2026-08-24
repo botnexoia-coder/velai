@@ -586,6 +586,13 @@ $('#pSub').onclick=()=>provPost('subaccount');
 $('#pTpl').onclick=()=>provPost('template');
 // Comprobar a demanda, con la respuesta CRUDA de Twilio a la vista: si el estado no viene
 // donde lo leemos, se ve aquí en vez de deducirse de una fila que no cambia nunca.
+// Reenviar: la plantilla existe en Twilio pero puede no haber llegado a Meta (le pasó a
+// gogestión, con la WABA a 0 plantillas). El paso 2 no sirve: lanza 409 si ya hay SID.
+$('#pTplRe').onclick=async()=>{const out=$('#tTplRaw');out.hidden=false;out.textContent='Reenviando a aprobación…';
+ try{const r=await api('/api/admin/tenants/'+editing.id+'/provision/template/resubmit',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'});
+  out.textContent='Reenviada ✓ — Twilio la aceptó otra vez. Comprueba en WhatsApp Manager que ahora SÍ aparece en la WABA;\nsi sigue a 0 plantillas, el problema está entre Twilio y Meta y toca ticket a Twilio.\n\n'+JSON.stringify(r.raw,null,1);
+  toast('Plantilla reenviada a aprobación ✓');loadProv(editing.id)}
+ catch(e){out.textContent='Twilio rechazó el reenvío: '+(TERRS[e.message]||e.message);toast('Reenvío fallido: '+e.message,false)}};
 $('#pTplChk').onclick=async()=>{const out=$('#tTplRaw');out.hidden=false;out.textContent='Consultando a Twilio…';
  try{const r=await api('/api/admin/tenants/'+editing.id+'/provision/template/check',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'});
   const lines=['Estado según Twilio: '+r.status+(r.reason?' · '+r.reason:''),'Estado guardado: '+(r.stored||'—'),'Plantilla: '+r.sid];

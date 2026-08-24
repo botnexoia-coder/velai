@@ -524,6 +524,21 @@ El test cubre los tres caminos con la API simulada: `approved` se aplica al mome
 la fila, y la **forma inesperada** (`{approval_requests:[…]}` en vez de `{whatsapp:{…}}`) sale como
 `unknown`, no escribe nada y entrega el crudo íntegro. Suite 111/111.
 
+**RESUELTO el mismo día con acceso a Meta.** Juan consiguió admin del portfolio del cliente y
+WhatsApp Manager cantó: la WABA de gogestión tenía **«Total de plantillas activas: 0 de 250»**. La
+plantilla **nunca llegó a Meta** — ni pendiente ni rechazada, inexistente — aunque Twilio aceptara el
+submit (por eso quedó su línea de auditoría). El `pending` de la fila era una espera que no iba a
+resolverse jamás. Lo demás de la WABA estaba sano y aísla el fallo a la plantilla: cuenta **Aprobada**,
+número **Conectado** con calidad **Alta**, pago por la línea de crédito de Twilio. Con una salvedad
+relevante: **verificación del negocio «No verificado»**, y el nombre del negocio es el nombre personal
+del titular, no «GOgestión».
+
+**Y el panel no dejaba reintentar:** el paso 2 lanza 409 `already_provisioned` si ya hay SID guardado,
+así que te dejaba atascado justo cuando había que reenviar. Nuevo paso **`template/resubmit`** («Reenviar
+a aprobación»): reenvía el Content SID existente, vuelve a marcar `pending` SOLO si Twilio lo acepta,
+audita el reenvío y devuelve el crudo — si Twilio lo rechaza (duplicado, categoría, nombre) el motivo
+viaja al panel con 502 en vez de deducirse, y la fila no se marca pendiente a mentira.
+
 **Dónde se mira, para el registro:** la plantilla es un recurso DE LA SUBCUENTA, así que en la consola
 de Twilio hay que cambiar de cuenta primero (Content Template Builder de la subcuenta, no de la
 principal) — y con la página de WhatsApp senders ya sabemos que el menú de la subcuenta puede no
