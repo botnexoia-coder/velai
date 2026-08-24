@@ -2087,6 +2087,23 @@ async function runProvisionStep(request, env, ctx, tenant, tenantId, step, actor
     return json({ ok: true, applied: { logo: !!profile.logo_url, websites: webs.length, description: !!profile.description } }, 200, NO_STORE);
   }
 
+  // Comprobar la plantilla AHORA, sin esperar al cron de 5 min, y con el crudo de Twilio
+  // delante: es la única forma de distinguir «Meta va lenta» de «lo estamos leyendo mal».
+  // Si Twilio ya dice approved/rejected, se aplica aquí mismo en vez de esperar otra vuelta.
+  if (step === 'template/check') {
+    if (!tenant.lead_template_sid) throw new HttpError(400, 'template_required');
+    const approval = await fetchApprovalStatus(credentials, tenant.lead_template_sid);
+    let applied = false;
+    if ((approval.status === 'approved' || approval.status === 'rejected') && approval.status !== tenant.lead_template_status) {
+      await env.DB.prepare('UPDATE tenants SET lead_template_status=?, updated_at=? WHERE id=?').bind(approval.status, now, tenantId).run();
+      await invalidateTenantCache(env, [tenant]);
+      await provisionAudit(env, ctx, tenant, actor, `plantilla ${approval.status} según Twilio${approval.reason ? ` (${clean(approval.reason, 120)})` : ''}`);
+      applied = true;
+    }
+    return json({ ok: true, status: approval.status, reason: approval.reason, applied,
+      stored: tenant.lead_template_status, sid: tenant.lead_template_sid, raw: approval.raw }, 200, NO_STORE);
+  }
+
   if (step === 'sender/sync') {
     // Reconciliación de LECTURA (SPEC-CONEXIONES PR2): tras el Self Sign-up del
     // cliente en la consola, el worker lee el sender de la subcuenta y rellena la
@@ -2433,7 +2450,7 @@ async function adminRouter(request, env, ctx, path, url, config, scope) {
       porDia: fillSeries(serieRows.results || [], 14),
     }, 200, NO_STORE);
   }
-  const provMatch = path.match(/^\/api\/admin\/tenants\/([0-9a-f-]+)\/provision(?:\/(subaccount|template|sender\/verify|sender\/sync|sender\/profile|sender|domains))?$/i);
+  const provMatch = path.match(/^\/api\/admin\/tenants\/([0-9a-f-]+)\/provision(?:\/(subaccount|template\/check|template|sender\/verify|sender\/sync|sender\/profile|sender|domains))?$/i);
   if (provMatch) {
     if (!UUID_RE.test(provMatch[1])) throw new HttpError(404, 'not_found');
     return await handleProvision(request, env, ctx, provMatch[1], provMatch[2] || '', actor);
@@ -3249,6 +3266,12 @@ async function pollProvisioning(env) {
       const now = new Date().toISOString();
       if (tenant.lead_template_status === 'pending' && tenant.lead_template_sid) {
         const approval = await fetchApprovalStatus(credentials, tenant.lead_template_sid);
+        // 'unknown' = Twilio contestó pero sin el estado donde lo buscamos. Sin este log la
+        // fila se queda 'pending' eternamente y parece que Meta va lenta.
+        if (!['approved', 'rejected', 'pending', 'received'].includes(approval.status)) {
+          console.log(JSON.stringify({ level: 'warn', code: 'template_status_unknown', tenant: tenant.slug,
+            status: approval.status, keys: Object.keys(approval.raw || {}).slice(0, 8).join(',') }));
+        }
         if (approval.status === 'approved') {
           await env.DB.prepare("UPDATE tenants SET lead_template_status='approved', updated_at=? WHERE id=?").bind(now, tenant.id).run();
           await invalidateTenantCache(env, [tenant]);
@@ -3267,7 +3290,13 @@ async function pollProvisioning(env) {
           if (sender.status === 'ONLINE') await sendTelegramText(env, `✅ <b>Velai</b>: el sender de WhatsApp de <b>${escapeHtml(tenant.name)}</b> está ONLINE.`);
         }
       }
-    } catch (_) { /* siguiente tenant; el cron reintenta en 5 min */ }
+    } catch (error) {
+      // Antes este catch era MUDO: un sondeo roto dejaba las plantillas 'pending' para
+      // siempre sin dejar rastro en ninguna parte (2026-08-24). Se sigue al siguiente
+      // tenant — el cron reintenta en 5 min — pero ya no en silencio.
+      console.log(JSON.stringify({ level: 'error', code: 'provision_poll_failed', tenant: tenant.slug,
+        error: clean(error.message, 80) }));
+    }
   }
 }
 

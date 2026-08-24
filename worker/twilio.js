@@ -67,10 +67,15 @@ export async function submitTemplateApproval(credentials, contentSid, name) {
   });
 }
 
+// El estado lo pone Meta y Twilio lo expone aquí. Devuelve `raw` a propósito: con
+// /v2/Channels/Senders ya aprendimos que la forma asumida de una respuesta de Twilio puede
+// no ser la real, y aquí un desajuste devolvería 'unknown' PARA SIEMPRE — la fila se
+// quedaría 'pending' en silencio y los avisos del cliente nunca saldrían. Con el crudo
+// delante, el desajuste se ve en un vistazo en vez de deducirse.
 export async function fetchApprovalStatus(credentials, contentSid) {
   const data = await twilioRequest(`https://content.twilio.com/v1/Content/${contentSid}/ApprovalRequests`, credentials, { method: 'GET' });
   const wa = data.whatsapp || {};
-  return { status: String(wa.status || 'unknown').toLowerCase(), reason: wa.rejection_reason || null };
+  return { status: String(wa.status || 'unknown').toLowerCase(), reason: wa.rejection_reason || null, raw: data };
 }
 
 export async function createWhatsAppSender(credentials, { phone, wabaId, callbackUrl }) {

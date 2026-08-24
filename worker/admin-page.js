@@ -191,6 +191,7 @@ dialog::backdrop{background:rgba(5,3,6,.78);backdrop-filter:blur(3px)}
 @media(max-width:1000px){.marca{flex-direction:column}.marcaprev{width:100%;position:static}}
 .grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px}
 .card.cardwide{grid-column:1/-1}
+.rawout{margin:10px 0 0;padding:10px 12px;background:var(--bg3);border:1px solid var(--border);border-radius:8px;font-size:12px;line-height:1.45;color:var(--muted);white-space:pre-wrap;word-break:break-word;max-height:260px;overflow:auto}
 .asunto{border-left:3px solid var(--orange)}
 .asunto .as-need{margin:2px 0 0;font-size:15px;line-height:1.4}
 .asunto .as-ctx{margin:5px 0 0;color:var(--muted);font-size:13px;line-height:1.45}
@@ -586,9 +587,11 @@ body.cliente .cliente-only{display:flex}
 <section class="tpane" data-tp="prov" hidden>
 <div class="card" id="tProv" hidden><b>Aprovisionamiento Twilio (automático)</b>
 <div id="tProvState" class="muted preline"></div>
+<pre id="tTplRaw" class="rawout" hidden></pre>
 <div class="actions actions0">
 <button class="btn alt" id="pSub" type="button">1· Crear o adoptar subcuenta</button>
 <button class="btn alt" id="pTpl" type="button">2· Plantilla → aprobación</button>
+<button class="btn alt" id="pTplChk" type="button">Comprobar plantilla ahora</button>
 <input id="pPhone" placeholder="+34910000000" class="w150">
 <button class="btn alt" id="pSender" type="button">3· Crear sender</button>
 <input id="pCode" placeholder="OTP" class="w80">

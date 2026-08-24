@@ -500,3 +500,33 @@ cuando sí caía a los recursos de Velai; los recientes son los que reflejan su 
 **Lo que queda es acción, no código:** vincular sus Telegram y seguir la aprobación de Meta (TAREAS §2).
 
 Suite 110/110.
+
+## El sondeo de plantillas deja de ser mudo (2026-08-24, sin MD previo)
+
+Juan preguntó dónde mirar cómo va la aprobación de las plantillas de las subcuentas. La respuesta
+destapó un agujero: **ninguna plantilla ha llegado nunca a `approved` en producción** (5 tenants con
+`null`, 2 con `pending`, cero `approved`, cero `rejected`), las dos existentes llevaban dos días
+`pending` — mucho para una Utility — y era **imposible distinguir «Meta va lenta» de «nuestro sondeo
+está roto»**, porque `pollProvisioning` tenía un `catch (_) {}` completamente mudo y
+`fetchApprovalStatus` lee `data.whatsapp.status`: si la forma real no fuera esa, devolvería `unknown`
+para siempre y la fila se quedaría `pending` en silencio. Con el precedente de `/v2/Channels/Senders`
+—donde la forma asumida NO era la real y solo se supo pegándole a la API— la duda estaba justificada.
+
+**Fuera el silencio:** el catch del sondeo loguea `provision_poll_failed` con el tenant y el error, y
+un estado que no sea approved/rejected/pending/received loguea `template_status_unknown` con las claves
+que sí trajo la respuesta. **Y comprobación a demanda:** botón «Comprobar plantilla ahora» en
+Aprovisionamiento → `POST …/provision/template/check`, que consulta Twilio, **aplica el veredicto ahí
+mismo** si ya es approved/rejected (con su línea de auditoría) y **muestra la respuesta CRUDA** en el
+panel. Un `unknown` nunca escribe en la fila: avisa de que la forma cambió y deja ver dónde está el
+estado de verdad. `fetchApprovalStatus` devuelve `raw` a propósito para eso.
+
+El test cubre los tres caminos con la API simulada: `approved` se aplica al momento, `pending` no toca
+la fila, y la **forma inesperada** (`{approval_requests:[…]}` en vez de `{whatsapp:{…}}`) sale como
+`unknown`, no escribe nada y entrega el crudo íntegro. Suite 111/111.
+
+**Dónde se mira, para el registro:** la plantilla es un recurso DE LA SUBCUENTA, así que en la consola
+de Twilio hay que cambiar de cuenta primero (Content Template Builder de la subcuenta, no de la
+principal) — y con la página de WhatsApp senders ya sabemos que el menú de la subcuenta puede no
+ofrecerla. Meta decide de verdad, pero con Self Sign-up la WABA vive en el Business Manager DEL
+CLIENTE, así que Velai normalmente no la ve: Twilio es la ventana práctica, y el botón del panel evita
+depender de ella.
