@@ -2332,14 +2332,16 @@ async function adminRouter(request, env, ctx, path, url, config, scope) {
   const sc = scopeClause(scope);
 
   if (path === '/api/admin/me' && request.method === 'GET') {
-    let tenantName = null;
+    let tenantName = null; let tenantLogo = null;
     if (scope.tenantId) {
-      const row = await env.DB.prepare('SELECT name FROM tenants WHERE id=?').bind(scope.tenantId).first();
+      const row = await env.DB.prepare('SELECT name, logo_url FROM tenants WHERE id=?').bind(scope.tenantId).first();
       tenantName = row ? row.name : null;
+      // El panel del cliente se viste con SU logo en cuanto lo sube (pedido de Juan).
+      tenantLogo = row && row.logo_url && /^https:\/\//.test(row.logo_url) ? row.logo_url : null;
     }
     // tenantId: el cliente lo necesita para llamar a SUS rutas de calendario
     // (/tenants/:id/calendar); es su propio id, no filtra nada ajeno.
-    return json({ role: scope.role, tenantName, tenantId: scope.tenantId }, 200, NO_STORE);
+    return json({ role: scope.role, tenantName, tenantLogo, tenantId: scope.tenantId }, 200, NO_STORE);
   }
 
   if (path === '/api/admin/escalations' && request.method === 'GET') {
@@ -2637,8 +2639,14 @@ async function adminRouter(request, env, ctx, path, url, config, scope) {
           if (!token) return;
           await applySenderProfile(env, { ...tenant, logo_url: logoUrl }, { sid: tenant.twilio_subaccount_sid, token });
           console.log(JSON.stringify({ level: 'info', code: 'sender_profile_synced', tenant: tenant.slug }));
+          // El resultado se guarda para que el panel lo cuente: un fallo en segundo plano
+          // es invisible por definición, y así el cliente no se queda esperando una foto
+          // que nunca llegó (a Juan le pasó con Diálogos).
+          if (env.KV) await env.KV.put(`waprof:${tenantId}`, JSON.stringify({ at: now, ok: true }), { expirationTtl: 30 * 86400 }).catch(() => {});
         } catch (error) {
-          console.log(JSON.stringify({ level: 'warn', code: 'sender_profile_sync_failed', tenant: tenant.slug, error: clean(String(error.message || error), 80) }));
+          const detail = clean(String(error.message || error), 80);
+          console.log(JSON.stringify({ level: 'warn', code: 'sender_profile_sync_failed', tenant: tenant.slug, error: detail }));
+          if (env.KV) await env.KV.put(`waprof:${tenantId}`, JSON.stringify({ at: now, ok: false, error: detail }), { expirationTtl: 30 * 86400 }).catch(() => {});
         }
       })());
     }
@@ -2713,11 +2721,15 @@ async function adminRouter(request, env, ctx, path, url, config, scope) {
              (twilio_from IS NOT NULL AND (channel_address = twilio_from OR EXISTS (SELECT 1 FROM tenant_channels c WHERE c.tenant_id = tenants.id AND c.address = tenants.twilio_from))) AS routed
       FROM tenants WHERE id=?`).bind(waMatch[1]).first();
     if (!row) throw new HttpError(404, 'not_found');
+    // Cómo fue el último empujón de la foto al perfil de WhatsApp (lo escribe el
+    // waitUntil de la subida del logo): sin esto, un fallo en segundo plano es invisible.
+    let profileSync = null;
+    if (env.KV) { try { profileSync = await env.KV.get(`waprof:${waMatch[1]}`, 'json'); } catch (_) {} }
     // El estado de ENTREGA de los avisos, calculado con las mismas condiciones que deliver().
     // La fila de arriba no lo trae: necesita telegram_chat_id y el SID de la plantilla.
     const alertRow = await env.DB.prepare(`SELECT telegram_chat_id, twilio_subaccount_sid, team_whatsapp,
              lead_template_sid, lead_template_status, twilio_from FROM tenants WHERE id=?`).bind(waMatch[1]).first();
-    return json({ whatsapp: row, alerts: leadAlertStatus(env, alertRow || {}) }, 200, NO_STORE);
+    return json({ whatsapp: row, alerts: leadAlertStatus(env, alertRow || {}), profileSync }, 200, NO_STORE);
   }
 
   // ── Números de aviso (SPEC-CONEXIONES PR3): el cliente edita SUS destinos ──

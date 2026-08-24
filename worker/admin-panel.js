@@ -148,7 +148,10 @@ async function loadConexiones(){$('#tgLinkBox').hidden=true;
   $('#nfTeam').value=w.team_whatsapp||'';$('#nfWa').value=w.wa_number||'';
   cxLogo=w.logo_url||'';
   $('#cxLogoPrev').innerHTML=/^https:\/\//i.test(cxLogo)?'<img src="'+esc(cxLogo)+'" alt="">':'sin logo';
-  $('#cxLogoOut').textContent=cxLogo?'':'Aún no has subido tu imagen.'}
+  const ps=wr.profileSync;
+  $('#cxLogoOut').textContent=!cxLogo?'Aún no has subido tu imagen.'
+   :(ps?(ps.ok?'Tu foto ya está aplicada a WhatsApp ('+fmt(ps.at)+').':'⚠ WhatsApp no aceptó la foto ('+esc(ps.error||'motivo desconocido')+'). Lo estamos revisando.')
+    :(w.sender_status==='ONLINE'?'Aplicada al chat de tu web. Para tu WhatsApp, vuelve a subirla y se aplica sola.':''))}
  catch(e){$('#waState').textContent=e.message}}
 // ── Asistente horizontal (canvas «Conexión de Telegram guiada», 2026-08-21): el
 // estado real del servidor (bot, vínculo, temas) marca los pasos hechos; los pasos
@@ -295,6 +298,12 @@ $('#adminsList').onclick=async e=>{const email=e.target&&e.target.dataset&&e.tar
   else toast('Admin quitado ✓'+(r.gate==='sincronizado'?' — puerta de Access actualizada':''));
   loadAdmins()}
  catch(e2){toast('NO quitado: '+(TERRS[e2.message]||e2.message),false)}};
+// Cabecera del panel con el logo del cliente: solo cuando la imagen CARGA de verdad,
+// para no dejar un hueco roto si la URL falla.
+function brandLogo(url,name){if(!url)return;const img=$('#brandLogo');
+ img.onload=()=>{$('#brandName').textContent=name||'';$('#brand').classList.add('haslogo')};
+ img.onerror=()=>{$('#brand').classList.remove('haslogo')};
+ img.src=url}
 function flags(list,cls){return list.map(f=>'<span class="flag'+(cls?' '+cls:'')+'">'+esc(f)+'</span>').join('')}
 // Un chip por canal REAL (la web entra por slug y está siempre) + avisos de configuración.
 // El viejo «socio pendiente» (era Ruta B con socio Meta) se retiró: con Self Sign-up el
@@ -628,7 +637,10 @@ $('#escalations').onclick=async e=>{const b=e.target.closest('[data-resume-t]');
 // El rol decide la interfaz, pero la DEFENSA es del worker en cada endpoint.
 let ME={role:'velai'};
 (async()=>{try{ME=await api('/api/admin/me')}catch(e){}
- if(ME.role!=='velai'){document.body.classList.add('cliente');if(ME.tenantName)document.querySelector('.brand small').textContent=ME.tenantName}
+ $('#footYear').textContent=new Date().getFullYear();
+ if(ME.role!=='velai'){document.body.classList.add('cliente');if(ME.tenantName)document.querySelector('.brand small').textContent=ME.tenantName;
+  // Su logo manda en la cabecera del panel; sin logo, se queda la marca de Velai.
+  if(ME.tenantLogo)brandLogo(ME.tenantLogo,ME.tenantName)}
  else loadTenants();
  load();loadStats();loadEscalations()})();
 // Sincronización del sender desde Twilio (solo Velai): rellena la fila tras el
@@ -656,6 +668,7 @@ $('#cxLogoUp').onclick=async()=>{const f=$('#cxLogoFile').files&&$('#cxLogoFile'
  try{const d=await api('/api/admin/tenants/'+cxTenant+'/logo',{method:'POST',headers:{'Content-Type':f.type||'application/octet-stream'},body:f});
   $('#cxLogoPrev').innerHTML='<img src="'+esc(d.logo_url)+'" alt="">';
   $('#cxLogoOut').textContent='Listo ✓ Ya se ve en el chat de tu web'+(d.whatsapp?' y en tu WhatsApp (puede tardar unos minutos en actualizarse).':'.');
+  if(ME.role!=='velai')brandLogo(d.logo_url,ME.tenantName);
   toast('Logo actualizado')}
  catch(e){$('#cxLogoOut').textContent='Error: '+(TERRS[e.message]||e.message)}};
 // Números de aviso (PR3): autoservicio con la guarda del 63031 en el worker.

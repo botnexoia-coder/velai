@@ -57,6 +57,19 @@ button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-vis
 .brand{display:flex;align-items:center;gap:9px;font-family:var(--font-d);font-weight:900;font-size:19px;letter-spacing:-.02em;padding:0 10px}
 .brand i{width:9px;height:9px;border-radius:50%;background:var(--orange);box-shadow:0 0 10px rgba(255,107,26,.7)}
 .brand small{font-family:var(--font-b);font-weight:500;font-size:10.5px;letter-spacing:.18em;color:var(--muted);text-transform:uppercase;margin-top:3px}
+/* Con el logo del cliente cargado, el punto naranja y la palabra Velai dejan paso a su
+   marca: el panel es SUYO (pedido de Juan, 2026-08-24). Velai sigue firmando en el pie. */
+.brand.haslogo i,.brand.haslogo .bname,.brand.haslogo small{display:none}
+.brand.haslogo{gap:10px;padding:0 6px}
+.brand .blogo{display:none}
+.brand.haslogo .blogo{display:flex;align-items:center;gap:9px;min-width:0}
+.brand .blogo img{width:34px;height:34px;border-radius:9px;object-fit:cover;flex:none;background:rgba(255,255,255,.06)}
+.brand .blogo b{font-family:var(--font-b);font-weight:600;font-size:12.5px;line-height:1.25;letter-spacing:.01em;color:var(--white);text-transform:none;white-space:normal;overflow:hidden}
+/* Pie de página fijo y delgado: la firma de Velai siempre visible sin robar espacio. */
+.foot{position:fixed;left:230px;right:0;bottom:0;height:30px;display:flex;align-items:center;justify-content:center;gap:8px;font-size:11px;color:rgba(var(--ink),.5);background:rgba(var(--card),.92);border-top:1px solid rgba(var(--ink),.08);backdrop-filter:blur(6px);z-index:15}
+.foot b{font-weight:700;color:rgba(var(--ink),.7)}
+main{padding-bottom:74px}
+@media(max-width:900px){.foot{left:0}}
 .sep{height:1px;background:var(--line);margin:18px 4px}
 .navlabel{font-size:11px;font-weight:500;letter-spacing:.14em;text-transform:uppercase;color:rgba(var(--ink),.42);padding:6px 12px 8px}
 .tabs{display:flex;flex-direction:column;gap:3px}
@@ -354,7 +367,7 @@ body.cliente .cliente-only{display:flex}
 .caldaylist>div:last-child{border-bottom:0}
 </style></head><body>
 <aside class="side">
-<div class="brand"><i></i>Velai <small>Panel</small></div>
+<div class="brand" id="brand"><i></i><span class="bname">Velai</span> <small>Panel</small><span class="blogo"><img id="brandLogo" alt=""><b id="brandName"></b></span></div>
 <div class="sep"></div>
 <div class="navlabel velai-only">Gestión</div>
 <nav class="tabs" role="tablist">
@@ -534,6 +547,7 @@ body.cliente .cliente-only{display:flex}
 <div class="cfgtiles" id="configState"></div>
 <div class="cfglegend"><span><i class="lg-ok"></i>operativo</span><span><i class="lg-warn"></i>requiere atención</span><span><i class="lg-bad"></i>error</span></div>
 </div></div></main>
+<div class="foot" id="foot">Panel de <b>Velai</b> · <span id="footYear"></span> · Todos los derechos reservados</div>
 <dialog id="detail"><div class="modal-h"><strong id="detailTitle">Detalle del lead</strong><button class="btn alt" id="close">Cerrar</button></div><div class="modal-b" id="detailBody"></div></dialog>
 <dialog id="tenantModal"><div class="modal-top"><div class="modal-h"><strong id="tenantTitle">Cliente</strong><div class="mh-r"><input id="tNote" placeholder="Nota del cambio (opcional)" class="inpill"><button class="btn" id="tenantSave" type="button">Guardar</button><button class="btn alt" id="tenantClose" type="button">Cerrar</button></div></div>
 <nav class="ttabs" id="ttabs">

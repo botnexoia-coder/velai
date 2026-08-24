@@ -2795,6 +2795,32 @@ test('perfil de WhatsApp: manda la marca de la ficha y NUNCA cambia el nombre vi
   } finally { globalThis.fetch = realFetch; }
 });
 
+test('el panel del cliente se viste con su logo y el fallo del perfil de WhatsApp deja de ser invisible', async () => {
+  const TID = '00000000-0000-4000-8000-0000000000e7';
+  const kv = { store: new Map(),
+    async get(k, t2) { const v = this.store.get(k); return v == null ? null : (t2 === 'json' ? JSON.parse(v) : v); },
+    async put(k, v) { this.store.set(k, v); }, async delete() {}, async list() { return { keys: [] }; } };
+  const env = { KV: kv, DB: { prepare: (sql) => ({ bind: () => ({
+    first: async () => (sql.includes('SELECT name, logo_url') ? { name: 'Mío', logo_url: 'https://api.hirevai.com/media/logos/x.png?v=1' }
+      : sql.includes('FROM tenants WHERE id=') ? { channel_address: 'whatsapp:+34600000001', sender_status: 'ONLINE', logo_url: 'https://api.hirevai.com/media/logos/x.png?v=1' } : null),
+    run: async () => ({ meta: { changes: 1 } }), all: async () => ({ results: [] }),
+  }) }) } };
+  const ctx = { waitUntil() {} };
+  const OWN = { role: 'cliente', tenantId: TID, email: 'c@x.com' };
+  // /me lleva el logo para vestir la cabecera al arrancar
+  const me = await (await testing.adminRouter(adminReq('/api/admin/me'), env, ctx, '/api/admin/me', new URL('https://x/api/admin/me'), {}, OWN)).json();
+  assert.equal(me.tenantLogo, 'https://api.hirevai.com/media/logos/x.png?v=1');
+  // un logo http:// (no https) no se sirve como marca
+  const envHttp = { ...env, DB: { prepare: (sql) => ({ bind: () => ({ first: async () => (sql.includes('SELECT name, logo_url') ? { name: 'M', logo_url: 'http://insegura/x.png' } : null), run: async () => ({ meta: { changes: 1 } }), all: async () => ({ results: [] }) }) }) } };
+  const meHttp = await (await testing.adminRouter(adminReq('/api/admin/me'), envHttp, ctx, '/api/admin/me', new URL('https://x/api/admin/me'), {}, OWN)).json();
+  assert.equal(meHttp.tenantLogo, null);
+  // el resultado del último empujón del perfil viaja al panel
+  await kv.put(`waprof:${TID}`, JSON.stringify({ at: '2026-08-24T10:00:00.000Z', ok: false, error: 'twilio_400_63028' }));
+  const wp = `/api/admin/tenants/${TID}/whatsapp`;
+  const wa = await (await testing.adminRouter(adminReq(wp), env, ctx, wp, new URL('https://x' + wp), {}, OWN)).json();
+  assert.deepEqual([wa.profileSync.ok, wa.profileSync.error], [false, 'twilio_400_63028'], 'el fallo se cuenta, no se esconde');
+});
+
 test('números de aviso (PR3): el cliente edita los suyos y la guarda del 63031 cierra los dos caminos', async () => {
   const TID = '00000000-0000-4000-8000-0000000000e1';
   const row = { id: TID, slug: 'mio', channel_address: 'whatsapp:+34624121930', twilio_from: 'whatsapp:+34624121930', team_whatsapp: null, wa_number: null, updated_at: 'T0' };
