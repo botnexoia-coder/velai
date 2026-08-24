@@ -614,6 +614,17 @@ async function tenantTokenColumn(env, tenantId, body) {
 // whatsapp y messenger viven en tenant_channels (con el canal primario como respaldo
 // histórico); telegram en su propia columna. Un solo sitio que conteste «qué canales
 // tiene este cliente» y que no pueda discrepar del enrutado real.
+// Lo que se le CUENTA al cliente sobre sus canales, en un solo sitio testeable. Los
+// estados de diagnóstico (sin enrutar, cliente inactivo) no viajan a su espacio: si su
+// WhatsApp no está enrutado eso es trabajo pendiente NUESTRO, no un problema que él pueda
+// accionar — se le dice que lo estamos dejando listo, no «404 unknown_tenant». Velai, en
+// la misma vista, sigue viendo el estado crudo: ahí el diagnóstico sí sirve.
+const CLIENT_STATE = { live: 'on', inactive: 'paused', unrouted: 'preparing', off: 'off' };
+function channelsForScope(scope, channels) {
+  if (scope.role === 'velai') return channels;
+  return channels.map((c) => ({ ...c, state: CLIENT_STATE[c.state] || 'off' }));
+}
+
 async function tenantChannelSummary(env, tenant) {
   const rows = (await env.DB.prepare('SELECT address, kind FROM tenant_channels WHERE tenant_id=?').bind(tenant.id).all()).results || [];
   const byKind = {};
@@ -622,13 +633,17 @@ async function tenantChannelSummary(env, tenant) {
   if (primary && !byKind[primary[1]]) byKind[primary[1]] = tenant.channel_address; // enruta por el fallback
   const off = (kind) => ({ kind, address: null, state: 'off' });
   const on = (kind, address) => ({ kind, address, state: tenant.active ? 'live' : 'inactive' });
-  const channels = [{ kind: 'web', address: tenant.slug, state: tenant.active ? 'live' : 'inactive' }];
+  // Direcciones LEGIBLES: el dominio del cliente en vez del slug y el nombre del grupo en
+  // vez del chat_id. Un `-100123456789` no le dice nada a nadie, y menos al cliente.
+  let web = tenant.slug;
+  try { const o = JSON.parse(tenant.web_origins || '[]'); if (o.length) web = new URL(o[0]).hostname.replace(/^www\./, ''); } catch (_) {}
+  const channels = [{ kind: 'web', address: web, state: tenant.active ? 'live' : 'inactive' }];
   // `unrouted` es el caso gogestion: sender propio en Twilio y ninguna fila que lo
   // enrute. Aquí se ve en la ficha, no solo en la vista global de Canales.
   if (byKind.whatsapp) channels.push(on('whatsapp', byKind.whatsapp));
   else if (tenant.sender_sid && tenant.twilio_from) channels.push({ kind: 'whatsapp', address: tenant.twilio_from, state: 'unrouted' });
   else channels.push(off('whatsapp'));
-  channels.push(tenant.telegram_chat_id ? on('telegram', String(tenant.telegram_chat_id)) : off('telegram'));
+  channels.push(tenant.telegram_chat_id ? on('telegram', tenant.telegram_chat_title || String(tenant.telegram_chat_id)) : off('telegram'));
   channels.push(byKind.messenger ? on('messenger', byKind.messenger) : off('messenger'));
   return channels;
 }
@@ -2155,6 +2170,10 @@ function clienteAllowed(path, method) {
   if (/^\/api\/admin\/tenants\/[0-9a-f-]+\/telegram\/link$/i.test(path) && method === 'POST') return true;
   if (/^\/api\/admin\/tenants\/[0-9a-f-]+\/telegram\/bot$/i.test(path) && ['POST', 'DELETE'].includes(method)) return true;
   if (/^\/api\/admin\/tenants\/[0-9a-f-]+\/whatsapp$/i.test(path) && method === 'GET') return true;
+  // Sus canales, en su espacio. El handler colapsa los estados de diagnóstico y exige que
+  // el :id sea el suyo. La vista GLOBAL de canales sigue siendo solo de Velai: lleva
+  // números y nombres de otros clientes.
+  if (/^\/api\/admin\/tenants\/[0-9a-f-]+\/channels$/i.test(path) && method === 'GET') return true;
   if (/^\/api\/admin\/tenants\/[0-9a-f-]+\/notify$/i.test(path) && method === 'PATCH') return true;
   if (/^\/api\/admin\/tenants\/[0-9a-f-]+\/telegram\/topics$/i.test(path) && method === 'POST') return true;
   if (/^\/api\/admin\/tenants\/[0-9a-f-]+\/telegram\/topics\/\d+$/i.test(path) && ['PATCH', 'DELETE'].includes(method)) return true;
@@ -2543,6 +2562,21 @@ async function adminRouter(request, env, ctx, path, url, config, scope) {
     return json({ channels, unrouted }, 200, NO_STORE);
   }
 
+  // ── Los canales DEL cliente, en su propio espacio ─────────────────────────
+  // Hoy tenía que leer tres tarjetas separadas para deducir qué tiene funcionando, y su
+  // canal web no aparecía en ninguna parte pese a llevar el widget en su web. Ajeno = 404,
+  // nunca 403: el molde del resto de rutas en autoservicio.
+  const chMatch = path.match(/^\/api\/admin\/tenants\/([0-9a-f-]+)\/channels$/i);
+  if (chMatch && request.method === 'GET') {
+    if (!UUID_RE.test(chMatch[1])) throw new HttpError(404, 'not_found');
+    if (scope.role !== 'velai' && scope.tenantId !== chMatch[1]) throw new HttpError(404, 'not_found');
+    const row = await env.DB.prepare(`SELECT id, slug, active, channel_address, twilio_from, sender_sid,
+             telegram_chat_id, telegram_chat_title, web_origins
+      FROM tenants WHERE id=?`).bind(chMatch[1]).first();
+    if (!row) throw new HttpError(404, 'not_found');
+    return json({ channels: channelsForScope(scope, await tenantChannelSummary(env, row)) }, 200, NO_STORE);
+  }
+
   const waMatch = path.match(/^\/api\/admin\/tenants\/([0-9a-f-]+)\/whatsapp$/i);
   if (waMatch && request.method === 'GET') {
     if (!UUID_RE.test(waMatch[1])) throw new HttpError(404, 'not_found');
@@ -2913,7 +2947,7 @@ async function adminRouter(request, env, ctx, path, url, config, scope) {
       const tenant = await env.DB.prepare(`SELECT id, slug, name, channel_address, team_whatsapp, telegram_chat_id,
         lead_template_sid, twilio_from, twilio_subaccount_sid, waba_id, meta_partner_status, system_prompt,
         bot_name, brand_name, logo_url, brand_color, brand_color_2, greeting, greeting_en, chips_json,
-        placeholder, wa_number, theme, web_origins, sender_sid, sender_status,
+        placeholder, wa_number, theme, web_origins, sender_sid, sender_status, telegram_chat_title,
         active, created_at, updated_at, twilio_auth_token_enc IS NOT NULL AS has_twilio_token
         FROM tenants WHERE id=?`).bind(tenantId).first();
       if (!tenant) throw new HttpError(404, 'not_found');
@@ -3274,4 +3308,4 @@ export function createWorker(config) {
   };
 }
 
-export const testing = { clean, errorResponseParts, tenantByAddress, syncPrimaryChannel, assertChannelFree, normalizePhone, extractPhone, safeUtm, publicCors, validTwilioSignature, callAnthropic, callAnthropicRaw, runToolLoop, calendarExecutor, calendarSystem, tenantCalendar, validCalendarDate, availableSlots, handleCalendarCallback, calendarCallbackFor, sendTwilioText, timingSafeEqual, telegramBotUsername, handleTelegramWebhook, sendTelegramText, tenantTelegramToken, telegramThreadFor, registerTelegramTopic, csvCell, expiryDate, leadFilters, isDemoKey, templateVar, leadTemplateVariables, readJson, deliver, drainQueuedLeads, verifyTurnstile, systemFor, validateTenant, invalidateTenantCache, tenantWriteError, assertNotActivePending, tenantChannelSummary, handleProvision, pollProvisioning, fillSeries, resolveScope, scopeClause, clienteAllowed, adminRouter, recordAuthFailure, handleAdmin, handleWidgetBoot, allowedOrigins, envOrigins, syncPanelGate, envAdmins, syncAdminGate, getSetting, setSetting, withCfToken };
+export const testing = { clean, errorResponseParts, tenantByAddress, syncPrimaryChannel, assertChannelFree, normalizePhone, extractPhone, safeUtm, publicCors, validTwilioSignature, callAnthropic, callAnthropicRaw, runToolLoop, calendarExecutor, calendarSystem, tenantCalendar, validCalendarDate, availableSlots, handleCalendarCallback, calendarCallbackFor, sendTwilioText, timingSafeEqual, telegramBotUsername, handleTelegramWebhook, sendTelegramText, tenantTelegramToken, telegramThreadFor, registerTelegramTopic, csvCell, expiryDate, leadFilters, isDemoKey, templateVar, leadTemplateVariables, readJson, deliver, drainQueuedLeads, verifyTurnstile, systemFor, validateTenant, invalidateTenantCache, tenantWriteError, assertNotActivePending, tenantChannelSummary, channelsForScope, handleProvision, pollProvisioning, fillSeries, resolveScope, scopeClause, clienteAllowed, adminRouter, recordAuthFailure, handleAdmin, handleWidgetBoot, allowedOrigins, envOrigins, syncPanelGate, envAdmins, syncAdminGate, getSetting, setSetting, withCfToken };

@@ -410,7 +410,10 @@ body.cliente .cliente-only{display:flex}
 </div>
 <div id="viewConexiones" hidden>
 <div class="vhead"><div><h1>Conexiones</h1><p>Canales de aviso y estado de WhatsApp del negocio</p></div><div class="actions actions0"><select id="cxTenantSel" class="inpill velai-only"></select></div></div>
-<div class="card">
+<div class="card"><b class="tgh tgh-sm">Tus canales</b>
+<p class="tgsub">Por d&oacute;nde te llegan conversaciones ahora mismo. Cada uno se configura en su apartado de abajo.</p>
+<div class="chlist" id="cxChannels"></div></div>
+<div class="card mt12">
 <div class="tgw-top"><div class="grow"><b class="tgh">Recibe tus leads en Telegram</b>
 <p class="tgsub">Una sola vez, 5–10 minutos. El asistente detecta lo que ya está hecho y guarda tu avance.</p></div>
 <span class="velai-only" id="tgWlRow"><span id="tgWlState" class="flag off">desactivada</span> <button class="btn alt btnsm" id="tgWlToggle" type="button">Activar</button></span> <span class="tgchip" id="tgProgress">—</span></div>

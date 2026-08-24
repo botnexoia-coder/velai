@@ -757,7 +757,7 @@ test('el panel rediseñado: sin dominios externos salvo las fuentes, nonce y tod
   const links = [...ADMIN_HTML.matchAll(/<a href="https:\/\/hirevai\.com\/([a-z]+)\//g)];
   assert.ok(links.length && links.every((m) => ['privacidad', 'condiciones'].includes(m[1])), 'enlaces solo a páginas legales');
   assert.ok(ADMIN_HTML.includes('__NONCE__'));
-  for (const id of ['tName', 'tSlug', 'tChannels', 'tFrom', 'tTeam', 'tChat', 'tTpl', 'tSub', 'tWaba', 'tToken', 'tPartner', 'tActive', 'tPrompt', 'tNote', 'pSub', 'pTpl', 'pPhone', 'pSender', 'pCode', 'pVerify', 'tenantFilter', 'newTenant', 'export', 'tTokenState', 'tBotName', 'tBrandName', 'tLogo', 'tColor1', 'tColor2', 'tGreeting', 'tGreetingEn', 'tChips', 'tPlaceholder', 'tWa', 'tTheme', 'brandPrev', 'toasts', 'tOrigins', 'tSyncDomains', 'logout', 'themeBtn', 'themeLabel', 'adminsCard', 'adminsList', 'aEmail', 'aAdd', 'configCard', 'configState', 'cfgToken', 'cfgTokenSave', 'cfgTokenClear', 'chRows', 'chAlarm', 'chQ', 'chTenant', 'chState', 'chCount']) {
+  for (const id of ['tName', 'tSlug', 'tChannels', 'tFrom', 'tTeam', 'tChat', 'tTpl', 'tSub', 'tWaba', 'tToken', 'tPartner', 'tActive', 'tPrompt', 'tNote', 'pSub', 'pTpl', 'pPhone', 'pSender', 'pCode', 'pVerify', 'tenantFilter', 'newTenant', 'export', 'tTokenState', 'tBotName', 'tBrandName', 'tLogo', 'tColor1', 'tColor2', 'tGreeting', 'tGreetingEn', 'tChips', 'tPlaceholder', 'tWa', 'tTheme', 'brandPrev', 'toasts', 'tOrigins', 'tSyncDomains', 'logout', 'themeBtn', 'themeLabel', 'adminsCard', 'adminsList', 'aEmail', 'aAdd', 'configCard', 'configState', 'cfgToken', 'cfgTokenSave', 'cfgTokenClear', 'chRows', 'chAlarm', 'chQ', 'chTenant', 'chState', 'chCount', 'cxChannels']) {
     assert.ok(ADMIN_HTML.includes(`id="${id}"`), `falta #${id}`);
   }
   assert.ok(!/localStorage/.test(ADMIN_HTML), 'sin localStorage');
@@ -2344,6 +2344,41 @@ test('la dirección del canal se DERIVA: alta prospecto, promoción a web al act
   const envD = { DB: { prepare: () => ({ bind: () => ({ all: async () => ({ results: [{ address: 'whatsapp:+34624121930', kind: 'whatsapp' }] }), first: async () => null }) }) } };
   const sum2 = await testing.tenantChannelSummary(envD, tenant);
   assert.deepEqual(sum2.find((c) => c.kind === 'whatsapp'), { kind: 'whatsapp', address: 'whatsapp:+34624121930', state: 'live' });
+});
+
+test('canales del cliente: ve los suyos sin diagnóstico, el ajeno es 404, y la vista GLOBAL sigue siendo de Velai', async () => {
+  const TID = '00000000-0000-4000-8000-0000000000d1';
+  // Su WhatsApp está de alta en Twilio pero SIN fila que lo enrute: el peor caso.
+  const row = { id: TID, slug: 'gog', active: 1, channel_address: 'web:gog', twilio_from: 'whatsapp:+34624121930',
+    sender_sid: 'XE1', telegram_chat_id: '-100123', telegram_chat_title: 'Leads GOgestión',
+    web_origins: JSON.stringify(['https://www.gogestion.es']) };
+  const env = { DB: { prepare: (sql) => ({ bind: () => ({
+    first: async () => (sql.includes('FROM tenants WHERE id=') ? row : null),
+    all: async () => ({ results: [] }) }) }) } };
+  const ctx = { waitUntil() {} };
+  const path = `/api/admin/tenants/${TID}/channels`;
+  const url = new URL('https://x' + path);
+  const OWN = { role: 'cliente', tenantId: TID, email: 'c@x.com' };
+  const mine = await (await testing.adminRouter(adminReq(path), env, ctx, path, url, {}, OWN)).json();
+  // Vocabulario del cliente: nada que no pueda accionar. Su WhatsApp sin enrutar es
+  // trabajo pendiente NUESTRO, así que lee «preparing», jamás «unrouted».
+  assert.deepEqual(mine.channels.map((c) => [c.kind, c.state]),
+    [['web', 'on'], ['whatsapp', 'preparing'], ['telegram', 'on'], ['messenger', 'off']]);
+  const raw = JSON.stringify(mine);
+  for (const leak of ['unrouted', 'sender_sid', 'XE1', 'channel_address']) assert.ok(!raw.includes(leak), 'no se filtra ' + leak);
+  // Direcciones legibles: su dominio y el nombre del grupo, no el slug ni el chat_id
+  assert.equal(mine.channels[0].address, 'gogestion.es');
+  assert.equal(mine.channels[2].address, 'Leads GOgestión');
+  // Velai, en la MISMA ruta, sigue viendo el estado crudo: ahí el diagnóstico sirve
+  const asVelai = await (await testing.adminRouter(adminReq(path), env, ctx, path, url, {}, { role: 'velai', email: 'a@velai' })).json();
+  assert.equal(asVelai.channels.find((c) => c.kind === 'whatsapp').state, 'unrouted');
+  // El :id ajeno es 404, nunca 403
+  const foreign = `/api/admin/tenants/${LEADS[1].id}/channels`;
+  await assert.rejects(testing.adminRouter(adminReq(foreign), env, ctx, foreign, new URL('https://x' + foreign), {}, OWN),
+    (e) => e.code === 'not_found');
+  // Y el mapa GLOBAL de canales (números y nombres de OTROS clientes) sigue vetado
+  assert.equal(testing.clienteAllowed('/api/admin/channels', 'GET'), false);
+  assert.equal(testing.clienteAllowed(`/api/admin/tenants/${TID}/channels`, 'GET'), true);
 });
 
 test('canales: la vista diagnostica el enrutado real y delata el sender vivo SIN fila (bot mudo en verde)', async () => {

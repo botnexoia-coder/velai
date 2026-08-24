@@ -111,6 +111,13 @@ async function loadConexiones(){$('#tgLinkBox').hidden=true;
    :'Aún no hay temas: crea el primero arriba.';
   tgRenderWiz(t)}
  catch(e){$('#tgState').textContent=e.message}
+ // Tus canales: el worker ya colapsó los estados según el rol; aquí solo se les pone
+ // palabras. Dos vocabularios a propósito — el cliente nunca lee un diagnóstico.
+ try{const ch=(await api('/api/admin/tenants/'+cxTenant+'/channels')).channels;
+  $('#cxChannels').innerHTML=ch.map(c=>{const s=CXCH[c.state]||CXCH.off;
+   return '<div class="chrow"><i class="'+s[0]+'"></i><span class="chk">'+esc(CXCH.k[c.kind]||c.kind)+'</span>'
+    +'<span class="chaddr">'+(c.address?esc(String(c.address).replace(/^whatsapp:/,'')):'—')+'</span>'+s[1]+'</div>'}).join('')}
+ catch(e){$('#cxChannels').innerHTML='<div class="chrow"><i></i><span class="chaddr">'+esc(e.message)+'</span></div>'}
  // Tarjeta de WhatsApp (PR2): estado en lenguaje de negocio, nunca jerga de Twilio.
  try{const w=(await api('/api/admin/tenants/'+cxTenant+'/whatsapp')).whatsapp;
   const st=w.sender_status;
@@ -399,6 +406,17 @@ $('#wizNext').onclick=async()=>{
 // tenant_channels / twilio_from / telegram_chat_id. El estado «sin enrutar» es el caso
 // gogestion — sender propio en Twilio sin fila que lo enrute — y aquí se ve en la ficha.
 const CHK={web:'web',whatsapp:'whatsapp',telegram:'telegram',messenger:'messenger'};
+// Vocabulario del CLIENTE: nada que no pueda accionar. «preparing» es su WhatsApp de alta
+// pero sin enrutar — trabajo pendiente NUESTRO, así que se dice así y no «sin enrutar».
+const CXCH={k:{web:'Tu web',whatsapp:'WhatsApp',telegram:'Telegram',messenger:'Messenger'},
+ on:['on','<span class="flag ok">activo</span>'],
+ preparing:['bad','<span class="flag">lo estamos dejando listo</span>'],
+ paused:['','<span class="flag off">en pausa</span>'],
+ off:['','<span class="muted">sin conectar</span>'],
+ // Velai ve la misma tarjeta con el estado crudo: ahí el diagnóstico sí sirve.
+ live:['on','<span class="flag ok">atendido</span>'],
+ unrouted:['bad','<span class="flag off">sin enrutar</span>'],
+ inactive:['','<span class="flag off">cliente inactivo</span>']};
 const CHSTATE={live:['on','<span class="flag ok">atendido</span>'],inactive:['','<span class="flag">cliente inactivo</span>'],
  unrouted:['bad','<span class="flag off">sin enrutar</span>'],off:['','<span class="muted">sin conectar</span>']};
 function renderChannels(list){$('#tChannels').innerHTML=(list||[]).map(c=>{const st=CHSTATE[c.state]||CHSTATE.off;
