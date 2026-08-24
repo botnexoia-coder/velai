@@ -115,7 +115,22 @@ class HttpError extends Error {
   constructor(status, code) { super(code); this.status = status; this.code = code; }
 }
 
+// Freno EN MEMORIA para actores ya autenticados (el panel): KV cobra una escritura por
+// petición y una sola carga del panel dispara ~8 llamadas — así se agotó media cuota
+// diaria en un día de pruebas (aviso de Cloudflare, 2026-08-24). Es por isolate, así que
+// vale como tope anti-bucle, no como defensa: para lo público sigue el contador en KV.
+const memHits = new Map();
+function memLimited(key, limit, windowMs = 60000) {
+  const now = Date.now();
+  const hit = memHits.get(key);
+  if (!hit || now - hit.at > windowMs) { memHits.set(key, { at: now, n: 1 }); if (memHits.size > 5000) memHits.clear(); return false; }
+  hit.n += 1;
+  return hit.n > limit;
+}
+
 async function rateLimited(env, ip, bucket, limit) {
+  // El panel (identidad verificada por Access) no gasta cuota de KV.
+  if (bucket === 'admin') return memLimited(`${bucket}:${ip}`, limit);
   if (!env.KV || !ip) return false;
   const key = `rl:${bucket}:${ip}`;
   try {
@@ -297,7 +312,10 @@ function expiryDate(env) {
 // La config de cada negocio es un dato (tabla `tenants`); los guardrails
 // antiinyección son código y se concatenan SIEMPRE (systemFor). El webhook de
 // Twilio enruta por `To`; el canal web por `body.tenant` (default: velai).
-const TENANT_TTL = 300; // 5 min: un cambio en la fila se ve casi al momento
+// 30 min: CUALQUIER edición desde el panel invalida estas claves al instante
+// (invalidateTenantCache), así que el TTL solo cubre cambios hechos por SQL directo. Con
+// 300 s se reescribía cada 5 minutos por clave y tenant — cientos de escrituras al día.
+const TENANT_TTL = 1800;
 
 // Caché en KV para no pegarle a D1 en cada mensaje. Se cachea también el fallo
 // (objeto vacío) para que un bombardeo a un To inexistente no golpee la base.
@@ -3465,13 +3483,20 @@ export function createWorker(config) {
         if (path.startsWith('/media/') && request.method === 'GET') {
           const key = path.slice('/media/'.length);
           if (!MEDIA_KEY_RE.test(key) || key.includes('..')) throw new HttpError(404, 'not_found');
+          // Caché del edge: la URL va versionada, así que un logo se lee del almacén una
+          // vez por centro de datos en lugar de una vez por visitante del widget.
+          const cache = caches.default;
+          const cached = await cache.match(request);
+          if (cached) return cached;
           const obj = await mediaGet(env, key);
           if (!obj) throw new HttpError(404, 'not_found');
           // La URL va versionada (?v=): cachear un año es seguro y la foto la lee
           // también Meta al aplicar el perfil de WhatsApp — tiene que ser pública.
           const headers = { 'Content-Type': obj.contentType, 'Cache-Control': 'public, max-age=31536000, immutable', 'Access-Control-Allow-Origin': '*' };
           if (obj.etag) headers.ETag = obj.etag;
-          return new Response(obj.body, { headers });
+          const media = new Response(obj.body, { headers });
+          ctx.waitUntil(cache.put(request, media.clone()).catch(() => {}));
+          return media;
         }
         if (path === '/lead' || path === '/chat') {
           const cors = await publicCors(request, env);
@@ -3494,4 +3519,4 @@ export function createWorker(config) {
   };
 }
 
-export const testing = { clean, persistLead, leadAlertStatus, captureWhatsAppLead, leadFromSummary, leadCaptureDone, errorResponseParts, tenantByAddress, syncPrimaryChannel, assertChannelFree, normalizePhone, extractPhone, safeUtm, publicCors, validTwilioSignature, callAnthropic, callAnthropicRaw, runToolLoop, calendarExecutor, calendarSystem, tenantCalendar, validCalendarDate, availableSlots, handleCalendarCallback, calendarCallbackFor, sendTwilioText, timingSafeEqual, telegramBotUsername, handleTelegramWebhook, sendTelegramText, tenantTelegramToken, telegramThreadFor, registerTelegramTopic, csvCell, expiryDate, leadFilters, isDemoKey, templateVar, leadTemplateVariables, readJson, deliver, drainQueuedLeads, verifyTurnstile, systemFor, validateTenant, invalidateTenantCache, tenantWriteError, assertNotActivePending, tenantChannelSummary, channelsForScope, handleProvision, pollProvisioning, fillSeries, resolveScope, scopeClause, clienteAllowed, adminRouter, recordAuthFailure, handleAdmin, handleWidgetBoot, allowedOrigins, envOrigins, syncPanelGate, envAdmins, syncAdminGate, getSetting, setSetting, withCfToken };
+export const testing = { rateLimited, memLimited, applySenderProfile, pushSenderProfile, clean, persistLead, leadAlertStatus, captureWhatsAppLead, leadFromSummary, leadCaptureDone, errorResponseParts, tenantByAddress, syncPrimaryChannel, assertChannelFree, normalizePhone, extractPhone, safeUtm, publicCors, validTwilioSignature, callAnthropic, callAnthropicRaw, runToolLoop, calendarExecutor, calendarSystem, tenantCalendar, validCalendarDate, availableSlots, handleCalendarCallback, calendarCallbackFor, sendTwilioText, timingSafeEqual, telegramBotUsername, handleTelegramWebhook, sendTelegramText, tenantTelegramToken, telegramThreadFor, registerTelegramTopic, csvCell, expiryDate, leadFilters, isDemoKey, templateVar, leadTemplateVariables, readJson, deliver, drainQueuedLeads, verifyTurnstile, systemFor, validateTenant, invalidateTenantCache, tenantWriteError, assertNotActivePending, tenantChannelSummary, channelsForScope, handleProvision, pollProvisioning, fillSeries, resolveScope, scopeClause, clienteAllowed, adminRouter, recordAuthFailure, handleAdmin, handleWidgetBoot, allowedOrigins, envOrigins, syncPanelGate, envAdmins, syncAdminGate, getSetting, setSetting, withCfToken };

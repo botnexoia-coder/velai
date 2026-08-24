@@ -2864,6 +2864,27 @@ test('la imagen guardada se aplica a WhatsApp SIN volver a subirla, y el panel p
   } finally { globalThis.fetch = realFetch; }
 });
 
+test('el panel no gasta cuota de KV y sigue teniendo tope; lo público sí cuenta en KV', async () => {
+  // El aviso de Cloudflare del 2026-08-24 (media cuota diaria de KV en un día de pruebas)
+  // era esto: una sola carga del panel son ~8 peticiones y cada una escribía una clave.
+  const kv = mapKV();
+  let writes = 0;
+  const env = { KV: { async get(k) { return kv.get(k); }, async put(k, v, o) { writes += 1; return kv.put(k, v, o); }, async delete(k) { return kv.delete(k); }, async list() { return { keys: [] }; } } };
+  for (let i = 0; i < 30; i++) await testing.rateLimited(env, 'juan@velai.com', 'admin', 120);
+  assert.equal(writes, 0, 'el panel no escribe en KV');
+  // pero el tope sigue existiendo (en memoria, por isolate)
+  let blocked = false;
+  for (let i = 0; i < 8; i++) blocked = await testing.rateLimited(env, 'otro@velai.com', 'admin', 5) || blocked;
+  assert.equal(blocked, true, 'un bucle del panel se frena igual');
+  // el tráfico público (sin identidad verificada) mantiene el contador en KV
+  await testing.rateLimited(env, '1.2.3.4', 'chat', 20);
+  assert.equal(writes, 1, 'lo público sigue contando en KV');
+  // la caché de tenants deja de reescribirse cada 5 minutos
+  const source = await readFile(new URL('../worker/app.js', import.meta.url), 'utf8');
+  const ttl = /const TENANT_TTL = (\d+)/.exec(source);
+  assert.ok(ttl && Number(ttl[1]) >= 900, 'TTL alto: la invalidación explícita ya cubre los cambios del panel');
+});
+
 test('números de aviso (PR3): el cliente edita los suyos y la guarda del 63031 cierra los dos caminos', async () => {
   const TID = '00000000-0000-4000-8000-0000000000e1';
   const row = { id: TID, slug: 'mio', channel_address: 'whatsapp:+34624121930', twilio_from: 'whatsapp:+34624121930', team_whatsapp: null, wa_number: null, updated_at: 'T0' };
