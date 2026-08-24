@@ -2821,6 +2821,46 @@ test('el panel del cliente se viste con su logo y el fallo del perfil de WhatsAp
   assert.deepEqual([wa.profileSync.ok, wa.profileSync.error], [false, 'twilio_400_63028'], 'el fallo se cuenta, no se esconde');
 });
 
+test('la imagen guardada se aplica a WhatsApp SIN volver a subirla, y el panel puede pintar imágenes', async () => {
+  const TID = '00000000-0000-4000-8000-0000000000e8';
+  // La CSP del panel debe permitir imágenes: sin img-src, default-src 'none' las bloquea
+  // TODAS y la miniatura del logo sale rota (lo vio Juan en Conexiones).
+  const source = await readFile(new URL('../worker/app.js', import.meta.url), 'utf8');
+  const csp = /'Content-Security-Policy': `([^`]+)`/.exec(source);
+  assert.ok(csp && /img-src [^;]*https:/.test(csp[1]), 'la CSP del panel deja pasar imágenes https');
+  const page = await readFile(new URL('../worker/admin-page.js', import.meta.url), 'utf8');
+  assert.ok(page.includes('class="filein"'), 'el input de archivo lleva el estilo del panel, no el nativo');
+  const realFetch = globalThis.fetch;
+  const posts = [];
+  try {
+    globalThis.fetch = async (url, init) => {
+      if (String(url).includes('api.telegram.org')) return new Response('{"ok":true}', { status: 200 });
+      if (!init || init.method === 'GET') return new Response(JSON.stringify({ status: 'ONLINE', profile: { name: 'Nombre Aprobado' } }), { status: 200 });
+      posts.push(JSON.parse(init.body));
+      return new Response('{"status":"ONLINE"}', { status: 200 });
+    };
+    const row = { id: TID, slug: 'mio', name: 'Mío', brand_name: 'Marca', greeting: 'Hola',
+      logo_url: 'https://api.hirevai.com/media/logos/y.png?v=2', web_origins: '[]',
+      sender_sid: 'XE' + 'd'.repeat(32), twilio_subaccount_sid: 'AC' + 'e'.repeat(32),
+      twilio_auth_token_enc: await encryptSecret({ SECRETS_KEK: TEST_KEK }, TID, 'a1b2c3d4e5f60718293a4b5c6d7e8f90') };
+    const kv = mapKV();
+    const env = { SECRETS_KEK: TEST_KEK, KV: kv, DB: { prepare: (sql) => ({ bind: () => ({
+      first: async () => (sql.includes('FROM tenants WHERE id=') ? { ...row } : null),
+      run: async () => ({ meta: { changes: 1 } }), all: async () => ({ results: [] }),
+    }) }) } };
+    const ctx = { waitUntil() {} };
+    const path = `/api/admin/tenants/${TID}/logo/apply`;
+    // el CLIENTE puede reaplicar SU imagen (autoservicio), sin resubir nada
+    const res = await (await testing.adminRouter(adminReq(path, { method: 'POST' }), env, ctx, path, new URL('https://x' + path), {}, { role: 'cliente', tenantId: TID })).json();
+    assert.equal(res.applied.logo, true);
+    assert.equal(posts[0].profile.logo_url, 'https://api.hirevai.com/media/logos/y.png?v=2', 'usa la URL ya guardada');
+    assert.equal(JSON.parse(await kv.get(`waprof:${TID}`)).ok, true, 'queda registrado para el panel');
+    // el de otro cliente, 404
+    const foreign = '/api/admin/tenants/00000000-0000-4000-8000-0000000000e9/logo/apply';
+    await assert.rejects(testing.adminRouter(adminReq(foreign, { method: 'POST' }), env, ctx, foreign, new URL('https://x' + foreign), {}, { role: 'cliente', tenantId: TID }), (e) => e.status === 404);
+  } finally { globalThis.fetch = realFetch; }
+});
+
 test('números de aviso (PR3): el cliente edita los suyos y la guarda del 63031 cierra los dos caminos', async () => {
   const TID = '00000000-0000-4000-8000-0000000000e1';
   const row = { id: TID, slug: 'mio', channel_address: 'whatsapp:+34624121930', twilio_from: 'whatsapp:+34624121930', team_whatsapp: null, wa_number: null, updated_at: 'T0' };

@@ -22,7 +22,7 @@ function adminPageResponse() {
     ...ADMIN_HEADERS,
     // font-src es la ÚNICA apertura: las fuentes de marca se sirven desde hirevai.com
     // (con CORS en _headers de Pages); el resto sigue cerrado con nonce.
-    'Content-Security-Policy': `default-src 'none'; script-src 'nonce-${nonce}'; style-src 'nonce-${nonce}'; connect-src 'self'; font-src https://hirevai.com; form-action 'self'; frame-ancestors 'none'; base-uri 'none'`,
+    'Content-Security-Policy': `default-src 'none'; script-src 'nonce-${nonce}'; style-src 'nonce-${nonce}'; connect-src 'self'; img-src 'self' https: data:; font-src https://hirevai.com; form-action 'self'; frame-ancestors 'none'; base-uri 'none'`,
   };
   return new Response(ADMIN_HTML.replaceAll('__NONCE__', nonce), { headers });
 }
@@ -1979,6 +1979,28 @@ async function applySenderProfile(env, tenant, credentials) {
   return { logo: !!profile.logo_url, websites: webs.length, description: !!profile.description };
 }
 
+// Empuja la marca al perfil de WhatsApp y DEJA CONSTANCIA del resultado: sin este
+// registro un fallo en segundo plano es invisible (Diálogos se quedó sin foto sin que
+// nada lo dijera). Nunca lanza: el llamante decide si el fallo importa.
+async function pushSenderProfile(env, tenant) {
+  const at = new Date().toISOString();
+  const note = async (data) => { if (env.KV) { try { await env.KV.put(`waprof:${tenant.id}`, JSON.stringify({ at, ...data }), { expirationTtl: 30 * 86400 }); } catch (_) {} } };
+  if (!tenant.sender_sid || !tenant.twilio_subaccount_sid) return { skipped: true, error: 'sender_required' };
+  try {
+    const token = await twilioAuthTokenFor(env, tenant);
+    if (!token) { await note({ ok: false, error: 'twilio_auth_token_missing' }); return { error: 'twilio_auth_token_missing' }; }
+    const applied = await applySenderProfile(env, tenant, { sid: tenant.twilio_subaccount_sid, token });
+    console.log(JSON.stringify({ level: 'info', code: 'sender_profile_synced', tenant: tenant.slug }));
+    await note({ ok: true, logo: applied.logo });
+    return { ok: true, applied };
+  } catch (error) {
+    const detail = clean(String(error.message || error), 80);
+    console.log(JSON.stringify({ level: 'warn', code: 'sender_profile_sync_failed', tenant: tenant.slug, error: detail }));
+    await note({ ok: false, error: detail });
+    return { error: detail };
+  }
+}
+
 async function runProvisionStep(request, env, ctx, tenant, tenantId, step, actor) {
   const now = new Date().toISOString();
 
@@ -2280,6 +2302,9 @@ function clienteAllowed(path, method) {
   // Su logo es SU marca: el cliente lo sube desde Conexiones (el handler exige que el
   // :id sea el suyo — ajeno = 404) y de paso se aplica a su foto de WhatsApp.
   if (/^\/api\/admin\/tenants\/[0-9a-f-]+\/logo$/i.test(path) && method === 'POST') return true;
+  // Aplicar a WhatsApp el logo que YA está guardado: volver a subir la misma imagen no
+  // tiene sentido (Juan, 2026-08-24). Idempotente y con guarda own-only en el handler.
+  if (/^\/api\/admin\/tenants\/[0-9a-f-]+\/logo\/apply$/i.test(path) && method === 'POST') return true;
   if (/^\/api\/admin\/tenants\/[0-9a-f-]+\/telegram\/topics$/i.test(path) && method === 'POST') return true;
   if (/^\/api\/admin\/tenants\/[0-9a-f-]+\/telegram\/topics\/\d+$/i.test(path) && ['PATCH', 'DELETE'].includes(method)) return true;
   if (path === '/api/admin/stats' && method === 'GET') return true;
@@ -2603,6 +2628,21 @@ async function adminRouter(request, env, ctx, path, url, config, scope) {
   // Logo de marca subido AL BUCKET (R2): una sola imagen alimenta el widget web y la
   // foto de perfil de WhatsApp. Se guarda bajo logos/<tenantId>.<ext> y se sirve por
   // /media/ del propio worker (api.hirevai.com) — nada de dominios de terceros.
+  // Reaplicar a WhatsApp la imagen guardada (sin resubirla).
+  const logoApply = path.match(/^\/api\/admin\/tenants\/([0-9a-f-]+)\/logo\/apply$/i);
+  if (logoApply && request.method === 'POST') {
+    if (!UUID_RE.test(logoApply[1])) throw new HttpError(404, 'not_found');
+    if (scope.role !== 'velai' && scope.tenantId !== logoApply[1]) throw new HttpError(404, 'not_found');
+    const tenant = await env.DB.prepare(`SELECT id, slug, name, logo_url, brand_name, greeting, web_origins,
+      sender_sid, twilio_subaccount_sid, twilio_auth_token_enc FROM tenants WHERE id=?`).bind(logoApply[1]).first();
+    if (!tenant) throw new HttpError(404, 'not_found');
+    if (!tenant.logo_url) throw new HttpError(400, 'logo_missing');
+    if (!tenant.sender_sid) throw new HttpError(400, 'sender_required');
+    const out = await pushSenderProfile(env, tenant);
+    if (!out.ok) throw new HttpError(502, out.error === 'twilio_auth_token_missing' ? 'twilio_auth_token_missing' : 'sender_profile_failed');
+    return json({ ok: true, applied: out.applied }, 200, NO_STORE);
+  }
+
   const logoMatch = path.match(/^\/api\/admin\/tenants\/([0-9a-f-]+)\/logo$/i);
   if (logoMatch && request.method === 'POST') {
     if (!UUID_RE.test(logoMatch[1])) throw new HttpError(404, 'not_found');
@@ -2632,23 +2672,11 @@ async function adminRouter(request, env, ctx, path, url, config, scope) {
     // La foto de WhatsApp se actualiza SOLA: el cliente sube su logo y ya está en los dos
     // canales, sin entender de perfiles. En segundo plano porque Twilio puede tardar y la
     // subida no debe fallar por ello — si falla, queda el botón manual de Velai.
+    // La foto de WhatsApp se actualiza SOLA: el cliente sube su logo y ya está en los dos
+    // canales, sin entender de perfiles. En segundo plano porque Twilio puede tardar y la
+    // subida no debe fallar por ello — el resultado queda registrado para el panel.
     if (tenant.sender_sid && tenant.twilio_subaccount_sid) {
-      ctx.waitUntil((async () => {
-        try {
-          const token = await twilioAuthTokenFor(env, tenant);
-          if (!token) return;
-          await applySenderProfile(env, { ...tenant, logo_url: logoUrl }, { sid: tenant.twilio_subaccount_sid, token });
-          console.log(JSON.stringify({ level: 'info', code: 'sender_profile_synced', tenant: tenant.slug }));
-          // El resultado se guarda para que el panel lo cuente: un fallo en segundo plano
-          // es invisible por definición, y así el cliente no se queda esperando una foto
-          // que nunca llegó (a Juan le pasó con Diálogos).
-          if (env.KV) await env.KV.put(`waprof:${tenantId}`, JSON.stringify({ at: now, ok: true }), { expirationTtl: 30 * 86400 }).catch(() => {});
-        } catch (error) {
-          const detail = clean(String(error.message || error), 80);
-          console.log(JSON.stringify({ level: 'warn', code: 'sender_profile_sync_failed', tenant: tenant.slug, error: detail }));
-          if (env.KV) await env.KV.put(`waprof:${tenantId}`, JSON.stringify({ at: now, ok: false, error: detail }), { expirationTtl: 30 * 86400 }).catch(() => {});
-        }
-      })());
+      ctx.waitUntil(pushSenderProfile(env, { ...tenant, logo_url: logoUrl }));
     }
     return json({ ok: true, logo_url: logoUrl, store, whatsapp: !!(tenant.sender_sid && tenant.twilio_subaccount_sid) }, 200, NO_STORE);
   }

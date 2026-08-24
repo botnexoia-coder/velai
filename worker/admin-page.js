@@ -331,6 +331,11 @@ body.cliente .cliente-only{display:flex}
 .card b.tgh{display:block;font-family:var(--font-d);font-size:19px;letter-spacing:-.02em;color:var(--white)}
 .card b.tgh-sm{font-size:16px}
 .card .tgcard>b{display:block;font-size:12.5px;color:var(--white);margin-bottom:2px}
+/* El selector de archivo nativo no se puede maquillar: se oculta accesiblemente y su
+   <label> hace de botón del panel. La clase va donde haya un input file (aquí y ficha). */
+.filein{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap;border:0}
+.filein:focus-visible+label{outline:2px solid var(--orange);outline-offset:2px}
+.fname{max-width:190px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px}
 .cxlogo{width:44px;height:44px;border-radius:10px;display:inline-flex;align-items:center;justify-content:center;background:rgba(var(--ink),.06);overflow:hidden;flex:none;font-size:11px;color:rgba(var(--ink),.5)}
 .cxlogo img{width:100%;height:100%;object-fit:cover}
 .tgnode[hidden],.tgbar[hidden],.tgstep[hidden]{display:none}
@@ -513,7 +518,7 @@ body.cliente .cliente-only{display:flex}
 <div class="chlist" id="cxAlerts"></div></div>
 <div class="card mt12"><b class="tgh tgh-sm">Tu logo</b>
 <p class="tgsub">La imagen de tu negocio: sale en el chat de tu web y como <b class="tgh">foto de perfil de tu WhatsApp</b>. Cuadrada, 640×640 o más, máximo 2 MB (PNG, JPG o WebP).</p>
-<div class="actions actions0"><span id="cxLogoPrev" class="cxlogo">—</span><input type="file" id="cxLogoFile" accept="image/png,image/jpeg,image/webp" class="grow"><button class="btn alt" id="cxLogoUp" type="button">Subir imagen</button></div>
+<div class="actions actions0"><span id="cxLogoPrev" class="cxlogo">—</span><input type="file" id="cxLogoFile" accept="image/png,image/jpeg,image/webp" class="filein"><label class="btn alt" for="cxLogoFile">Elegir imagen</label><span id="cxLogoName" class="fname muted">ninguna elegida</span><button class="btn" id="cxLogoUp" type="button">Guardar logo</button><button class="btn alt" id="cxLogoApply" type="button" hidden>Aplicar a mi WhatsApp</button></div>
 <small class="muted" id="cxLogoOut"></small></div>
 <div class="card mt12"><b class="tgh tgh-sm">Números de aviso por WhatsApp</b>
 <p class="tgsub">A qué WhatsApp del equipo llega el aviso de cada lead (además de Telegram). Varios números separados por coma, formato whatsapp:+34…</p>
@@ -590,7 +595,7 @@ body.cliente .cliente-only{display:flex}
 <div class="grid">
 <div class="card"><b>Nombre del bot</b><input id="tBotName" placeholder="Zoe"><small class="muted field-err" data-f="bot_name"></small></div>
 <div class="card"><b>Nombre de marca</b><input id="tBrandName" placeholder="Zoe Travel Spain"><small class="muted field-err" data-f="brand_name"></small></div>
-<div class="card"><b>Logo del negocio</b><input id="tLogo" placeholder="https://… o sube una imagen aquí abajo"><div class="note mt6"><input type="file" id="tLogoFile" accept="image/png,image/jpeg,image/webp"><button class="btn alt btnsm" id="tLogoUp" type="button">Subir imagen</button><span id="tLogoOut" class="muted"></span></div><small class="muted">Se guarda en nuestro almacenamiento y sirve para el widget y para la <b class="tgh">foto de perfil de WhatsApp</b>. Cuadrada, 640×640 o más, máx. 2 MB (PNG/JPG/WebP).</small><small class="muted field-err" data-f="logo_url"></small></div>
+<div class="card"><b>Logo del negocio</b><input id="tLogo" placeholder="https://… o sube una imagen aquí abajo"><div class="note mt6"><input type="file" id="tLogoFile" accept="image/png,image/jpeg,image/webp" class="filein"><label class="btn alt btnsm" for="tLogoFile">Elegir imagen</label><span id="tLogoName" class="fname muted">ninguna elegida</span><button class="btn btnsm" id="tLogoUp" type="button">Guardar logo</button><span id="tLogoOut" class="muted"></span></div><small class="muted">Se guarda en nuestro almacenamiento y sirve para el widget y para la <b class="tgh">foto de perfil de WhatsApp</b>. Cuadrada, 640×640 o más, máx. 2 MB (PNG/JPG/WebP).</small><small class="muted field-err" data-f="logo_url"></small></div>
 <div class="card"><b>Colores (#rrggbb · el 2º opcional, degradado)</b><div class="note mt6"><input id="tColor1" placeholder="#1a4fd0" class="w150"><input id="tColor2" placeholder="#f57a1f" class="w150"></div><small class="muted field-err" data-f="brand_color"></small><small class="muted field-err" data-f="brand_color_2"></small></div>
 <div class="card"><b>Saludo (ES)</b><textarea id="tGreeting" rows="2" placeholder="¡Hola! Soy Zoe 🐱 ¿A dónde sueñas viajar?"></textarea><small class="muted field-err" data-f="greeting"></small></div>
 <div class="card"><b>Saludo (EN, opcional)</b><textarea id="tGreetingEn" rows="2" placeholder="Hi! I'm Zoe 🐱 Where do you dream of travelling?"></textarea><small class="muted field-err" data-f="greeting_en"></small></div>
