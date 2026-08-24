@@ -368,3 +368,39 @@ canal cambiado desde la ficha y **primer lead real de un cliente en producción*
 chips de la lista por canal real — «socio pendiente» retirado) y **`api.hirevai.com`** como dominio
 del worker + widget v=8 (workers.dev está en listas de adblock: a esos visitantes el widget les salía
 sin marca y con el chat muerto).
+
+## Vista «Canales» — el enrutado visible (2026-08-24, sin MD previo — incidente gogestion)
+
+**El fallo.** gogestion quedó con el sender ONLINE, la ficha impecable (`sender_sid`, `waba_id`,
+`twilio_from`) y **el bot mudo**: no existía su fila en `tenant_channels`, así que `tenantByAddress`
+no resolvía y el webhook contestaba `404 unknown_tenant`. Causa: `sender/sync` (PR2) se salta
+`channel_address` cuando ya tiene valor — y gogestion tenía `web:gogestion` del canal web — pero
+**nunca escribía en `tenant_channels`**. Cualquier cliente con canal web previo quedaba así. Y no
+había forma de verlo: todas las vistas del panel salían de las columnas de `tenants` y del estado que
+reporta Twilio; ninguna leía la tabla que el worker consulta en cada mensaje, de modo que «verde en
+Twilio» y «mudo» convivían sin testigos. La tarjeta de Conexiones llegaba a decir «Activo».
+
+**Los dos arreglos de raíz** (5dddc37): `sender/sync` registra el canal con `assertChannelFree` +
+`syncPrimaryChannel` — siempre, no solo cuando hay columnas que rellenar, y si el número enruta a otro
+cliente no lo toca (loguea `sender_channel_not_registered`); e `invalidateTenantCache` barre también
+las direcciones de `tenant_channels`, porque `tenantByAddress` cachea **el fallo** 5 min y sin eso
+registrar un canal dejaba el bot mudo hasta que caducara el negativo.
+
+**La vista** (a6ac312): `GET /api/admin/channels` (velai-only por servidor, no solo por CSS) + pestaña
+**Canales**. Lista las direcciones que el worker atiende de verdad con el diagnóstico calculado en el
+worker — la misma pregunta que hace `tenantByAddress`, para que panel y enrutado no puedan discrepar:
+`atendido` / `cliente inactivo` (el webhook exige `active=1`) / `responde con otro número` (entra por
+una dirección y contesta desde otra) / `cliente borrado`. Arriba, la alarma que faltaba: **senders
+vivos en Twilio que ninguna fila enruta**. Dos avisos más donde ya se miraba: chip rojo «whatsapp: sin
+enrutar» en la lista de clientes (antes ese cliente pasaba por «solo web») y la tarjeta de Conexiones
+deja de decir «Activo» con el bot mudo — en lenguaje de cliente, que es quien la ve.
+
+**Lo pidieron los datos reales:** el filtro `sender_sid IS NOT NULL` en la consulta del hueco.
+`velai-messenger` lleva el `twilio_from` de Velai para los avisos de SALIDA y no tiene sender propio —
+sin ese filtro salía como alarma falsa. Y `created_at` se normaliza a ISO: el backfill de la 0017 usó
+`datetime('now')` (UTC sin marca) y `syncPrimaryChannel` escribe ISO con Z, así que el panel pintaba
+las viejas 2 h desplazadas.
+
+**Verificado en producción:** fila insertada a mano para desbloquear a gogestion, **bot contestando en
+WhatsApp confirmado por Juan**, 4 canales (velai, velai-messenger, dialogos, gogestion) todos en
+`atendido` y cero senders sin enrutar. Suite 105/105.

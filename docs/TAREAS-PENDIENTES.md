@@ -103,7 +103,8 @@ Sin esto, las campañas gastarían presupuesto a ciegas (sin medir conversiones)
 ### 2k. Canales múltiples por cliente (tenant_channels — fase 1 desplegada 2026-08-22)
 
 - [x] Tabla `tenant_channels` (migración 0017, backfill) + enrutado del webhook canales-primero con fallback a `tenants.channel_address`; el PATCH/POST mantienen el espejo del canal primario; chips de la lista por canal real (web siempre + whatsapp con estado del sender + messenger).
-- [ ] **Fase 2 (cuando un cliente pida 2 canales de mensajería a la vez):** UI para añadir canales secundarios (hoy solo escribe el primario), respuesta saliente por el canal de llegada, y fusionar «Velai (Messenger)» en la fila de Velai como primer caso real.
+- [x] **Enrutado visible + el hueco de `sender/sync` cerrado** (2026-08-24, a6ac312 y 5dddc37): la vista **Canales** del panel lista las direcciones que el worker atiende de verdad y alarma con los senders vivos que ninguna fila enruta; `sender/sync` registra el canal (antes un cliente con canal web previo quedaba con el sender ONLINE y el bot mudo — le pasó a gogestion). Detalle en IMPLEMENTADO.
+- [ ] **Fase 2 (cuando un cliente pida 2 canales de mensajería a la vez):** UI para añadir canales secundarios (hoy solo escribe el primario), respuesta saliente por el canal de llegada, y fusionar «Velai (Messenger)» en la fila de Velai como primer caso real. Nota: la vista Canales ya marca «responde con otro número» — el desalineado entre canal de llegada y `twilio_from` que la fase 2 tiene que resolver de verdad.
 
 ### 2h. Seguimiento del sprint de blindaje (desplegado 2026-08-20)
 
