@@ -2788,7 +2788,10 @@ test('perfil de WhatsApp: manda la marca de la ficha y NUNCA cambia el nombre vi
     assert.equal(sent.name, 'Nombre Aprobado', 'el display name se reenvía intacto');
     assert.equal(sent.logo_url, 'https://api.hirevai.com/media/logos/x.png?v=1');
     assert.deepEqual(sent.websites, [{ website: 'https://mio.com', label: 'Web' }], 'el apex, no el www');
-    assert.equal(sent.vertical, 'Other', 'lo que ya había en el perfil no se pierde');
+    // El payload va MÍNIMO: los campos del GET que la API de escritura no acepta se
+    // quedan fuera (reenviarlos provocaba el 63100 de validación).
+    assert.equal(sent.vertical, undefined, 'no se reenvía lo que el POST no admite');
+    assert.deepEqual(Object.keys(sent).sort(), ['about', 'description', 'logo_url', 'name', 'websites']);
     // sin sender no hay nada que perfilar
     const sin = provisionHarness({ tenant: { id: '00000000-0000-4000-8000-0000000000d3', slug: 'x', name: 'X', brand_name: 'X', twilio_subaccount_sid: sub, sender_sid: null, twilio_auth_token_enc: await encryptSecret({ SECRETS_KEK: TEST_KEK }, '00000000-0000-4000-8000-0000000000d3', 'a1b2c3d4e5f60718293a4b5c6d7e8f90') } });
     await assert.rejects(testing.handleProvision(provReq(), sin.env, sin.ctx, sin.row.id, 'sender/profile', 'juan@x'), (e) => e.code === 'sender_required');

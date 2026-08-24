@@ -66,8 +66,11 @@ button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-vis
 .brand .blogo img{width:34px;height:34px;border-radius:9px;object-fit:cover;flex:none;background:rgba(255,255,255,.06)}
 .brand .blogo b{font-family:var(--font-b);font-weight:600;font-size:12.5px;line-height:1.25;letter-spacing:.01em;color:var(--white);text-transform:none;white-space:normal;overflow:hidden}
 /* Pie de página fijo y delgado: la firma de Velai siempre visible sin robar espacio. */
-.foot{position:fixed;left:230px;right:0;bottom:0;height:30px;display:flex;align-items:center;justify-content:center;gap:8px;font-size:11px;color:rgba(var(--ink),.5);background:rgba(var(--card),.92);border-top:1px solid rgba(var(--ink),.08);backdrop-filter:blur(6px);z-index:15}
-.foot b{font-weight:700;color:rgba(var(--ink),.7)}
+/* OJO: --ink/--card SOLO existen dentro de main/dialog/#toasts (ver nota de tokens
+   arriba). El pie vive FUERA de main, así que usa los tokens de :root — los mismos del
+   sidebar — y de paso cumple la regla de que el marco del panel va oscuro siempre. */
+.foot{position:fixed;left:230px;right:0;bottom:0;height:30px;display:flex;align-items:center;justify-content:center;gap:6px;font-family:var(--font-b);font-size:11px;letter-spacing:.02em;color:var(--muted);background:var(--side);border-top:1px solid var(--border);z-index:15}
+.foot b{font-weight:700;color:var(--white)}
 main{padding-bottom:74px}
 @media(max-width:900px){.foot{left:0}}
 .sep{height:1px;background:var(--line);margin:18px 4px}

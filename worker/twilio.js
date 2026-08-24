@@ -14,7 +14,13 @@ async function twilioRequest(url, credentials, { method = 'POST', form = null, j
   if (json) { headers['Content-Type'] = 'application/json'; body = JSON.stringify(json); }
   const response = await fetch(url, { method, headers, body, signal: AbortSignal.timeout(10000) });
   const data = await response.json().catch(() => ({}));
-  if (!response.ok) throw new TwilioError(502, `twilio_${response.status}_${data.code || 'error'}`);
+  if (!response.ok) {
+    const error = new TwilioError(502, `twilio_${response.status}_${data.code || 'error'}`);
+    // El «message» de Twilio dice QUÉ campo falla: sin él, un 63100 (validación) obliga a
+    // adivinar (pasó con el perfil de Diálogos). Nunca lleva credenciales.
+    error.detail = String(data.message || '').slice(0, 200);
+    throw error;
+  }
   return data;
 }
 

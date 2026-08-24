@@ -1967,14 +1967,16 @@ async function applySenderProfile(env, tenant, credentials) {
     const first = (Array.isArray(origins) ? origins : []).find((o) => /^https:\/\//.test(o) && !/^https:\/\/www\./.test(o)) || (Array.isArray(origins) ? origins[0] : null);
     if (first) webs.push({ website: first, label: 'Web' });
   } catch (_) { /* web_origins corrupto no bloquea el perfil */ }
-  const profile = {
-    ...current.profile,
-    name: (current.profile && current.profile.name) || tenant.brand_name || tenant.name,
-    about: clean(tenant.brand_name || tenant.name, 139),
-    description: clean(tenant.greeting || tenant.brand_name || tenant.name, 512),
-    ...(tenant.logo_url && /^https:\/\//.test(tenant.logo_url) ? { logo_url: tenant.logo_url } : {}),
-    ...(webs.length ? { websites: webs } : {}),
-  };
+  // MÍNIMO y saneado: reenviar el perfil entero del GET metía campos que la API de
+  // escritura NO acepta y Twilio contestaba 63100 (validación) sin decir cuál — le pasó
+  // al perfil de Diálogos. Solo van los campos que queremos, más el nombre intacto.
+  const profile = { name: (current.profile && current.profile.name) || tenant.brand_name || tenant.name };
+  const about = clean(tenant.brand_name || tenant.name, 139);
+  if (about) profile.about = about;
+  const description = clean(tenant.greeting || tenant.brand_name || tenant.name, 512);
+  if (description) profile.description = description;
+  if (tenant.logo_url && /^https:\/\//.test(tenant.logo_url)) profile.logo_url = tenant.logo_url;
+  if (webs.length) profile.websites = webs;
   await updateSenderProfile(credentials, tenant.sender_sid, profile);
   return { logo: !!profile.logo_url, websites: webs.length, description: !!profile.description };
 }
@@ -1995,9 +1997,10 @@ async function pushSenderProfile(env, tenant) {
     return { ok: true, applied };
   } catch (error) {
     const detail = clean(String(error.message || error), 80);
-    console.log(JSON.stringify({ level: 'warn', code: 'sender_profile_sync_failed', tenant: tenant.slug, error: detail }));
-    await note({ ok: false, error: detail });
-    return { error: detail };
+    const why = clean(String(error.detail || ''), 160);   // el «message» de Twilio: qué campo falla
+    console.log(JSON.stringify({ level: 'warn', code: 'sender_profile_sync_failed', tenant: tenant.slug, error: detail, why }));
+    await note({ ok: false, error: detail, why });
+    return { error: detail, why };
   }
 }
 
@@ -2639,7 +2642,9 @@ async function adminRouter(request, env, ctx, path, url, config, scope) {
     if (!tenant.logo_url) throw new HttpError(400, 'logo_missing');
     if (!tenant.sender_sid) throw new HttpError(400, 'sender_required');
     const out = await pushSenderProfile(env, tenant);
-    if (!out.ok) throw new HttpError(502, out.error === 'twilio_auth_token_missing' ? 'twilio_auth_token_missing' : 'sender_profile_failed');
+    // El código REAL de Twilio llega al panel: aplanarlo a «sender_profile_failed» me
+    // hizo culpar a la imagen cuando el 63100 era del cuerpo de la petición.
+    if (!out.ok) return json({ ok: false, error: out.error || 'sender_profile_failed', why: out.why || null }, 502, NO_STORE);
     return json({ ok: true, applied: out.applied }, 200, NO_STORE);
   }
 
