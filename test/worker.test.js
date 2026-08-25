@@ -761,6 +761,19 @@ test('el panel rediseñado: sin dominios externos salvo las fuentes, nonce y tod
     assert.ok(ADMIN_HTML.includes(`id="${id}"`), `falta #${id}`);
   }
   assert.ok(!/localStorage/.test(ADMIN_HTML), 'sin localStorage');
+  // Dashboard (2026-08-25): las gráficas viven en su propia vista y Leads se queda con
+  // la bandeja. Cada vista del menú tiene que existir, o el botón deja la pantalla vacía.
+  const vistas = [...ADMIN_HTML.matchAll(/data-view="([a-z]+)"/g)].map((m) => m[1]);
+  assert.ok(vistas.includes('dashboard'), 'hay pestaña Dashboard');
+  for (const v of new Set(vistas)) {
+    assert.ok(ADMIN_HTML.includes(`id="view${v[0].toUpperCase()}${v.slice(1)}"`), `la pestaña ${v} no tiene vista`);
+  }
+  // las gráficas están en el Dashboard, no en Leads
+  const dash = ADMIN_HTML.slice(ADMIN_HTML.indexOf('id="viewDashboard"'), ADMIN_HTML.indexOf('id="viewLeads"'));
+  for (const id of ['chart', 'aiCard', 'aiChart', 'aiRows', 'mTotal']) assert.ok(dash.includes(`id="${id}"`), `#${id} debe estar en el Dashboard`);
+  const leads = ADMIN_HTML.slice(ADMIN_HTML.indexOf('id="viewLeads"'), ADMIN_HTML.indexOf('id="viewTenants"'));
+  assert.ok(leads.includes('id="escalations"') && leads.includes('id="filters"'), 'Leads conserva sus avisos y filtros');
+  assert.ok(!leads.includes('id="chart"'), 'las gráficas ya no están en Leads');
   // El canal dejó de ser una caja de texto: teclear `web:<slug>` a mano es lo que dejó a
   // gogestion ocupando el canal primario con su WhatsApp sin enrutar (2026-08-24).
   assert.ok(!ADMIN_HTML.includes('id="tAddress"'), 'el canal ya no se teclea en la ficha');

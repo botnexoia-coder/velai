@@ -396,7 +396,8 @@ body.cliente .cliente-only{display:flex}
 <div class="sep"></div>
 <div class="navlabel velai-only">Gestión</div>
 <nav class="tabs" role="tablist">
-<button class="tab is-on" role="tab" aria-selected="true" data-view="leads" type="button"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M17 21v-2a4 4 0 0 0-4-4H7a4 4 0 0 0-4 4v2"></path><circle cx="10" cy="7" r="4"></circle><path d="M21 21v-2a4 4 0 0 0-3-3.87"></path><path d="M16 3.13a4 4 0 0 1 0 7.75"></path></svg>Leads</button>
+<button class="tab is-on" role="tab" aria-selected="true" data-view="dashboard" type="button"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="12" width="4" height="9"></rect><rect x="10" y="7" width="4" height="14"></rect><rect x="17" y="3" width="4" height="18"></rect></svg>Dashboard</button>
+<button class="tab" role="tab" aria-selected="false" data-view="leads" type="button"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M17 21v-2a4 4 0 0 0-4-4H7a4 4 0 0 0-4 4v2"></path><circle cx="10" cy="7" r="4"></circle><path d="M21 21v-2a4 4 0 0 0-3-3.87"></path><path d="M16 3.13a4 4 0 0 1 0 7.75"></path></svg>Leads</button>
 <button class="tab" role="tab" aria-selected="false" data-view="calendario" id="calNavBtn" type="button"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="5" width="18" height="16" rx="2"></rect><line x1="8" y1="3" x2="8" y2="7"></line><line x1="16" y1="3" x2="16" y2="7"></line><line x1="3" y1="10" x2="21" y2="10"></line></svg>Calendario</button>
 <button class="tab" role="tab" aria-selected="false" data-view="conexiones" id="cxNavBtn" type="button"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"></path><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"></path></svg>Conexiones</button>
 <button class="tab velai-only" role="tab" aria-selected="false" data-view="tenants" type="button"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="7" width="18" height="13" rx="2"></rect><path d="M8 7V5a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>Clientes</button>
@@ -412,8 +413,8 @@ body.cliente .cliente-only{display:flex}
 <button class="tab" id="logout" type="button" title="Cerrar la sesión de Cloudflare Access"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path><path d="M16 17l5-5-5-5"></path><path d="M21 12H9"></path></svg>Salir</button>
 </div>
 </aside>
-<main><div id="viewLeads">
-<div class="vhead"><div><h1>Leads</h1><p>Últimos 30 días</p></div><button class="btn alt" id="export" type="button">Exportar CSV</button></div>
+<main><div id="viewDashboard">
+<div class="vhead"><div><h1>Dashboard</h1><p>Leads y consumo, de un vistazo</p></div></div>
 <div class="metrics">
 <div class="stat"><b>Leads · 30 días</b><span class="n" id="mTotal">—</span></div>
 <div class="stat"><b>Sin contactar</b><span class="n" id="mNew">—</span><small id="mNewSub"></small></div>
@@ -428,6 +429,9 @@ body.cliente .cliente-only{display:flex}
 <div id="aiChart" class="mt6"></div><div class="chartlabels"><span id="aiFrom"></span><span id="aiTo"></span></div>
 <div class="table mt12"><table class="tnarrow"><thead><tr><th>Cliente</th><th>Llamadas</th><th>Tokens</th><th>Coste</th><th>Parte del total</th></tr></thead><tbody id="aiRows"></tbody></table></div>
 <small class="muted">Coste estimado con las tarifas públicas de Anthropic (entrada, salida y caché) por modelo. El cupo diario por cliente se edita en su ficha.</small></div>
+</div>
+<div id="viewLeads" hidden>
+<div class="vhead"><div><h1>Leads</h1><p>Últimos 30 días</p></div><button class="btn alt" id="export" type="button">Exportar CSV</button></div>
 <div id="escalations"></div>
 <form class="filters" id="filters"><label class="search"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"></circle><path d="m21 21-4.3-4.3"></path></svg><input name="q" class="q" placeholder="Buscar nombre, teléfono, sector…"></label><span class="sel"><select name="tenant" id="tenantFilter"><option value="">Todos los clientes</option></select></span><span class="sel"><select name="status"><option value="">Todos los estados</option><option>new</option><option>contacted</option><option>qualified</option><option>won</option><option>lost</option><option>spam</option></select></span><span class="sel"><select name="notification"><option value="">Todos los avisos</option><option>pending</option><option>sent</option><option>failed</option><option>skipped</option></select></span><input name="source" placeholder="Fuente"><input name="from" type="date" title="Desde"><input name="to" type="date" title="Hasta"><button class="btn">Filtrar</button><span id="resultCount"></span></form>
 <div id="message"></div><div class="table"><table><thead><tr><th>Fecha</th><th>Cliente</th><th>Estado</th><th>Nombre</th><th>WhatsApp</th><th>Asunto</th><th>Fuente</th><th>Avisos</th></tr></thead><tbody id="rows"></tbody></table></div>
