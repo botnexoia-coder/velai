@@ -57,7 +57,7 @@ const miles=(n)=>new Intl.NumberFormat('es-ES').format(n);
 // componente para las tres tarjetas.
 function bar(label,val,pct,right,cls){return '<div class="brow'+(cls?' '+cls:'')+'"><span>'+esc(label)+'</span><span class="bt"><i data-w="'+Math.max(1,Math.min(100,pct))+'"></i></span><span class="bv">'+esc(right)+'</span></div>'}
 // Consumo de Cloudflare frente a los límites del plan gratuito.
-const INFRA_LABELS={worker_requests:['Peticiones al worker','worker.requests'],kv_reads:['Lecturas de KV','kv.read'],kv_writes:['Escrituras de KV','kv.write'],d1_rows_read:['Filas leídas en D1','d1.rowsRead'],d1_rows_written:['Filas escritas en D1','d1.rowsWritten']};
+const INFRA_LABELS={worker_requests:['Peticiones al worker','worker.requests'],kv_reads:['Lecturas de KV','kv.read'],kv_writes:['Escrituras de KV','kv.write'],kv_lists:['Listados de KV','kv.list'],kv_deletes:['Borrados de KV','kv.delete'],d1_rows_read:['Filas leídas en D1','d1.rowsRead'],d1_rows_written:['Filas escritas en D1','d1.rowsWritten']};
 async function loadInfra(){if(!ME||ME.role!=='velai')return;
  try{const d=await api('/api/admin/infra-usage');
   if(d.error){$('#infraNote').textContent='';

@@ -1621,6 +1621,8 @@ const CF_FREE_LIMITS = {
   worker_requests: 100000,   // Workers: 100.000 peticiones/día
   kv_reads: 100000,          // KV: 100.000 lecturas/día
   kv_writes: 1000,           // KV: 1.000 escrituras/día a claves distintas
+  kv_lists: 1000,            // KV: 1.000 listados/día — el segundo cuello real (escalaciones)
+  kv_deletes: 1000,          // KV: 1.000 borrados/día
   d1_rows_read: 5000000,     // D1: 5 millones de filas leídas/día
   d1_rows_written: 100000,   // D1: 100.000 filas escritas/día
 };

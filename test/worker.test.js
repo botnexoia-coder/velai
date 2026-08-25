@@ -3019,6 +3019,9 @@ test('dashboard: leads por canal, tasa de captura con denominador real y consumo
     }] } } }), { status: 200 });
     const ok = await testing.cloudflareUsage({ CF_API_TOKEN: 't', CF_ACCOUNT_ID: 'a', DB: { prepare: () => ({ bind: () => ({ first: async () => null }) }) } });
     assert.deepEqual([ok.worker.requests, ok.kv.read, ok.kv.write, ok.d1.rowsWritten], [500, 40, 7, 30]);
+    // los listados de KV también se vigilan: comparten un límite de 1.000/día con los
+    // borrados y en producción iban al 30% (las escalaciones listan por prefijo).
+    assert.equal(ok.limits.kv_lists, 1000);
   } finally { globalThis.fetch = realFetch; }
   // el cliente no ve la infraestructura
   await assert.rejects(testing.adminRouter(adminReq('/api/admin/infra-usage'), env, { waitUntil() {} }, '/api/admin/infra-usage', new URL('https://x/api/admin/infra-usage'), {}, { role: 'cliente', tenantId: 't-1' }), (e) => e.code === 'not_authorized');
