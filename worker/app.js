@@ -7,6 +7,9 @@ import { CALENDAR_TOOLS, CALENDAR_GUARDRAILS, DEFAULT_BUSINESS_HOURS, freeSlots,
 const JSON_HEADERS = { 'Content-Type': 'application/json; charset=utf-8' };
 // URL pública del worker: webhook de Twilio (senders) y de Telegram apuntan aquí.
 const WORKER_PUBLIC_URL = 'https://vai-worker.botnexo-ia.workers.dev';
+// Desde cuándo se cuentan conversaciones (migración 0020): antes de esta fecha no hay
+// denominador y la tasa de captura no se puede calcular sin engañar.
+const CONV_TRACKING_SINCE = '2026-08-25';
 const PUBLIC_MEDIA_BASE = 'https://api.hirevai.com'; // dominio propio: no lo cortan los adblock
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const STATUSES = new Set(['new', 'contacted', 'qualified', 'won', 'lost', 'spam']);
@@ -1558,6 +1561,8 @@ async function handleChat(request, env, cors, ctx, config) {
   if (!state) {
     await verifyTurnstile(env, body.turnstileToken, request, 'chat');
     state = { demo: isDemoKey(config, body.demo) ? body.demo : '', messages: [] };
+    // Turnstile ya pasó: es una conversación real, no un bot contando de más.
+    if (!state.demo) ctx.waitUntil(recordConversation(env, tenant, 'web'));
   }
   if (body.demo && state.demo !== body.demo) throw new HttpError(409, 'conversation_mode_mismatch');
   state.messages.push({ role: 'user', content: message });
@@ -1593,6 +1598,77 @@ async function handleChat(request, env, cors, ctx, config) {
     }));
   }
   return json({ reply }, 200, cors);
+}
+
+// Una conversación NUEVA (no cada mensaje): es el denominador de la tasa de captura.
+// Nunca lanza y va en waitUntil: contar no puede estropear una respuesta.
+async function recordConversation(env, tenant, channel) {
+  if (!env.DB || !tenant || !tenant.id) return;
+  const now = new Date().toISOString();
+  try {
+    await env.DB.prepare(`INSERT INTO conv_daily (tenant_id,day,channel,convs,updated_at) VALUES (?,?,?,1,?)
+      ON CONFLICT(tenant_id,day,channel) DO UPDATE SET convs=convs+1, updated_at=excluded.updated_at`)
+      .bind(tenant.id, now.slice(0, 10), channel, now).run();
+  } catch (error) {
+    console.log(JSON.stringify({ level: 'warn', code: 'conv_not_counted', error: clean(String(error.message || error), 60) }));
+  }
+}
+
+// Límites del plan GRATUITO de Cloudflare, verificados en su documentación el
+// 2026-08-25. Si se pasa a un plan de pago, actualizar aquí (el panel pinta el % con
+// estos números y un límite equivocado da una falsa sensación de holgura).
+const CF_FREE_LIMITS = {
+  worker_requests: 100000,   // Workers: 100.000 peticiones/día
+  kv_reads: 100000,          // KV: 100.000 lecturas/día
+  kv_writes: 1000,           // KV: 1.000 escrituras/día a claves distintas
+  d1_rows_read: 5000000,     // D1: 5 millones de filas leídas/día
+  d1_rows_written: 100000,   // D1: 100.000 filas escritas/día
+};
+
+// Consumo real de la infraestructura, leído de la API de analíticas de Cloudflare (no
+// estimado por nosotros). Requiere que el token tenga «Account Analytics: Read»; si no
+// lo tiene, se devuelve el motivo y el panel explica qué añadir en vez de mentir con
+// ceros.
+async function cloudflareUsage(env) {
+  const cfEnv = await withCfToken(env);
+  const token = cfEnv.CF_API_TOKEN; const account = cfEnv.CF_ACCOUNT_ID;
+  if (!token || !account) return { error: 'cloudflare_api_not_configured', limits: CF_FREE_LIMITS };
+  const since = new Date(Date.now() - 86400000).toISOString();
+  const query = `query($acc:String!,$since:Time!){viewer{accounts(filter:{accountTag:$acc}){
+    workersInvocationsAdaptive(limit:100,filter:{datetime_geq:$since}){sum{requests errors}}
+    kvOperationsAdaptiveGroups(limit:100,filter:{datetime_geq:$since}){sum{requests} dimensions{actionType}}
+    d1AnalyticsAdaptiveGroups(limit:100,filter:{datetime_geq:$since}){sum{readQueries writeQueries rowsRead rowsWritten}}
+  }}}`;
+  let data;
+  try {
+    const response = await fetch('https://api.cloudflare.com/client/v4/graphql', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ query, variables: { acc: account, since } }),
+      signal: AbortSignal.timeout(10000),
+    });
+    data = await response.json();
+  } catch (_) { return { error: 'cloudflare_unreachable', limits: CF_FREE_LIMITS }; }
+  const acc = data && data.data && data.data.viewer && data.data.viewer.accounts && data.data.viewer.accounts[0];
+  if (!acc) {
+    const why = (data && data.errors && data.errors[0] && String(data.errors[0].message).slice(0, 120)) || 'sin datos';
+    console.log(JSON.stringify({ level: 'warn', code: 'cf_analytics_denied', why }));
+    return { error: 'cloudflare_analytics_denied', why, limits: CF_FREE_LIMITS };
+  }
+  const sum = (rows, field) => (rows || []).reduce((t, r) => t + ((r.sum && r.sum[field]) || 0), 0);
+  const kv = { read: 0, write: 0, delete: 0, list: 0 };
+  for (const row of acc.kvOperationsAdaptiveGroups || []) {
+    const k = String((row.dimensions && row.dimensions.actionType) || '').toLowerCase();
+    if (k in kv) kv[k] += (row.sum && row.sum.requests) || 0;
+  }
+  const d1 = acc.d1AnalyticsAdaptiveGroups || [];
+  return {
+    ventana: '24 h',
+    worker: { requests: sum(acc.workersInvocationsAdaptive, 'requests'), errors: sum(acc.workersInvocationsAdaptive, 'errors') },
+    kv,
+    d1: { rowsRead: sum(d1, 'rowsRead'), rowsWritten: sum(d1, 'rowsWritten') },
+    limits: CF_FREE_LIMITS,
+  };
 }
 
 async function twilioAuthTokenFor(env, tenant) {
@@ -1739,6 +1815,7 @@ async function handleTwilio(request, env, ctx, config) {
   // final no comparten conversación.
   const key = `conv:wa:${tenant.id}:${from}`;
   let history = env.KV ? await env.KV.get(key, 'json') || [] : [];
+  if (!history.length) ctx.waitUntil(recordConversation(env, tenant, 'whatsapp'));
   history.push({ role: 'user', content: message }); history = history.slice(-20);
   // Conversación escalada a humano: el mensaje se guarda pero NO se contesta ni se
   // llama al modelo — hay una persona en la conversación y dos voces es peor que ninguna.
@@ -2560,10 +2637,14 @@ async function adminRouter(request, env, ctx, path, url, config, scope) {
         ? env.DB.prepare("SELECT COUNT(*) AS n FROM lead_notifications ln JOIN leads l ON l.id = ln.lead_id WHERE ln.status = 'failed' AND ln.updated_at >= datetime('now','-7 days') AND l.tenant_id = ?").bind(t)
         : env.DB.prepare("SELECT COUNT(*) AS n FROM lead_notifications WHERE status = 'failed' AND updated_at >= datetime('now','-7 days')"),
       env.DB.prepare(`SELECT date(created_at) AS d, COUNT(*) AS n FROM leads WHERE created_at >= datetime('now','-14 days')${leadW} GROUP BY d ORDER BY d`).bind(...leadArgs),
+      // Leads por canal: el dato ya estaba en la fila (source) y no se veía en ninguna parte.
+      env.DB.prepare(`SELECT source, COUNT(*) AS n FROM leads WHERE created_at >= datetime('now','-30 days')${leadW} GROUP BY source ORDER BY n DESC`).bind(...leadArgs),
+      // Denominador de la tasa de captura: conversaciones atendidas en el mismo periodo.
+      env.DB.prepare(`SELECT channel, SUM(convs) AS n FROM conv_daily WHERE day >= date('now','-30 days')${t ? ' AND tenant_id = ?' : ''} GROUP BY channel`).bind(...leadArgs),
     ];
     if (!t) statements.push(env.DB.prepare('SELECT active, COUNT(*) AS n FROM tenants GROUP BY active'));
     const results = await env.DB.batch(statements);
-    const [total30, nuevos, fallidos7, serieRows, tenantsRows] = results;
+    const [total30, nuevos, fallidos7, serieRows, canalRows, convRows, tenantsRows] = results;
     const activos = tenantsRows ? (tenantsRows.results || []).find((r) => Number(r.active) === 1) : null;
     return json({
       total30: total30.results[0].n,
@@ -2572,6 +2653,15 @@ async function adminRouter(request, env, ctx, path, url, config, scope) {
       fallidos7: fallidos7.results[0].n,
       tenantsActivos: t ? null : (activos ? activos.n : 0),
       porDia: fillSeries(serieRows.results || [], 14),
+      porCanal: (canalRows.results || []).map((r) => ({ canal: r.source || 'sin canal', n: r.n })),
+      // Tasa de captura por canal Y total. Solo cuenta desde que el registro existe
+      // (2026-08-25): las conversaciones anteriores no se guardaron, y una tasa
+      // calculada con un denominador incompleto sería mentira — el panel lo advierte.
+      captura: {
+        conversaciones: (convRows.results || []).reduce((s, r) => s + (r.n || 0), 0),
+        porCanal: (convRows.results || []).map((r) => ({ canal: r.channel, convs: r.n || 0 })),
+        desde: CONV_TRACKING_SINCE,
+      },
     }, 200, NO_STORE);
   }
   const provMatch = path.match(/^\/api\/admin\/tenants\/([0-9a-f-]+)\/provision(?:\/(subaccount|template\/check|template\/resubmit|template|sender\/verify|sender\/sync|sender\/profile|sender|domains))?$/i);
@@ -2693,6 +2783,11 @@ async function adminRouter(request, env, ctx, path, url, config, scope) {
   // foto de perfil de WhatsApp. Se guarda bajo logos/<tenantId>.<ext> y se sirve por
   // /media/ del propio worker (api.hirevai.com) — nada de dominios de terceros.
   // Reaplicar a WhatsApp la imagen guardada (sin resubirla).
+  // ── Consumo de infraestructura (solo Velai) ───────────────────────────────
+  if (path === '/api/admin/infra-usage' && request.method === 'GET') {
+    return json(await cloudflareUsage(env), 200, NO_STORE);
+  }
+
   // ── Consumo de IA por cliente (solo Velai) ────────────────────────────────
   // El gasto real de cada cliente en euros/dólares: sin esto no se sabe si un cliente
   // cuesta más de lo que paga, ni quién dispara el cupo diario.
@@ -3613,4 +3708,4 @@ export function createWorker(config) {
   };
 }
 
-export const testing = { aiCost, recordAiUsage, rateLimited, memLimited, applySenderProfile, pushSenderProfile, clean, persistLead, leadAlertStatus, captureWhatsAppLead, leadFromSummary, leadCaptureDone, errorResponseParts, tenantByAddress, syncPrimaryChannel, assertChannelFree, normalizePhone, extractPhone, safeUtm, publicCors, validTwilioSignature, callAnthropic, callAnthropicRaw, runToolLoop, calendarExecutor, calendarSystem, tenantCalendar, validCalendarDate, availableSlots, handleCalendarCallback, calendarCallbackFor, sendTwilioText, timingSafeEqual, telegramBotUsername, handleTelegramWebhook, sendTelegramText, tenantTelegramToken, telegramThreadFor, registerTelegramTopic, csvCell, expiryDate, leadFilters, isDemoKey, templateVar, leadTemplateVariables, readJson, deliver, drainQueuedLeads, verifyTurnstile, systemFor, validateTenant, invalidateTenantCache, tenantWriteError, assertNotActivePending, tenantChannelSummary, channelsForScope, handleProvision, pollProvisioning, fillSeries, resolveScope, scopeClause, clienteAllowed, adminRouter, recordAuthFailure, handleAdmin, handleWidgetBoot, allowedOrigins, envOrigins, syncPanelGate, envAdmins, syncAdminGate, getSetting, setSetting, withCfToken };
+export const testing = { cloudflareUsage, CF_FREE_LIMITS, recordConversation, aiCost, recordAiUsage, rateLimited, memLimited, applySenderProfile, pushSenderProfile, clean, persistLead, leadAlertStatus, captureWhatsAppLead, leadFromSummary, leadCaptureDone, errorResponseParts, tenantByAddress, syncPrimaryChannel, assertChannelFree, normalizePhone, extractPhone, safeUtm, publicCors, validTwilioSignature, callAnthropic, callAnthropicRaw, runToolLoop, calendarExecutor, calendarSystem, tenantCalendar, validCalendarDate, availableSlots, handleCalendarCallback, calendarCallbackFor, sendTwilioText, timingSafeEqual, telegramBotUsername, handleTelegramWebhook, sendTelegramText, tenantTelegramToken, telegramThreadFor, registerTelegramTopic, csvCell, expiryDate, leadFilters, isDemoKey, templateVar, leadTemplateVariables, readJson, deliver, drainQueuedLeads, verifyTurnstile, systemFor, validateTenant, invalidateTenantCache, tenantWriteError, assertNotActivePending, tenantChannelSummary, channelsForScope, handleProvision, pollProvisioning, fillSeries, resolveScope, scopeClause, clienteAllowed, adminRouter, recordAuthFailure, handleAdmin, handleWidgetBoot, allowedOrigins, envOrigins, syncPanelGate, envAdmins, syncAdminGate, getSetting, setSetting, withCfToken };

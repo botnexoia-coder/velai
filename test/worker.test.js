@@ -2981,6 +2981,49 @@ test('imagen por canal: web y WhatsApp pueden ser distintas y cada una va a lo s
   } finally { globalThis.fetch = realFetch; }
 });
 
+test('dashboard: leads por canal, tasa de captura con denominador real y consumo de Cloudflare', async () => {
+  // conversación nueva = una escritura, no una por mensaje
+  const binds = [];
+  const envConv = { DB: { prepare: (sql) => ({ bind: (...a) => { binds.push({ sql, a }); return { run: async () => ({ meta: { changes: 1 } }) }; } }) } };
+  await testing.recordConversation(envConv, { id: 't-1' }, 'web');
+  assert.ok(binds[0].sql.includes('ON CONFLICT(tenant_id,day,channel) DO UPDATE SET convs=convs+1'));
+  assert.deepEqual([binds[0].a[0], binds[0].a[2]], ['t-1', 'web']);
+  await testing.recordConversation({ DB: { prepare: () => { throw new Error('d1 down'); } } }, { id: 't-1' }, 'web'); // no lanza
+  await testing.recordConversation(envConv, null, 'web');
+  assert.equal(binds.length, 1, 'sin tenant no se cuenta nada');
+  // stats devuelve canal y captura, con el aviso de desde cuándo hay denominador
+  const batches = [
+    { results: [{ n: 9 }] }, { results: [{ n: 2, oldest: '2026-08-01' }] }, { results: [{ n: 0 }] },
+    { results: [{ d: '2026-08-25', n: 3 }] },
+    { results: [{ source: 'whatsapp', n: 6 }, { source: 'chat web', n: 3 }] },
+    { results: [{ channel: 'whatsapp', n: 20 }, { channel: 'web', n: 10 }] },
+    { results: [{ active: 1, n: 7 }] },
+  ];
+  const env = { DB: { prepare: () => ({ bind: () => ({}) }), batch: async () => batches } };
+  const res = await (await testing.adminRouter(adminReq('/api/admin/stats'), env, { waitUntil() {} }, '/api/admin/stats', new URL('https://x/api/admin/stats'), {}, VELAI)).json();
+  assert.deepEqual(res.porCanal, [{ canal: 'whatsapp', n: 6 }, { canal: 'chat web', n: 3 }]);
+  assert.equal(res.captura.conversaciones, 30, 'suma de conversaciones de todos los canales');
+  assert.ok(res.captura.desde, 'dice desde cuándo se cuentan: sin eso el % engañaría');
+  // consumo de Cloudflare: sin permiso NO devuelve ceros, devuelve el motivo y los límites
+  const realFetch = globalThis.fetch;
+  try {
+    globalThis.fetch = async () => new Response(JSON.stringify({ data: null, errors: [{ message: 'not authorized for that account' }] }), { status: 200 });
+    const denied = await testing.cloudflareUsage({ CF_API_TOKEN: 't', CF_ACCOUNT_ID: 'a', DB: { prepare: () => ({ bind: () => ({ first: async () => null }) }) } });
+    assert.equal(denied.error, 'cloudflare_analytics_denied');
+    assert.equal(denied.limits.kv_writes, 1000, 'los límites del plan gratuito viajan igual');
+    // con datos, agrega por tipo de operación
+    globalThis.fetch = async () => new Response(JSON.stringify({ data: { viewer: { accounts: [{
+      workersInvocationsAdaptive: [{ sum: { requests: 500, errors: 2 } }],
+      kvOperationsAdaptiveGroups: [{ sum: { requests: 40 }, dimensions: { actionType: 'read' } }, { sum: { requests: 7 }, dimensions: { actionType: 'write' } }],
+      d1AnalyticsAdaptiveGroups: [{ sum: { rowsRead: 900, rowsWritten: 30 } }],
+    }] } } }), { status: 200 });
+    const ok = await testing.cloudflareUsage({ CF_API_TOKEN: 't', CF_ACCOUNT_ID: 'a', DB: { prepare: () => ({ bind: () => ({ first: async () => null }) }) } });
+    assert.deepEqual([ok.worker.requests, ok.kv.read, ok.kv.write, ok.d1.rowsWritten], [500, 40, 7, 30]);
+  } finally { globalThis.fetch = realFetch; }
+  // el cliente no ve la infraestructura
+  await assert.rejects(testing.adminRouter(adminReq('/api/admin/infra-usage'), env, { waitUntil() {} }, '/api/admin/infra-usage', new URL('https://x/api/admin/infra-usage'), {}, { role: 'cliente', tenantId: 't-1' }), (e) => e.code === 'not_authorized');
+});
+
 test('números de aviso (PR3): el cliente edita los suyos y la guarda del 63031 cierra los dos caminos', async () => {
   const TID = '00000000-0000-4000-8000-0000000000e1';
   const row = { id: TID, slug: 'mio', channel_address: 'whatsapp:+34624121930', twilio_from: 'whatsapp:+34624121930', team_whatsapp: null, wa_number: null, updated_at: 'T0' };

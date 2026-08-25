@@ -116,6 +116,14 @@ main{overflow-x:clip}
 #aiChart{height:64px;display:flex;align-items:flex-end;gap:4px}
 #aiChart .bar{flex:1;min-height:2px;background:linear-gradient(180deg,var(--orange2),var(--orange));opacity:.55;border-radius:4px 4px 0 0}
 #aiChart .bar:hover{opacity:.95}
+.grid2{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:16px}
+/* Barra horizontal etiquetada: mismo lenguaje que la tabla de gasto (.share). */
+.brow{display:grid;grid-template-columns:minmax(96px,auto) 1fr auto;align-items:center;gap:10px;padding:5px 0;font-size:12.5px}
+.brow .bt{height:7px;border-radius:4px;background:rgba(var(--ink),.07);overflow:hidden}
+.brow .bt i{display:block;height:100%;background:var(--orange);opacity:.8;border-radius:4px}
+.brow .bv{color:var(--muted);white-space:nowrap}
+.brow.warn .bt i{background:#e0a021}
+.brow.bad .bt i{background:#d64545}
 .aihead{display:flex;align-items:center;justify-content:space-between;gap:12px}
 table.tnarrow{min-width:0}
 .share{display:inline-flex;align-items:center;gap:8px;min-width:120px}
@@ -422,6 +430,10 @@ body.cliente .cliente-only{display:flex}
 <div class="stat" id="mTenantsCard"><b>Clientes activos</b><span class="n" id="mTenants">—</span></div>
 </div>
 <div class="chartcard"><b>Leads por día · 14 días</b><div id="chart"></div><div class="chartlabels"><span id="chartFrom"></span><span id="chartTo"></span></div></div>
+<div class="grid2 mt12">
+<div class="chartcard"><b>Leads por canal · 30 días</b><div id="canalRows" class="mt6 muted">—</div></div>
+<div class="chartcard"><b>Tasa de captura · 30 días</b><div class="metrics mt6"><div class="stat"><b>Conversaciones</b><span class="n" id="capConv">—</span></div><div class="stat"><b>Acaban en lead</b><span class="n" id="capPct">—</span><small id="capSub"></small></div></div><div id="capRows" class="mt6 muted"></div></div>
+</div>
 <div class="chartcard velai-only mt12" id="aiCard"><div class="aihead"><b>Gasto de IA</b><span class="sel"><select id="aiDays"><option value="7">7 días</option><option value="30" selected>30 días</option><option value="90">90 días</option></select></span></div>
 <div class="metrics mt6"><div class="stat"><b>Coste del periodo</b><span class="n" id="aiCost">—</span><small id="aiCostSub"></small></div>
 <div class="stat"><b>Llamadas al modelo</b><span class="n" id="aiCalls">—</span></div>
@@ -429,6 +441,9 @@ body.cliente .cliente-only{display:flex}
 <div id="aiChart" class="mt6"></div><div class="chartlabels"><span id="aiFrom"></span><span id="aiTo"></span></div>
 <div class="table mt12"><table class="tnarrow"><thead><tr><th>Cliente</th><th>Llamadas</th><th>Tokens</th><th>Coste</th><th>Parte del total</th></tr></thead><tbody id="aiRows"></tbody></table></div>
 <small class="muted">Coste estimado con las tarifas públicas de Anthropic (entrada, salida y caché) por modelo. El cupo diario por cliente se edita en su ficha.</small></div>
+<div class="chartcard velai-only mt12" id="infraCard"><div class="aihead"><b>Infraestructura · Cloudflare (24 h)</b><span class="muted" id="infraNote"></span></div>
+<div id="infraRows" class="mt6 muted">—</div>
+<small class="muted">Consumo real leído de Cloudflare frente a los límites del plan gratuito. Superar un límite no cobra: degrada (los frenos y las cachés fallan «abriendo» y los leads siguen guardándose).</small></div>
 </div>
 <div id="viewLeads" hidden>
 <div class="vhead"><div><h1>Leads</h1><p>Últimos 30 días</p></div><button class="btn alt" id="export" type="button">Exportar CSV</button></div>

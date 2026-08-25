@@ -31,12 +31,50 @@ async function loadStats(){try{const s=await api('/api/admin/stats');
  $('#mTenants').textContent=s.tenantsActivos;
  const max=Math.max(1,...s.porDia.map(x=>x.n));
  $('#chart').innerHTML=s.porDia.map(x=>'<div class="bar" data-h="'+(x.n===0?6:Math.max(12,Math.round(x.n/max*100)))+'" title="'+esc(x.d)+': '+x.n+'"></div>').join('');paint($('#chart'));
- $('#chartFrom').textContent=s.porDia[0]?s.porDia[0].d.slice(5):'';$('#chartTo').textContent=s.porDia.at(-1)?s.porDia.at(-1).d.slice(5):''}
+ $('#chartFrom').textContent=s.porDia[0]?s.porDia[0].d.slice(5):'';$('#chartTo').textContent=s.porDia.at(-1)?s.porDia.at(-1).d.slice(5):'';
+ // Leads por canal: barra horizontal proporcional al canal que más aporta.
+ const cmax=Math.max(1,...(s.porCanal||[]).map(x=>x.n));
+ $('#canalRows').innerHTML=(s.porCanal||[]).length?s.porCanal.map(x=>bar(x.canal,x.n,Math.round(x.n/cmax*100),x.n+' leads')).join(''):'<span class="muted">Sin leads en el periodo.</span>';
+ // Tasa de captura: leads / conversaciones atendidas. El denominador solo existe desde
+ // que se registran conversaciones — si el periodo lo cruza, se advierte en vez de dar
+ // un porcentaje inflado.
+ const cap=s.captura||{},convs=cap.conversaciones||0;
+ $('#capConv').textContent=miles(convs);
+ const pct=convs?Math.round(s.total30/convs*100):null;
+ $('#capPct').textContent=pct===null?'—':pct+'%';
+ $('#capSub').textContent=convs?(s.total30+' de '+convs+' conversaciones'):'Aún no hay conversaciones contadas';
+ const desde=cap.desde||'';
+ $('#capRows').innerHTML=(cap.porCanal||[]).map(x=>{const l=(s.porCanal||[]).find(c=>String(c.canal).toLowerCase().includes(x.canal))||{n:0};
+   const p=x.convs?Math.round(l.n/x.convs*100):0;return bar(x.canal,p,Math.min(100,p),l.n+'/'+x.convs+' · '+p+'%')}).join('')
+  +(desde?'<small class="muted">Conversaciones contadas desde el '+esc(desde)+'.</small>':'');
+ paint($('#canalRows'));paint($('#capRows'))}
  catch(e){/* las métricas no bloquean el listado */}}
 // Gasto de IA por cliente (solo Velai): reutiliza el componente de barras del
 // dashboard. El coste lo calcula el worker con las tarifas por modelo.
 const usd=(n)=>'$'+(n<1?n.toFixed(4):n.toFixed(2));
 const miles=(n)=>new Intl.NumberFormat('es-ES').format(n);
+// Barra horizontal etiquetada (canales, captura, límites de Cloudflare): un solo
+// componente para las tres tarjetas.
+function bar(label,val,pct,right,cls){return '<div class="brow'+(cls?' '+cls:'')+'"><span>'+esc(label)+'</span><span class="bt"><i data-w="'+Math.max(1,Math.min(100,pct))+'"></i></span><span class="bv">'+esc(right)+'</span></div>'}
+// Consumo de Cloudflare frente a los límites del plan gratuito.
+const INFRA_LABELS={worker_requests:['Peticiones al worker','worker.requests'],kv_reads:['Lecturas de KV','kv.read'],kv_writes:['Escrituras de KV','kv.write'],d1_rows_read:['Filas leídas en D1','d1.rowsRead'],d1_rows_written:['Filas escritas en D1','d1.rowsWritten']};
+async function loadInfra(){if(!ME||ME.role!=='velai')return;
+ try{const d=await api('/api/admin/infra-usage');
+  if(d.error){$('#infraNote').textContent='';
+   $('#infraRows').innerHTML='<p class="as-ctx">'+(d.error==='cloudflare_analytics_denied'
+    ?'El token de Cloudflare no tiene permiso para leer analíticas. Añádele <b>Account Analytics: Read</b> en el panel de Cloudflare (My Profile → API Tokens → editar el token) y esta tarjeta se llena sola.'
+    :d.error==='cloudflare_api_not_configured'?'Falta el token de Cloudflare en el worker.'
+    :'No se pudo consultar a Cloudflare ahora mismo.')+'</p>'
+    +Object.entries(d.limits||{}).map(([k,v])=>bar((INFRA_LABELS[k]||[k])[0],0,0,'límite '+miles(v)+'/día')).join('');
+   return paint($('#infraRows'))}
+  $('#infraNote').textContent='últimas '+d.ventana;
+  const get=(path)=>path.split('.').reduce((o,k)=>(o||{})[k],d)||0;
+  $('#infraRows').innerHTML=Object.entries(INFRA_LABELS).map(([k,[label,path]])=>{
+   const used=get(path),lim=(d.limits||{})[k]||1,p=Math.round(used/lim*100);
+   return bar(label,used,p,miles(used)+' / '+miles(lim)+' · '+p+'%',p>=80?'bad':p>=50?'warn':'')}).join('')
+   +(d.worker&&d.worker.errors?'<small class="muted">'+miles(d.worker.errors)+' peticiones con error en la ventana.</small>':'');
+  paint($('#infraRows'))}
+ catch(e){$('#infraRows').textContent='No se pudo cargar: '+(TERRS[e.message]||e.message)}}
 async function loadAiUsage(){if(!ME||ME.role!=='velai')return;
  try{const d=await api('/api/admin/ai-usage?days='+($('#aiDays').value||30));
   $('#aiCost').textContent=usd(d.total.cost);
@@ -113,7 +151,7 @@ let tenantList=[],editing=null;
 const VIEWS={dashboard:'#viewDashboard',leads:'#viewLeads',tenants:'#viewTenants',config:'#viewConfig',calendario:'#viewCalendario',conexiones:'#viewConexiones',canales:'#viewCanales'};
 document.querySelectorAll('.tab[data-view]').forEach(b=>b.onclick=()=>{document.querySelectorAll('.tab[data-view]').forEach(x=>{x.classList.toggle('is-on',x===b);x.setAttribute('aria-selected',x===b?'true':'false')});const v=b.dataset.view;
  Object.entries(VIEWS).forEach(([k,sel])=>{$(sel).hidden=k!==v});
- if(v==='dashboard'){loadStats();loadAiUsage()}else if(v==='leads'){load();loadEscalations()}else if(v==='tenants')loadTenantList();else if(v==='config'){loadAdmins();loadConfig()}else if(v==='calendario'){calMenu()}else if(v==='conexiones'){cxMenu()}else if(v==='canales'){loadChannels()}});
+ if(v==='dashboard'){loadStats();loadAiUsage();loadInfra()}else if(v==='leads'){load();loadEscalations()}else if(v==='tenants')loadTenantList();else if(v==='config'){loadAdmins();loadConfig()}else if(v==='calendario'){calMenu()}else if(v==='conexiones'){cxMenu()}else if(v==='canales'){loadChannels()}});
 // ── Conexiones (SPEC-CONEXIONES PR1): Telegram de avisos en autoservicio ──
 // El cliente abre SU tarjeta; Velai elige tenant con el selector de la cabecera.
 let cxTenant=null;
@@ -677,7 +715,7 @@ let ME={role:'velai'};
  else loadTenants();
  // Arranca en Dashboard (es la primera pestaña): sus datos primero, y los leads en
  // segundo plano para que la bandeja esté lista al pulsar Leads.
- loadStats();loadAiUsage();load();loadEscalations()})();
+ loadStats();loadAiUsage();loadInfra();load();loadEscalations()})();
 // Sincronización del sender desde Twilio (solo Velai): rellena la fila tras el
 // Self Sign-up y repara el webhook si quedó en el default de Twilio.
 $('#waSync').onclick=async()=>{$('#waSyncOut').textContent='sincronizando…';
