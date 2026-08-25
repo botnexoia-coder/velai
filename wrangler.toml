@@ -73,6 +73,8 @@ CF_ADMIN_GROUP_ID = "92360e3f-8e40-4dfd-85e6-718617d140d0"
 # calendar_tool_failed, calendar_reply_failed, appointment_created,
 # tool_loop_overflow…) no se ven en ninguna parte.
 # Los logs no llevan PII por diseño, así que muestreo al 100%.
+# Códigos nuevos: ai_usage_not_recorded (el registro de gasto falló, la respuesta al
+# cliente NO), sender_profile_synced / sender_profile_sync_failed (foto de WhatsApp).
 [observability]
 enabled = true
 head_sampling_rate = 1

@@ -221,6 +221,43 @@ async function aiBudgetGuard(env, tenant) {
 // Devuelve el JSON COMPLETO de la API: con tools el primer bloque puede ser
 // tool_use y content[0].text no existe — el wrapper callAnthropic (texto) queda
 // para los llamadores sin herramientas.
+// Precios oficiales por millón de tokens (verificados en la referencia de la API de
+// Anthropic, 2026-08-24). El caché escribe a 1,25x y lee a 0,1x del precio de entrada.
+// Si un día cambian, se cambian AQUÍ: el panel calcula el gasto con esta tabla.
+const AI_PRICES = {
+  'claude-sonnet-4-6': { in: 3, out: 15 },
+  'claude-haiku-4-5-20251001': { in: 1, out: 5 },
+  'claude-haiku-4-5': { in: 1, out: 5 },
+};
+const AI_PRICE_FALLBACK = { in: 3, out: 15 };   // modelo desconocido: se estima como Sonnet
+
+function aiCost(row) {
+  const p = AI_PRICES[row.model] || AI_PRICE_FALLBACK;
+  const m = 1e6;
+  return (row.in_tokens * p.in + row.out_tokens * p.out
+    + row.cache_w_tokens * p.in * 1.25 + row.cache_r_tokens * p.in * 0.1) / m;
+}
+
+// Acumula el consumo de UNA llamada. Nunca lanza: el registro no puede tumbar una
+// respuesta al cliente. UPSERT para no crear una fila por llamada.
+async function recordAiUsage(env, tenant, model, usage) {
+  if (!env.DB || !usage) return;
+  const day = new Date().toISOString().slice(0, 10);
+  try {
+    await env.DB.prepare(`INSERT INTO ai_usage (tenant_id,day,model,calls,in_tokens,out_tokens,cache_w_tokens,cache_r_tokens,updated_at)
+      VALUES (?,?,?,1,?,?,?,?,?)
+      ON CONFLICT(tenant_id,day,model) DO UPDATE SET calls=calls+1, in_tokens=in_tokens+excluded.in_tokens,
+        out_tokens=out_tokens+excluded.out_tokens, cache_w_tokens=cache_w_tokens+excluded.cache_w_tokens,
+        cache_r_tokens=cache_r_tokens+excluded.cache_r_tokens, updated_at=excluded.updated_at`)
+      .bind((tenant && tenant.id) || '', day, String(model || 'desconocido'),
+        usage.input_tokens || 0, usage.output_tokens || 0,
+        usage.cache_creation_input_tokens || 0, usage.cache_read_input_tokens || 0,
+        new Date().toISOString()).run();
+  } catch (error) {
+    console.log(JSON.stringify({ level: 'warn', code: 'ai_usage_not_recorded', error: clean(String(error.message || error), 60) }));
+  }
+}
+
 async function callAnthropicRaw(env, payload, options = {}) {
   const { retries = 1, timeoutMs = 15000, tenant = null } = options;
   if (!env.ANTHROPIC_API_KEY) throw new HttpError(503, 'ai_not_configured');
@@ -252,6 +289,8 @@ async function callAnthropicRaw(env, payload, options = {}) {
   // caché NO está acertando — y la API no avisa. Verificable en Workers Logs.
   if (data.usage) {
     console.log(JSON.stringify({ level: 'info', code: 'ai_usage', in: data.usage.input_tokens || 0, out: data.usage.output_tokens || 0, cache_w: data.usage.cache_creation_input_tokens || 0, cache_r: data.usage.cache_read_input_tokens || 0 }));
+    // …y ADEMÁS a D1 por cliente: el log se pierde y no se puede sumar.
+    await recordAiUsage(env, tenant, payload.model, data.usage);
   }
   return data;
 }
@@ -1993,7 +2032,11 @@ async function applySenderProfile(env, tenant, credentials) {
   if (about) profile.about = about;
   const description = clean(tenant.greeting || tenant.brand_name || tenant.name, 512);
   if (description) profile.description = description;
-  if (tenant.logo_url && /^https:\/\//.test(tenant.logo_url)) profile.logo_url = tenant.logo_url;
+  // La imagen de WhatsApp puede ser distinta de la del widget (Juan, 2026-08-24): se
+  // recorta en círculo y pide 640x640, así que muchos negocios quieren el isotipo aquí
+  // y el logotipo completo en la web. Sin imagen propia, se usa la del widget.
+  const waLogo = tenant.logo_wa_url || tenant.logo_url;
+  if (waLogo && /^https:\/\//.test(waLogo)) profile.logo_url = waLogo;
   if (webs.length) profile.websites = webs;
   await updateSenderProfile(credentials, tenant.sender_sid, profile);
   return { logo: !!profile.logo_url, websites: webs.length, description: !!profile.description };
@@ -2650,14 +2693,53 @@ async function adminRouter(request, env, ctx, path, url, config, scope) {
   // foto de perfil de WhatsApp. Se guarda bajo logos/<tenantId>.<ext> y se sirve por
   // /media/ del propio worker (api.hirevai.com) — nada de dominios de terceros.
   // Reaplicar a WhatsApp la imagen guardada (sin resubirla).
+  // ── Consumo de IA por cliente (solo Velai) ────────────────────────────────
+  // El gasto real de cada cliente en euros/dólares: sin esto no se sabe si un cliente
+  // cuesta más de lo que paga, ni quién dispara el cupo diario.
+  if (path === '/api/admin/ai-usage' && request.method === 'GET') {
+    const days = Math.min(90, Math.max(1, Number(url.searchParams.get('days')) || 30));
+    const from = new Date(Date.now() - (days - 1) * 86400000).toISOString().slice(0, 10);
+    const rows = (await env.DB.prepare(`SELECT u.tenant_id, u.day, u.model, u.calls, u.in_tokens, u.out_tokens,
+        u.cache_w_tokens, u.cache_r_tokens, t.name AS tenant_name, t.slug
+      FROM ai_usage u LEFT JOIN tenants t ON t.id = u.tenant_id
+      WHERE u.day >= ? ORDER BY u.day ASC`).bind(from).all()).results || [];
+    const porCliente = new Map(); const porDia = new Map();
+    let totalCost = 0; let totalCalls = 0; let totalTokens = 0;
+    for (const r of rows) {
+      const cost = aiCost(r);
+      const tokens = (r.in_tokens || 0) + (r.out_tokens || 0) + (r.cache_w_tokens || 0) + (r.cache_r_tokens || 0);
+      totalCost += cost; totalCalls += r.calls || 0; totalTokens += tokens;
+      const key = r.tenant_id || '';
+      const cli = porCliente.get(key) || { tenant_id: key, name: r.tenant_name || (key ? 'cliente borrado' : 'Velai (panel)'), slug: r.slug || null, calls: 0, tokens: 0, cost: 0, models: {} };
+      cli.calls += r.calls || 0; cli.tokens += tokens; cli.cost += cost;
+      cli.models[r.model] = (cli.models[r.model] || 0) + (r.calls || 0);
+      porCliente.set(key, cli);
+      const d = porDia.get(r.day) || { d: r.day, cost: 0, calls: 0 };
+      d.cost += cost; d.calls += r.calls || 0; porDia.set(r.day, d);
+    }
+    // Serie completa (los días sin consumo también existen) para que la gráfica no mienta.
+    const serie = [];
+    for (let i = days - 1; i >= 0; i--) {
+      const d = new Date(Date.now() - i * 86400000).toISOString().slice(0, 10);
+      serie.push(porDia.get(d) || { d, cost: 0, calls: 0 });
+    }
+    return json({
+      days,
+      total: { cost: Number(totalCost.toFixed(4)), calls: totalCalls, tokens: totalTokens },
+      clientes: [...porCliente.values()].sort((a, b) => b.cost - a.cost).map((c) => ({ ...c, cost: Number(c.cost.toFixed(4)) })),
+      porDia: serie.map((d) => ({ ...d, cost: Number(d.cost.toFixed(4)) })),
+      moneda: 'USD',
+    }, 200, NO_STORE);
+  }
+
   const logoApply = path.match(/^\/api\/admin\/tenants\/([0-9a-f-]+)\/logo\/apply$/i);
   if (logoApply && request.method === 'POST') {
     if (!UUID_RE.test(logoApply[1])) throw new HttpError(404, 'not_found');
     if (scope.role !== 'velai' && scope.tenantId !== logoApply[1]) throw new HttpError(404, 'not_found');
-    const tenant = await env.DB.prepare(`SELECT id, slug, name, logo_url, brand_name, greeting, web_origins,
+    const tenant = await env.DB.prepare(`SELECT id, slug, name, logo_url, logo_wa_url, brand_name, greeting, web_origins,
       sender_sid, twilio_subaccount_sid, twilio_auth_token_enc FROM tenants WHERE id=?`).bind(logoApply[1]).first();
     if (!tenant) throw new HttpError(404, 'not_found');
-    if (!tenant.logo_url) throw new HttpError(400, 'logo_missing');
+    if (!tenant.logo_url && !tenant.logo_wa_url) throw new HttpError(400, 'logo_missing');
     if (!tenant.sender_sid) throw new HttpError(400, 'sender_required');
     const out = await pushSenderProfile(env, tenant);
     // El código REAL de Twilio llega al panel: aplanarlo a «sender_profile_failed» me
@@ -2672,7 +2754,7 @@ async function adminRouter(request, env, ctx, path, url, config, scope) {
     // Cliente ajeno = 404 ANTES de tocar D1 (nunca 403: no se confirma que exista).
     if (scope.role !== 'velai' && scope.tenantId !== logoMatch[1]) throw new HttpError(404, 'not_found');
     const tenantId = logoMatch[1];
-    const tenant = await env.DB.prepare(`SELECT id, slug, name, logo_url, brand_name, greeting, web_origins,
+    const tenant = await env.DB.prepare(`SELECT id, slug, name, logo_url, logo_wa_url, brand_name, greeting, web_origins,
       sender_sid, twilio_subaccount_sid, twilio_auth_token_enc FROM tenants WHERE id=?`).bind(tenantId).first();
     if (!tenant) throw new HttpError(404, 'not_found');
     const body = new Uint8Array(await request.arrayBuffer());
@@ -2684,13 +2766,24 @@ async function adminRouter(request, env, ctx, path, url, config, scope) {
     else if (body[0] === 0xff && body[1] === 0xd8 && body[2] === 0xff) { ext = 'jpg'; mime = 'image/jpeg'; }
     else if (body[0] === 0x52 && body[1] === 0x49 && body[2] === 0x46 && body[3] === 0x46 && body[8] === 0x57 && body[9] === 0x45 && body[10] === 0x42 && body[11] === 0x50) { ext = 'webp'; mime = 'image/webp'; }
     if (!ext) throw new HttpError(400, 'invalid_image');
-    const key = `logos/${tenantId}.${ext}`;
+    // ¿A qué canales aplica esta imagen? Por defecto, a los dos (lo que hacía antes).
+    // Ausente = a los dos canales (lo que hacía antes de separarlos). Presente pero
+    // vacío es una petición explícita sin canales: eso se rechaza, no se adivina.
+    const raw = url.searchParams.get('channels');
+    const pedidos = String(raw === null ? 'web,whatsapp' : raw).toLowerCase().split(',').map((c) => c.trim());
+    const aWeb = pedidos.includes('web');
+    const aWa = pedidos.includes('whatsapp');
+    if (!aWeb && !aWa) throw new HttpError(400, 'channels_required');
+    // Clave por canal: si son imágenes distintas no pueden compartir fichero.
+    const key = `logos/${tenantId}${aWeb && aWa ? '' : (aWeb ? '-web' : '-wa')}.${ext}`;
     const store = await mediaPut(env, key, body, mime);
     const now = new Date().toISOString();
     const logoUrl = `${PUBLIC_MEDIA_BASE}/media/${key}?v=${now.replace(/[^0-9]/g, '').slice(0, 14)}`;
-    await env.DB.prepare('UPDATE tenants SET logo_url=?, updated_at=? WHERE id=?').bind(logoUrl, now, tenantId).run();
+    const cols = [...(aWeb ? ['logo_url=?'] : []), ...(aWa ? ['logo_wa_url=?'] : [])];
+    const vals = cols.map(() => logoUrl);
+    await env.DB.prepare(`UPDATE tenants SET ${cols.join(',')}, updated_at=? WHERE id=?`).bind(...vals, now, tenantId).run();
     await env.DB.prepare('INSERT INTO tenant_versions (tenant_id,actor_email,field,previous_value,note,created_at) VALUES (?,?,?,?,?,?)')
-      .bind(tenantId, actor, 'config', JSON.stringify({ logo_url: tenant.logo_url }), `logo subido a ${store} (${ext}, ${Math.round(body.byteLength / 1024)} KB)`, now).run();
+      .bind(tenantId, actor, 'config', JSON.stringify({ logo_url: tenant.logo_url }), `logo subido a ${store} para ${[aWeb ? 'web' : null, aWa ? 'whatsapp' : null].filter(Boolean).join('+')} (${ext}, ${Math.round(body.byteLength / 1024)} KB)`, now).run();
     await invalidateTenantCache(env, [tenant]);
     // La foto de WhatsApp se actualiza SOLA: el cliente sube su logo y ya está en los dos
     // canales, sin entender de perfiles. En segundo plano porque Twilio puede tardar y la
@@ -2698,10 +2791,11 @@ async function adminRouter(request, env, ctx, path, url, config, scope) {
     // La foto de WhatsApp se actualiza SOLA: el cliente sube su logo y ya está en los dos
     // canales, sin entender de perfiles. En segundo plano porque Twilio puede tardar y la
     // subida no debe fallar por ello — el resultado queda registrado para el panel.
-    if (tenant.sender_sid && tenant.twilio_subaccount_sid) {
-      ctx.waitUntil(pushSenderProfile(env, { ...tenant, logo_url: logoUrl }));
+    if (aWa && tenant.sender_sid && tenant.twilio_subaccount_sid) {
+      ctx.waitUntil(pushSenderProfile(env, { ...tenant, logo_wa_url: logoUrl }));
     }
-    return json({ ok: true, logo_url: logoUrl, store, whatsapp: !!(tenant.sender_sid && tenant.twilio_subaccount_sid) }, 200, NO_STORE);
+    return json({ ok: true, logo_url: logoUrl, store, canales: { web: aWeb, whatsapp: aWa },
+      whatsapp: !!(aWa && tenant.sender_sid && tenant.twilio_subaccount_sid) }, 200, NO_STORE);
   }
 
   // ── Canales vivos: visibilidad del ENRUTADO (2026-08-24) ──────────────────
@@ -2768,7 +2862,7 @@ async function adminRouter(request, env, ctx, path, url, config, scope) {
     // `routed`: existe la fila de tenant_channels que hace que el webhook entrante
     // resuelva a este cliente. Sin ella el sender puede estar ONLINE y el bot mudo, así
     // que el estado que ve el cliente NO puede salir solo de sender_status.
-    const row = await env.DB.prepare(`SELECT channel_address, twilio_from, (waba_id IS NOT NULL) AS has_waba, sender_status, lead_template_status, meta_partner_status, team_whatsapp, wa_number, logo_url, (twilio_auth_token_enc IS NOT NULL) AS has_token, (twilio_subaccount_sid IS NOT NULL) AS has_subaccount,
+    const row = await env.DB.prepare(`SELECT channel_address, twilio_from, (waba_id IS NOT NULL) AS has_waba, sender_status, lead_template_status, meta_partner_status, team_whatsapp, wa_number, logo_url, logo_wa_url, (twilio_auth_token_enc IS NOT NULL) AS has_token, (twilio_subaccount_sid IS NOT NULL) AS has_subaccount,
              (twilio_from IS NOT NULL AND (channel_address = twilio_from OR EXISTS (SELECT 1 FROM tenant_channels c WHERE c.tenant_id = tenants.id AND c.address = tenants.twilio_from))) AS routed
       FROM tenants WHERE id=?`).bind(waMatch[1]).first();
     if (!row) throw new HttpError(404, 'not_found');
@@ -3519,4 +3613,4 @@ export function createWorker(config) {
   };
 }
 
-export const testing = { rateLimited, memLimited, applySenderProfile, pushSenderProfile, clean, persistLead, leadAlertStatus, captureWhatsAppLead, leadFromSummary, leadCaptureDone, errorResponseParts, tenantByAddress, syncPrimaryChannel, assertChannelFree, normalizePhone, extractPhone, safeUtm, publicCors, validTwilioSignature, callAnthropic, callAnthropicRaw, runToolLoop, calendarExecutor, calendarSystem, tenantCalendar, validCalendarDate, availableSlots, handleCalendarCallback, calendarCallbackFor, sendTwilioText, timingSafeEqual, telegramBotUsername, handleTelegramWebhook, sendTelegramText, tenantTelegramToken, telegramThreadFor, registerTelegramTopic, csvCell, expiryDate, leadFilters, isDemoKey, templateVar, leadTemplateVariables, readJson, deliver, drainQueuedLeads, verifyTurnstile, systemFor, validateTenant, invalidateTenantCache, tenantWriteError, assertNotActivePending, tenantChannelSummary, channelsForScope, handleProvision, pollProvisioning, fillSeries, resolveScope, scopeClause, clienteAllowed, adminRouter, recordAuthFailure, handleAdmin, handleWidgetBoot, allowedOrigins, envOrigins, syncPanelGate, envAdmins, syncAdminGate, getSetting, setSetting, withCfToken };
+export const testing = { aiCost, recordAiUsage, rateLimited, memLimited, applySenderProfile, pushSenderProfile, clean, persistLead, leadAlertStatus, captureWhatsAppLead, leadFromSummary, leadCaptureDone, errorResponseParts, tenantByAddress, syncPrimaryChannel, assertChannelFree, normalizePhone, extractPhone, safeUtm, publicCors, validTwilioSignature, callAnthropic, callAnthropicRaw, runToolLoop, calendarExecutor, calendarSystem, tenantCalendar, validCalendarDate, availableSlots, handleCalendarCallback, calendarCallbackFor, sendTwilioText, timingSafeEqual, telegramBotUsername, handleTelegramWebhook, sendTelegramText, tenantTelegramToken, telegramThreadFor, registerTelegramTopic, csvCell, expiryDate, leadFilters, isDemoKey, templateVar, leadTemplateVariables, readJson, deliver, drainQueuedLeads, verifyTurnstile, systemFor, validateTenant, invalidateTenantCache, tenantWriteError, assertNotActivePending, tenantChannelSummary, channelsForScope, handleProvision, pollProvisioning, fillSeries, resolveScope, scopeClause, clienteAllowed, adminRouter, recordAuthFailure, handleAdmin, handleWidgetBoot, allowedOrigins, envOrigins, syncPanelGate, envAdmins, syncAdminGate, getSetting, setSetting, withCfToken };

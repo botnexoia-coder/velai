@@ -2885,6 +2885,89 @@ test('el panel no gasta cuota de KV y sigue teniendo tope; lo público sí cuent
   assert.ok(ttl && Number(ttl[1]) >= 900, 'TTL alto: la invalidación explícita ya cubre los cambios del panel');
 });
 
+test('gasto de IA: se registra por cliente y modelo, y el panel lo suma con las tarifas reales', async () => {
+  // Tarifas verificadas en la referencia de la API (2026-08-24): sonnet 4.6 $3/$15 por
+  // millón, haiku 4.5 $1/$5; caché escribe a 1,25x de entrada y lee a 0,1x.
+  const sonnet = testing.aiCost({ model: 'claude-sonnet-4-6', in_tokens: 1e6, out_tokens: 0, cache_w_tokens: 0, cache_r_tokens: 0 });
+  assert.equal(Number(sonnet.toFixed(4)), 3);
+  const haiku = testing.aiCost({ model: 'claude-haiku-4-5', in_tokens: 0, out_tokens: 1e6, cache_w_tokens: 0, cache_r_tokens: 0 });
+  assert.equal(Number(haiku.toFixed(4)), 5);
+  const cache = testing.aiCost({ model: 'claude-sonnet-4-6', in_tokens: 0, out_tokens: 0, cache_w_tokens: 1e6, cache_r_tokens: 1e6 });
+  assert.equal(Number(cache.toFixed(4)), 3 * 1.25 + 3 * 0.1);
+  // un modelo desconocido no rompe el cálculo (se estima, no se ignora)
+  assert.ok(testing.aiCost({ model: 'modelo-nuevo', in_tokens: 1e6, out_tokens: 0, cache_w_tokens: 0, cache_r_tokens: 0 }) > 0);
+  // el registro acumula con UPSERT y NUNCA lanza si D1 falla
+  const binds = [];
+  const env = { DB: { prepare: (sql) => ({ bind: (...a) => { binds.push({ sql, a }); return { run: async () => ({ meta: { changes: 1 } }) }; } }) } };
+  await testing.recordAiUsage(env, { id: 't-1' }, 'claude-sonnet-4-6', { input_tokens: 10, output_tokens: 5, cache_read_input_tokens: 100 });
+  assert.ok(binds[0].sql.includes('ON CONFLICT(tenant_id,day,model) DO UPDATE'), 'una fila por cliente/día/modelo');
+  assert.deepEqual([binds[0].a[0], binds[0].a[2], binds[0].a[3], binds[0].a[4], binds[0].a[6]], ['t-1', 'claude-sonnet-4-6', 10, 5, 100]);
+  await testing.recordAiUsage({ DB: { prepare: () => { throw new Error('d1 down'); } } }, { id: 't-1' }, 'm', { input_tokens: 1 });
+  // sin cliente (previsualización del panel) se registra igual, con cliente vacío
+  await testing.recordAiUsage(env, null, 'claude-haiku-4-5', { input_tokens: 1 });
+  assert.equal(binds[1].a[0], '');
+  // el endpoint agrega por cliente y rellena los días sin consumo
+  const rows = [
+    { tenant_id: 't-1', day: '2026-08-24', model: 'claude-sonnet-4-6', calls: 2, in_tokens: 1e6, out_tokens: 0, cache_w_tokens: 0, cache_r_tokens: 0, tenant_name: 'Uno', slug: 'uno' },
+    { tenant_id: 't-2', day: '2026-08-24', model: 'claude-haiku-4-5', calls: 1, in_tokens: 0, out_tokens: 1e6, cache_w_tokens: 0, cache_r_tokens: 0, tenant_name: 'Dos', slug: 'dos' },
+  ];
+  const envList = { DB: { prepare: () => ({ bind: () => ({ all: async () => ({ results: rows }), first: async () => null, run: async () => ({ meta: { changes: 1 } }) }) }) } };
+  const path = '/api/admin/ai-usage?days=7';
+  const res = await (await testing.adminRouter(adminReq(path), envList, { waitUntil() {} }, '/api/admin/ai-usage', new URL('https://x' + path), {}, VELAI)).json();
+  assert.equal(res.porDia.length, 7, 'la serie no miente: los días sin gasto valen 0');
+  assert.equal(res.total.cost, 8, '3 + 5');
+  assert.deepEqual(res.clientes.map((c) => [c.name, c.cost]), [['Dos', 5], ['Uno', 3]], 'ordenado por gasto');
+  // un cliente NO puede ver el gasto de nadie
+  await assert.rejects(testing.adminRouter(adminReq(path), envList, { waitUntil() {} }, '/api/admin/ai-usage', new URL('https://x' + path), {}, { role: 'cliente', tenantId: 't-1' }), (e) => e.code === 'not_authorized');
+});
+
+test('imagen por canal: web y WhatsApp pueden ser distintas y cada una va a lo suyo', async () => {
+  const TID = '00000000-0000-4000-8000-0000000000f7';
+  const writes = [];
+  const row = { id: TID, slug: 'mio', name: 'Mío', logo_url: null, logo_wa_url: null, brand_name: 'M', greeting: 'h',
+    web_origins: '[]', sender_sid: 'XE' + 'f'.repeat(32), twilio_subaccount_sid: 'AC' + 'f'.repeat(32), twilio_auth_token_enc: null };
+  const env = { KV: mapKV(), DB: { prepare: (sql) => ({ bind: (...a) => ({
+    first: async () => (sql.includes('FROM tenants WHERE id=') ? { ...row } : null),
+    run: async () => { writes.push({ sql, a }); return { meta: { changes: 1 } }; }, all: async () => ({ results: [] }),
+  }) }) } };
+  const png = new Uint8Array(200); png.set([0x89, 0x50, 0x4e, 0x47], 0);
+  const call = (qs) => {
+    const path = `/api/admin/tenants/${TID}/logo`;
+    return testing.adminRouter(adminReq(path + qs, { method: 'POST', body: png }), env, { waitUntil() {} }, path, new URL('https://x' + path + qs), {}, VELAI);
+  };
+  // solo web: toca logo_url y NO empuja nada a WhatsApp
+  const web = await (await call('?channels=web')).json();
+  assert.deepEqual(web.canales, { web: true, whatsapp: false });
+  assert.equal(web.whatsapp, false, 'no se aplica a WhatsApp si no se pidió');
+  const upWeb = writes.find((w) => w.sql.includes('UPDATE tenants SET logo_url=?'));
+  assert.ok(upWeb && !upWeb.sql.includes('logo_wa_url'), 'solo la columna del widget');
+  assert.match(web.logo_url, /-web\.png/, 'fichero propio del canal');
+  // solo WhatsApp: otra columna, otro fichero
+  writes.length = 0;
+  const wa = await (await call('?channels=whatsapp')).json();
+  assert.ok(writes.some((w) => w.sql.includes('UPDATE tenants SET logo_wa_url=?')), 'columna de WhatsApp');
+  assert.match(wa.logo_url, /-wa\.png/);
+  // los dos a la vez (el comportamiento de antes) comparten fichero
+  writes.length = 0;
+  const both = await (await call('?channels=web,whatsapp')).json();
+  assert.deepEqual(both.canales, { web: true, whatsapp: true });
+  assert.ok(writes.some((w) => w.sql.includes('logo_url=?') && w.sql.includes('logo_wa_url=?')));
+  assert.ok(!/-web|-wa/.test(both.logo_url), 'misma imagen, un solo fichero');
+  // sin canales marcados, no se guarda nada
+  await assert.rejects(call('?channels='), (e) => e.code === 'channels_required');
+  // y la foto de WhatsApp prefiere SU imagen sobre la del widget
+  const realFetch = globalThis.fetch;
+  try {
+    const posts = [];
+    globalThis.fetch = async (u, init) => {
+      if (!init || init.method === 'GET') return new Response(JSON.stringify({ status: 'ONLINE', profile: { name: 'N' } }), { status: 200 });
+      posts.push(JSON.parse(init.body)); return new Response('{"status":"ONLINE"}', { status: 200 });
+    };
+    await testing.applySenderProfile({}, { ...row, logo_url: 'https://x/web.png', logo_wa_url: 'https://x/wa.png' }, { sid: 'AC', token: 't' });
+    assert.equal(posts[0].profile.logo_url, 'https://x/wa.png');
+  } finally { globalThis.fetch = realFetch; }
+});
+
 test('números de aviso (PR3): el cliente edita los suyos y la guarda del 63031 cierra los dos caminos', async () => {
   const TID = '00000000-0000-4000-8000-0000000000e1';
   const row = { id: TID, slug: 'mio', channel_address: 'whatsapp:+34624121930', twilio_from: 'whatsapp:+34624121930', team_whatsapp: null, wa_number: null, updated_at: 'T0' };

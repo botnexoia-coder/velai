@@ -111,6 +111,15 @@ main{overflow-x:clip}
 .chartcard b{font-size:11px;font-weight:500;letter-spacing:.09em;text-transform:uppercase;color:var(--muted)}
 #chart{height:74px;display:flex;align-items:flex-end;gap:5px;margin-top:12px}
 #chart .bar{flex:1;min-height:2px;background:linear-gradient(180deg,var(--orange2),var(--orange));opacity:.65;border-radius:4px 4px 0 0;transition:opacity .12s}
+/* La gráfica de gasto reutiliza el mismo componente de barras del dashboard: mismo
+   lenguaje visual, cero código nuevo de dibujo. */
+#aiChart{height:64px;display:flex;align-items:flex-end;gap:4px}
+#aiChart .bar{flex:1;min-height:2px;background:linear-gradient(180deg,var(--orange2),var(--orange));opacity:.55;border-radius:4px 4px 0 0}
+#aiChart .bar:hover{opacity:.95}
+.aihead{display:flex;align-items:center;justify-content:space-between;gap:12px}
+table.tnarrow{min-width:0}
+.share{display:inline-flex;align-items:center;gap:8px;min-width:120px}
+.share i{height:6px;border-radius:3px;background:var(--orange);opacity:.75;display:block}
 #chart .bar:hover{opacity:1}
 .chartlabels{display:flex;justify-content:space-between;color:var(--muted2);font-size:11px;margin-top:6px}
 /* ── Filtros ── */
@@ -345,6 +354,8 @@ body.cliente .cliente-only{display:flex}
 .filein{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap;border:0}
 .filein:focus-visible+label{outline:2px solid var(--orange);outline-offset:2px}
 .fname{max-width:190px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px}
+.chk2{display:inline-flex;align-items:center;gap:7px;font-size:12.5px;color:var(--muted);cursor:pointer}
+.chk2 input{accent-color:var(--orange);width:15px;height:15px}
 .cxlogo{width:44px;height:44px;border-radius:10px;display:inline-flex;align-items:center;justify-content:center;background:rgba(var(--ink),.06);overflow:hidden;flex:none;font-size:11px;color:rgba(var(--ink),.5)}
 .cxlogo img{width:100%;height:100%;object-fit:cover}
 .tgnode[hidden],.tgbar[hidden],.tgstep[hidden]{display:none}
@@ -410,6 +421,13 @@ body.cliente .cliente-only{display:flex}
 <div class="stat" id="mTenantsCard"><b>Clientes activos</b><span class="n" id="mTenants">—</span></div>
 </div>
 <div class="chartcard"><b>Leads por día · 14 días</b><div id="chart"></div><div class="chartlabels"><span id="chartFrom"></span><span id="chartTo"></span></div></div>
+<div class="chartcard velai-only mt12" id="aiCard"><div class="aihead"><b>Gasto de IA</b><span class="sel"><select id="aiDays"><option value="7">7 días</option><option value="30" selected>30 días</option><option value="90">90 días</option></select></span></div>
+<div class="metrics mt6"><div class="stat"><b>Coste del periodo</b><span class="n" id="aiCost">—</span><small id="aiCostSub"></small></div>
+<div class="stat"><b>Llamadas al modelo</b><span class="n" id="aiCalls">—</span></div>
+<div class="stat"><b>Tokens</b><span class="n" id="aiTokens">—</span></div></div>
+<div id="aiChart" class="mt6"></div><div class="chartlabels"><span id="aiFrom"></span><span id="aiTo"></span></div>
+<div class="table mt12"><table class="tnarrow"><thead><tr><th>Cliente</th><th>Llamadas</th><th>Tokens</th><th>Coste</th><th>Parte del total</th></tr></thead><tbody id="aiRows"></tbody></table></div>
+<small class="muted">Coste estimado con las tarifas públicas de Anthropic (entrada, salida y caché) por modelo. El cupo diario por cliente se edita en su ficha.</small></div>
 <div id="escalations"></div>
 <form class="filters" id="filters"><label class="search"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"></circle><path d="m21 21-4.3-4.3"></path></svg><input name="q" class="q" placeholder="Buscar nombre, teléfono, sector…"></label><span class="sel"><select name="tenant" id="tenantFilter"><option value="">Todos los clientes</option></select></span><span class="sel"><select name="status"><option value="">Todos los estados</option><option>new</option><option>contacted</option><option>qualified</option><option>won</option><option>lost</option><option>spam</option></select></span><span class="sel"><select name="notification"><option value="">Todos los avisos</option><option>pending</option><option>sent</option><option>failed</option><option>skipped</option></select></span><input name="source" placeholder="Fuente"><input name="from" type="date" title="Desde"><input name="to" type="date" title="Hasta"><button class="btn">Filtrar</button><span id="resultCount"></span></form>
 <div id="message"></div><div class="table"><table><thead><tr><th>Fecha</th><th>Cliente</th><th>Estado</th><th>Nombre</th><th>WhatsApp</th><th>Asunto</th><th>Fuente</th><th>Avisos</th></tr></thead><tbody id="rows"></tbody></table></div>
@@ -526,8 +544,9 @@ body.cliente .cliente-only{display:flex}
 <p class="tgsub">Un lead siempre se guarda en el panel. Esto es quién recibe además un aviso al momento.</p>
 <div class="chlist" id="cxAlerts"></div></div>
 <div class="card mt12"><b class="tgh tgh-sm">Tu logo</b>
-<p class="tgsub">La imagen de tu negocio: sale en el chat de tu web y como <b class="tgh">foto de perfil de tu WhatsApp</b>. Cuadrada, 640×640 o más, máximo 2 MB (PNG, JPG o WebP).</p>
-<div class="actions actions0"><span id="cxLogoPrev" class="cxlogo">—</span><input type="file" id="cxLogoFile" accept="image/png,image/jpeg,image/webp" class="filein"><label class="btn alt" for="cxLogoFile">Elegir imagen</label><span id="cxLogoName" class="fname muted">ninguna elegida</span><button class="btn" id="cxLogoUp" type="button">Guardar logo</button><button class="btn alt" id="cxLogoApply" type="button" hidden>Aplicar a mi WhatsApp</button></div>
+<p class="tgsub">La imagen de tu negocio. Elige a qué canales aplica: WhatsApp la recorta en círculo y pide 640×640, así que a veces conviene una distinta de la del chat web. Máximo 2 MB (PNG, JPG o WebP).</p>
+<div class="actions actions0"><label class="chk2"><input type="checkbox" id="cxChWeb" checked> Chat de mi web</label><label class="chk2"><input type="checkbox" id="cxChWa" checked> Mi WhatsApp</label></div>
+<div class="actions actions0"><span id="cxLogoPrev" class="cxlogo" title="Imagen del chat web">—</span><span id="cxLogoPrevWa" class="cxlogo" title="Imagen de WhatsApp">—</span><input type="file" id="cxLogoFile" accept="image/png,image/jpeg,image/webp" class="filein"><label class="btn alt" for="cxLogoFile">Elegir imagen</label><span id="cxLogoName" class="fname muted">ninguna elegida</span><button class="btn" id="cxLogoUp" type="button">Guardar logo</button><button class="btn alt" id="cxLogoApply" type="button" hidden>Aplicar a mi WhatsApp</button></div>
 <small class="muted" id="cxLogoOut"></small></div>
 <div class="card mt12"><b class="tgh tgh-sm">Números de aviso por WhatsApp</b>
 <p class="tgsub">A qué WhatsApp del equipo llega el aviso de cada lead (además de Telegram). Varios números separados por coma, formato whatsapp:+34…</p>
