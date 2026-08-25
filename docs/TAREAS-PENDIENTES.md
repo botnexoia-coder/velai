@@ -101,6 +101,13 @@ Sin esto, las campañas gastarían presupuesto a ciegas (sin medir conversiones)
 - [x] **Autoservicio (2026-08-24):** el propio cliente sube su logo desde Conexiones → «Tu logo» (ruta en `clienteAllowed` con guarda own-only: ajeno = 404) y el worker se lo aplica SOLO a su foto de WhatsApp en segundo plano (`sender_profile_synced` / `sender_profile_sync_failed` en los logs). El botón manual de Velai sigue como red de seguridad.
 - [ ] Subir un logo grande de Diálogos (su favicon actual es pequeño y se verá pixelado como foto de WhatsApp): ahora basta con subirlo, el perfil se actualiza solo.
 
+### 2n. Gasto de IA y marca por canal (desplegado 2026-08-25)
+
+- [x] **Gasto de IA por cliente** (migración 0018 `ai_usage`, UPSERT por cliente/día/modelo): tarjeta velai-only en el dashboard con coste del periodo, coste medio por llamada, llamadas, tokens, gráfica diaria y tabla por cliente. Tarifas por modelo en `AI_PRICES` (`worker/app.js`) — **si Anthropic cambia precios, se editan ahí**; caché a 1,25x (escritura) y 0,1x (lectura) del precio de entrada.
+- [x] **Imagen por canal** (migración 0019 `logo_wa_url`): la subida acepta `?channels=web,whatsapp`; casillas en la tarjeta «Tu logo» y miniatura por canal. El perfil de WhatsApp prefiere su imagen y cae a la del widget.
+- [ ] **Pendiente de comprobar en vivo:** que el gasto empiece a aparecer tras las próximas conversaciones (la tabla arranca vacía) y subir una imagen distinta para el WhatsApp de Diálogos (su isotipo cuadrado) dejando el logotipo completo en la web.
+- [ ] Cuando haya un mes de datos, revisar si algún cliente sale más caro que su cuota y ajustar su `ai_daily_limit` en la ficha.
+
 ### 2k. Canales múltiples por cliente (tenant_channels — fase 1 desplegada 2026-08-22)
 
 - [x] Tabla `tenant_channels` (migración 0017, backfill) + enrutado del webhook canales-primero con fallback a `tenants.channel_address`; el PATCH/POST mantienen el espejo del canal primario; chips de la lista por canal real (web siempre + whatsapp con estado del sender + messenger).
