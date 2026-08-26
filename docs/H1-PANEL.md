@@ -204,44 +204,47 @@ es gratis y arrastra los tiempos de aprobación de Meta.
 La plantilla `velai_weekly_report` y el envío por WhatsApp son un segundo paso, no un
 bloqueante del primero.
 
-### Cron: hoy solo hay uno
+### Sin cron nuevo: el informe viaja en el de 5 minutos — cambio sobre la spec
 
-`wrangler.toml` declara `crons = ["*/5 * * * *"]` y `scheduled()` ignora el evento
-(`worker/app.js:3709` pasa `_event`). Hay que:
+La spec pedía un segundo trigger (`0 7 * * 1`) y ramificar `scheduled()` por `event.cron`.
+**No se hizo, y el resultado es mejor.** El informe lo manda el cron de 5 minutos que ya
+existe, dentro de una **ventana** de 24 h que abre el lunes a las 07:00 UTC:
 
-1. Añadir `"0 7 * * 1"` a `crons`.
-2. Pasar `event.cron` a `scheduled(env, cron)` y ramificar: la cola de leads y la purga
-   siguen en el de 5 minutos; el informe solo en el de los lunes.
+- **Reintento gratis.** Un fallo de Telegram se vuelve a intentar en el tick siguiente en
+  vez de esperar una semana. Con un trigger único, un 500 de Telegram a las 07:00 del
+  lunes = informe perdido hasta el lunes siguiente.
+- **Coste cero fuera de la ventana.** `reportPeriod()` mira el día y la hora en JS y sale
+  sin tocar D1. Los otros 6 días no cuestan ni una consulta.
+- **El tope de consultas de D1 deja de ser un riesgo.** El plan gratuito da **50 consultas
+  por invocación** del Worker. Cuatro métricas × dos periodos × N clientes se lo come con
+  seis clientes (48). Se resolvió con **un `GROUP BY` por tabla para todo el lote** — tres
+  consultas, sean 6 clientes o 60 — y con lotes de 5 clientes por tick, así que el
+  siguiente tick sigue por donde iba.
 
-**Los crons de Cloudflare son UTC.** `0 7 * * 1` cae a las 09:00 en horario de verano
-y a las 08:00 en invierno. Se acepta el desfase de una hora — no merece un segundo
-trigger ni lógica de husos.
+Los crons de Cloudflare son UTC: son las 09:00 en horario de verano y las 08:00 en
+invierno. Se acepta el desfase de una hora; no merece lógica de husos.
 
-### Idempotencia y baja
+### Idempotencia, baja y honestidad
 
-Un cron que se dispara dos veces no puede enviar dos informes. Tabla nueva en la misma
-migración o en `0022`:
+`tenant_reports` (PK `tenant_id + period_start`) se **reserva antes de enviar**
+(`status='sending'`), así que dos ticks no mandan dos informes. `attempts` acota a 3: sin
+tope, un fallo permanente reintentaría en cada tick durante las 24 h de la ventana (288
+veces). Un cliente sin `telegram_chat_id` es un **`skipped` visible con su motivo**, no un
+silencio — el mismo criterio que la entrega dual de leads.
 
-```sql
-CREATE TABLE IF NOT EXISTS tenant_reports (
-  tenant_id TEXT NOT NULL,
-  period_start TEXT NOT NULL,       -- lunes de la semana informada, YYYY-MM-DD
-  status TEXT NOT NULL,             -- 'sent' | 'skipped' | 'failed'
-  detail TEXT,
-  sent_at TEXT NOT NULL,
-  PRIMARY KEY (tenant_id, period_start)
-);
-```
+`tenants.weekly_report` (default 1) con su interruptor en **Conexiones → Informe semanal**.
+Intercom resuelve la baja con un clic y es lo mínimo esperable de algo que llega sin
+pedirlo. Va por el endpoint `/notify`, que es donde ya viven los avisos.
 
-`INSERT ... ON CONFLICT DO NOTHING` **antes** de enviar: si la fila ya existe, no se
-envía. Y una columna `tenants.weekly_report INTEGER NOT NULL DEFAULT 1` con su
-interruptor en la pestaña de Conexiones — Intercom lo resuelve con baja de un clic y es
-lo mínimo esperable.
+Dos decisiones de honestidad en el contenido:
 
-Un cliente sin `telegram_chat_id` es un **skip visible** en `tenant_reports`, no un
-silencio: el mismo criterio que ya usa la entrega dual de leads.
-
----
+- **La comparación se calla cuando no es comparable.** El historial arrancó el 2026-08-26,
+  así que en los primeros informes la semana anterior es cero *por no haber existido*, no
+  por no haber pasado nada. Un «▼ 100%» ahí sería mentira.
+- **Una semana en blanco no se disfraza de informe con cuatro ceros.** Dice que no entró
+  ninguna conversación y manda a **Canales**, que es lo que este panel hace mejor que
+  nadie: comprobar de verdad si los avisos pueden salir. Un cero repetido cada lunes es
+  una señal de baja; un cero que te dice qué mirar es servicio.
 
 ## §3. Comparativa con el periodo anterior
 

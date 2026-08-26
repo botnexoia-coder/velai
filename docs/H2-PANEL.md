@@ -61,7 +61,10 @@ Depende de §1: sin fuentes separadas del prompt no hay traza que enseñar.
 
 ---
 
-## §4. Responder desde el panel
+## §4. Responder desde el panel → adelantado a [`H2-BANDEJA.md`](./H2-BANDEJA.md)
+
+Juan lo pidió el 2026-08-26 con capturas de una bandeja de dos paneles, así que sale de
+este esbozo y tiene spec propia. Lo de abajo se queda como resumen.
 
 Las 8 DIY, Cliengo y Zenvia lo tienen. Con H1 §1 el historial ya está; falta el camino
 de salida y una guarda que ninguna de ellas pone bien:
