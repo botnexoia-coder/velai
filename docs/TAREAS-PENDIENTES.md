@@ -115,6 +115,10 @@ en tres horizontes: [`PLAN-PANEL.md`](./PLAN-PANEL.md) es el mapa y las decision
 [`H1-PANEL.md`](./H1-PANEL.md), [`H2-PANEL.md`](./H2-PANEL.md) y
 [`H3-PANEL.md`](./H3-PANEL.md), el trabajo. Lo que depende de ti:
 
+- [x] **H1 §1 desplegado el 2026-08-26** (migración 0021 + historial en D1 + vista Conversaciones + `/privacidad/`). El CI aplicó la migración y desplegó; el humo del preflight de `/chat` pasó.
+- [ ] **Pendiente de comprobar en vivo:** escribir por el widget y por WhatsApp y ver que la conversación aparece en la vista **Conversaciones** con los dos turnos (la tabla arranca vacía: las conversaciones anteriores vivían en KV y ya caducaron). Comprobar de paso que la ficha de un lead nuevo enlaza con su conversación.
+- [ ] **Vigilar `conv_state_not_saved` en Workers Logs** los primeros días: significa que alguien recibió su respuesta pero el turno siguiente irá sin ese contexto. Si aparece, es lo primero que hay que mirar del historial.
+- [ ] **Confirmar que el cuello de KV bajó**: en el dashboard, las escrituras de KV por conversación deberían pasar de ~5 a ~2. Si no se nota, quedan los dos contadores de cupo de IA por mover a D1 (`ai_usage` ya es una tabla) y los dos limitadores de tasa — están apuntados en `VOLUMEN-Y-ALMACENAMIENTO.md` §Decisión (3 y 4).
 - [ ] **Cuando la base pase de 100 MB o KV pase del 50% del cupo diario**, revisar [`VOLUMEN-Y-ALMACENAMIENTO.md`](./VOLUMEN-Y-ALMACENAMIENTO.md) (medido el 2026-08-26: la base entera pesa 332 KB y el cuello real es KV, no D1).
 - [x] **Retención de transcripciones + `/privacidad/`** — 90 días desde el último mensaje (`CONV_RETENTION_DAYS`), uniforme (una conversación con lead no se guarda más), y la política actualizada el 2026-08-26 con la base jurídica de la finalidad nueva. El razonamiento del plazo está en `H1-PANEL.md` §1.
 - [ ] **Coexistence y Embedded Signup: decidir antes de septiembre de 2026** (H3 §1 y §2). El 15 de octubre Meta retira Embedded Signup v2/v3 y `coex` no migra solo. Si el alta sigue siendo acompañada en la consola de Twilio, no toca nada; solo hay que decidirlo a tiempo.
