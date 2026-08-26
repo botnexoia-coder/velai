@@ -3656,9 +3656,47 @@ test('una respuesta truncada se REGISTRA: hasta ahora stop_reason solo se miraba
   }), { status: 200 });
   try {
     const reply = await testing.callAnthropic(env, { model: 'claude-sonnet-4-6', max_tokens: 400, messages: [{ role: 'user', content: 'hola' }] }, { tenant: { slug: 'gogestion' } });
-    assert.ok(reply.endsWith('llama a la Subdelegación.'), 'llega recortada en frase completa');
+    assert.ok(reply.includes('llama a la Subdelegación.'), 'recortada en frase completa');
+    assert.ok(!reply.includes('te recomiendo que'), 'sin la frase a medias');
+    // Y NO se queda ahí: cierra ofreciendo el siguiente paso. Nadie se queda a mitad.
+    assert.ok(reply.endsWith('?'), 'acaba invitando a seguir: ' + reply.slice(-60));
     const aviso = logs.map((l) => { try { return JSON.parse(l); } catch (_) { return {}; } }).find((l) => l.code === 'reply_truncated');
     assert.ok(aviso, 'queda rastro: antes esto era invisible');
     assert.equal(aviso.tenant, 'gogestion', 'y se sabe A QUIÉN le pasa, para poder subirle el tope');
   } finally { globalThis.fetch = realFetch; console.log = realLog; }
+});
+
+// ── «No podemos dejar a un cliente a mitad de una conversación» (Juan, 2026-08-26) ──
+test('la regla de ESPACIO Y CIERRE viaja en las reglas de sistema de TODOS los tenants', async () => {
+  // Vive en código a propósito, igual que las antiinyección: nadie la desactiva editando
+  // una fila de D1. Este test es el que impide que desaparezca en un refactor del prompt.
+  const src = await readFile(new URL('../vai-worker.js', import.meta.url), 'utf8');
+  assert.match(src, /== ESPACIO Y CIERRE ==/);
+  assert.match(src, /se corta por la mitad/, 'le dice POR QUÉ importa, no solo el límite');
+  assert.match(src, /CIERRA ofreciendo el siguiente paso/, 'y qué hacer en su lugar');
+  assert.match(src, /agendar una cita/);
+  assert.match(src, /Nunca dejes una enumeración a medias/);
+});
+
+test('si se corta igual, el cierre ofrece el siguiente paso y CABE en el canal', () => {
+  const truncado = { stop_reason: 'max_tokens', model: 'claude-sonnet-4-6' };
+  const largo = 'Para la nacionalidad por residencia necesitas varios documentos. '.repeat(40);
+
+  // Con calendario conectado el cierre propone CITA: es el que cierra la venta.
+  const conCita = testing.settleReply(truncado, { closing: 'cita', bodyLimit: 1500 }, largo);
+  assert.match(conCita, /¿te agendo una cita\?$/);
+  assert.ok(conCita.length <= 1500, 'cabe en WhatsApp: ' + conCita.length);
+
+  // Sin calendario, propone que escriba el equipo: nunca se queda en el aire.
+  const sinCita = testing.settleReply(truncado, { closing: 'equipo', bodyLimit: 1500 }, largo);
+  assert.match(sinCita, /el equipo te escriba/);
+  assert.ok(sinCita.length <= 1500);
+
+  // Lo importante del presupuesto: el cierre se reserva ANTES de recortar. Si se añadiera
+  // después, el guarda del canal lo cortaría y se comería justo el cierre.
+  assert.equal(testing.waBody(conCita), conCita, 'el guarda del canal ya no tiene que tocarlo');
+
+  // Sin truncado no se toca nada: no se le añade un cierre a una respuesta que ya cerró.
+  const entera = 'Te confirmo la cita del martes a las 10:00.';
+  assert.equal(testing.settleReply({ stop_reason: 'end_turn' }, { closing: 'cita' }, entera), entera);
 });
