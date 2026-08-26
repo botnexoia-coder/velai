@@ -3775,16 +3775,38 @@ test('el plan de IA se edita desde la ficha: sin eso, el aviso al 80% mandaría 
 test('el panel no referencia ids que no existen: uno solo mata TODO el script', async () => {
   // Clase de fallo que el check del bundle NO puede cazar (su DOM stub devuelve un proxy
   // para cualquier querySelector) y que deja el panel entero en blanco: un $('#x').onclick
-  // a nivel de módulo sobre un id que ya no está en el HTML lanza y aborta el arranque.
-  // Pasó al sustituir la tabla de Conversaciones por la bandeja, y por eso existe esto.
+  // a nivel de módulo sobre un id que ya no está lanza y aborta el arranque.
   const js = await readFile(new URL('../worker/admin-panel.js', import.meta.url), 'utf8');
   const html = await readFile(new URL('../worker/admin-page.js', import.meta.url), 'utf8');
   const ids = new Set([...js.matchAll(/\$\('#([A-Za-z0-9_-]+)'\)/g)].map((m) => m[1]));
-  // Los que crea el propio panel al pintar (no están en el HTML estático, y solo se
-  // acceden DESPUÉS de renderizarlos).
-  const dinamicos = new Set(['csend', 'cmsg']);
-  const faltan = [...ids].filter((id) => !dinamicos.has(id) && !html.includes(`id="${id}"`));
-  assert.deepEqual(faltan, [], 'ids referenciados por el panel que no existen en el HTML');
-  // Y al revés para lo que se crea dinámicamente: que siga generándose en algún innerHTML.
-  for (const id of dinamicos) assert.ok(js.includes(`id="${id}"`), `${id} ya no se pinta en ninguna parte`);
+  // Un id vale si está en el HTML estático O si el propio panel lo pinta (el modal del
+  // lead y el cajón de la bandeja se construyen con innerHTML). Sin lista a mano: así el
+  // test no se queda obsoleto cada vez que aparece un elemento dinámico.
+  const huerfanos = [...ids].filter((id) => !html.includes(`id="${id}"`) && !js.includes(`id="${id}"`));
+  assert.deepEqual(huerfanos, [], 'ids que el panel usa y NADIE crea');
+});
+
+test('los manejadores críticos del panel siguen cableados', async () => {
+  // Tripwire por el incidente del 2026-08-26: al sustituir la vista de Conversaciones por
+  // la bandeja se reemplazó un bloque delimitado por dos comentarios y se llevó por delante
+  // lo que había en medio — logout, cambio de tema, filtros de leads, la apertura de la
+  // ficha del lead y wireDetail. Todo eso dejó de funcionar y ningún test se enteró.
+  const js = await readFile(new URL('../worker/admin-panel.js', import.meta.url), 'utf8');
+  const criticos = [
+    ["$('#logout')", 'cerrar sesión'],
+    ["$('#themeBtn')", 'cambio de tema'],
+    ['function applyTheme', 'aplicar tema'],
+    ['async function openLead', 'abrir la ficha de un lead'],
+    ['function wireDetail', 'guardar estado, notas y reintento del lead'],
+    ["$('#rows')", 'clic en una fila de leads'],
+    ["$('#filters')", 'filtros de leads'],
+    ["$('#export')", 'exportar leads'],
+    ["$('#convRows')", 'clic en una conversación'],
+    ["$('#convFilters')", 'filtros de la bandeja'],
+    ['async function loadInbox', 'cargar la bandeja'],
+    ['async function sendReply', 'responder desde la bandeja'],
+    ['async function loadSaldo', 'saldo de IA del cliente'],
+  ];
+  const faltan = criticos.filter(([needle]) => !js.includes(needle)).map(([, que]) => que);
+  assert.deepEqual(faltan, [], 'manejadores del panel desaparecidos');
 });
