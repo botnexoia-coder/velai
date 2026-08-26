@@ -3786,27 +3786,41 @@ test('el panel no referencia ids que no existen: uno solo mata TODO el script', 
   assert.deepEqual(huerfanos, [], 'ids que el panel usa y NADIE crea');
 });
 
-test('los manejadores críticos del panel siguen cableados', async () => {
+test('el panel no pierde manejadores por el camino: inventario congelado', async () => {
   // Tripwire por el incidente del 2026-08-26: al sustituir la vista de Conversaciones por
   // la bandeja se reemplazó un bloque delimitado por dos comentarios y se llevó por delante
-  // lo que había en medio — logout, cambio de tema, filtros de leads, la apertura de la
-  // ficha del lead y wireDetail. Todo eso dejó de funcionar y ningún test se enteró.
+  // lo que había en medio — logout, cambio de tema, filtros y exportar de leads, el cerrar
+  // del modal, la apertura de la ficha del lead y wireDetail. Todo dejó de funcionar EN
+  // SILENCIO: el panel arrancaba perfectamente y ningún test se enteró.
+  //
+  // Este test no mira si funcionan: mira que SIGAN EXISTIENDO. Es un inventario, y si
+  // añades una función o un manejador nuevo tienes que meterlo aquí a propósito — el
+  // trabajo extra es justamente el punto: obliga a mirar qué desapareció.
   const js = await readFile(new URL('../worker/admin-panel.js', import.meta.url), 'utf8');
-  const criticos = [
-    ["$('#logout')", 'cerrar sesión'],
-    ["$('#themeBtn')", 'cambio de tema'],
-    ['function applyTheme', 'aplicar tema'],
-    ['async function openLead', 'abrir la ficha de un lead'],
-    ['function wireDetail', 'guardar estado, notas y reintento del lead'],
-    ["$('#rows')", 'clic en una fila de leads'],
-    ["$('#filters')", 'filtros de leads'],
-    ["$('#export')", 'exportar leads'],
-    ["$('#convRows')", 'clic en una conversación'],
-    ["$('#convFilters')", 'filtros de la bandeja'],
-    ['async function loadInbox', 'cargar la bandeja'],
-    ['async function sendReply', 'responder desde la bandeja'],
-    ['async function loadSaldo', 'saldo de IA del cliente'],
-  ];
-  const faltan = criticos.filter(([needle]) => !js.includes(needle)).map(([, que]) => que);
-  assert.deepEqual(faltan, [], 'manejadores del panel desaparecidos');
+  const fns = new Set([...js.matchAll(/^(?:async )?function ([A-Za-z0-9_]+)/gm)].map((m) => m[1]));
+  const handlers = new Set([...js.matchAll(/\$\('#([A-Za-z0-9_-]+)'\)\.(?:onclick|onsubmit|onchange|oninput)/g)].map((m) => m[1]));
+
+  // Funciones que sostienen una vista entera. Si falta una, esa vista está muerta.
+  const FUNCIONES = ['applyTheme', 'openLead', 'wireDetail', 'load', 'loadStats', 'loadTenants',
+    'loadAiUsage', 'loadInfra', 'loadSaldo', 'loadInbox', 'renderThread', 'composer', 'sendReply',
+    'loadConexiones', 'cxMenu', 'loadChannels', 'loadTenantList', 'loadAdmins', 'loadConfig',
+    'calMenu', 'loadEscalations', 'whoOf', 'prevPrefix', 'chTabs', 'convParams', 'api', 'toast', 'paint'];
+  const sinFuncion = FUNCIONES.filter((f) => !fns.has(f));
+  assert.deepEqual(sinFuncion, [], 'funciones del panel desaparecidas');
+
+  // Elementos con manejador. Uno menos = un botón que no hace nada, y eso no lo cazan ni
+  // node --check ni check-bundle ni el test de ids.
+  const CLICABLES = ['logout', 'themeBtn', 'filters', 'more', 'export', 'close', 'rows',
+    'saveStatus', 'retry', 'addNote', 'delete', 'convRows', 'convFilters', 'convExport', 'chTabs',
+    'aiDays', 'escalations', 'tenantRows', 'newTenant', 'tenantSave', 'tenantClose', 'tenantPreview',
+    'wizBack', 'wizNext', 'tDupSel', 'ttabs', 'tLogoUp', 'tVersions', 'tSyncDomains',
+    'uAdd', 'tUsersList', 'aAdd', 'adminsList', 'cfgTokenSave', 'cfgTokenClear',
+    'cxTenantSel', 'cxLogoUp', 'cxLogoApply', 'nfSave', 'wrToggle', 'wrTest',
+    'tgLink', 'tgUnlink', 'tgWlToggle', 'tgBotSave', 'tgBotDel', 'tgSetup', 'tgTopicAdd', 'tgTopics',
+    'calTenantSel', 'calGrid', 'calToday', 'calPrev', 'calNext', 'calBack',
+    'calConnect', 'calReconnect', 'calDisconnect', 'calSave', 'calDayClose',
+    'chQ', 'chTenant', 'chState', 'waSync', 'waProfile',
+    'pSub', 'pTpl', 'pTplRe', 'pTplChk', 'pSender', 'pVerify'];
+  const sinManejador = CLICABLES.filter((id) => !handlers.has(id));
+  assert.deepEqual(sinManejador, [], 'elementos del panel que se quedaron sin manejador');
 });
