@@ -31,6 +31,10 @@ routes = [
 ALLOWED_WEB_ORIGINS = "https://hirevai.com,https://www.hirevai.com,https://velai-dey.pages.dev,https://hiredatavision.com,https://www.hiredatavision.com,https://gogestion.es,https://www.gogestion.es,https://zoetravelspain.com,https://www.zoetravelspain.com,https://dialogosqueensenan.com,https://www.dialogosqueensenan.com,https://gogestion-demo.pages.dev"
 ADMIN_ORIGIN = "https://admin.hirevai.com"
 LEAD_RETENTION_MONTHS = "24"
+# Retención de TRANSCRIPCIONES (migración 0021), aparte y más corta que la de los leads:
+# una conversación guardada es más sensible que una ficha de contacto. El cron la purga
+# con el mismo LIMIT acotado. Si se cambia este número hay que reflejarlo en /privacidad/.
+CONV_RETENTION_DAYS = "90"
 # Tope diario GLOBAL de llamadas al modelo (presupuesto anti-abuso, resetea a medianoche UTC).
 AI_DAILY_LIMIT = "1000"
 # Tope diario POR TENANT (default; la columna tenants.ai_daily_limit lo pisa por fila).
@@ -73,7 +77,10 @@ CF_ADMIN_GROUP_ID = "92360e3f-8e40-4dfd-85e6-718617d140d0"
 # calendar_tool_failed, calendar_reply_failed, appointment_created,
 # tool_loop_overflow…) no se ven en ninguna parte.
 # Los logs no llevan PII por diseño, así que muestreo al 100%.
-# Códigos nuevos: conv_not_counted (conversación no contada), cf_analytics_denied
+# Códigos nuevos: conv_state_not_saved (el turno NO se guardó en D1: el visitante recibió
+# su respuesta pero el turno siguiente irá sin memoria — es el código a vigilar del
+# historial), conv_lead_not_linked, conv_purge_failed (la retención no pudo purgar),
+# conv_not_counted (conversación no contada), cf_analytics_denied
 # (el token no puede leer analíticas de Cloudflare), ai_usage_not_recorded (el registro de gasto falló, la respuesta al
 # cliente NO), sender_profile_synced / sender_profile_sync_failed (foto de WhatsApp).
 [observability]

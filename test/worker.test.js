@@ -253,10 +253,10 @@ test('el webhook de Twilio enruta por To al tenant correcto y aísla el historia
     TWILIO_AUTH_TOKEN: 'tok', TWILIO_ACCOUNT_SID: 'AC' + 'p'.repeat(32),
     ANTHROPIC_API_KEY: 'k',
     KV: { async get() { return null; }, async put(key, value) { kvPuts.push(key); }, async delete() {} },
-    DB: { prepare: (sql) => ({ bind: (...args) => ({
+    DB: withConversations({ prepare: (sql) => ({ bind: (...args) => ({
       first: async () => sql.includes('channel_address') ? (tenants[args[0]] || null) : null,
       all: async () => ({ results: [] }), run: async () => {},
-    }) }), batch: async () => [] },
+    }) }), batch: async () => [] }),
   };
   const anthropicSystems = [];
   const realFetch = globalThis.fetch;
@@ -275,9 +275,11 @@ test('el webhook de Twilio enruta por To al tenant correcto y aísla el historia
     }
     assert.ok(anthropicSystems[0].includes('PROMPT-UNO') && anthropicSystems[0].includes('REGLA'));
     assert.ok(anthropicSystems[1].includes('PROMPT-DOS'));
-    // historiales namespaceados por tenant: mismo usuario final, claves distintas
-    const convKeys = kvPuts.filter((k) => k.startsWith('conv:wa:'));
-    assert.deepEqual([...new Set(convKeys)].sort(), ['conv:wa:t-dos:whatsapp:+34600000000', 'conv:wa:t-uno:whatsapp:+34600000000']);
+    // historiales namespaceados por tenant: mismo usuario final, DOS conversaciones
+    // distintas en D1 (antes eran dos claves de KV — la memoria se mudó, el aislamiento no).
+    assert.deepEqual(env.DB.convs.map((c) => `${c.tenant_id}|${c.external_id}`).sort(),
+      ['t-dos|whatsapp:+34600000000', 't-uno|whatsapp:+34600000000']);
+    assert.equal(new Set(env.DB.convs.map((c) => c.id)).size, 2, 'ids distintos: no comparten fila');
     // To desconocido: 404 unknown_tenant y sin llamar al modelo
     const before = anthropicSystems.length;
     const unknown = await twilioRequest('https://worker.test/', { AccountSid: env.TWILIO_ACCOUNT_SID, From: 'whatsapp:+34600000000', To: 'whatsapp:+15559999999', Body: 'hola' }, 'tok');
@@ -812,10 +814,10 @@ function handoffHarness() {
       async put(k, v) { kvStore.set(k, typeof v === 'string' ? v : JSON.stringify(v)); },
       async delete(k) { kvStore.delete(k); },
     },
-    DB: { prepare: (sql) => ({ bind: (...args) => ({
+    DB: withConversations({ prepare: (sql) => ({ bind: (...args) => ({
       first: async () => sql.includes('channel_address') ? ([tenant, tenantB].find((t) => t.channel_address === args[0]) || null) : null,
       all: async () => ({ results: [] }), run: async () => ({ meta: { changes: 1 } }),
-    }) }), batch: async () => [] },
+    }) }), batch: async () => [] }),
   };
   const realFetch = globalThis.fetch;
   globalThis.fetch = async (url, init) => {
@@ -855,7 +857,7 @@ test('handoff: el centinela pausa por tenant+remitente, avisa una vez y nunca ll
     assert.match(await paused.text(), /<Response><\/Response>/);
     assert.equal(h.modelCalls(), before, 'cero llamadas al modelo en pausa');
     assert.equal(h.telegram.length, 1, 'sin aviso repetido');
-    const hist = JSON.parse(h.kvStore.get('conv:wa:t-h:whatsapp:+34600000000'));
+    const hist = h.env.DB.history('t-h', 'whatsapp', 'whatsapp:+34600000000');
     assert.equal(hist.at(-1).content, '¿hola?', 'el mensaje queda en el historial');
     // 4) la pausa NO es global: el mismo remitente con OTRO tenant recibe respuesta
     const other = await h.send(worker, ctx, 'whatsapp:+34910000002', 'hola');
@@ -1433,14 +1435,81 @@ function mapKV(kv = new Map()) {
   };
 }
 
+// ── Conversaciones en D1 (migración 0021) ────────────────────────────────────
+// La memoria del chat dejó de vivir en KV: envuelve un mock de D1 y le añade estado REAL
+// para `conversations` / `conv_messages`. Sin estado, cada turno arrancaría de cero y los
+// tests de aislamiento por tenant, de reintento y de pausa no probarían nada.
+function withConversations(inner) {
+  const convs = []; const msgs = [];
+  // `since` es el corte de la ventana de sesión (72 h). El mock lo respeta de verdad:
+  // sin eso, el test de la sesión no probaría la sesión.
+  const openOf = (tenantId, channel, externalId, since) => [...convs].reverse()
+    .find((c) => c.tenant_id === tenantId && c.channel === channel && c.external_id === externalId
+      && (!since || c.last_at > since));
+  return {
+    convs,
+    msgs,
+    // Historial de una dirección tal y como lo leería el worker, o null si no hay ninguno.
+    history(tenantId, channel, externalId) {
+      const c = openOf(tenantId, channel, externalId);
+      return c ? msgs.filter((m) => m.conversation_id === c.id).map((m) => ({ role: m.role, content: m.text })) : null;
+    },
+    prepare(sql) {
+      const base = inner.prepare(sql);
+      return {
+        sql,
+        bind: (...args) => {
+          const b = base.bind(...args);
+          return {
+            sql,
+            args,
+            first: async () => {
+              if (/FROM conversations/.test(sql) && /last_at > \?/.test(sql)) {
+                const found = openOf(args[0], args[1], args[2], args[3]);
+                return found ? { id: found.id, demo: found.demo, msgs: found.msgs } : null;
+              }
+              return b.first();
+            },
+            all: async () => {
+              if (/FROM conv_messages/.test(sql)) {
+                const rows = msgs.filter((m) => m.conversation_id === args[0]);
+                return { results: rows.slice(-args[1]).reverse().map((m) => ({ role: m.role, text: m.text })) };
+              }
+              return b.all();
+            },
+            run: async () => b.run(),
+          };
+        },
+      };
+    },
+    batch: async (stmts) => {
+      // Solo interceptamos los batches de conversación; los demás (stats, etc.) siguen
+      // yendo al mock de abajo, que es quien sabe qué devolver.
+      if (!stmts.every((st) => /conversations|conv_messages/.test(st.sql || ''))) return inner.batch(stmts);
+      for (const st of stmts) {
+        if (/INSERT INTO conversations/.test(st.sql)) {
+          const [id, tenant_id, channel, external_id, demo, m,, started] = st.args;
+          convs.push({ id, tenant_id, channel, external_id, demo, msgs: m, last_at: started });
+        } else if (/UPDATE conversations SET msgs/.test(st.sql)) {
+          const c = convs.find((x) => x.id === st.args.at(-1));
+          if (c) { c.msgs += st.args[0]; c.last_at = st.args[2]; }
+        } else if (/INSERT INTO conv_messages/.test(st.sql)) {
+          msgs.push({ conversation_id: st.args[0], role: st.args[1], text: st.args[2] });
+        }
+      }
+      return stmts.map(() => ({}));
+    },
+  };
+}
+
 function webhookEnv(tenants, kv) {
   return {
     TWILIO_AUTH_TOKEN: 'tok', TWILIO_ACCOUNT_SID: 'AC' + 'p'.repeat(32), ANTHROPIC_API_KEY: 'k',
     KV: mapKV(kv),
-    DB: { prepare: (sql) => ({ bind: (...args) => ({
+    DB: withConversations({ prepare: (sql) => ({ bind: (...args) => ({
       first: async () => sql.includes('channel_address') ? (tenants[args[0]] || null) : null,
       all: async () => ({ results: [] }), run: async () => {},
-    }) }), batch: async () => [] },
+    }) }), batch: async () => [] }),
   };
 }
 
@@ -1464,7 +1533,7 @@ test('el webhook ignora un MessageSid repetido sin llamar al modelo ni duplicar 
     assert.equal(second.status, 200);
     assert.ok(!(await second.text()).includes('<Message>'), 'el duplicado responde TwiML vacío');
     assert.equal(modelCalls, 1, 'el modelo se paga UNA vez');
-    const history = JSON.parse(env.KV.map.get('conv:wa:t-uno:whatsapp:+34600000000'));
+    const history = env.DB.history('t-uno', 'whatsapp', 'whatsapp:+34600000000');
     assert.equal(history.filter((m) => m.role === 'user').length, 1, 'sin turnos duplicados');
   } finally { globalThis.fetch = realFetch; }
 });
@@ -1804,10 +1873,10 @@ test('webhook con calendario: tool_use → TwiML vacío YA y la respuesta llega 
     const params = { AccountSid: env.TWILIO_ACCOUNT_SID, From: 'whatsapp:+34600000000', To: 'whatsapp:+15550000001', Body: 'quiero cita', MessageSid: 'SM' + '6'.repeat(32) };
     env.DB.prepare('x'); // no-op para linters de stub
     const tenants = { 'whatsapp:+15550000001': tenant };
-    env.DB = { prepare: (sql) => ({ bind: (...args) => ({
+    env.DB = withConversations({ prepare: (sql) => ({ bind: (...args) => ({
       first: async () => sql.includes('channel_address') ? (tenants[args[0]] || null) : (sql.includes('tenant_calendars') ? calRow : null),
       all: async () => ({ results: [] }), run: async () => ({ meta: { changes: 1 } }),
-    }) }), batch: async () => [] };
+    }) }), batch: async () => [] });
     const res = await worker.fetch(await twilioRequest('https://worker.test/', params, 'tok'), env, ctx);
     assert.equal(res.status, 200);
     assert.ok(!(await res.text()).includes('<Message>'), 'TwiML vacío inmediato: Twilio no espera al bucle');
@@ -1818,7 +1887,7 @@ test('webhook con calendario: tool_use → TwiML vacío YA y la respuesta llega 
     assert.equal(send.get('From'), 'whatsapp:+15550000001', 'From = la dirección del tenant');
     assert.equal(send.get('To'), 'whatsapp:+34600000000');
     assert.ok(send.get('Body').includes('10:00'));
-    const history = JSON.parse(kv.get(`conv:wa:${tenant.id}:whatsapp:+34600000000`));
+    const history = env.DB.history(tenant.id, 'whatsapp', 'whatsapp:+34600000000');
     assert.equal(history.at(-1).role, 'assistant', 'el turno completo queda en el historial');
   } finally { globalThis.fetch = realFetch; }
 });
@@ -3056,4 +3125,175 @@ test('números de aviso (PR3): el cliente edita los suyos y la guarda del 63031 
   // ajeno → 404
   const foreign = `/api/admin/tenants/${LEADS[1].id}/notify`;
   await assert.rejects(testing.adminRouter(adminReq(foreign, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ wa_number: '1' }) }), env, ctx, foreign, new URL('https://x' + foreign), {}, OWN), (e) => e.code === 'not_found');
+});
+
+// ── Historial de conversación en D1 (migración 0021) ─────────────────────────
+test('conversaciones: sesión de 72 h, ventana de 20 al modelo y recuento de «no supe contestar»', async () => {
+  const env = { DB: withConversations({ prepare: () => ({ bind: () => ({ first: async () => null, all: async () => ({ results: [] }), run: async () => ({}) }) }), batch: async () => [] }) };
+  const tenant = { id: 't-1' };
+
+  // Primer turno: no hay sesión abierta → fila nueva, y convLoad NO escribe (el INSERT
+  // lo hace convAppend, para que una conversación que no pasa Turnstile no deje rastro).
+  const first = await testing.convLoad(env, tenant, 'web', 'c-1');
+  assert.equal(first.isNew, true);
+  assert.deepEqual(first.messages, []);
+  assert.equal(env.DB.convs.length, 0, 'convLoad no escribe');
+  await testing.convAppend(env, first, [{ role: 'user', content: 'hola' }, { role: 'assistant', content: 'buenas' }]);
+  assert.equal(env.DB.convs.length, 1);
+
+  // Segundo turno: reutiliza la MISMA fila y trae el historial.
+  const second = await testing.convLoad(env, tenant, 'web', 'c-1');
+  assert.equal(second.isNew, false);
+  assert.equal(second.id, first.id);
+  assert.deepEqual(second.messages.map((m) => m.content), ['hola', 'buenas']);
+  assert.equal(env.DB.convs.length, 1, 'no duplica la conversación');
+
+  // Otro tenant con la MISMA dirección es otra conversación: el aislamiento no depende
+  // del almacén (antes eran claves de KV distintas, ahora filas distintas).
+  const otro = await testing.convLoad(env, { id: 't-2' }, 'web', 'c-1');
+  assert.equal(otro.isNew, true);
+  assert.notEqual(otro.id, first.id);
+  await testing.convAppend(env, otro, [{ role: 'user', content: 'soy de otro negocio' }]);
+  assert.deepEqual((await testing.convLoad(env, tenant, 'web', 'c-1')).messages.map((m) => m.content),
+    ['hola', 'buenas'], 'el mensaje del otro tenant no se cuela en esta conversación');
+
+  // Pasadas las 72 h de silencio, la siguiente entrada abre una conversación NUEVA: el
+  // panel enseña sesiones discretas y no un hilo infinito por teléfono. (72 h es el
+  // estándar de facto del sector para dar una conversación por resuelta.)
+  env.DB.convs.forEach((c) => { c.last_at = '2026-01-01T00:00:00.000Z'; });
+  const tras72h = await testing.convLoad(env, tenant, 'web', 'c-1');
+  assert.equal(tras72h.isNew, true, 'tras el silencio, sesión nueva');
+  assert.notEqual(tras72h.id, first.id);
+  assert.deepEqual(tras72h.messages, [], 'la sesión nueva no arrastra el historial de la vieja');
+  await testing.convAppend(env, tras72h, [{ role: 'user', content: 'vuelvo' }]);
+  assert.equal(env.DB.convs.length, 3, 'dos sesiones del mismo visitante + la del otro tenant');
+
+  // Se GUARDA todo y al modelo solo le va la ventana: 30 mensajes dentro, 20 fuera.
+  const long = await testing.convLoad(env, tenant, 'web', 'c-1');
+  await testing.convAppend(env, long, Array.from({ length: 30 }, (_, i) => ({ role: i % 2 ? 'assistant' : 'user', content: `m${i}` })));
+  const windowed = await testing.convLoad(env, tenant, 'web', 'c-1');
+  assert.equal(windowed.messages.length, testing.CONV_WINDOW);
+  assert.equal(windowed.messages.at(-1).content, 'm29', 'la ventana es la COLA, no la cabeza');
+  assert.equal(env.DB.msgs.filter((m) => m.conversation_id === tras72h.id).length, 31, 'guardado íntegro: 1 + 30');
+});
+
+test('«no supe contestar»: el patrón cuenta las respuestas sin resolver y no las normales', () => {
+  const cuenta = (text) => testing.UNANSWERED_RE.test(text);
+  assert.ok(cuenta('No lo sé, lo siento'));
+  assert.ok(cuenta('No tengo esa información ahora mismo'));
+  assert.ok(cuenta('No puedo confirmarte el precio'));
+  assert.ok(cuenta('Eso lo consulto con el equipo y te digo'));
+  // Conservador a propósito: en el informe del cliente es mejor contar de menos que
+  // inflar «preguntas que no supe contestar».
+  assert.ok(!cuenta('Claro, te lo reservo para el martes a las 10:00'));
+  assert.ok(!cuenta('Tenemos hueco mañana por la mañana'));
+  assert.ok(!cuenta('El corte de pelo cuesta 15 euros'));
+  // «sé» con acento a propósito: «no se» sin acento es otro verbo y aparece en
+  // respuestas perfectamente resueltas.
+  assert.ok(!cuenta('No se admiten perros en la terraza'));
+  assert.ok(!cuenta('No se puede pagar en efectivo, solo tarjeta'));
+});
+
+test('el chat web guarda el turno en D1 y NO gasta escrituras de KV en el historial', async () => {
+  const worker = createWorker({ SYSTEM: 'VELAI', DEMOS: {}, SUMMARY_PROMPT: '', GUARDRAILS: 'REGLA' });
+  const ctx = { waitUntil() {} };
+  const row = { id: 't-web', slug: 'zoe', name: 'Zoe', channel_address: 'web:zoe', active: 1, system_prompt: 'P'.repeat(60) };
+  const kvPuts = [];
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = async (url) => {
+    if (String(url).includes('siteverify')) return new Response(JSON.stringify({ success: true, action: 'chat', hostname: 'zoetravelspain.com' }), { status: 200 });
+    if (String(url).includes('api.anthropic.com')) return new Response(JSON.stringify({ content: [{ text: 'No lo sé, te lo confirma el equipo.' }] }), { status: 200 });
+    return new Response('{}', { status: 200 });
+  };
+  try {
+    const env = {
+      ALLOWED_WEB_ORIGINS: 'https://zoetravelspain.com', TURNSTILE_SECRET_KEY: 's', ANTHROPIC_API_KEY: 'k',
+      KV: { async get() { return null; }, async put(k) { kvPuts.push(k); }, async delete() {} },
+      DB: withConversations({ prepare: (sql) => ({ bind: (...args) => ({ first: async () => (sql.includes('slug = ?') && args[0] === 'zoe' ? row : null), all: async () => ({ results: [] }), run: async () => ({ meta: { changes: 1 } }) }) }), batch: async () => [] }),
+    };
+    const res = await worker.fetch(new Request('https://worker.test/chat', {
+      method: 'POST', headers: { Origin: 'https://zoetravelspain.com', 'Content-Type': 'application/json' },
+      body: JSON.stringify({ conversationId: 'f23e4567-e89b-42d3-a456-426614174001', message: '¿abrís el domingo?', tenant: 'zoe', turnstileToken: 'tok' }),
+    }), env, ctx);
+    assert.equal(res.status, 200);
+    // El turno completo, en D1.
+    assert.deepEqual(env.DB.history('t-web', 'web', 'f23e4567-e89b-42d3-a456-426614174001').map((m) => m.role), ['user', 'assistant']);
+    // Y la respuesta era un «no lo sé»: queda contada para el informe semanal.
+    assert.equal(env.DB.convs[0].msgs, 2);
+    // El punto de docs/VOLUMEN-Y-ALMACENAMIENTO.md: el historial ya NO gasta cuota de KV
+    // (era 1 de las 5 escrituras por turno contra un tope de 1.000/día).
+    assert.deepEqual(kvPuts.filter((k) => k.startsWith('conv:')), []);
+  } finally { globalThis.fetch = realFetch; }
+});
+
+function convDb(conversations, messages = {}) {
+  return {
+    prepare(sql) {
+      return { bind: (...args) => ({
+        first: async () => {
+          if (!/WHERE c\.id = \?/.test(sql)) return null;
+          const scoped = sql.includes('c.tenant_id = ?') ? conversations.filter((c) => c.tenant_id === args[1]) : conversations;
+          return scoped.find((c) => c.id === args[0]) || null;
+        },
+        all: async () => {
+          if (/FROM conv_messages/.test(sql)) return { results: messages[args[0]] || [] };
+          if (!/FROM conversations c/.test(sql)) return { results: [] };
+          let rows = conversations;
+          if (sql.includes("c.demo = ''")) rows = rows.filter((c) => !c.is_demo);
+          if (sql.includes('c.unanswered > 0')) rows = rows.filter((c) => c.unanswered > 0);
+          if (sql.includes('c.tenant_id = ?')) rows = rows.filter((c) => c.tenant_id === args.at(-2));
+          return { results: rows.map((c) => ({ ...c })) };
+        },
+        run: async () => ({ meta: { changes: 1 } }),
+      }) };
+    },
+    batch: async () => [],
+  };
+}
+
+const CONVS = [
+  { id: '00000000-0000-4000-8000-0000000000b1', tenant_id: 't-mio', tenant_name: 'Mi Negocio', channel: 'web', msgs: 6, unanswered: 1, last_at: '2026-08-26T10:00:00Z', is_demo: 0, external_id: 'c-mia' },
+  { id: '00000000-0000-4000-8000-0000000000b2', tenant_id: 't-otro', tenant_name: 'Otro Negocio', channel: 'whatsapp', msgs: 4, unanswered: 0, last_at: '2026-08-26T09:00:00Z', is_demo: 0, external_id: 'whatsapp:+34600000002' },
+  { id: '00000000-0000-4000-8000-0000000000b3', tenant_id: 't-mio', tenant_name: 'Mi Negocio', channel: 'web', msgs: 2, unanswered: 0, last_at: '2026-08-26T08:00:00Z', is_demo: 1, external_id: 'c-demo' },
+];
+
+test('conversaciones en el panel: el cliente solo ve las suyas, la ajena es 404 y las demos no cuentan', async () => {
+  const env = { KV: { async get() { return null; }, async put() {}, async delete() {} }, DB: convDb(CONVS, { '00000000-0000-4000-8000-0000000000b1': [{ role: 'user', text: '¿abrís?', created_at: 'x' }] }) };
+  const ctx = { waitUntil() {} };
+  const call = (path, scope) => testing.adminRouter(adminReq(path), env, ctx, path.split('?')[0], new URL('https://admin.hirevai.com' + path), {}, scope);
+
+  // Listado del cliente: solo lo suyo, sin la demo y sin nombres de otros.
+  const list = await (await call('/api/admin/conversations', CLIENTE)).json();
+  assert.deepEqual(list.conversations.map((c) => c.id), ['00000000-0000-4000-8000-0000000000b1']);
+  const raw = JSON.stringify(list);
+  assert.ok(!raw.includes('Otro Negocio') && !raw.includes('tenant_name'), 'sin nombres de otros clientes');
+
+  // La demo solo aparece si se pide explícitamente (es juego de rol de Velai, no del negocio).
+  const conDemo = await (await call('/api/admin/conversations?demo=1', CLIENTE)).json();
+  assert.deepEqual(conDemo.conversations.map((c) => c.id).sort(), ['00000000-0000-4000-8000-0000000000b1', '00000000-0000-4000-8000-0000000000b3']);
+
+  // «Lo que el bot no supo contestar»: el filtro que convierte la lista en plan de acción.
+  const sinResolver = await (await call('/api/admin/conversations?sinResolver=1', CLIENTE)).json();
+  assert.deepEqual(sinResolver.conversations.map((c) => c.id), ['00000000-0000-4000-8000-0000000000b1']);
+
+  // Velai las ve todas y CON el nombre del cliente.
+  const todas = await (await call('/api/admin/conversations', VELAI)).json();
+  assert.equal(todas.conversations.length, 2);
+  assert.ok(JSON.stringify(todas).includes('Otro Negocio'));
+
+  // La transcripción ajena es 404, nunca 403: un 403 confirmaría que existe.
+  await assert.rejects(call('/api/admin/conversations/' + CONVS[1].id, CLIENTE), (e) => e.status === 404);
+  const mia = await (await call('/api/admin/conversations/' + CONVS[0].id, CLIENTE)).json();
+  assert.equal(mia.conversation.id, CONVS[0].id);
+  assert.deepEqual(mia.messages.map((m) => m.text), ['¿abrís?']);
+  assert.ok(!('tenant_name' in mia.conversation));
+});
+
+test('la retención de transcripciones es propia, acotada y más corta que la de los leads', () => {
+  assert.equal(testing.convRetentionDays({}), 90, 'default');
+  assert.equal(testing.convRetentionDays({ CONV_RETENTION_DAYS: '30' }), 30);
+  // Basura y valores absurdos caen al default en vez de dejar la purga sin criterio.
+  assert.equal(testing.convRetentionDays({ CONV_RETENTION_DAYS: '0' }), 90);
+  assert.equal(testing.convRetentionDays({ CONV_RETENTION_DAYS: 'nope' }), 90);
+  assert.equal(testing.convRetentionDays({ CONV_RETENTION_DAYS: '99999' }), 90);
 });

@@ -1341,7 +1341,7 @@ function leadCaptureDone(env, tenant, fields, userTurns) {
   return true;
 }
 
-async function captureChatLead(config, env, ctx, tenant, body, phone, messages) {
+async function captureChatLead(config, env, ctx, tenant, body, phone, messages, convId) {
   // Mismas guardas que el canal WhatsApp: una captura por conversación (marca en KV),
   // mínimo 2 turnos del usuario. Claves namespaceadas por tenant: dos clientes con el
   // mismo usuario final no se pisan el UNIQUE(request_id).
@@ -1360,6 +1360,7 @@ async function captureChatLead(config, env, ctx, tenant, body, phone, messages) 
     source: 'chat web', whatsapp: phone, phone, ...fields,
     pageUrl: clean(body.pageUrl, 500), utm: safeUtm(body.utm), score: null,
   });
+  if (result.ok) await convLinkLead(env, convId, result.leadId);
   if (result.ok && env.KV && leadCaptureDone(env, tenant, fields, userTurns)) await env.KV.put(mark, '1', { expirationTtl: 30 * 86400 });
 }
 
@@ -1368,7 +1369,7 @@ async function captureChatLead(config, env, ctx, tenant, body, phone, messages) 
 // sola vez por remitente (marca en KV + request_id idempotente `wa:<phone>`).
 // Se dispara con intención comercial mínima: ≥2 turnos del cliente y un resumen
 // de Haiku que detecte negocio o necesidad.
-async function captureWhatsAppLead(config, env, ctx, tenant, from, phone, messages) {
+async function captureWhatsAppLead(config, env, ctx, tenant, from, phone, messages, convId) {
   const mark = `lead:wa:${tenant.id}:${from}`;
   if (env.KV && await env.KV.get(mark)) return;
   const userTurns = messages.filter((m) => m.role === 'user').length;
@@ -1381,6 +1382,7 @@ async function captureWhatsAppLead(config, env, ctx, tenant, from, phone, messag
     tenantId: tenant.id, tenantIsDefault: tenant.slug === defaultTenantSlug(env),
     whatsapp: from.replace(/^whatsapp:/i, ''), phone, ...fields, score: null,
   });
+  if (result.ok) await convLinkLead(env, convId, result.leadId);
   if (result.ok && env.KV && leadCaptureDone(env, tenant, fields, userTurns)) await env.KV.put(mark, '1', { expirationTtl: 30 * 86400 });
 }
 
@@ -1552,48 +1554,50 @@ async function handleChat(request, env, cors, ctx, config) {
   const message = clean(body.message, 2000);
   if (!message) throw new HttpError(400, 'invalid_message');
   if (body.demo && !isDemoKey(config, body.demo)) throw new HttpError(400, 'invalid_demo');
-  if (!env.KV) throw new HttpError(503, 'conversation_storage_not_configured');
+  // La conversación vive en D1 desde la migración 0021 (antes en KV, con TTL de 24 h y
+  // recortada a 20 mensajes). Sin base no hay memoria, y responder sin memoria es peor
+  // que no responder — el 503 es el mismo contrato que tenía KV.
+  if (!env.DB) throw new HttpError(503, 'conversation_storage_not_configured');
   // Límite también por conversación: rotar de IP (CGNAT/móvil) no multiplica el cupo.
   if (await rateLimited(env, body.conversationId, 'chatconv', 20)) throw new HttpError(429, 'rate_limited');
   const tenant = await webTenant(env, body);
-  const key = `conv:web:${tenant.id}:${body.conversationId}`;
-  let state = await env.KV.get(key, 'json');
-  if (!state) {
+  const conv = await convLoad(env, tenant, 'web', body.conversationId);
+  if (conv.isNew) {
     await verifyTurnstile(env, body.turnstileToken, request, 'chat');
-    state = { demo: isDemoKey(config, body.demo) ? body.demo : '', messages: [] };
+    conv.demo = isDemoKey(config, body.demo) ? body.demo : '';
     // Turnstile ya pasó: es una conversación real, no un bot contando de más.
-    if (!state.demo) ctx.waitUntil(recordConversation(env, tenant, 'web'));
+    if (!conv.demo) ctx.waitUntil(recordConversation(env, tenant, 'web'));
   }
-  if (body.demo && state.demo !== body.demo) throw new HttpError(409, 'conversation_mode_mismatch');
-  state.messages.push({ role: 'user', content: message });
-  state.messages = state.messages.slice(-20);
+  if (body.demo && conv.demo !== body.demo) throw new HttpError(409, 'conversation_mode_mismatch');
+  // Se GUARDA todo y al modelo se le manda solo la ventana: el slice de antes tiraba lo
+  // viejo, que es justo lo que dejamos de hacer.
+  const history = [...conv.messages, { role: 'user', content: message }].slice(-CONV_WINDOW);
   // Con calendario conectado (y fuera de demo) el turno va por el bucle de tools;
   // max_tokens sube a 500 SOLO ahí: el JSON de tool_use consume output y con 300
   // un agendar_cita con motivo largo se truncaba a mitad de JSON.
-  const cal = isDemoKey(config, state.demo) ? null : await tenantCalendar(env, tenant);
+  const cal = isDemoKey(config, conv.demo) ? null : await tenantCalendar(env, tenant);
   let reply;
   if (cal) {
     reply = await runToolLoop(env, {
       model: 'claude-sonnet-4-6', max_tokens: 500,
-      system: calendarSystem(config, tenant, cal), messages: state.messages,
+      system: calendarSystem(config, tenant, cal), messages: history,
     }, CALENDAR_TOOLS, calendarExecutor(env, tenant, cal, { channel: 'web', conversationKey: body.conversationId, defaultPhone: '' }), { tenant });
     reply = reply || 'Ahora mismo no puedo consultar la agenda. Déjame tu nombre y teléfono y el equipo te confirma la cita enseguida.';
   } else {
     reply = await callAnthropic(env, {
       model: 'claude-sonnet-4-6', max_tokens: 300,
       // Las DEMOS son material comercial de Velai, no de un tenant: van tal cual.
-      system: isDemoKey(config, state.demo) ? config.DEMOS[state.demo] : systemFor(config, tenant), messages: state.messages,
+      system: isDemoKey(config, conv.demo) ? config.DEMOS[conv.demo] : systemFor(config, tenant), messages: history,
     }, { tenant });
   }
   // El centinela de handoff jamás llega al usuario, tampoco en el canal web
   // (la pausa v1 es solo del canal WhatsApp — SPEC-HANDOFF §A.1).
   reply = reply.replace(WANTS_HUMAN, '').trim() || 'De acuerdo, aviso al equipo para que te contacten.';
-  state.messages.push({ role: 'assistant', content: reply });
-  state.messages = state.messages.slice(-20);
-  await env.KV.put(key, JSON.stringify(state), { expirationTtl: 86400 });
+  await convAppend(env, conv, [{ role: 'user', content: message }, { role: 'assistant', content: reply }]);
+  const trail = [...history, { role: 'assistant', content: reply }].slice(-CONV_WINDOW);
   const phone = extractPhone(message);
-  if (!state.demo && phone) {
-    ctx.waitUntil(captureChatLead(config, env, ctx, tenant, body, phone, state.messages).catch((error) => {
+  if (!conv.demo && phone) {
+    ctx.waitUntil(captureChatLead(config, env, ctx, tenant, body, phone, trail, conv.id).catch((error) => {
       console.log(JSON.stringify({ level: 'error', code: 'chat_lead_capture_failed', conversationId: body.conversationId, error: error.name }));
     }));
   }
@@ -1611,6 +1615,96 @@ async function recordConversation(env, tenant, channel) {
       .bind(tenant.id, now.slice(0, 10), channel, now).run();
   } catch (error) {
     console.log(JSON.stringify({ level: 'warn', code: 'conv_not_counted', error: clean(String(error.message || error), 60) }));
+  }
+}
+
+// ── Historial de conversación en D1 (migración 0021) ─────────────────────────
+// `conversations` + `conv_messages` son la FUENTE ÚNICA del estado de la conversación:
+// sustituyen al `conv:web:*` / `conv:wa:*` de KV, no lo acompañan. El motivo no es solo
+// poder leerla en el panel — es que KV era el techo de volumen REAL del sistema (cinco
+// escrituras por turno contra 1.000/día; ver docs/VOLUMEN-Y-ALMACENAMIENTO.md).
+const CONV_WINDOW = 20;          // lo que ve el modelo; se GUARDA todo
+const CONV_SESSION_HOURS = 72;   // tras este silencio, la siguiente entrada abre sesión nueva
+const CONV_RETENTION_DAYS = 90;  // default; la var CONV_RETENTION_DAYS del toml lo pisa
+
+function convRetentionDays(env) {
+  const raw = Number(env.CONV_RETENTION_DAYS);
+  return Number.isFinite(raw) && raw >= 1 && raw <= 3650 ? Math.floor(raw) : CONV_RETENTION_DAYS;
+}
+
+// Respuestas en las que el bot admite no resolver. Deliberadamente CONSERVADOR: en el
+// informe semanal del cliente es mejor contar de menos que inflar «preguntas que no supe
+// contestar». El recuento se guarda en la fila al escribir (reprocesar transcripciones
+// enteras después sale caro) y se puede recalcular sobre conv_messages si se afina.
+// «sé» CON acento a propósito: «no se admiten perros» o «no se puede pagar en efectivo»
+// son respuestas perfectamente resueltas, y `no se` las contaría todas. El modelo escribe
+// español con acentos, así que la forma acentuada es la señal fiable.
+const UNANSWERED_RE = /no (?:lo )?sé(?![a-z])|no tengo (?:esa|esta|la) informaci[óo]n|no dispongo de|no puedo (?:darte|facilitarte|confirmarte)|no figura|no aparece en|no estoy seguro|lo consulto con el equipo|te lo confirma el equipo/i;
+
+// La sesión ABIERTA de una dirección, con su ventana de mensajes. Nunca devuelve null:
+// si no hay sesión viva devuelve una nueva SIN escribir nada — el INSERT ocurre en
+// convAppend, porque en el camino web todavía falta pasar Turnstile y una conversación
+// rechazada no debe dejar fila.
+async function convLoad(env, tenant, channel, externalId) {
+  const since = new Date(Date.now() - CONV_SESSION_HOURS * 3600000).toISOString();
+  const row = await env.DB.prepare(`SELECT id, demo, msgs FROM conversations
+     WHERE tenant_id=? AND channel=? AND external_id=? AND last_at > ?
+     ORDER BY last_at DESC LIMIT 1`).bind(tenant.id, channel, externalId, since).first();
+  const base = { tenant: tenant.id, channel, externalId };
+  if (!row) return { ...base, id: crypto.randomUUID(), demo: '', msgs: 0, isNew: true, messages: [] };
+  // DESC + LIMIT + reverse: leer la cola de una conversación larga por el índice, no
+  // barrer la conversación entera para quedarse con el final.
+  const rows = (await env.DB.prepare('SELECT role, text FROM conv_messages WHERE conversation_id=? ORDER BY id DESC LIMIT ?')
+    .bind(row.id, CONV_WINDOW).all()).results || [];
+  return {
+    ...base, id: row.id, demo: row.demo || '', msgs: Number(row.msgs) || 0, isNew: false,
+    messages: rows.reverse().map((m) => ({ role: m.role, content: m.text })),
+  };
+}
+
+// Cierra el turno: la fila de la conversación y sus mensajes en UN batch (transacción,
+// así que el orden INSERT-conversación → INSERT-mensajes satisface la FK).
+// Se hace AWAIT, no waitUntil: esto es el estado de la conversación y perderlo deja al
+// turno siguiente sin memoria. Pero NO lanza: el modelo ya respondió y esa respuesta se
+// ha pagado — devolverla sin memoria es malo, tirarla es peor.
+// `expires_at` se recalcula en cada turno para que el reloj de retención corra desde el
+// último mensaje: una conversación viva no se purga a media frase.
+async function convAppend(env, conv, turns) {
+  const list = (turns || []).filter((t) => t && t.content);
+  if (!list.length) return false;
+  const now = new Date().toISOString();
+  const expires = new Date(Date.now() + convRetentionDays(env) * 86400000).toISOString();
+  const unanswered = list.filter((t) => t.role === 'assistant' && UNANSWERED_RE.test(t.content)).length;
+  const head = conv.isNew
+    ? env.DB.prepare(`INSERT INTO conversations (id,tenant_id,channel,external_id,demo,msgs,unanswered,started_at,last_at,expires_at)
+        VALUES (?,?,?,?,?,?,?,?,?,?)`)
+      .bind(conv.id, conv.tenant, conv.channel, conv.externalId, conv.demo || '', list.length, unanswered, now, now, expires)
+    : env.DB.prepare('UPDATE conversations SET msgs=msgs+?, unanswered=unanswered+?, last_at=?, expires_at=? WHERE id=?')
+      .bind(list.length, unanswered, now, expires, conv.id);
+  try {
+    await env.DB.batch([head, ...list.map((t) => env.DB
+      .prepare('INSERT INTO conv_messages (conversation_id,role,text,created_at) VALUES (?,?,?,?)')
+      .bind(conv.id, t.role, t.content, now))]);
+  } catch (error) {
+    // Sin texto del mensaje: los logs no llevan PII, tampoco cuando fallan.
+    console.log(JSON.stringify({ level: 'error', code: 'conv_state_not_saved', channel: conv.channel, error: clean(String(error.message || error), 80) }));
+    return false;
+  }
+  conv.isNew = false;
+  conv.msgs += list.length;
+  return true;
+}
+
+// Enlaza la conversación con el lead que salió de ella. `leads.conversation_id` existe
+// desde la migración 0001, pero solo lo rellena el canal web y guarda el id del widget:
+// el camino de vuelta (ficha del lead → lo que se dijo) necesita esto, y en WhatsApp es
+// el ÚNICO camino. Nunca lanza: es navegación del panel, no el lead.
+async function convLinkLead(env, convId, leadId) {
+  if (!env.DB || !convId || !leadId) return;
+  try {
+    await env.DB.prepare('UPDATE conversations SET lead_id=? WHERE id=? AND lead_id IS NULL').bind(leadId, convId).run();
+  } catch (error) {
+    console.log(JSON.stringify({ level: 'warn', code: 'conv_lead_not_linked', error: clean(String(error.message || error), 60) }));
   }
 }
 
@@ -1711,8 +1805,10 @@ async function alertTenantMisconfigured(env, tenant, accountSid) {
 
 // Tras la respuesta del modelo, el cierre del turno de Twilio es idéntico en el
 // camino síncrono (TwiML) y en el asíncrono del calendario (Messages API): handoff,
-// historial en KV y captura de lead — factorizado para que no diverjan.
-async function settleTwilioReply(config, env, ctx, tenant, from, message, history, key, rawReply) {
+// historial en D1 y captura de lead — factorizado para que no diverjan.
+// El turno del USUARIO se guarda aquí, no antes: así el mensaje y su respuesta entran en
+// el mismo batch y no queda un mensaje huérfano si el modelo falla a mitad.
+async function settleTwilioReply(config, env, ctx, tenant, from, message, conv, rawReply) {
   let reply = String(rawReply || '');
   const wantsHuman = WANTS_HUMAN.test(reply);
   reply = reply.replace(WANTS_HUMAN, '').trim();
@@ -1721,12 +1817,13 @@ async function settleTwilioReply(config, env, ctx, tenant, from, message, histor
       console.log(JSON.stringify({ level: 'error', code: 'handoff_alert_failed', tenant: tenant.slug, error: error.name }));
     }));
   }
-  let trail = history;
-  if (reply) trail = [...history, { role: 'assistant', content: reply }].slice(-20);
-  if (env.KV) await env.KV.put(key, JSON.stringify(trail), { expirationTtl: 86400 });
+  const turns = [{ role: 'user', content: message }];
+  if (reply) turns.push({ role: 'assistant', content: reply });
+  const trail = [...conv.messages, ...turns].slice(-CONV_WINDOW);
+  await convAppend(env, conv, turns);
   const phone = normalizePhone(from.replace(/^whatsapp:/i, ''));
   if (phone) {
-    ctx.waitUntil(captureWhatsAppLead(config, env, ctx, tenant, from, phone, trail).catch((error) => {
+    ctx.waitUntil(captureWhatsAppLead(config, env, ctx, tenant, from, phone, trail, conv.id).catch((error) => {
       console.log(JSON.stringify({ level: 'error', code: 'wa_lead_capture_failed', tenant: tenant.slug, error: error.name }));
     }));
   }
@@ -1813,16 +1910,23 @@ async function handleTwilio(request, env, ctx, config) {
     return new Response('<?xml version="1.0" encoding="UTF-8"?><Response></Response>', { headers: { 'Content-Type': 'text/xml; charset=utf-8' } });
   }
 
-  // Historial namespaceado por tenant: dos clientes distintos con el mismo usuario
-  // final no comparten conversación.
-  const key = `conv:wa:${tenant.id}:${from}`;
-  let history = env.KV ? await env.KV.get(key, 'json') || [] : [];
-  if (!history.length) ctx.waitUntil(recordConversation(env, tenant, 'whatsapp'));
-  history.push({ role: 'user', content: message }); history = history.slice(-20);
+  // Historial en D1 (migración 0021), namespaceado por tenant: dos clientes distintos con
+  // el mismo usuario final no comparten conversación. Y por SESIÓN de 72 h, no por vida
+  // del teléfono: el panel enseña conversaciones discretas en vez de un hilo infinito.
+  if (!env.DB) throw new HttpError(503, 'conversation_storage_not_configured');
+  const channel = from.startsWith('messenger:') ? 'messenger' : 'whatsapp';
+  const conv = await convLoad(env, tenant, channel, from);
+  // OJO: el CONTADOR sigue diciendo 'whatsapp' también para Messenger, aunque la
+  // conversación se guarde con su canal real. No es descuido: el panel cruza este
+  // denominador con `leads.source`, y captureWhatsAppLead escribe 'whatsapp' para los dos
+  // canales. Un 'messenger' aquí dejaría a Messenger con 0 leads sobre N conversaciones y
+  // le inflaría la tasa a WhatsApp. Se separan cuando se separe también el origen del lead.
+  if (conv.isNew) ctx.waitUntil(recordConversation(env, tenant, 'whatsapp'));
+  const history = [...conv.messages, { role: 'user', content: message }].slice(-CONV_WINDOW);
   // Conversación escalada a humano: el mensaje se guarda pero NO se contesta ni se
   // llama al modelo — hay una persona en la conversación y dos voces es peor que ninguna.
   if (env.KV && await env.KV.get(`pause:${tenant.id}:${from}`)) {
-    await env.KV.put(key, JSON.stringify(history), { expirationTtl: 86400 });
+    await convAppend(env, conv, [{ role: 'user', content: message }]);
     console.log(JSON.stringify({ level: 'info', code: 'bot_paused', tenant: tenant.slug }));
     return new Response(EMPTY_TWIML, { headers: { 'Content-Type': 'text/xml; charset=utf-8' } });
   }
@@ -1830,7 +1934,7 @@ async function handleTwilio(request, env, ctx, config) {
   const cal = await tenantCalendar(env, tenant);
   if (!cal) {
     const raw = await callAnthropic(env, { model: 'claude-sonnet-4-6', max_tokens: 300, system: systemFor(config, tenant), messages: history }, { tenant, retries: 0, timeoutMs: 10000 });
-    return twiml(await settleTwilioReply(config, env, ctx, tenant, from, message, history, key, raw));
+    return twiml(await settleTwilioReply(config, env, ctx, tenant, from, message, conv, raw));
   }
   // Con calendario: híbrido síncrono/asíncrono (SPEC-CALENDARIO §3.4). La primera
   // llamada mantiene la latencia de siempre; si el modelo NO pide herramientas,
@@ -1841,18 +1945,18 @@ async function handleTwilio(request, env, ctx, config) {
   const payload = { model: 'claude-sonnet-4-6', max_tokens: 500, system: calendarSystem(config, tenant, cal), messages: history };
   const first = await callAnthropicRaw(env, { ...payload, tools: CALENDAR_TOOLS }, { tenant, retries: 0, timeoutMs: 10000 });
   if (first.stop_reason !== 'tool_use') {
-    return twiml(await settleTwilioReply(config, env, ctx, tenant, from, message, history, key, contentText(first)));
+    return twiml(await settleTwilioReply(config, env, ctx, tenant, from, message, conv, contentText(first)));
   }
   ctx.waitUntil((async () => {
     const executor = calendarExecutor(env, tenant, cal, {
-      channel: from.startsWith('messenger:') ? 'messenger' : 'whatsapp',
+      channel,
       conversationKey: from,
       defaultPhone: normalizePhone(from.replace(/^whatsapp:/i, '')),
     });
     // Timeouts agresivos en el tramo asíncrono: waitUntil da ~30 s en total.
     const raw = await runToolLoop(env, payload, CALENDAR_TOOLS, executor, { tenant, retries: 0, timeoutMs: 10000 }, first)
       || 'No he podido confirmar la agenda ahora mismo; el equipo te escribe enseguida para cerrarla.';
-    const reply = await settleTwilioReply(config, env, ctx, tenant, from, message, history, key, raw);
+    const reply = await settleTwilioReply(config, env, ctx, tenant, from, message, conv, raw);
     if (reply) {
       const sent = await sendTwilioText(env, tenant, to, from, reply);
       if (!sent.ok) console.log(JSON.stringify({ level: 'error', code: 'calendar_reply_failed', tenant: tenant.slug, error: sent.error || 'skipped' }));
@@ -1948,6 +2052,31 @@ function leadFilters(url) {
   const to = clean(url.searchParams.get('to'), 30);
   // Una fecha suelta (input type=date) debe incluir el día completo frente al ISO almacenado.
   if (to) { clauses.push('l.created_at <= ?'); values.push(/^\d{4}-\d{2}-\d{2}$/.test(to) ? `${to}T23:59:59.999Z` : to); }
+  return { sql: clauses.join(' AND '), values };
+}
+
+// Filtros de la vista Conversaciones. Alias `c.` — el aislamiento por tenant NO se
+// construye aquí, lo pone scopeClause(scope, 'c') en el endpoint.
+function convFilters(url) {
+  const clauses = ['1=1']; const values = [];
+  const channel = clean(url.searchParams.get('channel'), 20);
+  if (['web', 'whatsapp', 'messenger'].includes(channel)) { clauses.push('c.channel = ?'); values.push(channel); }
+  const tenant = clean(url.searchParams.get('tenant'), 40);
+  if (tenant && UUID_RE.test(tenant)) { clauses.push('c.tenant_id = ?'); values.push(tenant); }
+  const from = clean(url.searchParams.get('from'), 30);
+  if (from) { clauses.push('c.last_at >= ?'); values.push(from); }
+  const to = clean(url.searchParams.get('to'), 30);
+  // Una fecha suelta (input type=date) debe incluir el día completo frente al ISO almacenado.
+  if (to) { clauses.push('c.last_at <= ?'); values.push(/^\d{4}-\d{2}-\d{2}$/.test(to) ? `${to}T23:59:59.999Z` : to); }
+  const lead = clean(url.searchParams.get('lead'), 4);
+  if (lead === 'si') clauses.push('c.lead_id IS NOT NULL');
+  if (lead === 'no') clauses.push('c.lead_id IS NULL');
+  // «Lo que el bot no supo contestar» — el filtro que convierte la lista en plan de
+  // acción, y el germen de la pantalla de H2 §2.
+  if (url.searchParams.get('sinResolver') === '1') clauses.push('c.unanswered > 0');
+  // Las DEMOS son juego de rol comercial de Velai, no conversaciones del negocio: fuera
+  // por defecto, o la tasa de captura y los recuentos del panel mienten.
+  if (url.searchParams.get('demo') !== '1') clauses.push("c.demo = ''");
   return { sql: clauses.join(' AND '), values };
 }
 
@@ -2415,10 +2544,12 @@ async function resolveScope(env, email) {
 }
 
 // Único punto de paso del aislamiento (NO NEGOCIABLE): con tenantId la condición
-// filtra; con null (Velai) se anula. Ningún endpoint construye SQL de leads sin esto.
-function scopeClause(scope) {
+// filtra; con null (Velai) se anula. Ningún endpoint construye SQL de leads —ni de
+// conversaciones— sin esto. El alias es parámetro para que las tablas nuevas usen ESTA
+// función en vez de escribirse su propio filtro: un segundo punto de paso es un agujero.
+function scopeClause(scope, alias = 'l') {
   return scope.tenantId
-    ? { sql: ' AND l.tenant_id = ?', args: [scope.tenantId] }
+    ? { sql: ` AND ${alias}.tenant_id = ?`, args: [scope.tenantId] }
     : { sql: '', args: [] };
 }
 
@@ -2453,6 +2584,11 @@ function clienteAllowed(path, method) {
   if (path === '/api/admin/stats' && method === 'GET') return true;
   if (path === '/api/admin/me' && method === 'GET') return true;
   if (path === '/api/admin/escalations' && method === 'GET') return true;
+  // Sus conversaciones, en su espacio: el scope las filtra por tenant y el detalle exige
+  // que la conversación sea suya (ajena = 404, nunca 403).
+  if (path === '/api/admin/conversations' && method === 'GET') return true;
+  if (path === '/api/admin/conversations/export.csv' && method === 'GET') return true;
+  if (/^\/api\/admin\/conversations\/[0-9a-f-]+$/i.test(path) && method === 'GET') return true;
   if (path === '/api/admin/escalations/resume' && method === 'POST') return true;
   if (/^\/api\/admin\/leads\/[0-9a-f-]+$/i.test(path) && (method === 'GET' || method === 'PATCH')) return true;
   if (/^\/api\/admin\/leads\/[0-9a-f-]+\/notes$/i.test(path) && method === 'POST') return true;
@@ -2562,6 +2698,67 @@ async function adminRouter(request, env, ctx, path, url, config, scope) {
       : ['created_at','status','source','name','whatsapp','need','context','sector','messages_per_day','channel','score','note','page_url'];
     const csv = [keys.join(','), ...rows.map((row) => keys.map((key) => csvCell(row[key])).join(','))].join('\r\n');
     return new Response('\uFEFF' + csv, { headers: { 'Content-Type': 'text/csv; charset=utf-8', 'Content-Disposition': 'attachment; filename="velai-leads.csv"', 'Cache-Control': 'no-store' } });
+  }
+
+  // ── Conversaciones (migración 0021) ────────────────────────────────────────
+  // El hueco de paridad número uno: hasta ahora la conversación vivía en KV con TTL de
+  // 24 h y cuando un lead salía mal no había forma de mirar qué pasó.
+  if (path === '/api/admin/conversations' && request.method === 'GET') {
+    const f = convFilters(url);
+    const limit = Math.min(100, Math.max(1, Number(url.searchParams.get('limit')) || 50));
+    // Mismo cursor por tupla que los leads: un last_at repetido en el borde de página no
+    // se salta conversaciones.
+    const cursor = clean(url.searchParams.get('cursor'), 80);
+    if (cursor) {
+      const [cAt, cId] = cursor.split('|');
+      if (cId) { f.sql += ' AND (c.last_at < ? OR (c.last_at = ? AND c.id < ?))'; f.values.push(cAt, cAt, cId); }
+      else { f.sql += ' AND c.last_at < ?'; f.values.push(cAt); }
+    }
+    const scc = scopeClause(scope, 'c');
+    const rows = (await env.DB.prepare(`
+      SELECT c.id, c.channel, c.msgs, c.unanswered, c.started_at, c.last_at, c.lead_id,
+             c.demo <> '' AS is_demo, t.name AS tenant_name, c.tenant_id,
+             l.name AS lead_name, l.status AS lead_status
+      FROM conversations c
+      LEFT JOIN tenants t ON t.id = c.tenant_id
+      LEFT JOIN leads l ON l.id = c.lead_id
+      WHERE ${f.sql}${scc.sql} ORDER BY c.last_at DESC, c.id DESC LIMIT ?`)
+      .bind(...f.values, ...scc.args, limit + 1).all()).results;
+    const more = rows.length > limit; if (more) rows.pop();
+    // Un cliente nunca recibe nombres de otros tenants (el suyo va en su cabecera).
+    if (scope.role !== 'velai') for (const row of rows) { delete row.tenant_name; delete row.tenant_id; }
+    return json({ conversations: rows, nextCursor: more ? `${rows.at(-1).last_at}|${rows.at(-1).id}` : null }, 200, NO_STORE);
+  }
+  if (path === '/api/admin/conversations/export.csv' && request.method === 'GET') {
+    const f = convFilters(url);
+    const scc = scopeClause(scope, 'c');
+    // Un mensaje por fila, con la conversación como columna: es el formato que sirve
+    // para leer en una hoja de cálculo, y el que pide un cliente que quiere auditar.
+    const rows = (await env.DB.prepare(`
+      SELECT c.id AS conversacion, c.channel AS canal, m.created_at AS fecha, m.role AS quien, m.text AS mensaje
+      FROM conversations c JOIN conv_messages m ON m.conversation_id = c.id
+      WHERE ${f.sql}${scc.sql} ORDER BY c.last_at DESC, c.id DESC, m.id ASC LIMIT 20000`)
+      .bind(...f.values, ...scc.args).all()).results;
+    const keys = ['conversacion', 'canal', 'fecha', 'quien', 'mensaje'];
+    const csv = [keys.join(','), ...rows.map((row) => keys.map((key) => csvCell(row[key])).join(','))].join('\r\n');
+    return new Response('\uFEFF' + csv, { headers: { 'Content-Type': 'text/csv; charset=utf-8', 'Content-Disposition': 'attachment; filename="velai-conversaciones.csv"', 'Cache-Control': 'no-store' } });
+  }
+  const convMatch = path.match(/^\/api\/admin\/conversations\/([0-9a-f-]+)$/i);
+  if (convMatch && request.method === 'GET') {
+    if (!UUID_RE.test(convMatch[1])) throw new HttpError(404, 'not_found');
+    const scc = scopeClause(scope, 'c');
+    // La transcripción ajena es un 404, nunca un 403: un 403 confirmaría que la
+    // conversación existe. Mismo criterio que el resto del panel.
+    const head = await env.DB.prepare(`
+      SELECT c.id, c.channel, c.external_id, c.msgs, c.unanswered, c.started_at, c.last_at,
+             c.expires_at, c.lead_id, c.demo <> '' AS is_demo, t.name AS tenant_name
+      FROM conversations c LEFT JOIN tenants t ON t.id = c.tenant_id
+      WHERE c.id = ?${scc.sql}`).bind(convMatch[1], ...scc.args).first();
+    if (!head) throw new HttpError(404, 'not_found');
+    if (scope.role !== 'velai') delete head.tenant_name;
+    const messages = (await env.DB.prepare('SELECT role, text, created_at FROM conv_messages WHERE conversation_id=? ORDER BY id ASC LIMIT 500')
+      .bind(head.id).all()).results;
+    return json({ conversation: head, messages }, 200, NO_STORE);
   }
   if (path === '/api/admin/tenants' && request.method === 'GET') {
     // Semáforo de configuración de un vistazo: sin plantilla, sin equipo o con
@@ -3624,6 +3821,14 @@ async function scheduled(env) {
   for (const row of [...due, ...idle]) await processNotifications(env, row.lead_id);
   // Purga acotada: una acumulación grande no debe chocar con los límites por sentencia de D1.
   await env.DB.prepare('DELETE FROM leads WHERE id IN (SELECT id FROM leads WHERE expires_at <= ? LIMIT 500)').bind(now).run();
+  // Transcripciones (migración 0021): retención propia y MÁS CORTA que la de los leads —
+  // una transcripción es más sensible que una ficha. LIMIT bajo porque cada fila arrastra
+  // sus mensajes por ON DELETE CASCADE: 100 conversaciones pueden ser miles de filas.
+  try {
+    await env.DB.prepare('DELETE FROM conversations WHERE id IN (SELECT id FROM conversations WHERE expires_at <= ? LIMIT 100)').bind(now).run();
+  } catch (error) {
+    console.log(JSON.stringify({ level: 'error', code: 'conv_purge_failed', error: clean(String(error.message || error), 80) }));
+  }
 }
 
 export function createWorker(config) {
@@ -3710,4 +3915,4 @@ export function createWorker(config) {
   };
 }
 
-export const testing = { cloudflareUsage, CF_FREE_LIMITS, recordConversation, aiCost, recordAiUsage, rateLimited, memLimited, applySenderProfile, pushSenderProfile, clean, persistLead, leadAlertStatus, captureWhatsAppLead, leadFromSummary, leadCaptureDone, errorResponseParts, tenantByAddress, syncPrimaryChannel, assertChannelFree, normalizePhone, extractPhone, safeUtm, publicCors, validTwilioSignature, callAnthropic, callAnthropicRaw, runToolLoop, calendarExecutor, calendarSystem, tenantCalendar, validCalendarDate, availableSlots, handleCalendarCallback, calendarCallbackFor, sendTwilioText, timingSafeEqual, telegramBotUsername, handleTelegramWebhook, sendTelegramText, tenantTelegramToken, telegramThreadFor, registerTelegramTopic, csvCell, expiryDate, leadFilters, isDemoKey, templateVar, leadTemplateVariables, readJson, deliver, drainQueuedLeads, verifyTurnstile, systemFor, validateTenant, invalidateTenantCache, tenantWriteError, assertNotActivePending, tenantChannelSummary, channelsForScope, handleProvision, pollProvisioning, fillSeries, resolveScope, scopeClause, clienteAllowed, adminRouter, recordAuthFailure, handleAdmin, handleWidgetBoot, allowedOrigins, envOrigins, syncPanelGate, envAdmins, syncAdminGate, getSetting, setSetting, withCfToken };
+export const testing = { convLoad, convAppend, convLinkLead, convFilters, convRetentionDays, UNANSWERED_RE, CONV_WINDOW, cloudflareUsage, CF_FREE_LIMITS, recordConversation, aiCost, recordAiUsage, rateLimited, memLimited, applySenderProfile, pushSenderProfile, clean, persistLead, leadAlertStatus, captureWhatsAppLead, leadFromSummary, leadCaptureDone, errorResponseParts, tenantByAddress, syncPrimaryChannel, assertChannelFree, normalizePhone, extractPhone, safeUtm, publicCors, validTwilioSignature, callAnthropic, callAnthropicRaw, runToolLoop, calendarExecutor, calendarSystem, tenantCalendar, validCalendarDate, availableSlots, handleCalendarCallback, calendarCallbackFor, sendTwilioText, timingSafeEqual, telegramBotUsername, handleTelegramWebhook, sendTelegramText, tenantTelegramToken, telegramThreadFor, registerTelegramTopic, csvCell, expiryDate, leadFilters, isDemoKey, templateVar, leadTemplateVariables, readJson, deliver, drainQueuedLeads, verifyTurnstile, systemFor, validateTenant, invalidateTenantCache, tenantWriteError, assertNotActivePending, tenantChannelSummary, channelsForScope, handleProvision, pollProvisioning, fillSeries, resolveScope, scopeClause, clienteAllowed, adminRouter, recordAuthFailure, handleAdmin, handleWidgetBoot, allowedOrigins, envOrigins, syncPanelGate, envAdmins, syncAdminGate, getSetting, setSetting, withCfToken };
