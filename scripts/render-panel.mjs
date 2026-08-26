@@ -53,6 +53,9 @@ const VISTAS = {
       .replace('<div class="chatlog thread-log" id="threadLog"></div>', `<div class="chatlog thread-log" id="threadLog">${bubs}</div>`)
       .replace('<div class="composer" id="composer"></div>', '<div class="composer" id="composer"><textarea rows="2" placeholder="Escribe tu respuesta…"></textarea><div class="crow"><button class="btn">Enviar</button><span class="cwin">Quedan <b>23 h</b> de la ventana de WhatsApp.</span></div></div>');
   },
+  // Conexiones no necesita inyectar nada: la rejilla de horario es markup estático, y es
+  // justo lo que hay que MIRAR (un cliente tiene que entenderla sin explicación).
+  conexiones: (h) => h,
 };
 if (!VISTAS[view]) { console.error(`render-panel: vista desconocida «${view}». Disponibles: ${Object.keys(VISTAS).join(', ')}`); process.exit(2); }
 html = html.replace('<div id="viewDashboard">', '<div id="viewDashboard" hidden>');

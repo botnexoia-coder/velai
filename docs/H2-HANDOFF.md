@@ -66,8 +66,18 @@ Reutiliza lo que ya existe y está probado con DST: `localWeekday` y `localToUtc
 (`{"mon":[["09:00","14:00"],["16:00","19:00"]],…}`).
 
 Columnas nuevas en `tenants`: `support_hours` (TEXT/JSON) y `support_tz` (TEXT).
-`support_hours` a NULL = **sin restricción horaria**, manda solo el interruptor — así la
-función sirve desde el primer día sin configurar seis clientes, y el horario es opt-in.
+`support_hours` a NULL cae al **mismo default que el calendario** (L-V 9-19,
+`DEFAULT_BUSINESS_HOURS`). Al principio propuse que NULL fuera «sin restricción» y Juan lo
+corrigió: si la interacción humana va con horario, un NULL sin límite es lo contrario de lo
+pedido. Un `{}` explícito sí significa «nunca se ofrece asesor», y el panel lo dice con esas
+palabras para que no parezca un fallo.
+
+**Lo edita el CLIENTE, en Conexiones, con una rejilla de horas.** La primera versión fue un
+textarea de JSON (la convención que ya usaba el horario del calendario) y Juan lo paró: eso
+es para nosotros, no para un cliente. Ahora son siete filas —una por día— con dos tramos
+cada una, porque la jornada partida es la norma aquí, un selector de zona horaria con las
+seis habituales y un «copiar el lunes a L-V». Guarda por `/notify`, que ya es un endpoint
+auditado y con scope de cliente, en vez de abrir uno nuevo.
 
 ## Lo que se toca, y el riesgo de cada cosa
 

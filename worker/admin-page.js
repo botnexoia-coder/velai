@@ -137,6 +137,14 @@ table.tnarrow{min-width:0}
 .filters input[name=source]{max-width:120px}
 .filters input[type=date]{color:rgba(var(--ink),.80)}
 .filters .fchk{display:inline-flex;align-items:center;gap:7px;font-size:13px;cursor:pointer}
+/* Rejilla de horario: una fila por día, dos tramos (la jornada partida es la norma aquí). */
+.shgrid{display:flex;flex-direction:column;gap:6px;margin-top:10px}
+.shrow{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.shday{min-width:88px;font-weight:600;font-size:13px}
+.shpair{display:inline-flex;align-items:center;gap:6px}
+.shsep{color:var(--muted2);font-size:12px}
+.shrow input[type=time]{background:var(--bg2);color:var(--white);border:1px solid var(--border2);border-radius:var(--r-sm);padding:7px 9px;font-size:13px}
+@media(max-width:700px){.shday{min-width:100%}}
 .search{flex:1;min-width:220px;max-width:340px;display:flex;align-items:center;gap:9px;background:var(--bg2);border:1px solid rgba(var(--ink),.10);border-radius:var(--r-sm);padding:0 13px}
 .search:hover,.search:focus-within{border-color:var(--orange)}
 .search svg{width:15px;height:15px;color:rgba(var(--ink),.40);flex-shrink:0}
@@ -254,6 +262,11 @@ dialog::backdrop{background:rgba(5,3,6,.78);backdrop-filter:blur(3px)}
 @media(max-width:560px){.chrow{flex-wrap:wrap;gap:6px}.chrow .chaddr{flex-basis:100%}}
 .card{background:var(--surface);border:1px solid var(--border);border-radius:calc(var(--r) - 4px);padding:14px 16px}
 .card b{display:block;color:var(--muted);font-size:11px;font-weight:500;letter-spacing:.07em;text-transform:uppercase;margin-bottom:5px}
+/* …pero ese es el estilo del TÍTULO de la tarjeta, y se aplicaba a cualquier <b> anidado:
+   un énfasis dentro de un párrafo salía en mayúsculas y como bloque, partiendo la frase en
+   tres. Se veía en «La DESCRIPCIÓN es lo que Vai usa…» desde antes. Reset aditivo, para no
+   tocar la regla del título y arriesgar los que sí son directos. */
+.card p b,.card small b,.card li b,.card td b,.card span b{display:inline;color:inherit;font-size:inherit;font-weight:700;letter-spacing:normal;text-transform:none;margin:0}
 .card input,.card textarea,.card select{width:100%;background:var(--bg3);color:var(--white);border:1px solid rgba(var(--ink),.10);border-radius:8px;padding:9px 12px;margin-top:4px}
 .panelcard{background:var(--bg2);border:1px solid var(--border);border-radius:var(--r);padding:22px 24px}
 .panelcard>b{display:block;font-family:var(--font-d);font-weight:900;font-size:15px;letter-spacing:-.01em;margin-bottom:2px}
@@ -522,7 +535,8 @@ body.cliente .cliente-only{display:flex}
 <div class="legend"><span><i class="d-new"></i>nuevo</span><span><i class="d-contacted"></i>contactado</span><span><i class="d-qualified"></i>cualificado</span><span><i class="d-won"></i>ganado</span><span><i class="d-lost"></i>perdido</span></div>
 <div class="pager"><button class="btn alt" id="more" hidden>Cargar más</button></div></div>
 <div id="viewConversaciones" hidden>
-<div class="vhead"><div><h1>Conversaciones</h1><p>Lo que se dijo — y responder sin salir del panel</p></div><button class="btn alt" id="convExport" type="button">Exportar CSV</button></div>
+<div class="vhead"><div><h1>Conversaciones</h1><p>Lo que se dijo — y responder sin salir del panel</p></div><div class="actions actions0"><span id="availState" class="flag off">—</span><button class="btn alt btnsm" id="availToggle" type="button">—</button><button class="btn alt" id="convExport" type="button">Exportar CSV</button></div></div>
+<small class="muted" id="availNote"></small>
 <form class="filters" id="convFilters">
 <input type="hidden" name="channel" id="convChannel">
 <span class="sel velai-only"><select name="tenant" id="convTenant"><option value="">Todos los clientes</option></select></span>
@@ -660,6 +674,19 @@ body.cliente .cliente-only{display:flex}
 <p class="tgsub">A qué WhatsApp del equipo llega el aviso de cada lead (además de Telegram). Varios números separados por coma, formato whatsapp:+34…</p>
 <div class="actions actions0"><input id="nfTeam" placeholder="whatsapp:+34600111222,whatsapp:+34600333444" class="grow inpill"><input id="nfWa" placeholder="nº de errores (solo dígitos)" class="inpill"><button class="btn alt" id="nfSave" type="button">Guardar</button></div>
 <small class="muted field-err" data-f="team_whatsapp"></small></div>
+<div class="card mt12"><b class="tgh tgh-sm">Horario de atención humana</b>
+<p class="tgsub">Vai atiende <b>24 horas al día, todos los días</b>. Esto solo decide <b>cuándo puede pasar una conversación a una persona</b> de tu equipo. Fuera de este horario no ofrece asesor: atiende él y te deja el lead.</p>
+<div class="actions actions0"><label class="muted">Zona horaria <span class="sel"><select id="shTz">
+<option value="Europe/Madrid">España peninsular (Europe/Madrid)</option>
+<option value="Atlantic/Canary">Canarias (Atlantic/Canary)</option>
+<option value="America/Bogota">Colombia (America/Bogota)</option>
+<option value="America/Mexico_City">México (America/Mexico_City)</option>
+<option value="America/Argentina/Buenos_Aires">Argentina (America/Argentina/Buenos_Aires)</option>
+<option value="America/Santiago">Chile (America/Santiago)</option>
+</select></span></label></div>
+<div class="shgrid"><div class="shrow"><span class="shday">Lunes</span><span class="shpair"><input type="time" id="sh_mon_1a"><span class="shsep">a</span><input type="time" id="sh_mon_1b"></span><span class="shpair"><input type="time" id="sh_mon_2a"><span class="shsep">a</span><input type="time" id="sh_mon_2b"></span></div><div class="shrow"><span class="shday">Martes</span><span class="shpair"><input type="time" id="sh_tue_1a"><span class="shsep">a</span><input type="time" id="sh_tue_1b"></span><span class="shpair"><input type="time" id="sh_tue_2a"><span class="shsep">a</span><input type="time" id="sh_tue_2b"></span></div><div class="shrow"><span class="shday">Miércoles</span><span class="shpair"><input type="time" id="sh_wed_1a"><span class="shsep">a</span><input type="time" id="sh_wed_1b"></span><span class="shpair"><input type="time" id="sh_wed_2a"><span class="shsep">a</span><input type="time" id="sh_wed_2b"></span></div><div class="shrow"><span class="shday">Jueves</span><span class="shpair"><input type="time" id="sh_thu_1a"><span class="shsep">a</span><input type="time" id="sh_thu_1b"></span><span class="shpair"><input type="time" id="sh_thu_2a"><span class="shsep">a</span><input type="time" id="sh_thu_2b"></span></div><div class="shrow"><span class="shday">Viernes</span><span class="shpair"><input type="time" id="sh_fri_1a"><span class="shsep">a</span><input type="time" id="sh_fri_1b"></span><span class="shpair"><input type="time" id="sh_fri_2a"><span class="shsep">a</span><input type="time" id="sh_fri_2b"></span></div><div class="shrow"><span class="shday">Sábado</span><span class="shpair"><input type="time" id="sh_sat_1a"><span class="shsep">a</span><input type="time" id="sh_sat_1b"></span><span class="shpair"><input type="time" id="sh_sat_2a"><span class="shsep">a</span><input type="time" id="sh_sat_2b"></span></div><div class="shrow"><span class="shday">Domingo</span><span class="shpair"><input type="time" id="sh_sun_1a"><span class="shsep">a</span><input type="time" id="sh_sun_1b"></span><span class="shpair"><input type="time" id="sh_sun_2a"><span class="shsep">a</span><input type="time" id="sh_sun_2b"></span></div></div>
+<p class="muted">Deja las horas en blanco para los días que no atendéis. El segundo tramo es para las jornadas partidas.</p>
+<div class="actions actions0"><button class="btn" id="shSave" type="button">Guardar horario</button><button class="btn alt btnsm" id="shCopy" type="button">Copiar el lunes a L-V</button><span class="muted" id="shOut"></span></div></div>
 <div class="card mt12"><b class="tgh tgh-sm">Informe semanal</b>
 <p class="tgsub">Cada lunes por la mañana, un resumen de la semana en tu grupo de Telegram: conversaciones, leads, citas y las preguntas que Vai no supo contestar. Llega sin entrar al panel — y se apaga cuando quieras.</p>
 <div class="actions actions0"><span id="wrState" class="flag off">—</span><button class="btn alt btnsm" id="wrToggle" type="button">—</button><button class="btn alt btnsm" id="wrTest" type="button">Enviar una prueba ahora</button></div>
@@ -737,7 +764,8 @@ body.cliente .cliente-only{display:flex}
 <label class="muted">Cupo diario (llamadas) <input id="tAiDay" type="number" min="1" step="50" placeholder="1500" class="inpill w150"></label>
 </div>
 <small class="muted field-err" data-f="ai_monthly_tokens"></small>
-<small class="muted field-err" data-f="ai_daily_limit"></small></div></section>
+<small class="muted field-err" data-f="ai_daily_limit"></small></div>
+</section>
 <section class="tpane" data-tp="marca" hidden>
 <div class="card"><b>Marca del widget (chat en la web del cliente)</b>
 <p class="muted mt6">Lo que ve el visitante: logo, nombre, saludo, colores. Vacío = marca de Velai (hirevai.com no cambia). Se sirve por <code>/widget/boot</code> y se aplica sin deploy (caché 5 min).</p>

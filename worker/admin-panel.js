@@ -136,7 +136,11 @@ const WIN_WHY={
  web_reply_unsupported:'El canal web no admite respuesta desde el panel: el widget solo habla cuando el visitante escribe.',
  inbox_address_unknown:'No sabemos por qué número responder (conversación anterior a la bandeja). En cuanto el cliente vuelva a escribir, se podrá.',
  no_inbound:'Todavía no hay ningún mensaje del cliente en esta conversación.',
- window_closed:'La ventana de 24 h de WhatsApp se cerró. Para escribir ahora hace falta una plantilla aprobada por Meta.'};
+ window_closed:'La ventana de 24 h de WhatsApp se cerró. Para escribir ahora hace falta una plantilla aprobada por Meta.',
+ atiende_la_ia:'Vai está atendiendo esta conversación. El cajón se abre cuando la persona pide un asesor y alguien toma el control.',
+ sin_control:'Esta persona pidió hablar con alguien del equipo. Toma el control para poder escribirle.',
+ ya_tomada:'Otra persona del equipo tomó el control de esta conversación.',
+ nada_que_tomar:'Aquí no hay ningún control que tomar: la está atendiendo Vai.'};
 function fmtShort(v){if(!v)return '';const d=new Date(v),now=new Date();
  return (d.toDateString()===now.toDateString())
   ?new Intl.DateTimeFormat('es-ES',{hour:'2-digit',minute:'2-digit'}).format(d)
@@ -160,16 +164,26 @@ function chTabs(counts){const cur=$('#convChannel').value;
  const tabs=[{k:'',label:'Todos',n:total,u:unread}].concat(counts.filter(c=>c.n).map(c=>({k:c.channel,label:CH_LABEL[c.channel]||c.channel,n:c.n,u:c.unread||0})));
  $('#chTabs').innerHTML=tabs.map(t=>'<button type="button" class="chtab'+(t.k===cur?' is-on':'')+'" data-ch="'+esc(t.k)+'">'+esc(t.label)+' <b>'+esc(t.n)+'</b>'+(t.u?' <i class="cvdot"></i>':'')+'</button>').join('')}
 $('#chTabs').onclick=e=>{const b=e.target.closest('[data-ch]');if(!b)return;$('#convChannel').value=b.dataset.ch;loadInbox()};
-function composer(win){const box=$('#composer');
+function composer(win,c){const box=$('#composer');
  if(!win||!win.open){const why=WIN_WHY[win&&win.reason]||'No se puede responder a esta conversación ahora mismo.';
-  box.innerHTML='<textarea disabled placeholder="Cajón cerrado"></textarea><div class="crow"><span class="cwin shut">'+esc(why)+'</span></div>';return}
+  // En 'esperando' el cajón cerrado no basta: hay alguien esperando y hay que poder entrar.
+  // Con la cuenta atrás a la vista, porque pasada esa marca Vai retoma.
+  const puede=c&&c.state==='esperando';
+  const quedan=puede&&c.state_at?Math.max(0,GRACE_MIN-Math.floor((Date.now()-new Date(c.state_at))/60000)):null;
+  box.innerHTML='<textarea disabled placeholder="Cajón cerrado"></textarea><div class="crow">'
+   +(puede?'<button class="btn" id="takeover" type="button">Tomo el control</button>':'')
+   +'<span class="cwin shut">'+esc(why)+(quedan!==null?' Vai retoma en '+quedan+' min si nadie entra.':'')+'</span></div>';
+  if(puede)$('#takeover').onclick=()=>control('takeover');
+  return}
  // Las HORAS que quedan, no un semáforo verde: es el dato con el que se decide si contestar
  // ahora o mandar plantilla. Wati es el único del mercado que lo expone.
  const left=Math.max(0,Math.round((new Date(win.closesAt)-new Date())/3600000));
  box.innerHTML='<textarea id="cmsg" rows="2" placeholder="Escribe tu respuesta…"></textarea>'
   +'<div class="crow"><button class="btn" id="csend" type="button">Enviar</button>'
-  +'<span class="cwin">Quedan <b>'+left+' h</b> de la ventana de WhatsApp. Al responder, Vai se calla 4 h en esta conversación.</span></div>';
+  +'<button class="btn alt" id="release" type="button">Devolver a Vai</button>'
+  +'<span class="cwin">Tienes el control'+(c&&c.agent_email?' ('+esc(c.agent_email)+')':'')+'. Quedan <b>'+left+' h</b> de la ventana de WhatsApp.</span></div>';
  $('#csend').onclick=sendReply;
+ $('#release').onclick=()=>control('release');
  $('#cmsg').onkeydown=ev=>{if(ev.key==='Enter'&&!ev.shiftKey){ev.preventDefault();sendReply()}}}
 async function sendReply(){const el=$('#cmsg');const text=(el.value||'').trim();if(!text||!convOpen)return;
  $('#csend').disabled=true;el.disabled=true;
@@ -201,7 +215,32 @@ function renderThread(t){
  // Solo se baja el scroll si el lector YA estaba abajo: en un polling cada 15 s, saltar al
  // final mientras alguien lee hacia arriba es insoportable.
  if(atBottom)log.scrollTop=log.scrollHeight;
- composer(t.window)}
+ composer(t.window,c)}
+let GRACE_MIN=5;
+async function control(accion){if(!convOpen)return;
+ try{await api('/api/admin/conversations/'+convOpen+'/'+accion,{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'});
+  toast(accion==='takeover'?'Control tomado ✓ — ya puedes escribirle':'Devuelta a Vai ✓');await loadInbox(true)}
+ catch(e){toast('No se pudo: '+(WIN_WHY[e.message]||TERRS[e.message]||e.message),false);await loadInbox(true)}}
+// Disponibilidad: el interruptor es de esta persona, el horario es del cliente y lo cierra
+// por fuera. Se dice cuál de los dos manda, para que nadie crea que está cubriendo y no.
+async function loadAvailability(){if(!ME)return;
+ try{const d=await api('/api/admin/availability'+(ME.tenantId?'':'?tenant='+encodeURIComponent(availTenant()||'')));
+  GRACE_MIN=d.graceMin||5;
+  $('#availState').textContent=d.offering?'Asesor disponible':(d.available?'Fuera de horario':'No disponible');
+  $('#availState').className='flag '+(d.offering?'ok':'off');
+  $('#availToggle').textContent=d.available?'Marcarme no disponible':'Marcarme disponible';
+  $('#availNote').textContent=d.available&&!d.withinHours
+   ?'Estás marcado como disponible, pero fuera del horario de atención ('+esc(d.tz)+') no se ofrecen asesores: Vai atiende y captura el lead.'
+   :(d.offering?(d.advisors===1?'Vai puede pasar una conversación a una persona.':d.advisors+' personas disponibles.')
+     :'Vai atiende todo y captura leads. Nadie va a recibir conversaciones.')}
+ catch(e){$('#availState').textContent='—';$('#availNote').textContent=''}}
+function availTenant(){return $('#convTenant')?$('#convTenant').value:''}
+$('#availToggle').onclick=async()=>{$('#availToggle').disabled=true;
+ try{const cur=$('#availToggle').textContent.includes('no disponible');
+  await api('/api/admin/availability'+(ME.tenantId?'':'?tenant='+encodeURIComponent(availTenant()||'')),{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({available:!cur})});
+  await loadAvailability()}
+ catch(e){toast('No se pudo cambiar la disponibilidad: '+(TERRS[e.message]||e.message),false)}
+ finally{$('#availToggle').disabled=false}};
 async function loadInbox(quiet=false){
  try{const p=convParams();if(convOpen)p.set('conversation',convOpen);
   const d=await api('/api/admin/inbox?'+p);
@@ -284,7 +323,7 @@ const VIEWS={dashboard:'#viewDashboard',leads:'#viewLeads',conversaciones:'#view
 document.querySelectorAll('.tab[data-view]').forEach(b=>b.onclick=()=>{document.querySelectorAll('.tab[data-view]').forEach(x=>{x.classList.toggle('is-on',x===b);x.setAttribute('aria-selected',x===b?'true':'false')});const v=b.dataset.view;
  Object.entries(VIEWS).forEach(([k,sel])=>{$(sel).hidden=k!==v});
  inboxPolling(v==='conversaciones');
- if(v==='dashboard'){loadStats();loadAiUsage();loadInfra();loadSaldo()}else if(v==='leads'){load();loadEscalations()}else if(v==='conversaciones'){loadInbox()}else if(v==='tenants')loadTenantList();else if(v==='config'){loadAdmins();loadConfig()}else if(v==='calendario'){calMenu()}else if(v==='conexiones'){cxMenu()}else if(v==='canales'){loadChannels()}});
+ if(v==='dashboard'){loadStats();loadAiUsage();loadInfra();loadSaldo()}else if(v==='leads'){load();loadEscalations()}else if(v==='conversaciones'){loadInbox();loadAvailability()}else if(v==='tenants')loadTenantList();else if(v==='config'){loadAdmins();loadConfig()}else if(v==='calendario'){calMenu()}else if(v==='conexiones'){cxMenu()}else if(v==='canales'){loadChannels()}});
 // ── Conexiones (SPEC-CONEXIONES PR1): Telegram de avisos en autoservicio ──
 // El cliente abre SU tarjeta; Velai elige tenant con el selector de la cabecera.
 let cxTenant=null;
@@ -319,6 +358,11 @@ async function loadConexiones(){$('#tgLinkBox').hidden=true;
   $('#wrToggle').textContent=cxWeekly?'Desactivar':'Activar';
   $('#wrNote').textContent=t.linked?'':'Vincula primero el grupo de Telegram: es por donde llega el informe.';
   $('#wrTest').hidden=!t.linked;
+  // El horario se lee de /availability, que ya devuelve el que está en vigor (con el
+  // default aplicado) y la zona horaria.
+  try{const av=await api('/api/admin/availability'+(ME&&ME.tenantId?'':'?tenant='+encodeURIComponent(cxTenant)));
+   shToForm(av.hours);$('#shTz').value=av.tz||'Europe/Madrid';$('#shOut').textContent=shSummary(av.hours)}
+  catch(e){$('#shOut').textContent=''}
   // «¿Salió el informe?» se responde aquí y no abriendo Telegram. Un skipped o un failed
   // deja de ser invisible.
   const WR_ST={sent:'entregado',skipped:'no enviado',failed:'falló',sending:'en curso'};
@@ -457,6 +501,31 @@ $('#wrToggle').onclick=async()=>{const next=!cxWeekly;
  try{await api('/api/admin/tenants/'+cxTenant+'/notify',{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({weekly_report:next})});
   toast(next?'Informe semanal activado ✓ (llega el lunes)':'Informe semanal desactivado ✓');loadConexiones()}
  catch(e){toast('No se pudo cambiar el informe: '+(TERRS[e.message]||e.message),false)}};
+const SUP_DAYS=['mon','tue','wed','thu','fri','sat','sun'];
+function shToForm(h){for(const d of SUP_DAYS){const t=(h&&h[d])||[];
+ for(const i of [1,2]){const w=t[i-1]||[];$('#sh_'+d+'_'+i+'a').value=w[0]||'';$('#sh_'+d+'_'+i+'b').value=w[1]||''}}}
+function shFromForm(){const out={};
+ for(const d of SUP_DAYS){const tramos=[];
+  for(const i of [1,2]){const a=$('#sh_'+d+'_'+i+'a').value,b=$('#sh_'+d+'_'+i+'b').value;
+   if(a&&b&&a<b)tramos.push([a,b])}
+  if(tramos.length)out[d]=tramos}
+ return out}
+// Lo que de verdad está en vigor, en una frase. Un objeto vacío NO es lo mismo que «sin
+// configurar»: significa que nunca se ofrece asesor, y eso hay que decirlo o parece un fallo.
+function shSummary(h){const abiertos=SUP_DAYS.filter(d=>h&&h[d]&&h[d].length);
+ if(!abiertos.length)return 'Ahora mismo NUNCA se ofrece asesor: Vai atiende siempre y te deja el lead.';
+ return 'En vigor: '+abiertos.length+(abiertos.length===1?' día':' días')+' con atención humana.'}
+$('#shCopy').onclick=()=>{const a1=$('#sh_mon_1a').value,b1=$('#sh_mon_1b').value,a2=$('#sh_mon_2a').value,b2=$('#sh_mon_2b').value;
+ for(const d of ['tue','wed','thu','fri']){$('#sh_'+d+'_1a').value=a1;$('#sh_'+d+'_1b').value=b1;$('#sh_'+d+'_2a').value=a2;$('#sh_'+d+'_2b').value=b2}
+ $('#shOut').textContent='Copiado — recuerda Guardar.'};
+$('#shSave').onclick=async()=>{$('#shSave').disabled=true;
+ try{const hours=shFromForm();
+  await api('/api/admin/tenants/'+cxTenant+'/notify',{method:'PATCH',headers:{'Content-Type':'application/json'},
+   body:JSON.stringify({support_hours:JSON.stringify(hours),support_tz:$('#shTz').value})});
+  $('#shOut').textContent=shSummary(hours);toast('Horario guardado ✓');
+  if(typeof loadAvailability==='function')loadAvailability()}
+ catch(e){toast('Horario NO guardado: '+(TERRS[e.message]||e.message),false)}
+ finally{$('#shSave').disabled=false}};
 $('#wrTest').onclick=async()=>{$('#wrTest').disabled=true;
  try{await api('/api/admin/tenants/'+cxTenant+'/report/test',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'});
   toast('Prueba enviada ✓ — míralo en tu grupo de Telegram')}
