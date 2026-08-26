@@ -56,6 +56,9 @@ const VISTAS = {
   // Conexiones no necesita inyectar nada: la rejilla de horario es markup estático, y es
   // justo lo que hay que MIRAR (un cliente tiene que entenderla sin explicación).
   conexiones: (h) => h,
+  // El calendario esconde su configuración hasta que hay conexión: aquí se destapa para
+  // poder mirar la rejilla del horario laboral sin montar un OAuth.
+  calendario: (h) => h.replace('<div id="calViewWrap" hidden>', '<div id="calViewWrap">'),
 };
 if (!VISTAS[view]) { console.error(`render-panel: vista desconocida «${view}». Disponibles: ${Object.keys(VISTAS).join(', ')}`); process.exit(2); }
 html = html.replace('<div id="viewDashboard">', '<div id="viewDashboard" hidden>');

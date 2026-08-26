@@ -361,7 +361,7 @@ async function loadConexiones(){$('#tgLinkBox').hidden=true;
   // El horario se lee de /availability, que ya devuelve el que está en vigor (con el
   // default aplicado) y la zona horaria.
   try{const av=await api('/api/admin/availability'+(ME&&ME.tenantId?'':'?tenant='+encodeURIComponent(cxTenant)));
-   shToForm(av.hours);$('#shTz').value=av.tz||'Europe/Madrid';$('#shOut').textContent=shSummary(av.hours)}
+   hoursToForm('sh',av.hours);$('#shTz').value=av.tz||'Europe/Madrid';$('#shOut').textContent=shSummary(av.hours)}
   catch(e){$('#shOut').textContent=''}
   // «¿Salió el informe?» se responde aquí y no abriendo Telegram. Un skipped o un failed
   // deja de ser invisible.
@@ -502,24 +502,27 @@ $('#wrToggle').onclick=async()=>{const next=!cxWeekly;
   toast(next?'Informe semanal activado ✓ (llega el lunes)':'Informe semanal desactivado ✓');loadConexiones()}
  catch(e){toast('No se pudo cambiar el informe: '+(TERRS[e.message]||e.message),false)}};
 const SUP_DAYS=['mon','tue','wed','thu','fri','sat','sun'];
-function shToForm(h){for(const d of SUP_DAYS){const t=(h&&h[d])||[];
- for(const i of [1,2]){const w=t[i-1]||[];$('#sh_'+d+'_'+i+'a').value=w[0]||'';$('#sh_'+d+'_'+i+'b').value=w[1]||''}}}
-function shFromForm(){const out={};
+// Una sola rejilla para dos horarios distintos (asesores y laboral del calendario): el
+// prefijo del id decide cuál. Antes los dos eran un textarea de JSON.
+function hoursToForm(pfx,h){for(const d of SUP_DAYS){const t=(h&&h[d])||[];
+ for(const i of [1,2]){const w=t[i-1]||[];$('#'+pfx+'_'+d+'_'+i+'a').value=w[0]||'';$('#'+pfx+'_'+d+'_'+i+'b').value=w[1]||''}}}
+function hoursFromForm(pfx){const out={};
  for(const d of SUP_DAYS){const tramos=[];
-  for(const i of [1,2]){const a=$('#sh_'+d+'_'+i+'a').value,b=$('#sh_'+d+'_'+i+'b').value;
+  for(const i of [1,2]){const a=$('#'+pfx+'_'+d+'_'+i+'a').value,b=$('#'+pfx+'_'+d+'_'+i+'b').value;
    if(a&&b&&a<b)tramos.push([a,b])}
   if(tramos.length)out[d]=tramos}
  return out}
+function hoursCopyMon(pfx){for(const i of [1,2]){const a=$('#'+pfx+'_mon_'+i+'a').value,b=$('#'+pfx+'_mon_'+i+'b').value;
+ for(const d of ['tue','wed','thu','fri']){$('#'+pfx+'_'+d+'_'+i+'a').value=a;$('#'+pfx+'_'+d+'_'+i+'b').value=b}}}
 // Lo que de verdad está en vigor, en una frase. Un objeto vacío NO es lo mismo que «sin
 // configurar»: significa que nunca se ofrece asesor, y eso hay que decirlo o parece un fallo.
 function shSummary(h){const abiertos=SUP_DAYS.filter(d=>h&&h[d]&&h[d].length);
  if(!abiertos.length)return 'Ahora mismo NUNCA se ofrece asesor: Vai atiende siempre y te deja el lead.';
  return 'En vigor: '+abiertos.length+(abiertos.length===1?' día':' días')+' con atención humana.'}
-$('#shCopy').onclick=()=>{const a1=$('#sh_mon_1a').value,b1=$('#sh_mon_1b').value,a2=$('#sh_mon_2a').value,b2=$('#sh_mon_2b').value;
- for(const d of ['tue','wed','thu','fri']){$('#sh_'+d+'_1a').value=a1;$('#sh_'+d+'_1b').value=b1;$('#sh_'+d+'_2a').value=a2;$('#sh_'+d+'_2b').value=b2}
- $('#shOut').textContent='Copiado — recuerda Guardar.'};
+$('#shCopy').onclick=()=>{hoursCopyMon('sh');$('#shOut').textContent='Copiado — recuerda Guardar.'};
+$('#calCopy').onclick=()=>{hoursCopyMon('cal');$('#calHoursOut').textContent='Copiado — recuerda Guardar calendario.'};
 $('#shSave').onclick=async()=>{$('#shSave').disabled=true;
- try{const hours=shFromForm();
+ try{const hours=hoursFromForm('sh');
   await api('/api/admin/tenants/'+cxTenant+'/notify',{method:'PATCH',headers:{'Content-Type':'application/json'},
    body:JSON.stringify({support_hours:JSON.stringify(hours),support_tz:$('#shTz').value})});
   $('#shOut').textContent=shSummary(hours);toast('Horario guardado ✓');
@@ -829,7 +832,9 @@ async function calRefresh(){try{const d=await api('/api/admin/tenants/'+calTenan
  if(!conn){$('#calState').innerHTML=c?'<span class="flag off">La conexión está en error ('+esc(c.last_error||c.status)+'): vuelve a conectar.</span>':'';
   $('#calConnect').textContent=c?'Reconectar Google':'Conectar Google';return}
  $('#calWho').innerHTML='Conectado como <b>'+esc(c.account_email||'cuenta de Google')+'</b> · las citas se crean en su calendario «'+esc(c.calendar_id||'primary')+'»';
- $('#calId').value=c.calendar_id||'primary';$('#calTz').value=c.timezone||'';$('#calSlot').value=c.slot_minutes||30;$('#calHours').value=c.business_hours||'';
+ $('#calId').value=c.calendar_id||'primary';$('#calTz').value=c.timezone||'';$('#calSlot').value=c.slot_minutes||30;
+ try{hoursToForm('cal',c.business_hours?JSON.parse(c.business_hours):null)}catch(e){hoursToForm('cal',null)}
+ $('#calHoursOut').textContent=c.business_hours?'':'Usando el horario por defecto: L-V de 9:00 a 19:00.';
  await calLoadMonth()}
  catch(e){toast('No se pudo cargar el calendario: '+(TERRS[e.message]||e.message),false)}}
 async function calLoadMonth(){const y=calMonth.getFullYear(),m=calMonth.getMonth();
@@ -878,8 +883,11 @@ $('#calConnect').onclick=calStartOAuth;$('#calReconnect').onclick=calStartOAuth;
 $('#calDisconnect').onclick=async()=>{if(!confirm('¿Desconectar el calendario? Vai dejará de consultar huecos y agendar citas para este cliente.'))return;
  try{await api('/api/admin/tenants/'+calTenant+'/calendar',{method:'DELETE'});toast('Calendario desconectado');calRefresh()}
  catch(e){toast('No se pudo desconectar: '+(TERRS[e.message]||e.message),false)}};
-$('#calSave').onclick=async()=>{let hours=null;const rawHours=$('#calHours').value.trim();
- if(rawHours){try{hours=JSON.parse(rawHours)}catch(e){toast('El horario no es JSON válido',false);return}}
+$('#calSave').onclick=async()=>{const grid=hoursFromForm('cal');
+ // OJO: la rejilla vacía se manda como null, NO como {}. Con el textarea, vacío significaba
+ // «el default L-V 9-19»; un {} en el calendario significa «ningún hueco jamás» y habría
+ // matado las citas en silencio al borrar la rejilla sin querer.
+ const hours=Object.keys(grid).length?grid:null;
  try{await api('/api/admin/tenants/'+calTenant+'/calendar',{method:'PATCH',headers:{'Content-Type':'application/json'},
   body:JSON.stringify({calendar_id:$('#calId').value.trim()||'primary',timezone:$('#calTz').value.trim()||'Europe/Madrid',slot_minutes:Number($('#calSlot').value)||30,business_hours:hours})});
   toast('Calendario guardado ✓');calRefresh()}

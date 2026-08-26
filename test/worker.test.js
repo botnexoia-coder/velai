@@ -3842,7 +3842,7 @@ test('el panel no pierde manejadores por el camino: inventario congelado', async
   const FUNCIONES = ['applyTheme', 'openLead', 'wireDetail', 'load', 'loadStats', 'loadTenants',
     'loadAiUsage', 'loadInfra', 'loadSaldo', 'loadInbox', 'renderThread', 'composer', 'sendReply',
     'loadConexiones', 'cxMenu', 'loadChannels', 'loadTenantList', 'loadAdmins', 'loadConfig',
-    'loadAvailability', 'control', 'shToForm', 'shFromForm', 'shSummary',
+    'loadAvailability', 'control', 'hoursToForm', 'hoursFromForm', 'hoursCopyMon', 'shSummary',
     'calMenu', 'loadEscalations', 'whoOf', 'prevPrefix', 'chTabs', 'convParams', 'api', 'toast', 'paint'];
   const sinFuncion = FUNCIONES.filter((f) => !fns.has(f));
   assert.deepEqual(sinFuncion, [], 'funciones del panel desaparecidas');
@@ -3854,7 +3854,7 @@ test('el panel no pierde manejadores por el camino: inventario congelado', async
     'aiDays', 'escalations', 'tenantRows', 'newTenant', 'tenantSave', 'tenantClose', 'tenantPreview',
     'wizBack', 'wizNext', 'tDupSel', 'ttabs', 'tLogoUp', 'tVersions', 'tSyncDomains',
     'uAdd', 'tUsersList', 'aAdd', 'adminsList', 'cfgTokenSave', 'cfgTokenClear',
-    'cxTenantSel', 'cxLogoUp', 'cxLogoApply', 'nfSave', 'wrToggle', 'wrTest', 'availToggle', 'shSave', 'shCopy',
+    'cxTenantSel', 'cxLogoUp', 'cxLogoApply', 'nfSave', 'wrToggle', 'wrTest', 'availToggle', 'shSave', 'shCopy', 'calCopy',
     'tgLink', 'tgUnlink', 'tgWlToggle', 'tgBotSave', 'tgBotDel', 'tgSetup', 'tgTopicAdd', 'tgTopics',
     'calTenantSel', 'calGrid', 'calToday', 'calPrev', 'calNext', 'calBack',
     'calConnect', 'calReconnect', 'calDisconnect', 'calSave', 'calDayClose',
