@@ -1,0 +1,22 @@
+-- Saldo de IA mensual VISIBLE para el cliente (H3 §4 del plan, decidido por Juan el
+-- 2026-08-26: «que el cliente lo vea y se vaya descontando, sin frenar las respuestas»).
+--
+-- El dato ya existe: ai_usage (migración 0018) guarda tokens por cliente, día y modelo.
+-- Lo único que faltaba es CUÁNTO incluye su plan. NULL = el default del toml
+-- (AI_TENANT_MONTHLY_TOKENS), así se cambia el plan de un cliente sin deploy — igual que
+-- ai_daily_limit.
+--
+-- Dimensionado con consumo REAL medido el 2026-08-26, no a ojo:
+--   dialogos   26 llamadas /  81.853 tokens = 3.148 tokens por llamada
+--   gogestion  12 llamadas /  58.462 tokens = 4.872 tokens por llamada
+-- La diferencia no es el tráfico: es el prompt. El de GOgestión son 12.858 caracteres y
+-- viaja en CADA turno (como cache_r). Es el problema de H2 §1 (base de conocimiento
+-- gestionable) visto desde la factura, y el saldo lo va a hacer evidente.
+--
+-- A ~4.000 tokens por llamada y ~8 turnos por conversación son ~32.000 tokens por
+-- conversación. El default de 5.000.000 son ~155 conversaciones al mes (~5 al día), unas
+-- cinco veces el ritmo actual por cliente.
+--
+-- IMPORTANTE: este saldo NO corta nada. Es un contador. El único corte que existe es el
+-- guarda anti-abuso diario (ai_daily_limit), que es otra cosa y avisa antes de morder.
+ALTER TABLE tenants ADD COLUMN ai_monthly_tokens INTEGER;

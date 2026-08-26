@@ -187,6 +187,18 @@ async function aiBudgetGuard(env, tenant) {
     const tenantLimit = Number(tenant.ai_daily_limit) || Number(env.AI_TENANT_DAILY_LIMIT) || 300;
     tenantKey = `budget:ai:${tenant.id}:${day}`;
     try { tenantCount = Number(await env.KV.get(tenantKey) || 0); } catch (_) { tenantKey = null; }
+    // Aviso al 80%, una vez al día: subir el tope sin avisar antes solo retrasa la
+    // sorpresa. Este es el aviso que convierte el corte en algo que vemos venir.
+    if (tenantKey && tenantCount >= Math.floor(tenantLimit * 0.8) && tenantCount < tenantLimit) {
+      try {
+        const warnKey = `alert:ai80:${tenant.id}:${day}`;
+        if (!(await env.KV.get(warnKey))) {
+          await env.KV.put(warnKey, '1', { expirationTtl: 2 * 86400 });
+          console.log(JSON.stringify({ level: 'warn', code: 'ai_tenant_budget_warning', tenant: tenant.slug, used: tenantCount, limit: tenantLimit }));
+          await sendTelegramText(env, `⚠️ <b>Velai</b>: <b>${escapeHtml(tenant.name)}</b> (${escapeHtml(tenant.slug)}) va por ${tenantCount} de ${tenantLimit} llamadas de IA hoy (80%). Si llega al tope, sus canales responden 429. Súbele el límite en su ficha si el tráfico es legítimo.`);
+        }
+      } catch (_) {}
+    }
     if (tenantKey && tenantCount >= tenantLimit) {
       try {
         const alertKey = `alert:aibudget:${tenant.id}`;
@@ -632,6 +644,17 @@ function validateTenant(body, { partial = false } = {}) {
   }
   if (has('active')) out.active = body.active ? 1 : 0;
   if (has('weekly_report')) out.weekly_report = body.weekly_report ? 1 : 0;
+  // Saldo mensual de tokens del plan (contador, no corta) y cupo diario de llamadas
+  // (guarda anti-abuso, sí corta). Vacío = NULL = el default del toml, para no tener que
+  // tocar seis filas cuando cambie el plan estándar.
+  for (const [field, min, max] of [['ai_monthly_tokens', 10000, 1e10], ['ai_daily_limit', 1, 100000]]) {
+    if (!has(field)) continue;
+    const raw = String(body[field] ?? '').trim();
+    if (!raw) { out[field] = null; continue; }
+    const n = Number(raw);
+    if (!Number.isFinite(n) || n < min || n > max) bad(field);
+    else out[field] = Math.floor(n);
+  }
   return out;
 }
 
@@ -2677,6 +2700,8 @@ function clienteAllowed(path, method) {
   if (/^\/api\/admin\/tenants\/[0-9a-f-]+\/telegram\/topics$/i.test(path) && method === 'POST') return true;
   if (/^\/api\/admin\/tenants\/[0-9a-f-]+\/telegram\/topics\/\d+$/i.test(path) && ['PATCH', 'DELETE'].includes(method)) return true;
   if (path === '/api/admin/stats' && method === 'GET') return true;
+  // Su saldo de IA: el handler lo fuerza a su propio tenant y no devuelve coste.
+  if (path === '/api/admin/ai-balance' && method === 'GET') return true;
   if (path === '/api/admin/me' && method === 'GET') return true;
   if (path === '/api/admin/escalations' && method === 'GET') return true;
   // Sus conversaciones, en su espacio: el scope las filtra por tenant y el detalle exige
@@ -3168,6 +3193,50 @@ async function adminRouter(request, env, ctx, path, url, config, scope) {
   // ── Consumo de IA por cliente (solo Velai) ────────────────────────────────
   // El gasto real de cada cliente en euros/dólares: sin esto no se sabe si un cliente
   // cuesta más de lo que paga, ni quién dispara el cupo diario.
+  // Saldo de IA del mes, para el panel DEL CLIENTE. Deliberadamente sin coste: la tarjeta
+  // de gasto en dólares es velai-only porque enseñarle al cliente lo que pagamos por él es
+  // enseñarle el margen. Aquí van tokens y porcentaje, que es lo que necesita saber.
+  if (path === '/api/admin/ai-balance' && request.method === 'GET') {
+    // Velai puede mirar el de cualquiera con ?tenant=; un cliente, solo el suyo.
+    const asked = clean(url.searchParams.get('tenant'), 40);
+    const tenantId = scope.tenantId || (asked && UUID_RE.test(asked) ? asked : null);
+    if (!tenantId) throw new HttpError(400, 'tenant_required');
+    if (scope.tenantId && asked && asked !== scope.tenantId) throw new HttpError(404, 'not_found');
+    const row = await env.DB.prepare('SELECT id, name, ai_monthly_tokens FROM tenants WHERE id=?').bind(tenantId).first();
+    if (!row) throw new HttpError(404, 'not_found');
+    const now = new Date();
+    const month = now.toISOString().slice(0, 7);
+    const today = now.toISOString().slice(0, 10);
+    // La misma suma que usa el dashboard: con el caché de prompt casi todo el input llega
+    // como cache_r, así que contar solo in+out no enseñaría casi nada.
+    const totals = await env.DB.prepare(`SELECT
+        SUM(in_tokens+out_tokens+cache_w_tokens+cache_r_tokens) AS mes,
+        SUM(CASE WHEN day = ? THEN in_tokens+out_tokens+cache_w_tokens+cache_r_tokens ELSE 0 END) AS hoy,
+        SUM(calls) AS llamadas
+      FROM ai_usage WHERE tenant_id = ? AND day LIKE ?`).bind(today, tenantId, `${month}-%`).first();
+    const included = Number(row.ai_monthly_tokens) || Number(env.AI_TENANT_MONTHLY_TOKENS) || 5000000;
+    const used = Number(totals && totals.mes) || 0;
+    // Serie diaria del mes para la gráfica: los días sin consumo también existen, o la
+    // gráfica comprime el eje y miente sobre la distribución.
+    const rows = (await env.DB.prepare('SELECT day, SUM(in_tokens+out_tokens+cache_w_tokens+cache_r_tokens) AS n FROM ai_usage WHERE tenant_id=? AND day LIKE ? GROUP BY day').bind(tenantId, `${month}-%`).all()).results || [];
+    const byDay = new Map(rows.map((r) => [r.day, r.n || 0]));
+    const days = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 0)).getUTCDate();
+    const serie = [];
+    for (let d = 1; d <= days; d++) {
+      const key = `${month}-${String(d).padStart(2, '0')}`;
+      serie.push({ d: key, n: byDay.get(key) || 0 });
+    }
+    return json({
+      month, included, used,
+      remaining: Math.max(0, included - used),
+      // El porcentaje se acota a 100: una barra al 140% no significa nada.
+      pct: included > 0 ? Math.min(100, Math.round((used / included) * 100)) : 0,
+      over: used > included,
+      usedToday: Number(totals && totals.hoy) || 0,
+      calls: Number(totals && totals.llamadas) || 0,
+      serie,
+    }, 200, NO_STORE);
+  }
   if (path === '/api/admin/ai-usage' && request.method === 'GET') {
     const days = Math.min(90, Math.max(1, Number(url.searchParams.get('days')) || 30));
     const from = new Date(Date.now() - (days - 1) * 86400000).toISOString().slice(0, 10);
@@ -3748,6 +3817,7 @@ async function adminRouter(request, env, ctx, path, url, config, scope) {
         lead_template_sid, twilio_from, twilio_subaccount_sid, waba_id, meta_partner_status, system_prompt,
         bot_name, brand_name, logo_url, brand_color, brand_color_2, greeting, greeting_en, chips_json,
         placeholder, wa_number, theme, web_origins, sender_sid, sender_status, telegram_chat_title,
+        ai_monthly_tokens, ai_daily_limit,
         active, created_at, updated_at, twilio_auth_token_enc IS NOT NULL AS has_twilio_token
         FROM tenants WHERE id=?`).bind(tenantId).first();
       if (!tenant) throw new HttpError(404, 'not_found');

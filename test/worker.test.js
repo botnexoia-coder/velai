@@ -3700,3 +3700,74 @@ test('si se corta igual, el cierre ofrece el siguiente paso y CABE en el canal',
   const entera = 'Te confirmo la cita del martes a las 10:00.';
   assert.equal(testing.settleReply({ stop_reason: 'end_turn' }, { closing: 'cita' }, entera), entera);
 });
+
+// ── Saldo de IA visible para el cliente (migración 0024) ─────────────────────
+function balanceDb(row, totals, serie = []) {
+  return {
+    prepare(sql) {
+      return { bind: (...args) => ({
+        first: async () => (/FROM tenants WHERE id=\?/.test(sql) ? (row && row.id === args[0] ? row : null) : totals),
+        all: async () => ({ results: serie }),
+        run: async () => ({ meta: { changes: 1 } }),
+      }) };
+    },
+    batch: async () => [],
+  };
+}
+
+test('saldo de IA: el cliente ve tokens y porcentaje, y NUNCA el coste', async () => {
+  const TID = '00000000-0000-4000-8000-000000000a01';
+  const env = { DB: balanceDb({ id: TID, name: 'Mío', ai_monthly_tokens: null }, { mes: 1207480, hoy: 48300, llamadas: 310 }),
+    KV: mapKV(), AI_TENANT_MONTHLY_TOKENS: '3000000' };
+  const ctx = { waitUntil() {} };
+  const OWN = { role: 'cliente', tenantId: TID, email: 'cliente@x.com' };
+  const path = '/api/admin/ai-balance';
+  const d = await (await testing.adminRouter(adminReq(path), env, ctx, path, new URL('https://x' + path), {}, OWN)).json();
+  assert.equal(d.included, 3000000, 'sin columna, el default del toml');
+  assert.equal(d.used, 1207480);
+  assert.equal(d.remaining, 1792520, 'el saldo BAJA: es lo que pidió Juan');
+  assert.equal(d.pct, 40);
+  assert.equal(d.usedToday, 48300);
+  assert.equal(d.over, false);
+  // Lo que NO puede salir nunca: enseñarle al cliente lo que pagamos por él es enseñarle
+  // el margen. La tarjeta en dólares es velai-only por eso.
+  const raw = JSON.stringify(d);
+  assert.ok(!/cost|coste|usd|eur|\$/i.test(raw), 'ni una pista de coste: ' + raw.slice(0, 120));
+});
+
+test('saldo de IA: pasarse no rompe la barra ni deja el saldo en negativo', async () => {
+  const TID = '00000000-0000-4000-8000-000000000a02';
+  // Plan propio en la fila (pisa al default) y consumo por encima.
+  const env = { DB: balanceDb({ id: TID, name: 'Mío', ai_monthly_tokens: 1000000 }, { mes: 1400000, hoy: 90000, llamadas: 500 }),
+    KV: mapKV(), AI_TENANT_MONTHLY_TOKENS: '3000000' };
+  const ctx = { waitUntil() {} };
+  const OWN = { role: 'cliente', tenantId: TID, email: 'cliente@x.com' };
+  const path = '/api/admin/ai-balance';
+  const d = await (await testing.adminRouter(adminReq(path), env, ctx, path, new URL('https://x' + path), {}, OWN)).json();
+  assert.equal(d.included, 1000000, 'la columna del cliente manda sobre el default');
+  assert.equal(d.remaining, 0, 'nunca negativo');
+  assert.equal(d.pct, 100, 'la barra se acota: un 140% no significa nada');
+  assert.equal(d.over, true, 'pero se sabe que se pasó, para poder decírselo');
+});
+
+test('saldo de IA: un cliente no puede pedir el saldo de otro', async () => {
+  const TID = '00000000-0000-4000-8000-000000000a03';
+  const env = { DB: balanceDb({ id: TID, name: 'Mío', ai_monthly_tokens: null }, { mes: 10, hoy: 1, llamadas: 1 }), KV: mapKV() };
+  const ctx = { waitUntil() {} };
+  const OWN = { role: 'cliente', tenantId: TID, email: 'cliente@x.com' };
+  const ajeno = '/api/admin/ai-balance?tenant=00000000-0000-4000-8000-000000000a99';
+  await assert.rejects(
+    testing.adminRouter(adminReq(ajeno), env, ctx, '/api/admin/ai-balance', new URL('https://x' + ajeno), {}, OWN),
+    (e) => e.status === 404, 'el de otro es 404, no el suyo por defecto');
+});
+
+test('el plan de IA se edita desde la ficha: sin eso, el aviso al 80% mandaría a un sitio que no existe', () => {
+  // El mensaje del aviso dice «súbele el límite en su ficha», así que el campo tiene que
+  // existir y validar. Vacío = NULL = default del worker.
+  assert.deepEqual(testing.validateTenant({ ai_monthly_tokens: '8000000', ai_daily_limit: '2500' }, { partial: true }),
+    { ai_monthly_tokens: 8000000, ai_daily_limit: 2500 });
+  assert.deepEqual(testing.validateTenant({ ai_monthly_tokens: '', ai_daily_limit: '' }, { partial: true }),
+    { ai_monthly_tokens: null, ai_daily_limit: null });
+  assert.throws(() => testing.validateTenant({ ai_monthly_tokens: 'muchos' }, { partial: true }));
+  assert.throws(() => testing.validateTenant({ ai_daily_limit: '0' }, { partial: true }), 'un cupo de 0 dejaría al cliente mudo');
+});
