@@ -143,6 +143,16 @@ function fmtShort(v){if(!v)return '';const d=new Date(v),now=new Date();
   :new Intl.DateTimeFormat('es-ES',{day:'2-digit',month:'short'}).format(d)}
 function convParams(){const p=new URLSearchParams(new FormData($('#convFilters')));for(const[k,v]of[...p])if(!v)p.delete(k);return p}
 function initials(v){const t=String(v||'').replace(/^(whatsapp:|messenger:)/,'').replace(/[^A-Za-z0-9]/g,'');return (t.slice(0,2)||'··').toUpperCase()}
+// Quién es la persona del otro lado. En web el external_id es el id de conversación que
+// genera el navegador: como título es un UUID ilegible, así que se dice lo que de verdad
+// se sabe. El id sigue a la vista en la cabecera del hilo, para poder rastrearlo.
+function whoOf(c){
+ if(c.lead_name)return c.lead_name;
+ if(c.channel==='web')return 'Visitante de la web';
+ return String(c.external_id||'').replace(/^(whatsapp:|messenger:)/,'')||'sin identificar'}
+// Quién escribió el último mensaje. 'tú' es la PERSONA del equipo, no el bot: ahora que
+// existe role='agent' confundirlos sería justo lo que la migración 0023 vino a evitar.
+function prevPrefix(role){return role==='user'?'':role==='agent'?'tú: ':'bot: '}
 function chTabs(counts){const cur=$('#convChannel').value;
  const total=counts.reduce((a,c)=>a+c.n,0),unread=counts.reduce((a,c)=>a+(c.unread||0),0);
  // Instagram NO se pinta: no hay canal desplegado, y un filtro que no filtra nada es
@@ -174,9 +184,11 @@ function renderThread(t){
  if(!t){$('#thread').hidden=true;$('#threadEmpty').hidden=false;return}
  $('#threadEmpty').hidden=true;$('#thread').hidden=false;
  const c=t.conversation;
- $('#threadHead').innerHTML='<span class="cvav" data-c="'+tenantColor(c.external_id)+'">'+esc(initials(c.lead_name||c.external_id))+'</span>'
-  +'<span><b>'+esc(c.lead_name||String(c.external_id||'').replace(/^(whatsapp:|messenger:)/,''))+'</b>'
-  +'<div class="muted">'+esc(CH_LABEL[c.channel]||c.channel)+(c.tenant_name?' · '+esc(c.tenant_name):'')+'</div></span>'
+ const quien=whoOf(c);
+ $('#threadHead').innerHTML='<span class="cvav" data-c="'+tenantColor(c.external_id)+'">'+esc(initials(quien))+'</span>'
+  +'<span><b>'+esc(quien)+'</b>'
+  +'<div class="muted">'+esc(CH_LABEL[c.channel]||c.channel)+(c.tenant_name?' · '+esc(c.tenant_name):'')
+  +' · <span class="mono">'+esc(String(c.external_id||'').replace(/^(whatsapp:|messenger:)/,'').slice(0,8))+'</span></div></span>'
   +'<span class="grow"></span>'
   +(c.unanswered>0?'<span class="chip">'+esc(c.unanswered)+' sin respuesta</span>':'')
   +'<span class="chip">se borra el '+fmt(c.expires_at)+'</span>';
@@ -196,8 +208,8 @@ async function loadInbox(quiet=false){
   chTabs(d.counts||[]);
   const rows=d.conversations||[];
   $('#convRows').innerHTML=rows.length?rows.map(c=>{
-   const who=c.lead_name||String(c.external_id||'').replace(/^(whatsapp:|messenger:)/,'');
-   const prev=(c.preview_role==='user'?'':'tú: ')+String(c.preview||'');
+   const who=whoOf(c);
+   const prev=prevPrefix(c.preview_role)+String(c.preview||'');
    return '<div class="cvrow'+(c.id===convOpen?' is-on':'')+'" data-id="'+esc(c.id)+'">'
     +'<span class="cvav" data-c="'+tenantColor(c.external_id)+'">'+esc(initials(who))+'</span>'
     +'<span class="cvmain"><span class="cvtop"><span class="cvwho">'+esc(who)+'</span><span class="cvwhen">'+esc(fmtShort(c.last_at))+'</span></span>'

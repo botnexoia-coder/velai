@@ -318,11 +318,16 @@ dialog::backdrop{background:rgba(5,3,6,.78);backdrop-filter:blur(3px)}
 .cvtop{display:flex;gap:8px;align-items:baseline}
 .cvwho{font-weight:700;font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1}
 .cvwhen{font-size:11px;color:var(--muted2);white-space:nowrap}
-.cvprev{font-size:12px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-top:2px}
+.cvprev{display:block;font-size:12px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-top:2px}
 .cvdot{width:8px;height:8px;border-radius:50%;background:var(--orange);flex:0 0 8px;margin-top:6px}
 .inbox-r{display:flex;flex-direction:column;min-width:0}
 .thread-empty{flex:1;display:grid;place-items:center;color:var(--muted2);padding:20px;text-align:center}
 .thread{display:flex;flex-direction:column;min-height:0;height:100%}
+/* Misma trampa que .tgstep de arriba: una clase que fija display GANA al atributo
+   [hidden], así que sin esto los dos paneles se dibujaban a la vez, el hilo empujaba al
+   cajón de escritura fuera de la caja y el log se quedaba sin scroll propio. */
+.thread-empty[hidden],.thread[hidden]{display:none}
+.mono{font-family:ui-monospace,monospace;font-size:11px;opacity:.75}
 .thread-h{padding:12px 14px;border-bottom:1px solid var(--border2);display:flex;gap:10px;align-items:center;flex-wrap:wrap}
 .thread-log{flex:1;overflow-y:auto;padding:14px;min-height:0}
 .composer{border-top:1px solid var(--border2);padding:10px 12px}
