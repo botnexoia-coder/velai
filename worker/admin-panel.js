@@ -133,7 +133,6 @@ const CH_LABEL={web:'Web',whatsapp:'WhatsApp',messenger:'Messenger'};
 // Por qué NO se puede responder, en palabras del dueño. El cajón se cierra ANTES de que
 // alguien escriba: el 63016 de Twilio llega cuando el mensaje ya se dio por enviado.
 const WIN_WHY={
- web_reply_unsupported:'El canal web no admite respuesta desde el panel: el widget solo habla cuando el visitante escribe.',
  inbox_address_unknown:'No sabemos por qué número responder (conversación anterior a la bandeja). En cuanto el cliente vuelva a escribir, se podrá.',
  no_inbound:'Todavía no hay ningún mensaje del cliente en esta conversación.',
  window_closed:'La ventana de 24 h de WhatsApp se cerró. Para escribir ahora hace falta una plantilla aprobada por Meta.',
@@ -175,13 +174,18 @@ function composer(win,c){const box=$('#composer');
    +'<span class="cwin shut">'+esc(why)+(quedan!==null?' Vai retoma en '+quedan+' min si nadie entra.':'')+'</span></div>';
   if(puede)$('#takeover').onclick=()=>control('takeover');
   return}
- // Las HORAS que quedan, no un semáforo verde: es el dato con el que se decide si contestar
- // ahora o mandar plantilla. Wati es el único del mercado que lo expone.
- const left=Math.max(0,Math.round((new Date(win.closesAt)-new Date())/3600000));
+ // En WhatsApp lo que importa es cuánto queda de la ventana de Meta; en web, si el
+ // visitante sigue delante. Son la misma pregunta —«¿esto va a llegar?»— con distinta
+ // respuesta, y en los dos casos se enseña el dato, no un semáforo verde.
+ const estado=win.web
+  ?(win.away
+    ?'<span class="cwin shut">El visitante no está en la página ahora mismo. Tu mensaje se guarda y lo verá si vuelve durante su visita.</span>'
+    :'<span class="cwin">El visitante está en la página.</span>')
+  :'<span class="cwin">Quedan <b>'+Math.max(0,Math.round((new Date(win.closesAt)-new Date())/3600000))+' h</b> de la ventana de WhatsApp.</span>';
  box.innerHTML='<textarea id="cmsg" rows="2" placeholder="Escribe tu respuesta…"></textarea>'
   +'<div class="crow"><button class="btn" id="csend" type="button">Enviar</button>'
   +'<button class="btn alt" id="release" type="button">Devolver a Vai</button>'
-  +'<span class="cwin">Tienes el control'+(c&&c.agent_email?' ('+esc(c.agent_email)+')':'')+'. Quedan <b>'+left+' h</b> de la ventana de WhatsApp.</span></div>';
+  +'<span class="cwin">Tienes el control'+(c&&c.agent_email?' ('+esc(c.agent_email)+')':'')+'.</span>'+estado+'</div>';
  $('#csend').onclick=sendReply;
  $('#release').onclick=()=>control('release');
  $('#cmsg').onkeydown=ev=>{if(ev.key==='Enter'&&!ev.shiftKey){ev.preventDefault();sendReply()}}}

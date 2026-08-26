@@ -162,9 +162,13 @@ Detalles que aparecieron al construir:
 
 ### Lo que sigue fuera, y por qué
 
-- **Responder por el canal web: no se puede, y lo dice.** El widget solo habla cuando el
-  visitante escribe; no hay canal de vuelta desde el panel. Darle uno es otro trabajo
-  (polling en el widget, o un canal push). El cajón se cierra con el motivo escrito.
+- ~~**Responder por el canal web: no se puede.**~~ **Hecho el 2026-08-26** (migración 0026,
+  widget v9). El widget declara `live:true` y pregunta por mensajes nuevos cada 6 s **solo
+  cuando la conversación no la lleva el bot**: con la IA atendiendo no hace ni una petición
+  extra. Un widget v8 cacheado no manda la bandera, así que el worker no le cede el turno y
+  se comporta como antes — por eso se pudo desplegar sin tocar las webs de los clientes.
+  El equivalente honesto de la ventana de 24 h aquí es `visitor_seen_at`: el panel dice si
+  el visitante sigue en la página, y avisa en vez de bloquear.
 - **Plantillas fuera de la ventana.** La v1 **dice** que la ventana se cerró; no finge poder
   saltarla. Comparte maquinaria con el informe semanal por WhatsApp: se harán juntas.
 - **Instagram.** No se pinta la pestaña. Va por Meta igual que Messenger, así que se conecta

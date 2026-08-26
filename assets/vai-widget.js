@@ -1,12 +1,12 @@
 /* ══════════════════════════════════════════════════════════════════════════
-   VAI CHAT WIDGET — autocontenido (CSS + markup + lógica) · v7
+   VAI CHAT WIDGET — autocontenido (CSS + markup + lógica) · v9
    ──────────────────────────────────────────────────────────────────────────
    Se carga en TODAS las páginas con una sola línea:
-     <script src="/assets/vai-widget.js?v=7" defer></script>
+     <script src="/assets/vai-widget.js?v=9" defer></script>
 
    En la web de un CLIENTE van dos líneas (la primera declara el tenant):
      <script>window.VELAI_TENANT='zoe';</script>
-     <script src="https://hirevai.com/assets/vai-widget.js?v=7" defer></script>
+     <script src="https://hirevai.com/assets/vai-widget.js?v=9" defer></script>
 
    Autocontenido a propósito: solo index.html carga /assets/styles.css, el
    resto de páginas llevan CSS inline. Por eso este archivo inyecta su propio
@@ -17,6 +17,13 @@
    mismo, con la sitekey pública de Velai por defecto (overridable con
    window.VELAI_TURNSTILE_SITEKEY). Si window.VELAI_HUMAN existe (hirevai.com)
    se usa tal cual: un solo widget de Turnstile por página, cero cambios aquí.
+
+   ATENCIÓN HUMANA EN VIVO (v9): el widget declara `live:true` al worker y, SOLO
+   cuando una conversación deja de llevarla el bot, pregunta cada 6 s por mensajes
+   nuevos (GET /chat/poll). Con la IA atendiendo —el 99% del tráfico— no hace ni
+   una petición extra. Un widget v8 cacheado NO manda `live`, así que el worker no
+   le cede el turno a nadie y se comporta exactamente como antes: la IA atiende y
+   captura el lead. Por eso se puede desplegar sin tocar las webs de los clientes.
 
    MARCA POR TENANT (v7): al montar se pide GET /widget/boot?tenant=<slug> y
    el chat pinta el logo, nombre, saludo, chips, placeholder, colores, tema y
@@ -73,7 +80,10 @@
     open: 'Open chat with ', close: 'Close chat with ', closeBtn: 'Close chat',
     chat: 'Chat with ', send: 'Send', msg: 'Message', dismiss: 'Dismiss',
     errHuman: "I couldn't verify you're human (an unstable network or a blocker can cause this). Reload the page and try again, or message us on WhatsApp: https://wa.me/",
-    errGeneric: "Oops, I can't reply right now. Message us on WhatsApp and we'll answer in minutes: https://wa.me/"
+    errGeneric: "Oops, I can't reply right now. Message us on WhatsApp and we'll answer in minutes: https://wa.me/",
+    agentLabel: 'Team',
+    liveWaiting: 'Connecting you with someone from the team…',
+    liveHuman: "You're now talking with someone from the team"
   } : {
     online: 'En línea ahora',
     placeholder: 'Escribe un mensaje...',
@@ -83,7 +93,10 @@
     open: 'Abrir chat con ', close: 'Cerrar chat con ', closeBtn: 'Cerrar chat',
     chat: 'Chat con ', send: 'Enviar', msg: 'Mensaje', dismiss: 'Cerrar',
     errHuman: 'No pude verificar que eres humano (a veces lo causa una red inestable o un bloqueador). Recarga la página e inténtalo de nuevo, o escríbenos por WhatsApp: https://wa.me/',
-    errGeneric: 'Ups, ahora mismo no puedo responder. Escríbenos por WhatsApp y te contestamos en minutos: https://wa.me/'
+    errGeneric: 'Ups, ahora mismo no puedo responder. Escríbenos por WhatsApp y te contestamos en minutos: https://wa.me/',
+    agentLabel: 'Equipo',
+    liveWaiting: 'Avisando a alguien del equipo…',
+    liveHuman: 'Ahora hablas con una persona del equipo'
   };
 
   function track(name, params) {
@@ -192,6 +205,10 @@
     '.vai-b{max-width:80%;padding:8px 10px 5px;box-shadow:0 1px 2px rgba(0,0,0,.1)}' +
     '.vai-b.is-bot{background:var(--vai-bot);border-radius:0 8px 8px 8px}' +
     '.vai-b.is-user{background:var(--vai-user);border-radius:8px 8px 0 8px}' +
+    '.vai-row.is-agent{justify-content:flex-start}' +
+    '.vai-b.is-agent{background:#e8f5e9;border-radius:0 8px 8px 8px;border-left:3px solid #199e70}' +
+    '.vai-b-who{font-size:11px;font-weight:700;color:#199e70;margin-bottom:2px}' +
+    '.vai-live{font-size:12px;color:#8696a0;text-align:center;padding:6px 0}' +
     '.vai-b-t{font-size:13.5px;color:var(--vai-text);line-height:1.5;white-space:pre-wrap;word-break:break-word}' +
     '.vai-b-h{font-size:11px;color:#8696a0;text-align:right;margin-top:2px}' +
     /* móvil: panel a pantalla casi completa */
@@ -305,6 +322,8 @@
   window.VELAI_UUID = window.VELAI_UUID || uuid; // reutilizable por leadform/quizzes
 
   var open = false, started = false, sent = 0, busy = false, humanVerified = false;
+  // Parte viva (v9): estado de la conversación, último mensaje visto y temporizador.
+  var liveState = 'bot', lastId = 0, pollTimer = null;
   var conversationId = ''; // se genera en el primer envío (o se restaura de la sesión)
   var demo = '';
   var history = [];
@@ -313,7 +332,7 @@
 
   function saveState() {
     try {
-      sessionStorage.setItem(SS_STATE, JSON.stringify({ conversationId: conversationId, demo: demo, history: history, sent: sent, open: open, humanVerified: humanVerified }));
+      sessionStorage.setItem(SS_STATE, JSON.stringify({ conversationId: conversationId, demo: demo, history: history, sent: sent, open: open, humanVerified: humanVerified, liveState: liveState, lastId: lastId }));
     } catch (e) {}
   }
   function loadState() {
@@ -322,6 +341,8 @@
       if (!s || !Array.isArray(s.history) || !s.history.length) return;
       history = s.history;
       if (typeof s.conversationId === 'string') conversationId = s.conversationId;
+      if (typeof s.liveState === 'string') liveState = s.liveState;
+      if (typeof s.lastId === 'number') lastId = s.lastId;
       humanVerified = !!s.humanVerified;
       sent = typeof s.sent === 'number' ? s.sent : history.length;
       demo = isDemo(s.demo) ? s.demo : '';
@@ -333,7 +354,7 @@
     el.msgs.innerHTML = '';
     addMsg('bot', script().greeting);
     history.forEach(function (m) {
-      addMsg(m.role === 'assistant' ? 'bot' : 'user', m.content, m.t);
+      addMsg(m.role === 'assistant' ? 'bot' : (m.role === 'agent' ? 'agent' : 'user'), m.content, m.t);
     });
   }
 
@@ -473,6 +494,9 @@
     }
 
     el.win.classList.toggle('is-open', open);
+    // El sondeo vive con el panel: al abrir con una conversación en manos de una persona se
+    // recupera lo que hayan escrito mientras estaba cerrado; al cerrar, se para.
+    if (open && liveState !== 'bot') { startLive(); pollOnce(); } else if (!open) { stopLive(); }
     el.iconChat.style.display = open ? 'none' : 'block';
     el.iconClose.style.display = open ? 'block' : 'none';
     el.bubble.setAttribute('aria-label', (open ? T.close : T.open) + botName());
@@ -489,6 +513,7 @@
         withBrand(function () {
           renderHistory();
           if (!sent) renderChips();
+          if (liveState !== 'bot') applyLive(liveState);
         });
       } else {
         setTimeout(function () {
@@ -518,17 +543,69 @@
 
   /* ── 8. Mensajes ────────────────────────────────────────────────────── */
   function addMsg(role, text, t) {
-    var isBot = role === 'bot';
+    // 'agent' (v9) es una PERSONA del equipo: burbuja propia y con nombre. Disfrazarla de
+    // bot sería mentirle al visitante sobre con quién está hablando.
+    var kind = role === 'bot' ? 'is-bot' : (role === 'agent' ? 'is-agent' : 'is-user');
     var d = t ? new Date(t) : new Date();
     var time = d.getHours() + ':' + (d.getMinutes() < 10 ? '0' : '') + d.getMinutes();
     var row = document.createElement('div');
-    row.className = 'vai-row ' + (isBot ? 'is-bot' : 'is-user');
-    row.innerHTML = '<div class="vai-b ' + (isBot ? 'is-bot' : 'is-user') + '">' +
+    row.className = 'vai-row ' + kind;
+    row.innerHTML = '<div class="vai-b ' + kind + '">' +
+      (role === 'agent' ? '<div class="vai-b-who">' + esc(T.agentLabel) + '</div>' : '') +
       '<div class="vai-b-t">' + esc(text) + '</div>' +
       '<div class="vai-b-h">' + time + '</div></div>';
     el.msgs.appendChild(row);
     el.msgs.scrollTop = el.msgs.scrollHeight;
   }
+
+  /* ── Parte viva (v9): recoger lo que escribe una persona desde el panel ──────
+     Solo se pregunta cuando la conversación NO la lleva el bot. Con la IA
+     atendiendo no hay ni una petición: es lo que hace que esto sea sostenible. */
+  function liveNote(text) {
+    var old = document.getElementById('vaiLive');
+    if (old) old.remove();
+    if (!text) return;
+    var n = document.createElement('div');
+    n.id = 'vaiLive'; n.className = 'vai-live'; n.textContent = text;
+    el.msgs.appendChild(n);
+    el.msgs.scrollTop = el.msgs.scrollHeight;
+  }
+  function applyLive(state) {
+    liveState = state || 'bot';
+    liveNote(liveState === 'esperando' ? T.liveWaiting : (liveState === 'humano' ? T.liveHuman : ''));
+    if (liveState === 'bot') stopLive(); else startLive();
+    saveState();
+  }
+  async function pollOnce() {
+    if (!conversationId) return;
+    try {
+      var qs = '?conversationId=' + encodeURIComponent(conversationId) + '&after=' + lastId +
+        (TENANT ? '&tenant=' + encodeURIComponent(TENANT) : '');
+      var res = await fetch(WORKER + '/chat/poll' + qs);
+      if (!res.ok) return;
+      var data = await res.json();
+      for (var i = 0; i < (data.messages || []).length; i++) {
+        var m = data.messages[i];
+        if (m.id > lastId) lastId = m.id;
+        // Solo se pinta lo que viene de una PERSONA: las respuestas del bot ya las pintó
+        // quien las pidió, y repetirlas duplicaría la conversación en pantalla.
+        if (m.role !== 'agent') continue;
+        history.push({ role: 'agent', content: m.text, t: Date.parse(m.at) || Date.now() });
+        addMsg('agent', m.text, m.at);
+      }
+      if (data.state !== liveState) applyLive(data.state);
+      else saveState();
+    } catch (e) { /* un sondeo fallido no rompe nada: se reintenta al siguiente */ }
+  }
+  function startLive() {
+    if (pollTimer) return;
+    pollTimer = setInterval(function () {
+      // Solo con el panel abierto y la pestaña a la vista: sondear una pestaña de fondo es
+      // gastar peticiones para nadie.
+      if (open && document.visibilityState === 'visible') pollOnce();
+    }, 6000);
+  }
+  function stopLive() { if (pollTimer) { clearInterval(pollTimer); pollTimer = null; } }
 
   async function send(preset, source) {
     if (busy) return;
@@ -550,23 +627,28 @@
 
     try {
       if (!conversationId) { conversationId = uuid(); saveState(); }
-      var reply;
+      var data;
       try {
-        reply = await postChat(text);
+        data = await postChat(text);
       } catch (err) {
         // El servidor perdió el estado (KV caducado) y vuelve a exigir verificación:
         // reintentar UNA vez con token fresco en vez de dejar la sesión rota.
         if (err && err.status === 403 && humanVerified) {
           humanVerified = false; saveState();
-          reply = await postChat(text);
+          data = await postChat(text);
         } else { throw err; }
       }
       humanVerified = true;
-      history.push({ role: 'assistant', content: reply, t: Date.now() });
-      saveState();
+      if (typeof data.lastId === 'number' && data.lastId > lastId) lastId = data.lastId;
       el.typing.classList.remove('is-on');
-      addMsg('bot', reply);
-      track('chat_reply', { n: sent });
+      // Sin reply el bot no ha hablado (lo lleva una persona): no se pinta una burbuja
+      // vacía, se enseña el estado y el sondeo trae lo que escriba el equipo.
+      if (data.reply) {
+        history.push({ role: 'assistant', content: data.reply, t: Date.now() });
+        addMsg('bot', data.reply);
+        track('chat_reply', { n: sent });
+      }
+      applyLive(data.state);
     } catch (err) {
       // Nunca dejar humanVerified bloqueado en true tras un fallo: el próximo
       // intento pide token nuevo y el usuario puede recuperarse solo.
@@ -664,6 +746,10 @@
       payload.tenant = window.VELAI_TENANT.slice(0, 40);
     }
     if (demo) payload.demo = demo;
+    // Declara que este widget SABE recibir respuestas de una persona. Sin esta bandera el
+    // worker no cede el turno — así un widget v8 cacheado en la web de un cliente sigue
+    // funcionando igual que siempre en vez de dejar al visitante hablando a una pared.
+    payload.live = true;
     if (!humanVerified) {
       payload.turnstileToken = await humanToken('chat');
     }
@@ -679,9 +765,11 @@
       throw err;
     }
     var data = await res.json();
-    var reply = data.reply || (data.content && data.content[0] ? data.content[0].text : null);
-    if (!reply) throw new Error('empty');
-    return reply;
+    if (!data.reply && data.content && data.content[0]) data.reply = data.content[0].text;
+    // reply null es LEGÍTIMO desde v9: significa que la conversación la lleva una persona y
+    // el bot calla. Solo es un error si además no hay estado que explique el silencio.
+    if (!data.reply && !data.state) throw new Error('empty');
+    return data;
   }
 
   /* ── 9. API pública ─────────────────────────────────────────────────── */
