@@ -136,6 +136,7 @@ table.tnarrow{min-width:0}
 .filters input:hover{border-color:var(--orange)}
 .filters input[name=source]{max-width:120px}
 .filters input[type=date]{color:rgba(var(--ink),.80)}
+.filters .fchk{display:inline-flex;align-items:center;gap:7px;font-size:13px;cursor:pointer}
 .search{flex:1;min-width:220px;max-width:340px;display:flex;align-items:center;gap:9px;background:var(--bg2);border:1px solid rgba(var(--ink),.10);border-radius:var(--r-sm);padding:0 13px}
 .search:hover,.search:focus-within{border-color:var(--orange)}
 .search svg{width:15px;height:15px;color:rgba(var(--ink),.40);flex-shrink:0}
@@ -291,6 +292,13 @@ dialog::backdrop{background:rgba(5,3,6,.78);backdrop-filter:blur(3px)}
 .note{display:flex;gap:8px}
 .lead-meta{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
 .note textarea{flex:1}
+/* Transcripción: burbujas de chat. El visitante a la izquierda y Vai a la derecha —
+   leerlo tiene que parecerse a leer el chat, no a leer una tabla de filas. */
+.chatlog{display:flex;flex-direction:column;gap:8px;margin-top:12px}
+.bub{max-width:76%;padding:8px 12px;border-radius:14px;line-height:1.45;white-space:pre-wrap;overflow-wrap:anywhere}
+.bub.user{align-self:flex-start;background:var(--card2);border:1px solid var(--line);border-bottom-left-radius:4px}
+.bub.bot{align-self:flex-end;background:rgba(255,107,26,.10);border:1px solid rgba(255,107,26,.30);border-bottom-right-radius:4px}
+.bub time{display:block;margin-top:4px;font-size:11px;opacity:.6}
 .timeline{margin-top:20px}
 .timeline h3{font-family:var(--font-d);font-weight:900;letter-spacing:-.01em}
 .timeline article{border-left:2px solid rgba(255,107,26,.25);padding:0 0 14px 14px}
@@ -406,6 +414,7 @@ body.cliente .cliente-only{display:flex}
 <nav class="tabs" role="tablist">
 <button class="tab is-on" role="tab" aria-selected="true" data-view="dashboard" type="button"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="12" width="4" height="9"></rect><rect x="10" y="7" width="4" height="14"></rect><rect x="17" y="3" width="4" height="18"></rect></svg>Dashboard</button>
 <button class="tab" role="tab" aria-selected="false" data-view="leads" type="button"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M17 21v-2a4 4 0 0 0-4-4H7a4 4 0 0 0-4 4v2"></path><circle cx="10" cy="7" r="4"></circle><path d="M21 21v-2a4 4 0 0 0-3-3.87"></path><path d="M16 3.13a4 4 0 0 1 0 7.75"></path></svg>Leads</button>
+<button class="tab" role="tab" aria-selected="false" data-view="conversaciones" type="button"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"></path></svg>Conversaciones</button>
 <button class="tab" role="tab" aria-selected="false" data-view="calendario" id="calNavBtn" type="button"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="5" width="18" height="16" rx="2"></rect><line x1="8" y1="3" x2="8" y2="7"></line><line x1="16" y1="3" x2="16" y2="7"></line><line x1="3" y1="10" x2="21" y2="10"></line></svg>Calendario</button>
 <button class="tab" role="tab" aria-selected="false" data-view="conexiones" id="cxNavBtn" type="button"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"></path><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"></path></svg>Conexiones</button>
 <button class="tab velai-only" role="tab" aria-selected="false" data-view="tenants" type="button"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="7" width="18" height="13" rx="2"></rect><path d="M8 7V5a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>Clientes</button>
@@ -452,6 +461,18 @@ body.cliente .cliente-only{display:flex}
 <div id="message"></div><div class="table"><table><thead><tr><th>Fecha</th><th>Cliente</th><th>Estado</th><th>Nombre</th><th>WhatsApp</th><th>Asunto</th><th>Fuente</th><th>Avisos</th></tr></thead><tbody id="rows"></tbody></table></div>
 <div class="legend"><span><i class="d-new"></i>nuevo</span><span><i class="d-contacted"></i>contactado</span><span><i class="d-qualified"></i>cualificado</span><span><i class="d-won"></i>ganado</span><span><i class="d-lost"></i>perdido</span></div>
 <div class="pager"><button class="btn alt" id="more" hidden>Cargar más</button></div></div>
+<div id="viewConversaciones" hidden>
+<div class="vhead"><div><h1>Conversaciones</h1><p>Lo que se dijo, no solo lo que salió de ahí</p></div><button class="btn alt" id="convExport" type="button">Exportar CSV</button></div>
+<form class="filters" id="convFilters">
+<span class="sel"><select name="channel"><option value="">Todos los canales</option><option value="web">Web</option><option value="whatsapp">WhatsApp</option><option value="messenger">Messenger</option></select></span>
+<span class="sel"><select name="lead"><option value="">Con lead y sin lead</option><option value="si">Solo las que dieron lead</option><option value="no">Solo las que no</option></select></span>
+<span class="sel velai-only"><select name="tenant" id="convTenant"><option value="">Todos los clientes</option></select></span>
+<input name="from" type="date" title="Desde"><input name="to" type="date" title="Hasta">
+<label class="fchk"><input type="checkbox" name="sinResolver" value="1">Solo con preguntas sin respuesta</label>
+<button class="btn">Filtrar</button><span id="convCount"></span>
+</form>
+<div id="convMessage"></div><div class="table"><table><thead><tr><th>Última actividad</th><th class="velai-only">Cliente</th><th>Canal</th><th>Mensajes</th><th>Sin respuesta</th><th>Lead</th></tr></thead><tbody id="convRows"></tbody></table></div>
+<div class="pager"><button class="btn alt" id="convMore" hidden>Cargar más</button></div></div>
 <div id="viewTenants" hidden>
 <div class="vhead"><div><h1>Clientes</h1><p>Canal, contexto y estado de cada cliente</p></div><button class="btn" id="newTenant" type="button">Nuevo cliente</button></div>
 <div class="table"><table><thead><tr><th>Nombre</th><th>Canal</th><th>Leads</th><th>Contexto</th><th>Configuración</th><th>Estado</th><th>Calendario</th></tr></thead><tbody id="tenantRows"></tbody></table></div></div>
@@ -601,6 +622,7 @@ body.cliente .cliente-only{display:flex}
 </div></div></main>
 <div class="foot" id="foot">Panel de <b>Velai</b> · <span id="footYear"></span> · Todos los derechos reservados</div>
 <dialog id="detail"><div class="modal-h"><strong id="detailTitle">Detalle del lead</strong><button class="btn alt" id="close">Cerrar</button></div><div class="modal-b" id="detailBody"></div></dialog>
+<dialog id="convDetail"><div class="modal-h"><strong id="convTitle">Conversación</strong><button class="btn alt" id="convClose" type="button">Cerrar</button></div><div class="modal-b" id="convBody"></div></dialog>
 <dialog id="tenantModal"><div class="modal-top"><div class="modal-h"><strong id="tenantTitle">Cliente</strong><div class="mh-r"><input id="tNote" placeholder="Nota del cambio (opcional)" class="inpill"><button class="btn" id="tenantSave" type="button">Guardar</button><button class="btn alt" id="tenantClose" type="button">Cerrar</button></div></div>
 <nav class="ttabs" id="ttabs">
 <button type="button" class="ttab is-on" data-tt="identidad">Identidad y canal<i class="dot"></i></button>

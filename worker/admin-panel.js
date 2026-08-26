@@ -100,7 +100,48 @@ async function load(append=false){try{const p=params();if(append&&cursor)p.set('
  loadedCount+=d.leads.length;cursor=d.nextCursor;$('#more').hidden=!cursor;
  $('#resultCount').textContent=loadedCount+(cursor?'+':'')+' resultado'+((loadedCount===1&&!cursor)?'':'s');
  $('#message').textContent=''}catch(e){$('#message').innerHTML='<p class="error">'+esc(e.message)+'</p>'}}
-async function loadTenants(){try{const d=await api('/api/admin/tenants');for(const t of d.tenants)$('#tenantFilter').insertAdjacentHTML('beforeend','<option value="'+esc(t.id)+'">'+esc(t.name)+'</option>')}catch(e){/* sin tenants: el filtro queda en Todos */}}
+async function loadTenants(){try{const d=await api('/api/admin/tenants');for(const t of d.tenants){const opt='<option value="'+esc(t.id)+'">'+esc(t.name)+'</option>';$('#tenantFilter').insertAdjacentHTML('beforeend',opt);$('#convTenant').insertAdjacentHTML('beforeend',opt)}}catch(e){/* sin tenants: los filtros quedan en Todos */}}
+
+// ── Conversaciones (migración 0021) ──────────────────────────────────────────
+// El hueco de paridad número uno: hasta ahora la conversación vivía en KV con TTL de
+// 24 h y cuando un lead salía mal no había forma de mirar qué pasó.
+let convCursor=null,convCount=0;
+const CH_LABEL={web:'Web',whatsapp:'WhatsApp',messenger:'Messenger'};
+function convParams(){const p=new URLSearchParams(new FormData($('#convFilters')));for(const[k,v]of[...p])if(!v)p.delete(k);return p}
+async function loadConversations(append=false){try{const p=convParams();if(append&&convCursor)p.set('cursor',convCursor);
+ const d=await api('/api/admin/conversations?'+p);if(!append){$('#convRows').innerHTML='';convCount=0}
+ if(!d.conversations.length&&!append)$('#convRows').innerHTML='<tr><td colspan="6" class="empty">No hay conversaciones con estos filtros. Solo se guardan desde el 26 de agosto de 2026: las anteriores vivían en KV y caducaban a las 24 h.</td></tr>';
+ for(const c of d.conversations)$('#convRows').insertAdjacentHTML('beforeend','<tr data-id="'+esc(c.id)+'"><td>'+fmt(c.last_at)+'</td>'
+  +'<td class="velai-only">'+tenantChip(c.tenant_id,c.tenant_name)+'</td>'
+  +'<td>'+esc(CH_LABEL[c.channel]||c.channel)+'</td><td>'+esc(c.msgs)+'</td>'
+  // Sin respuesta en rojo solo si hay alguna: un cero en rojo es ruido.
+  +'<td>'+(c.unanswered>0?'<span class="nb bad"><i></i>'+esc(c.unanswered)+'</span>':'<span class="muted">0</span>')+'</td>'
+  +'<td>'+(c.lead_id?(statusPill(c.lead_status||'new')+' '+esc(c.lead_name||'')):'<span class="muted">—</span>')+'</td></tr>');
+ paint($('#convRows'));
+ convCount+=d.conversations.length;convCursor=d.nextCursor;$('#convMore').hidden=!convCursor;
+ $('#convCount').textContent=convCount+(convCursor?'+':'')+' conversaci'+((convCount===1&&!convCursor)?'ón':'ones');
+ $('#convMessage').textContent=''}catch(e){$('#convMessage').innerHTML='<p class="error">'+esc(TERRS[e.message]||e.message)+'</p>'}}
+$('#convFilters').onsubmit=e=>{e.preventDefault();convCursor=null;loadConversations()};
+$('#convMore').onclick=()=>loadConversations(true);
+$('#convExport').onclick=()=>{location.href='/api/admin/conversations/export.csv?'+convParams()};
+$('#convClose').onclick=()=>$('#convDetail').close();
+$('#convRows').onclick=e=>{const tr=e.target.closest('[data-id]');if(tr)openConv(tr.dataset.id)};
+async function openConv(id){try{const d=await api('/api/admin/conversations/'+id);const c=d.conversation;
+ $('#convTitle').textContent=(CH_LABEL[c.channel]||c.channel)+' · '+fmt(c.started_at);
+ const meta='<div class="lead-meta">'+tenantChip(null,c.tenant_name)
+  +'<span class="chip">'+esc(c.msgs)+' mensajes</span>'
+  +(c.unanswered>0?'<span class="chip">'+esc(c.unanswered)+' sin respuesta</span>':'')
+  +(c.is_demo?'<span class="chip">demo</span>':'')
+  +'<span class="chip">'+esc(c.external_id)+'</span></div>';
+ // La retención a la vista: quien lee una transcripción debe saber cuándo desaparece.
+ const caduca='<small class="muted">Se borra automáticamente el '+fmt(c.expires_at)+'.</small>';
+ const log=d.messages.map(m=>'<div class="bub '+(m.role==='user'?'user':'bot')+'">'+esc(m.text)+'<time>'+fmt(m.created_at)+'</time></div>').join('')
+  ||'<p class="muted">Esta conversación no tiene mensajes guardados.</p>';
+ const verLead=c.lead_id?'<div class="actions"><button class="btn alt" id="convLead">Ver el lead que salió de aquí</button></div>':'';
+ $('#convBody').innerHTML=meta+'<div class="chatlog">'+log+'</div>'+verLead+'<div class="mt12">'+caduca+'</div>';
+ if(c.lead_id)$('#convLead').onclick=()=>{$('#convDetail').close();openLead(c.lead_id)};
+ paint($('#convBody'));$('#convDetail').showModal()}
+ catch(e){toast('No se pudo abrir la conversación: '+(e.message==='not_found'?'ya no existe (retención cumplida)':e.message),false)}}
 // Cerrar sesión = logout de Cloudflare Access (borra la cookie CF_Authorization de
 // esta app y redirige al login). La ruta la atiende Access, nunca llega al worker.
 $('#logout').onclick=()=>{location.href='/cdn-cgi/access/logout'};
@@ -148,10 +189,10 @@ const TERRS={already_provisioned:'Ese paso ya está hecho (idempotente: un doble
 let tenantList=[],editing=null;
 // Dashboard (2026-08-25): las gráficas viven en su propia vista; Leads se queda con la
 // bandeja de trabajo (filtros, tabla, exportar) y sus avisos de chats en pausa.
-const VIEWS={dashboard:'#viewDashboard',leads:'#viewLeads',tenants:'#viewTenants',config:'#viewConfig',calendario:'#viewCalendario',conexiones:'#viewConexiones',canales:'#viewCanales'};
+const VIEWS={dashboard:'#viewDashboard',leads:'#viewLeads',conversaciones:'#viewConversaciones',tenants:'#viewTenants',config:'#viewConfig',calendario:'#viewCalendario',conexiones:'#viewConexiones',canales:'#viewCanales'};
 document.querySelectorAll('.tab[data-view]').forEach(b=>b.onclick=()=>{document.querySelectorAll('.tab[data-view]').forEach(x=>{x.classList.toggle('is-on',x===b);x.setAttribute('aria-selected',x===b?'true':'false')});const v=b.dataset.view;
  Object.entries(VIEWS).forEach(([k,sel])=>{$(sel).hidden=k!==v});
- if(v==='dashboard'){loadStats();loadAiUsage();loadInfra()}else if(v==='leads'){load();loadEscalations()}else if(v==='tenants')loadTenantList();else if(v==='config'){loadAdmins();loadConfig()}else if(v==='calendario'){calMenu()}else if(v==='conexiones'){cxMenu()}else if(v==='canales'){loadChannels()}});
+ if(v==='dashboard'){loadStats();loadAiUsage();loadInfra()}else if(v==='leads'){load();loadEscalations()}else if(v==='conversaciones'){loadConversations()}else if(v==='tenants')loadTenantList();else if(v==='config'){loadAdmins();loadConfig()}else if(v==='calendario'){calMenu()}else if(v==='conexiones'){cxMenu()}else if(v==='canales'){loadChannels()}});
 // ── Conexiones (SPEC-CONEXIONES PR1): Telegram de avisos en autoservicio ──
 // El cliente abre SU tarjeta; Velai elige tenant con el selector de la cabecera.
 let cxTenant=null;
