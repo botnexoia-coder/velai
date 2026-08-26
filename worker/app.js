@@ -572,6 +572,7 @@ function validateTenant(body, { partial = false } = {}) {
     }
   }
   if (has('active')) out.active = body.active ? 1 : 0;
+  if (has('weekly_report')) out.weekly_report = body.weekly_report ? 1 : 0;
   return out;
 }
 
@@ -3177,12 +3178,13 @@ async function adminRouter(request, env, ctx, path, url, config, scope) {
     if (!UUID_RE.test(notifyMatch[1])) throw new HttpError(404, 'not_found');
     const tenantId = notifyMatch[1];
     if (scope.role !== 'velai' && scope.tenantId !== tenantId) throw new HttpError(404, 'not_found');
-    const previous = await env.DB.prepare('SELECT id, slug, channel_address, twilio_from, team_whatsapp, wa_number FROM tenants WHERE id=?').bind(tenantId).first();
+    const previous = await env.DB.prepare('SELECT id, slug, channel_address, twilio_from, team_whatsapp, wa_number, weekly_report FROM tenants WHERE id=?').bind(tenantId).first();
     if (!previous) throw new HttpError(404, 'not_found');
     const body = await readJson(request, 4000);
     const subset = {};
     if (body.team_whatsapp !== undefined) subset.team_whatsapp = body.team_whatsapp;
     if (body.wa_number !== undefined) subset.wa_number = body.wa_number;
+    if (body.weekly_report !== undefined) subset.weekly_report = body.weekly_report;
     if (!Object.keys(subset).length) throw new HttpError(400, 'nothing_to_update');
     const fields = validateTenant(subset, { partial: true }); // WA_RE / WA_DIGITS_RE de siempre
     assertTeamNotFrom(fields, previous);
@@ -3263,7 +3265,7 @@ async function adminRouter(request, env, ctx, path, url, config, scope) {
     const tenantId = tgMatch[1];
     // Autoservicio: el cliente solo SU tenant — ajeno = 404, ANTES de tocar D1.
     if (scope.role !== 'velai' && scope.tenantId !== tenantId) throw new HttpError(404, 'not_found');
-    const tenantRow = await env.DB.prepare('SELECT id, slug, name, channel_address, telegram_chat_id, telegram_chat_title, telegram_linked_at, telegram_bot_username, telegram_bot_token_enc, telegram_whitelabel, telegram_topics FROM tenants WHERE id=?').bind(tenantId).first();
+    const tenantRow = await env.DB.prepare('SELECT id, slug, name, channel_address, telegram_chat_id, telegram_chat_title, telegram_linked_at, telegram_bot_username, telegram_bot_token_enc, telegram_whitelabel, telegram_topics, weekly_report FROM tenants WHERE id=?').bind(tenantId).first();
     if (!tenantRow) throw new HttpError(404, 'not_found');
     // La marca blanca es una feature que ACTIVA VELAI por cliente: sin el flag, el
     // bot propio no existe — para el cliente es 404 (ni confirmación de la feature)
@@ -3357,7 +3359,7 @@ async function adminRouter(request, env, ctx, path, url, config, scope) {
       // botUsername sí; el token cifrado JAMÁS sale del worker.
       let topics = [];
       try { topics = JSON.parse(tenantRow.telegram_topics || '[]'); } catch (_) {}
-      return json({ telegram: { linked: Boolean(tenantRow.telegram_chat_id), title: tenantRow.telegram_chat_title || null, linked_at: tenantRow.telegram_linked_at || null, botUsername: tenantRow.telegram_bot_username || null, whitelabel: Boolean(tenantRow.telegram_whitelabel), topics: Array.isArray(topics) ? topics : [] } }, 200, NO_STORE);
+      return json({ telegram: { linked: Boolean(tenantRow.telegram_chat_id), title: tenantRow.telegram_chat_title || null, linked_at: tenantRow.telegram_linked_at || null, botUsername: tenantRow.telegram_bot_username || null, whitelabel: Boolean(tenantRow.telegram_whitelabel), topics: Array.isArray(topics) ? topics : [], weeklyReport: tenantRow.weekly_report !== 0 } }, 200, NO_STORE);
     }
     if (!tgMatch[2] && request.method === 'DELETE') {
       const now = new Date().toISOString();
@@ -3802,6 +3804,147 @@ async function pollProvisioning(env) {
   }
 }
 
+// ── Informe semanal al canal del cliente (H1 §2, migración 0022) ─────────────
+// El hueco más grande del análisis competitivo: NI UN SOLO proveedor español o
+// latinoamericano manda un resumen periódico automático, y los pocos que lo mandan (solo
+// Intercom fuera del mercado hispano) lo mandan por CORREO. Va por Telegram porque es
+// donde el dueño YA está y porque no tiene ventana de 24 h: por WhatsApp haría falta una
+// plantilla aprobada por Meta, que es un bloque aparte y comparte maquinaria con las
+// plantillas de la bandeja (docs/H2-BANDEJA.md).
+const WEEKLY_REPORT_HOUR = 7;    // UTC
+const WEEKLY_REPORT_BATCH = 5;   // clientes por tick: el plan gratuito de D1 da 50 consultas por invocación
+const WEEKLY_REPORT_TRIES = 3;
+
+// El lunes desde las 07:00 UTC y durante 24 h. NO es un instante único a propósito: lo
+// manda el cron de 5 minutos QUE YA EXISTE, así que un fallo puntual se reintenta en el
+// tick siguiente en vez de esperar una semana, y no hace falta un segundo trigger ni
+// ramificar por event.cron. Fuera de la ventana esta función no toca D1.
+// Los crons de Cloudflare son UTC: son las 09:00 en horario de verano y las 08:00 en
+// invierno. Se acepta el desfase de una hora; no merece lógica de husos.
+function reportPeriod(now) {
+  const d = new Date(now);
+  const hour = d.getUTCHours(); const day = d.getUTCDay();   // 0 = domingo, 1 = lunes
+  if (!((day === 1 && hour >= WEEKLY_REPORT_HOUR) || (day === 2 && hour < WEEKLY_REPORT_HOUR))) return null;
+  // Lunes 00:00 UTC de la semana EN CURSO; la semana informada es la ANTERIOR.
+  const monday = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
+  monday.setUTCDate(monday.getUTCDate() - ((day === 0 ? 7 : day) - 1));
+  return {
+    end: monday.toISOString(),
+    start: new Date(monday.getTime() - 7 * 86400000).toISOString(),
+    prev: new Date(monday.getTime() - 14 * 86400000).toISOString(),
+    key: new Date(monday.getTime() - 7 * 86400000).toISOString().slice(0, 10),
+  };
+}
+
+const dm = (iso) => iso.slice(0, 10).split('-').reverse().slice(0, 2).join('/');
+
+// «14 (▲ 3 más que la semana anterior)». Sin comparación cuando no es comparable — un
+// «▼ 100%» calculado contra una semana sin datos registrados es una mentira, y es
+// exactamente lo que pasa las dos primeras semanas del historial.
+function reportMetric(label, value, previous, comparable) {
+  const n = Number(value) || 0;
+  if (!comparable) return `${label}: <b>${n}</b>`;
+  const diff = n - (Number(previous) || 0);
+  if (!diff) return `${label}: <b>${n}</b> <i>(igual que la semana anterior)</i>`;
+  return `${label}: <b>${n}</b> <i>(${diff > 0 ? '▲' : '▼'} ${Math.abs(diff)} ${diff > 0 ? 'más' : 'menos'} que la semana anterior)</i>`;
+}
+
+function weeklyReportText(tenant, st, period, comparable) {
+  const head = `📊 <b>TU SEMANA EN VELAI — ${escapeHtml(String(tenant.name || '').toUpperCase())}</b>\ndel ${dm(period.start)} al ${dm(new Date(new Date(period.end).getTime() - 86400000).toISOString())}\n\n`;
+  // Una semana en blanco NO se disfraza de informe con cuatro ceros: se dice, y se
+  // aprovecha para lo que este panel hace mejor que nadie — comprobar la entrega.
+  if (!st.convs && !st.leads) {
+    return head + 'Esta semana no ha entrado ninguna conversación.\n\n'
+      + 'Si esperabas mensajes, merece la pena abrir el panel y mirar <b>Canales</b>: comprueba de verdad si tus avisos pueden salir (destinatarios, número, plantilla) y te dice qué falta.';
+  }
+  const lines = [
+    reportMetric('💬 Conversaciones', st.convs, st.prevConvs, comparable),
+    reportMetric('🎯 Leads', st.leads, st.prevLeads, comparable),
+    reportMetric('📅 Citas', st.citas, st.prevCitas, comparable),
+  ];
+  if (st.unans) lines.push(`❓ Preguntas que no supe contestar: <b>${st.unans}</b>`);
+  let text = head + lines.join('\n');
+  if (st.unans) {
+    text += `\n\n<i>Están en el panel, en Conversaciones → «Solo con preguntas sin respuesta». Arreglar tres o cuatro al mes es lo que más sube la tasa de resolución.</i>`;
+  }
+  return text;
+}
+
+// Un solo GROUP BY por tabla para TODO el lote, no cuatro consultas por cliente: con seis
+// clientes eso serían 48 consultas y el plan gratuito de D1 corta en 50 por invocación.
+async function weeklyStats(env, ids, period) {
+  const holes = ids.map(() => '?').join(',');
+  const blank = () => ({ convs: 0, unans: 0, prevConvs: 0, leads: 0, prevLeads: 0, citas: 0, prevCitas: 0 });
+  const out = new Map(ids.map((id) => [id, blank()]));
+  const [conv, leads, citas] = await env.DB.batch([
+    // demo = '': las demos son juego de rol comercial de Velai, no conversaciones del negocio.
+    env.DB.prepare(`SELECT tenant_id,
+        SUM(CASE WHEN last_at >= ? THEN 1 ELSE 0 END) AS convs,
+        SUM(CASE WHEN last_at >= ? THEN unanswered ELSE 0 END) AS unans,
+        SUM(CASE WHEN last_at < ? THEN 1 ELSE 0 END) AS prev_convs
+      FROM conversations WHERE demo = '' AND last_at >= ? AND last_at < ? AND tenant_id IN (${holes})
+      GROUP BY tenant_id`).bind(period.start, period.start, period.start, period.prev, period.end, ...ids),
+    env.DB.prepare(`SELECT tenant_id,
+        SUM(CASE WHEN created_at >= ? THEN 1 ELSE 0 END) AS leads,
+        SUM(CASE WHEN created_at < ? THEN 1 ELSE 0 END) AS prev_leads
+      FROM leads WHERE created_at >= ? AND created_at < ? AND tenant_id IN (${holes})
+      GROUP BY tenant_id`).bind(period.start, period.start, period.prev, period.end, ...ids),
+    env.DB.prepare(`SELECT tenant_id,
+        SUM(CASE WHEN created_at >= ? THEN 1 ELSE 0 END) AS citas,
+        SUM(CASE WHEN created_at < ? THEN 1 ELSE 0 END) AS prev_citas
+      FROM appointments WHERE status = 'confirmed' AND created_at >= ? AND created_at < ? AND tenant_id IN (${holes})
+      GROUP BY tenant_id`).bind(period.start, period.start, period.prev, period.end, ...ids),
+  ]);
+  for (const r of conv.results || []) Object.assign(out.get(r.tenant_id) || blank(), { convs: r.convs, unans: r.unans, prevConvs: r.prev_convs });
+  for (const r of leads.results || []) Object.assign(out.get(r.tenant_id) || blank(), { leads: r.leads, prevLeads: r.prev_leads });
+  for (const r of citas.results || []) Object.assign(out.get(r.tenant_id) || blank(), { citas: r.citas, prevCitas: r.prev_citas });
+  return out;
+}
+
+async function sendWeeklyReports(env, now) {
+  const period = reportPeriod(now);
+  if (!period) return;
+  // Los que faltan, de pocos en pocos. Una fila 'sent'/'skipped' o con los intentos
+  // agotados ya no vuelve: la idempotencia vive en la tabla, no en la hora del cron.
+  const pending = (await env.DB.prepare(`
+    SELECT t.id, t.slug, t.name, t.telegram_chat_id, t.telegram_bot_token_enc FROM tenants t
+    WHERE t.active = 1 AND t.weekly_report = 1
+      AND NOT EXISTS (SELECT 1 FROM tenant_reports r WHERE r.tenant_id = t.id AND r.period_start = ?
+                        AND (r.status IN ('sent','skipped') OR r.attempts >= ?))
+    ORDER BY t.slug LIMIT ?`).bind(period.key, WEEKLY_REPORT_TRIES, WEEKLY_REPORT_BATCH).all()).results;
+  if (!pending.length) return;
+  const stats = await weeklyStats(env, pending.map((t) => t.id), period);
+  // La comparación necesita que la semana anterior ESTUVIERA registrada. El historial de
+  // conversaciones arrancó el 2026-08-26 (migración 0021): antes de eso el «anterior» es
+  // cero por no haber existido, no por no haber pasado nada.
+  const comparable = period.prev.slice(0, 10) >= CONV_TRACKING_SINCE;
+  for (const tenant of pending) {
+    // Reserva ANTES de enviar: un segundo tick del cron no puede mandar el mismo informe
+    // dos veces. changes = 0 significa que otro tick se lo llevó o que agotó los intentos.
+    const claim = await env.DB.prepare(`INSERT INTO tenant_reports (tenant_id,period_start,status,attempts,sent_at)
+      VALUES (?,?,'sending',1,?)
+      ON CONFLICT(tenant_id,period_start) DO UPDATE SET status='sending', attempts=attempts+1, sent_at=excluded.sent_at
+        WHERE tenant_reports.attempts < ? AND tenant_reports.status NOT IN ('sent','skipped')`)
+      .bind(tenant.id, period.key, new Date().toISOString(), WEEKLY_REPORT_TRIES).run();
+    if (!claim.meta || !claim.meta.changes) continue;
+    let status = 'sent'; let detail = null;
+    if (!tenant.telegram_chat_id) {
+      // Skip VISIBLE con su motivo, como la entrega dual de leads: un cliente sin
+      // Telegram vinculado no es un silencio, es una tarea pendiente.
+      status = 'skipped'; detail = 'telegram_not_configured';
+    } else {
+      const st = stats.get(tenant.id) || { convs: 0, leads: 0, citas: 0, unans: 0 };
+      const botToken = await tenantTelegramToken(env, tenant);
+      const outcome = await sendTelegramText(env, weeklyReportText(tenant, st, period, comparable),
+        tenant.telegram_chat_id, { allowFallback: false, botToken });
+      if (!outcome.ok) { status = 'failed'; detail = clean(outcome.error || 'telegram_failed', 60); }
+    }
+    await env.DB.prepare('UPDATE tenant_reports SET status=?, detail=?, sent_at=? WHERE tenant_id=? AND period_start=?')
+      .bind(status, detail, new Date().toISOString(), tenant.id, period.key).run();
+    console.log(JSON.stringify({ level: status === 'failed' ? 'error' : 'info', code: 'weekly_report', tenant: tenant.slug, period: period.key, status, detail }));
+  }
+}
+
 async function scheduled(env) {
   if (!env.DB) return;
   const now = new Date().toISOString();
@@ -3809,6 +3952,12 @@ async function scheduled(env) {
   try { await pollProvisioning(env); } catch (_) {}
   // Dos consultas con ORDER BY: lo entregable (pending/failed) tiene prioridad y las
   // filas 'skipped' perpetuas no pueden acaparar la ventana del cron (inanición).
+  // El informe semanal vive aquí y no en un trigger propio: así un fallo se reintenta en
+  // el tick siguiente en vez de esperar una semana. Fuera de la ventana del lunes, sale
+  // sin tocar D1. Nunca lanza: no puede impedir que se entreguen los avisos de leads.
+  try { await sendWeeklyReports(env, now); } catch (error) {
+    console.log(JSON.stringify({ level: 'error', code: 'weekly_report_failed', error: clean(String(error.message || error), 80) }));
+  }
   const due = (await env.DB.prepare(`
     SELECT lead_id FROM lead_notifications
     WHERE status IN ('pending','failed') AND attempts < 5
@@ -3915,4 +4064,4 @@ export function createWorker(config) {
   };
 }
 
-export const testing = { convLoad, convAppend, convLinkLead, convFilters, convRetentionDays, UNANSWERED_RE, CONV_WINDOW, cloudflareUsage, CF_FREE_LIMITS, recordConversation, aiCost, recordAiUsage, rateLimited, memLimited, applySenderProfile, pushSenderProfile, clean, persistLead, leadAlertStatus, captureWhatsAppLead, leadFromSummary, leadCaptureDone, errorResponseParts, tenantByAddress, syncPrimaryChannel, assertChannelFree, normalizePhone, extractPhone, safeUtm, publicCors, validTwilioSignature, callAnthropic, callAnthropicRaw, runToolLoop, calendarExecutor, calendarSystem, tenantCalendar, validCalendarDate, availableSlots, handleCalendarCallback, calendarCallbackFor, sendTwilioText, timingSafeEqual, telegramBotUsername, handleTelegramWebhook, sendTelegramText, tenantTelegramToken, telegramThreadFor, registerTelegramTopic, csvCell, expiryDate, leadFilters, isDemoKey, templateVar, leadTemplateVariables, readJson, deliver, drainQueuedLeads, verifyTurnstile, systemFor, validateTenant, invalidateTenantCache, tenantWriteError, assertNotActivePending, tenantChannelSummary, channelsForScope, handleProvision, pollProvisioning, fillSeries, resolveScope, scopeClause, clienteAllowed, adminRouter, recordAuthFailure, handleAdmin, handleWidgetBoot, allowedOrigins, envOrigins, syncPanelGate, envAdmins, syncAdminGate, getSetting, setSetting, withCfToken };
+export const testing = { reportPeriod, reportMetric, weeklyReportText, weeklyStats, sendWeeklyReports, convLoad, convAppend, convLinkLead, convFilters, convRetentionDays, UNANSWERED_RE, CONV_WINDOW, cloudflareUsage, CF_FREE_LIMITS, recordConversation, aiCost, recordAiUsage, rateLimited, memLimited, applySenderProfile, pushSenderProfile, clean, persistLead, leadAlertStatus, captureWhatsAppLead, leadFromSummary, leadCaptureDone, errorResponseParts, tenantByAddress, syncPrimaryChannel, assertChannelFree, normalizePhone, extractPhone, safeUtm, publicCors, validTwilioSignature, callAnthropic, callAnthropicRaw, runToolLoop, calendarExecutor, calendarSystem, tenantCalendar, validCalendarDate, availableSlots, handleCalendarCallback, calendarCallbackFor, sendTwilioText, timingSafeEqual, telegramBotUsername, handleTelegramWebhook, sendTelegramText, tenantTelegramToken, telegramThreadFor, registerTelegramTopic, csvCell, expiryDate, leadFilters, isDemoKey, templateVar, leadTemplateVariables, readJson, deliver, drainQueuedLeads, verifyTurnstile, systemFor, validateTenant, invalidateTenantCache, tenantWriteError, assertNotActivePending, tenantChannelSummary, channelsForScope, handleProvision, pollProvisioning, fillSeries, resolveScope, scopeClause, clienteAllowed, adminRouter, recordAuthFailure, handleAdmin, handleWidgetBoot, allowedOrigins, envOrigins, syncPanelGate, envAdmins, syncAdminGate, getSetting, setSetting, withCfToken };

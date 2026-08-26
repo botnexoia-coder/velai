@@ -2096,7 +2096,9 @@ test('telegram: GET de estado y DELETE de desvinculación (rol cliente, solo lo 
   const OWN = { role: 'cliente', tenantId: TID, email: 'cliente@x.com' };
   const path = `/api/admin/tenants/${TID}/telegram`;
   const got = await (await testing.adminRouter(adminReq(path), env, ctx, path, new URL('https://x' + path), {}, OWN)).json();
-  assert.deepEqual(got.telegram, { linked: true, title: 'Mi grupo', linked_at: '2026-08-21T10:00:00Z', botUsername: null, whitelabel: false, topics: [] });
+  // weeklyReport viaja con la tarjeta de Telegram: es por donde llega el informe (H1 §2).
+  // Sin columna en la fila cuenta como ACTIVADO, igual que el default de la migración.
+  assert.deepEqual(got.telegram, { linked: true, title: 'Mi grupo', linked_at: '2026-08-21T10:00:00Z', botUsername: null, whitelabel: false, topics: [], weeklyReport: true });
   const del = await (await testing.adminRouter(adminReq(path, { method: 'DELETE' }), env, ctx, path, new URL('https://x' + path), {}, OWN)).json();
   assert.equal(del.ok, true);
   const cleared = db.writes.find((w) => w.sql.includes('SET telegram_chat_id=NULL'));
@@ -3296,4 +3298,157 @@ test('la retención de transcripciones es propia, acotada y más corta que la de
   assert.equal(testing.convRetentionDays({ CONV_RETENTION_DAYS: '0' }), 90);
   assert.equal(testing.convRetentionDays({ CONV_RETENTION_DAYS: 'nope' }), 90);
   assert.equal(testing.convRetentionDays({ CONV_RETENTION_DAYS: '99999' }), 90);
+});
+
+// ── Informe semanal al canal del cliente (H1 §2, migración 0022) ─────────────
+const LUNES = '2026-08-31T07:30:00.000Z';        // lunes, dentro de la ventana
+const LUNES_TARDE = '2026-09-14T07:30:00.000Z';  // lunes con semana anterior ya registrada
+
+test('informe semanal: la ventana es el lunes desde las 07:00 UTC y 24 h, y la semana es la anterior', () => {
+  const p = testing.reportPeriod(LUNES);
+  assert.ok(p, 'lunes 07:30 está dentro');
+  assert.equal(p.start, '2026-08-24T00:00:00.000Z');
+  assert.equal(p.end, '2026-08-31T00:00:00.000Z', 'la semana informada CIERRA el lunes: es la anterior');
+  assert.equal(p.prev, '2026-08-17T00:00:00.000Z');
+  assert.equal(p.key, '2026-08-24');
+  // El martes de madrugada sigue dentro (24 h de ventana) y apunta a la MISMA semana:
+  // así un fallo se reintenta en el tick siguiente en vez de esperar una semana.
+  assert.equal(testing.reportPeriod('2026-09-01T03:00:00.000Z').key, '2026-08-24');
+  // Fuera de la ventana no hay periodo, y por tanto la función no toca D1.
+  assert.equal(testing.reportPeriod('2026-08-31T06:59:00.000Z'), null, 'lunes antes de las 7');
+  assert.equal(testing.reportPeriod('2026-09-01T08:00:00.000Z'), null, 'martes ya pasado');
+  assert.equal(testing.reportPeriod('2026-08-28T12:00:00.000Z'), null, 'viernes');
+  assert.equal(testing.reportPeriod('2026-08-30T12:00:00.000Z'), null, 'domingo');
+});
+
+test('informe semanal: la comparación se calla cuando la semana anterior no estaba registrada', () => {
+  assert.equal(testing.reportMetric('Leads', 6, 3, true), 'Leads: <b>6</b> <i>(▲ 3 más que la semana anterior)</i>');
+  assert.equal(testing.reportMetric('Leads', 3, 6, true), 'Leads: <b>3</b> <i>(▼ 3 menos que la semana anterior)</i>');
+  assert.equal(testing.reportMetric('Leads', 6, 6, true), 'Leads: <b>6</b> <i>(igual que la semana anterior)</i>');
+  // Lo importante: sin comparable NO se inventa un -100% contra una semana que no existió.
+  assert.equal(testing.reportMetric('Leads', 6, 0, false), 'Leads: <b>6</b>');
+});
+
+test('informe semanal: el texto lleva lo medido, y una semana en blanco manda a Canales', () => {
+  const p = testing.reportPeriod(LUNES);
+  const t = { name: 'GOgestión' };
+  const texto = testing.weeklyReportText(t, { convs: 14, leads: 6, citas: 2, unans: 3 }, p, true);
+  assert.match(texto, /TU SEMANA EN VELAI — GOGESTIÓN/);
+  assert.match(texto, /del 24\/08 al 30\/08/, 'de lunes a domingo, no al lunes siguiente');
+  assert.match(texto, /Conversaciones: <b>14<\/b>/);
+  assert.match(texto, /Leads: <b>6<\/b>/);
+  assert.match(texto, /Citas: <b>2<\/b>/);
+  assert.match(texto, /no supe contestar: <b>3<\/b>/);
+  assert.match(texto, /Solo con preguntas sin respuesta/, 'dice dónde mirarlas');
+  // Sin preguntas sin respuesta, esa línea NO aparece (un 0 ahí es ruido).
+  assert.ok(!/no supe contestar/.test(testing.weeklyReportText(t, { convs: 4, leads: 1, citas: 0, unans: 0 }, p, true)));
+  // Semana en blanco: no se disfraza de informe con cuatro ceros; se aprovecha para lo
+  // que este panel hace mejor que nadie.
+  const vacia = testing.weeklyReportText(t, { convs: 0, leads: 0, citas: 0, unans: 0 }, p, true);
+  assert.match(vacia, /no ha entrado ninguna conversación/);
+  assert.match(vacia, /<b>Canales<\/b>/);
+  assert.ok(!/Conversaciones: <b>0<\/b>/.test(vacia));
+});
+
+function reportDb(tenants, stats = {}) {
+  const reports = new Map();   // "<tenant>|<period>" -> { status, attempts }
+  return {
+    reports,
+    prepare(sql) {
+      return { sql, bind: (...args) => ({
+        sql, args,
+        first: async () => null,
+        all: async () => {
+          if (/FROM tenants t/.test(sql)) {
+            const [period, tries, limit] = args;
+            const open = tenants.filter((t) => {
+              const r = reports.get(t.id + '|' + period);
+              return !r || (!['sent', 'skipped'].includes(r.status) && r.attempts < tries);
+            });
+            return { results: open.slice(0, limit) };
+          }
+          return { results: [] };
+        },
+        run: async () => {
+          if (/INSERT INTO tenant_reports/.test(sql)) {
+            const key = args[0] + '|' + args[1];
+            const r = reports.get(key);
+            if (!r) { reports.set(key, { status: 'sending', attempts: 1 }); return { meta: { changes: 1 } }; }
+            if (['sent', 'skipped'].includes(r.status) || r.attempts >= 3) return { meta: { changes: 0 } };
+            r.status = 'sending'; r.attempts += 1; return { meta: { changes: 1 } };
+          }
+          if (/UPDATE tenant_reports/.test(sql)) {
+            const r = reports.get(args[3] + '|' + args[4]);
+            if (r) { r.status = args[0]; r.detail = args[1]; }
+            return { meta: { changes: 1 } };
+          }
+          return { meta: { changes: 1 } };
+        },
+      }) };
+    },
+    batch: async (stmts) => stmts.map((st) => ({
+      results: (stats[/FROM conversations/.test(st.sql) ? 'conv' : /FROM leads/.test(st.sql) ? 'leads' : 'citas'] || []),
+    })),
+  };
+}
+
+test('informe semanal: se manda una vez por semana, el sin-Telegram es un skip visible y va de cinco en cinco', async () => {
+  const tenants = [
+    { id: 't-a', slug: 'a', name: 'Alfa', telegram_chat_id: '-100', telegram_bot_token_enc: null },
+    { id: 't-b', slug: 'b', name: 'Beta', telegram_chat_id: null, telegram_bot_token_enc: null },
+  ];
+  const db = reportDb(tenants, {
+    conv: [{ tenant_id: 't-a', convs: 14, unans: 3, prev_convs: 11 }],
+    leads: [{ tenant_id: 't-a', leads: 6, prev_leads: 6 }],
+    citas: [{ tenant_id: 't-a', citas: 2, prev_citas: 1 }],
+  });
+  const env = { DB: db, TELEGRAM_TOKEN: 'tg' };
+  const sent = [];
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = async (url, init) => {
+    if (String(url).includes('api.telegram.org')) { sent.push(JSON.parse(init.body)); return new Response(JSON.stringify({ ok: true }), { status: 200 }); }
+    return new Response('{}', { status: 200 });
+  };
+  try {
+    await testing.sendWeeklyReports(env, LUNES_TARDE);
+    assert.equal(sent.length, 1, 'solo el que tiene Telegram recibe');
+    assert.equal(sent[0].chat_id, '-100');
+    assert.match(sent[0].text, /Conversaciones: <b>14<\/b>/);
+    assert.match(sent[0].text, /▲ 3 más que la semana anterior/, 'la semana anterior ya estaba registrada');
+    // El que no tiene Telegram es un SKIP con su motivo, no un silencio.
+    const key = (id) => id + '|' + testing.reportPeriod(LUNES_TARDE).key;
+    assert.equal(db.reports.get(key('t-b')).status, 'skipped');
+    assert.equal(db.reports.get(key('t-b')).detail, 'telegram_not_configured');
+    assert.equal(db.reports.get(key('t-a')).status, 'sent');
+
+    // Segundo tick del cron en la misma ventana: NI UN mensaje más. La idempotencia vive
+    // en la tabla, no en la hora a la que se dispara el cron.
+    await testing.sendWeeklyReports(env, LUNES_TARDE);
+    assert.equal(sent.length, 1, 'un cron que se dispara dos veces no manda dos informes');
+
+    // Fuera de la ventana no hace nada, ni siquiera consultar.
+    let tocado = false;
+    await testing.sendWeeklyReports({ DB: { prepare() { tocado = true; return { bind: () => ({ all: async () => ({ results: [] }) }) }; } } }, '2026-09-16T10:00:00.000Z');
+    assert.equal(tocado, false, 'fuera de la ventana no toca D1');
+  } finally { globalThis.fetch = realFetch; }
+});
+
+test('informe semanal: un fallo de Telegram queda como failed y se reintenta, con tope', async () => {
+  const tenants = [{ id: 't-a', slug: 'a', name: 'Alfa', telegram_chat_id: '-100', telegram_bot_token_enc: null }];
+  const db = reportDb(tenants, {});
+  const env = { DB: db, TELEGRAM_TOKEN: 'tg' };
+  const realFetch = globalThis.fetch;
+  let intentos = 0;
+  globalThis.fetch = async (url) => {
+    if (String(url).includes('api.telegram.org')) { intentos++; return new Response('nope', { status: 500 }); }
+    return new Response('{}', { status: 200 });
+  };
+  try {
+    const key = 't-a|' + testing.reportPeriod(LUNES_TARDE).key;
+    for (let i = 0; i < 5; i++) await testing.sendWeeklyReports(env, LUNES_TARDE);
+    assert.equal(db.reports.get(key).status, 'failed');
+    // Tope de 3: sin él, un fallo permanente reintentaría en cada tick del cron durante
+    // las 24 h de la ventana (288 intentos).
+    assert.equal(intentos, 3, 'tres intentos y para');
+  } finally { globalThis.fetch = realFetch; }
 });
