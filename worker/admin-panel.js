@@ -58,6 +58,28 @@ const miles=(n)=>new Intl.NumberFormat('es-ES').format(n);
 function bar(label,val,pct,right,cls){return '<div class="brow'+(cls?' '+cls:'')+'"><span>'+esc(label)+'</span><span class="bt"><i data-w="'+Math.max(1,Math.min(100,pct))+'"></i></span><span class="bv">'+esc(right)+'</span></div>'}
 // Consumo de Cloudflare frente a los límites del plan gratuito.
 const INFRA_LABELS={worker_requests:['Peticiones al worker','worker.requests'],kv_reads:['Lecturas de KV','kv.read'],kv_writes:['Escrituras de KV','kv.write'],kv_lists:['Listados de KV','kv.list'],kv_deletes:['Borrados de KV','kv.delete'],d1_rows_read:['Filas leídas en D1','d1.rowsRead'],d1_rows_written:['Filas escritas en D1','d1.rowsWritten']};
+// Saldo de IA del mes, en el panel del CLIENTE. Nunca coste: eso es la tarjeta velai-only.
+// El saldo baja hasta cero (decisión de Juan, 2026-08-26) y al llegar NO corta nada — así
+// que la tarjeta lo dice con letra clara, o el primer cliente que lo cruce va a pensar que
+// le llega una factura.
+const MESES=['enero','febrero','marzo','abril','mayo','junio','julio','agosto','septiembre','octubre','noviembre','diciembre'];
+async function loadSaldo(){if(!ME||ME.role==='velai')return;
+ try{const d=await api('/api/admin/ai-balance');
+  $('#saldoTitle').textContent='Saldo de IA · '+(MESES[Number(String(d.month).slice(5,7))-1]||d.month);
+  $('#saldoLeft').textContent=miles(d.remaining)+' tokens';
+  $('#saldoOf').textContent='de '+miles(d.included)+' de este mes';
+  // La barra pinta lo CONSUMIDO, no lo que queda: es lo que se lee de un vistazo.
+  $('#saldoBar').className='bigbar'+(d.pct>=80?' hot':'');
+  $('#saldoBar').innerHTML='<i data-w="'+Math.max(1,d.pct)+'"></i>';
+  $('#saldoToday').textContent='Consumido hoy: '+miles(d.usedToday)+' tokens';
+  $('#saldoPct').textContent=d.pct+'% del mes';
+  const max=Math.max(1,...(d.serie||[]).map(x=>x.n));
+  $('#saldoChart').innerHTML=(d.serie||[]).map(x=>'<div class="bar" data-h="'+(x.n===0?6:Math.max(12,Math.round(x.n/max*100)))+'" title="'+esc(x.d)+': '+miles(x.n)+' tokens"></div>').join('');
+  $('#saldoNote').textContent=d.over
+   ?'Has pasado del saldo incluido este mes. No se ha cortado nada ni se te cobra de más: lo revisamos juntos y ajustamos tu plan si hace falta.'
+   :'Al agotarse no se corta nada ni se te cobra de más: es un contador para que sepas cuánto usas.';
+  paint($('#saldoCard'))}
+ catch(e){$('#saldoLeft').textContent='—';$('#saldoNote').textContent='No se pudo cargar el saldo: '+(TERRS[e.message]||e.message)}}
 async function loadInfra(){if(!ME||ME.role!=='velai')return;
  try{const d=await api('/api/admin/infra-usage');
   if(d.error){$('#infraNote').textContent='';
@@ -208,7 +230,7 @@ const VIEWS={dashboard:'#viewDashboard',leads:'#viewLeads',conversaciones:'#view
 document.querySelectorAll('.tab[data-view]').forEach(b=>b.onclick=()=>{document.querySelectorAll('.tab[data-view]').forEach(x=>{x.classList.toggle('is-on',x===b);x.setAttribute('aria-selected',x===b?'true':'false')});const v=b.dataset.view;
  Object.entries(VIEWS).forEach(([k,sel])=>{$(sel).hidden=k!==v});
  inboxPolling(v==='conversaciones');
- if(v==='dashboard'){loadStats();loadAiUsage();loadInfra()}else if(v==='leads'){load();loadEscalations()}else if(v==='conversaciones'){loadInbox()}else if(v==='tenants')loadTenantList();else if(v==='config'){loadAdmins();loadConfig()}else if(v==='calendario'){calMenu()}else if(v==='conexiones'){cxMenu()}else if(v==='canales'){loadChannels()}});
+ if(v==='dashboard'){loadStats();loadAiUsage();loadInfra();loadSaldo()}else if(v==='leads'){load();loadEscalations()}else if(v==='conversaciones'){loadInbox()}else if(v==='tenants')loadTenantList();else if(v==='config'){loadAdmins();loadConfig()}else if(v==='calendario'){calMenu()}else if(v==='conexiones'){cxMenu()}else if(v==='canales'){loadChannels()}});
 // ── Conexiones (SPEC-CONEXIONES PR1): Telegram de avisos en autoservicio ──
 // El cliente abre SU tarjeta; Velai elige tenant con el selector de la cabecera.
 let cxTenant=null;
@@ -533,7 +555,7 @@ $('#tenantModal').addEventListener('cancel',e=>{if(!confirmDiscard())e.preventDe
 // channel_address NO está aquí a propósito: dejó de ser un campo que se teclea. El alta
 // lo deriva del slug en el worker y se promueve a web:<slug> al marcar Activo; los canales
 // de mensajería se dan de alta en Conexiones. La ficha solo los MUESTRA (renderChannels).
-const TF={name:'#tName',slug:'#tSlug',twilio_from:'#tFrom',team_whatsapp:'#tTeam',telegram_chat_id:'#tChat',lead_template_sid:'#tTpl',twilio_subaccount_sid:'#tSub',waba_id:'#tWaba',meta_partner_status:'#tPartner',system_prompt:'#tPrompt',bot_name:'#tBotName',brand_name:'#tBrandName',logo_url:'#tLogo',brand_color:'#tColor1',brand_color_2:'#tColor2',greeting:'#tGreeting',greeting_en:'#tGreetingEn',placeholder:'#tPlaceholder',wa_number:'#tWa',theme:'#tTheme'};
+const TF={name:'#tName',slug:'#tSlug',twilio_from:'#tFrom',team_whatsapp:'#tTeam',telegram_chat_id:'#tChat',lead_template_sid:'#tTpl',twilio_subaccount_sid:'#tSub',waba_id:'#tWaba',meta_partner_status:'#tPartner',system_prompt:'#tPrompt',bot_name:'#tBotName',brand_name:'#tBrandName',logo_url:'#tLogo',brand_color:'#tColor1',brand_color_2:'#tColor2',greeting:'#tGreeting',greeting_en:'#tGreetingEn',placeholder:'#tPlaceholder',wa_number:'#tWa',theme:'#tTheme',ai_monthly_tokens:'#tAiMonth',ai_daily_limit:'#tAiDay'};
 // chips_json y web_origins van aparte: en el form son una línea por valor; al worker
 // viajan como array (el servidor valida y guarda JSON).
 function jsonToLines(json){try{const a=JSON.parse(json||'[]');return Array.isArray(a)?a.join('\n'):''}catch(e){return ''}}
@@ -796,7 +818,7 @@ let ME={role:'velai'};
  else loadTenants();
  // Arranca en Dashboard (es la primera pestaña): sus datos primero, y los leads en
  // segundo plano para que la bandeja esté lista al pulsar Leads.
- loadStats();loadAiUsage();loadInfra();load();loadEscalations()})();
+ loadStats();loadAiUsage();loadInfra();loadSaldo();load();loadEscalations()})();
 // Sincronización del sender desde Twilio (solo Velai): rellena la fila tras el
 // Self Sign-up y repara el webhook si quedó en el default de Twilio.
 $('#waSync').onclick=async()=>{$('#waSyncOut').textContent='sincronizando…';

@@ -180,6 +180,15 @@ tr[data-id]:hover,tr[data-tid]:hover{background:rgba(255,107,26,.05)}
 /* Rol cliente: la interfaz oculta lo que no le aplica, pero la DEFENSA es del worker
    (cada endpoint valida el scope por su cuenta — SPEC-HANDOFF §B.3.5). */
 body.cliente .velai-only{display:none}
+/* El inverso: cosas que SOLO ve el cliente. El saldo de IA es para él — Velai tiene la
+   tarjeta de coste en dólares, que jamás debe salir del panel de Velai. */
+.cliente-only{display:none}body.cliente .cliente-only{display:block}
+.saldo{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;margin-top:6px}
+.saldo .n{font-family:var(--font-d);font-weight:900;font-size:30px;letter-spacing:-.02em}
+.saldo .of{color:var(--muted)}
+.bigbar{height:12px;border-radius:999px;background:var(--line);overflow:hidden;margin-top:12px}
+.bigbar i{display:block;height:100%;border-radius:999px;background:linear-gradient(90deg,var(--orange),var(--orange2))}
+.bigbar.hot i{background:linear-gradient(90deg,var(--amber),var(--bad))}
 body.cliente #tenantFilter,body.cliente #mTenantsCard{display:none}
 body.cliente th:nth-child(2),body.cliente td:nth-child(2){display:none}
 #escalations{display:flex;gap:8px;flex-wrap:wrap;margin:0 0 14px}
@@ -474,6 +483,12 @@ body.cliente .cliente-only{display:flex}
 <div class="stat" id="mFailCard"><b>Avisos fallidos · 7 días</b><span class="n" id="mFail">—</span></div>
 <div class="stat" id="mTenantsCard"><b>Clientes activos</b><span class="n" id="mTenants">—</span></div>
 </div>
+<div class="chartcard cliente-only mt12" id="saldoCard"><b id="saldoTitle">Saldo de IA</b>
+<div class="saldo"><span class="n" id="saldoLeft">—</span><span class="of" id="saldoOf"></span></div>
+<div class="bigbar" id="saldoBar"><i data-w="0"></i></div>
+<div class="chartlabels"><span id="saldoToday"></span><span id="saldoPct"></span></div>
+<div id="saldoChart" class="mt6"></div>
+<small class="muted" id="saldoNote"></small></div>
 <div class="chartcard"><b>Leads por día · 14 días</b><div id="chart"></div><div class="chartlabels"><span id="chartFrom"></span><span id="chartTo"></span></div></div>
 <div class="grid2 mt12">
 <div class="chartcard"><b>Leads por canal · 30 días</b><div id="canalRows" class="mt6 muted">—</div></div>
@@ -704,7 +719,16 @@ body.cliente .cliente-only{display:flex}
 <small class="muted field-err" data-f="system_prompt"></small></div>
 <div class="card mt12"><b>Probar el borrador (no guarda nada)</b>
 <div class="note mt6"><input id="tTestMsg" placeholder="Mensaje de prueba, p. ej. «hola, ¿tenéis hueco mañana?»" class="grow"><button class="btn alt" id="tenantPreview" type="button">Probar</button></div>
-<article id="tPreviewOut" class="muted prewrap"></article></div></section>
+<article id="tPreviewOut" class="muted prewrap"></article></div>
+<div class="card mt12"><b>Consumo de IA de este cliente</b>
+<p class="muted mt6">El <b>saldo mensual</b> es lo que el cliente ve en SU panel, y no corta nada: es un contador. El <b>cupo diario</b> sí corta (429) y existe contra abuso — avisa a Velai al 80%. Vacíos = los valores por defecto del worker.</p>
+<p class="muted">Ojo: el contexto de arriba viaja en CADA turno, así que un prompt largo consume saldo en cada mensaje. Medido el 2026-08-26: GOgestión gasta 4.872 tokens por llamada y Diálogos 3.148 — la diferencia es el tamaño del prompt, no el tráfico.</p>
+<div class="actions actions0">
+<label class="muted">Saldo mensual (tokens) <input id="tAiMonth" type="number" min="10000" step="100000" placeholder="5000000" class="inpill w150"></label>
+<label class="muted">Cupo diario (llamadas) <input id="tAiDay" type="number" min="1" step="50" placeholder="1500" class="inpill w150"></label>
+</div>
+<small class="muted field-err" data-f="ai_monthly_tokens"></small>
+<small class="muted field-err" data-f="ai_daily_limit"></small></div></section>
 <section class="tpane" data-tp="marca" hidden>
 <div class="card"><b>Marca del widget (chat en la web del cliente)</b>
 <p class="muted mt6">Lo que ve el visitante: logo, nombre, saludo, colores. Vacío = marca de Velai (hirevai.com no cambia). Se sirve por <code>/widget/boot</code> y se aplica sin deploy (caché 5 min).</p>
