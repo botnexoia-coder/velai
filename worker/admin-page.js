@@ -304,8 +304,12 @@ dialog::backdrop{background:rgba(5,3,6,.78);backdrop-filter:blur(3px)}
 /* Bandeja de dos paneles: lista a la izquierda, hilo a la derecha. Altura ACOTADA a
    propósito — el hilo tiene que scrollar dentro de su panel, no empujar la página. */
 .inbox{display:grid;grid-template-columns:320px minmax(0,1fr);border:1px solid var(--border2);border-radius:var(--r);overflow:hidden;height:min(72vh,760px);background:var(--bg2)}
-.inbox-l{border-right:1px solid var(--border2);display:flex;flex-direction:column;min-width:0}
-.inbox-list{overflow-y:auto;flex:1}
+/* min-height:0 en TODA la cadena, no solo min-width. Un hijo de grid/flex tiene
+   min-height:auto por defecto y NO puede encogerse por debajo de su contenido: sin esto el
+   log nunca activa su scroll, crece entero y empuja el cajón de escritura fuera de la caja,
+   donde el overflow:hidden de .inbox lo recorta. Era justo lo que se veía. */
+.inbox-l{border-right:1px solid var(--border2);display:flex;flex-direction:column;min-width:0;min-height:0}
+.inbox-list{overflow-y:auto;flex:1;min-height:0}
 .chtabs{display:flex;gap:6px;padding:10px;border-bottom:1px solid var(--border2);flex-wrap:wrap}
 .chtab{border:1px solid var(--border2);background:none;color:var(--muted);border-radius:999px;padding:5px 11px;font-size:12px;font-weight:600;cursor:pointer;display:inline-flex;gap:6px;align-items:center}
 .chtab.is-on{border-color:var(--orange);color:var(--orange)}
@@ -320,9 +324,9 @@ dialog::backdrop{background:rgba(5,3,6,.78);backdrop-filter:blur(3px)}
 .cvwhen{font-size:11px;color:var(--muted2);white-space:nowrap}
 .cvprev{display:block;font-size:12px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-top:2px}
 .cvdot{width:8px;height:8px;border-radius:50%;background:var(--orange);flex:0 0 8px;margin-top:6px}
-.inbox-r{display:flex;flex-direction:column;min-width:0}
+.inbox-r{display:flex;flex-direction:column;min-width:0;min-height:0}
 .thread-empty{flex:1;display:grid;place-items:center;color:var(--muted2);padding:20px;text-align:center}
-.thread{display:flex;flex-direction:column;min-height:0;height:100%}
+.thread{display:flex;flex-direction:column;min-height:0;flex:1}
 /* Misma trampa que .tgstep de arriba: una clase que fija display GANA al atributo
    [hidden], así que sin esto los dos paneles se dibujaban a la vez, el hilo empujaba al
    cajón de escritura fuera de la caja y el log se quedaba sin scroll propio. */
