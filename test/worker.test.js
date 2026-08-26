@@ -2098,7 +2098,7 @@ test('telegram: GET de estado y DELETE de desvinculación (rol cliente, solo lo 
   const got = await (await testing.adminRouter(adminReq(path), env, ctx, path, new URL('https://x' + path), {}, OWN)).json();
   // weeklyReport viaja con la tarjeta de Telegram: es por donde llega el informe (H1 §2).
   // Sin columna en la fila cuenta como ACTIVADO, igual que el default de la migración.
-  assert.deepEqual(got.telegram, { linked: true, title: 'Mi grupo', linked_at: '2026-08-21T10:00:00Z', botUsername: null, whitelabel: false, topics: [], weeklyReport: true });
+  assert.deepEqual(got.telegram, { linked: true, title: 'Mi grupo', linked_at: '2026-08-21T10:00:00Z', botUsername: null, whitelabel: false, topics: [], weeklyReport: true, lastReport: null });
   const del = await (await testing.adminRouter(adminReq(path, { method: 'DELETE' }), env, ctx, path, new URL('https://x' + path), {}, OWN)).json();
   assert.equal(del.ok, true);
   const cleared = db.writes.find((w) => w.sql.includes('SET telegram_chat_id=NULL'));
@@ -3450,5 +3450,53 @@ test('informe semanal: un fallo de Telegram queda como failed y se reintenta, co
     // Tope de 3: sin él, un fallo permanente reintentaría en cada tick del cron durante
     // las 24 h de la ventana (288 intentos).
     assert.equal(intentos, 3, 'tres intentos y para');
+  } finally { globalThis.fetch = realFetch; }
+});
+
+test('prueba del informe: manda los últimos 7 días marcado como PRUEBA, y no consume el envío del lunes', async () => {
+  const TID = '00000000-0000-4000-8000-0000000000e1';
+  const row = { id: TID, slug: 'mio', name: 'Mi Negocio', telegram_chat_id: '-777', telegram_bot_token_enc: null };
+  const writes = [];
+  const db = {
+    prepare(sql) {
+      return { sql, bind: (...args) => ({
+        sql, args,
+        first: async () => (/FROM tenants WHERE id=\?/.test(sql) ? row : null),
+        all: async () => ({ results: [] }),
+        run: async () => { writes.push(sql); return { meta: { changes: 1 } }; },
+      }) };
+    },
+    batch: async (stmts) => stmts.map((st) => ({
+      results: /FROM conversations/.test(st.sql) ? [{ tenant_id: TID, convs: 9, unans: 2, prev_convs: 4 }]
+        : /FROM leads/.test(st.sql) ? [{ tenant_id: TID, leads: 3, prev_leads: 1 }]
+          : [{ tenant_id: TID, citas: 1, prev_citas: 0 }],
+    })),
+  };
+  const env = { DB: db, KV: mapKV(), TELEGRAM_TOKEN: 'tg' };
+  const ctx = { waitUntil() {} };
+  const OWN = { role: 'cliente', tenantId: TID, email: 'cliente@x.com' };
+  const path = `/api/admin/tenants/${TID}/report/test`;
+  const sent = [];
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = async (url, init) => {
+    if (String(url).includes('api.telegram.org')) { sent.push(JSON.parse(init.body)); return new Response(JSON.stringify({ ok: true }), { status: 200 }); }
+    return new Response('{}', { status: 200 });
+  };
+  try {
+    const res = await testing.adminRouter(adminReq(path, { method: 'POST', body: '{}' }), env, ctx, path, new URL('https://x' + path), {}, OWN);
+    assert.equal((await res.json()).ok, true);
+    assert.equal(sent.length, 1);
+    assert.equal(sent[0].chat_id, '-777');
+    assert.match(sent[0].text, /🧪 <b>PRUEBA<\/b>/, 'va marcado: nadie lo confunde con el informe del lunes');
+    assert.match(sent[0].text, /Conversaciones: <b>9<\/b>/);
+    // Lo importante: una prueba NO puede consumir el envío real de la semana.
+    assert.ok(!writes.some((w) => /tenant_reports/.test(w)), 'no toca tenant_reports');
+    // El de otro tenant es 404, nunca 403.
+    const ajeno = `/api/admin/tenants/00000000-0000-4000-8000-0000000000e9/report/test`;
+    await assert.rejects(testing.adminRouter(adminReq(ajeno, { method: 'POST', body: '{}' }), env, ctx, ajeno, new URL('https://x' + ajeno), {}, OWN), (e) => e.status === 404);
+    // Sin grupo vinculado no se finge que salió: 400 con el motivo que el panel ya traduce.
+    row.telegram_chat_id = null;
+    await assert.rejects(testing.adminRouter(adminReq(path, { method: 'POST', body: '{}' }), env, ctx, path, new URL('https://x' + path), {}, OWN),
+      (e) => e.status === 400 && e.code === 'telegram_no_vinculado');
   } finally { globalThis.fetch = realFetch; }
 });

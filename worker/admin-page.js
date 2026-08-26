@@ -594,8 +594,9 @@ body.cliente .cliente-only{display:flex}
 <small class="muted field-err" data-f="team_whatsapp"></small></div>
 <div class="card mt12"><b class="tgh tgh-sm">Informe semanal</b>
 <p class="tgsub">Cada lunes por la mañana, un resumen de la semana en tu grupo de Telegram: conversaciones, leads, citas y las preguntas que Vai no supo contestar. Llega sin entrar al panel — y se apaga cuando quieras.</p>
-<div class="actions actions0"><span id="wrState" class="flag off">—</span><button class="btn alt btnsm" id="wrToggle" type="button">—</button></div>
-<small class="muted" id="wrNote"></small></div>
+<div class="actions actions0"><span id="wrState" class="flag off">—</span><button class="btn alt btnsm" id="wrToggle" type="button">—</button><button class="btn alt btnsm" id="wrTest" type="button">Enviar una prueba ahora</button></div>
+<small class="muted" id="wrNote"></small>
+<small class="muted" id="wrLast"></small></div>
 <div class="card mt12 velai-only"><b>Webhook del bot (solo Velai, una vez)</b>
 <p class="muted mt6">Registra el webhook de Telegram apuntando al worker. OJO: con el webhook activo, getUpdates deja de funcionar para ese bot.</p>
 <div class="actions actions0"><button class="btn alt" id="tgSetup" type="button">Registrar webhook</button><span id="tgSetupOut" class="muted"></span></div></div>

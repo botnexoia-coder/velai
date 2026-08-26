@@ -2574,6 +2574,8 @@ function clienteAllowed(path, method) {
   // números y nombres de otros clientes.
   if (/^\/api\/admin\/tenants\/[0-9a-f-]+\/channels$/i.test(path) && method === 'GET') return true;
   if (/^\/api\/admin\/tenants\/[0-9a-f-]+\/notify$/i.test(path) && method === 'PATCH') return true;
+  // Probar SU informe semanal en SU grupo: el handler exige que el :id sea el suyo.
+  if (/^\/api\/admin\/tenants\/[0-9a-f-]+\/report\/test$/i.test(path) && method === 'POST') return true;
   // Su logo es SU marca: el cliente lo sube desde Conexiones (el handler exige que el
   // :id sea el suyo — ajeno = 404) y de paso se aplica a su foto de WhatsApp.
   if (/^\/api\/admin\/tenants\/[0-9a-f-]+\/logo$/i.test(path) && method === 'POST') return true;
@@ -3198,6 +3200,40 @@ async function adminRouter(request, env, ctx, path, url, config, scope) {
     return json({ ok: true }, 200, NO_STORE);
   }
 
+  // Enviar el informe AHORA, como prueba. Sin esto, la única forma de comprobar que el
+  // informe semanal funciona es esperar al lunes — inaceptable para algo que depende de
+  // que el grupo esté vinculado y el bot tenga permisos. Manda los ÚLTIMOS 7 DÍAS (no la
+  // semana cerrada: con el historial recién arrancado esa saldría vacía) y va marcado como
+  // prueba para que nadie lo confunda con el informe del lunes.
+  // NO toca tenant_reports: una prueba no puede consumir el envío real de la semana.
+  const reportTestMatch = path.match(/^\/api\/admin\/tenants\/([0-9a-f-]+)\/report\/test$/i);
+  if (reportTestMatch && request.method === 'POST') {
+    if (!UUID_RE.test(reportTestMatch[1])) throw new HttpError(404, 'not_found');
+    const tenantId = reportTestMatch[1];
+    if (scope.role !== 'velai' && scope.tenantId !== tenantId) throw new HttpError(404, 'not_found');
+    // Un botón que escribe en el grupo del cliente no se pulsa en bucle.
+    if (await rateLimited(env, `${actor}:${tenantId}`, 'reporttest', 5)) throw new HttpError(429, 'rate_limited');
+    const tenantRow = await env.DB.prepare('SELECT id, slug, name, telegram_chat_id, telegram_bot_token_enc FROM tenants WHERE id=?').bind(tenantId).first();
+    if (!tenantRow) throw new HttpError(404, 'not_found');
+    if (!tenantRow.telegram_chat_id) throw new HttpError(400, 'telegram_no_vinculado');
+    const ms = Date.now();
+    const period = {
+      start: new Date(ms - 7 * 86400000).toISOString(),
+      end: new Date(ms).toISOString(),
+      prev: new Date(ms - 14 * 86400000).toISOString(),
+    };
+    const stats = await weeklyStats(env, [tenantId], period);
+    const st = stats.get(tenantId);
+    const comparable = period.prev.slice(0, 10) >= CONV_TRACKING_SINCE;
+    const text = '🧪 <b>PRUEBA</b> — así llegará tu informe cada lunes por la mañana.\n\n'
+      + weeklyReportText(tenantRow, st, period, comparable);
+    const outcome = await sendTelegramText(env, text, tenantRow.telegram_chat_id,
+      { allowFallback: false, botToken: await tenantTelegramToken(env, tenantRow) });
+    if (!outcome.ok) throw new HttpError(502, clean(outcome.error || 'telegram_failed', 40));
+    console.log(JSON.stringify({ level: 'info', code: 'weekly_report_test', tenant: tenantRow.slug, actor_role: scope.role }));
+    return json({ ok: true, stats: st }, 200, NO_STORE);
+  }
+
   // ── Telegram del tenant (SPEC-CONEXIONES PR1): vinculación en autoservicio ──
   if (path === '/api/admin/telegram/setup' && request.method === 'POST') {
     // Registra el webhook del bot (idempotente; solo Velai). OJO operativo: con el
@@ -3359,7 +3395,14 @@ async function adminRouter(request, env, ctx, path, url, config, scope) {
       // botUsername sí; el token cifrado JAMÁS sale del worker.
       let topics = [];
       try { topics = JSON.parse(tenantRow.telegram_topics || '[]'); } catch (_) {}
-      return json({ telegram: { linked: Boolean(tenantRow.telegram_chat_id), title: tenantRow.telegram_chat_title || null, linked_at: tenantRow.telegram_linked_at || null, botUsername: tenantRow.telegram_bot_username || null, whitelabel: Boolean(tenantRow.telegram_whitelabel), topics: Array.isArray(topics) ? topics : [], weeklyReport: tenantRow.weekly_report !== 0 } }, 200, NO_STORE);
+      // El último informe, con su estado. «¿Salió?» se responde en el panel y no abriendo
+      // Telegram — y un 'skipped'/'failed' deja de ser invisible. En try/catch: si la
+      // tabla aún no existe (deploy antes de migrar), la tarjeta simplemente no lo enseña.
+      let lastReport = null;
+      try {
+        lastReport = await env.DB.prepare('SELECT period_start, status, detail, sent_at FROM tenant_reports WHERE tenant_id=? ORDER BY period_start DESC LIMIT 1').bind(tenantId).first();
+      } catch (_) {}
+      return json({ telegram: { linked: Boolean(tenantRow.telegram_chat_id), title: tenantRow.telegram_chat_title || null, linked_at: tenantRow.telegram_linked_at || null, botUsername: tenantRow.telegram_bot_username || null, whitelabel: Boolean(tenantRow.telegram_whitelabel), topics: Array.isArray(topics) ? topics : [], weeklyReport: tenantRow.weekly_report !== 0, lastReport: lastReport || null } }, 200, NO_STORE);
     }
     if (!tgMatch[2] && request.method === 'DELETE') {
       const now = new Date().toISOString();

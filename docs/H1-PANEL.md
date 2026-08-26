@@ -224,6 +224,23 @@ existe, dentro de una **ventana** de 24 h que abre el lunes a las 07:00 UTC:
 Los crons de Cloudflare son UTC: son las 09:00 en horario de verano y las 08:00 en
 invierno. Se acepta el desfase de una hora; no merece lógica de husos.
 
+### Probarlo sin esperar al lunes — hueco que faltaba
+
+Tal como se desplegó primero, la única forma de comprobar que el informe funciona era
+esperar al lunes. **Eso es inaceptable** para algo que depende de que el grupo esté
+vinculado y de que el bot tenga permisos: si falla, se descubre una semana tarde y delante
+del cliente. Añadido el 2026-08-26:
+
+- **«Enviar una prueba ahora»** en Conexiones → Informe semanal:
+  `POST /api/admin/tenants/:id/report/test`. Manda los **últimos 7 días** (no la semana
+  cerrada: con el historial recién arrancado esa sale vacía), marcado con `🧪 PRUEBA`, y
+  **no toca `tenant_reports`** — una prueba no puede consumir el envío real de la semana.
+  Con límite de 5 por minuto: un botón que escribe en el grupo del cliente no se pulsa en
+  bucle.
+- **El estado del último informe a la vista** en la misma tarjeta: «Último informe (semana
+  del 24/08): entregado / no enviado / falló». «¿Salió?» se responde en el panel y no
+  abriendo Telegram, y un `skipped` deja de ser invisible.
+
 ### Idempotencia, baja y honestidad
 
 `tenant_reports` (PK `tenant_id + period_start`) se **reserva antes de enviar**

@@ -226,6 +226,13 @@ async function loadConexiones(){$('#tgLinkBox').hidden=true;
   $('#wrState').className='flag '+(cxWeekly?'ok':'off');
   $('#wrToggle').textContent=cxWeekly?'Desactivar':'Activar';
   $('#wrNote').textContent=t.linked?'':'Vincula primero el grupo de Telegram: es por donde llega el informe.';
+  $('#wrTest').hidden=!t.linked;
+  // «¿Salió el informe?» se responde aquí y no abriendo Telegram. Un skipped o un failed
+  // deja de ser invisible.
+  const WR_ST={sent:'entregado',skipped:'no enviado',failed:'falló',sending:'en curso'};
+  $('#wrLast').textContent=t.lastReport
+   ?('Último informe (semana del '+esc(t.lastReport.period_start)+'): '+(WR_ST[t.lastReport.status]||t.lastReport.status)+(t.lastReport.detail?' — '+esc(t.lastReport.detail):''))
+   :(t.linked?'Todavía no se ha enviado ninguno: el primero sale el lunes por la mañana.':'');
   $('#tgTopics').innerHTML=(t.topics&&t.topics.length)
    ?t.topics.map(tp=>'<div class="mb6"><span class="flag off">'+esc(tp.name)+' <a href="#" data-tdel="'+esc(String(tp.thread_id))+'" title="Quitar del enrutado">✕</a></span> <span class="muted">'+(tp.description?esc(tp.description):'sin descripción')+' · <a href="#" data-tdesc="'+esc(String(tp.thread_id))+'">editar</a></span></div>').join('')
    :'Aún no hay temas: crea el primero arriba.';
@@ -358,6 +365,11 @@ $('#wrToggle').onclick=async()=>{const next=!cxWeekly;
  try{await api('/api/admin/tenants/'+cxTenant+'/notify',{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({weekly_report:next})});
   toast(next?'Informe semanal activado ✓ (llega el lunes)':'Informe semanal desactivado ✓');loadConexiones()}
  catch(e){toast('No se pudo cambiar el informe: '+(TERRS[e.message]||e.message),false)}};
+$('#wrTest').onclick=async()=>{$('#wrTest').disabled=true;
+ try{await api('/api/admin/tenants/'+cxTenant+'/report/test',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'});
+  toast('Prueba enviada ✓ — míralo en tu grupo de Telegram')}
+ catch(e){toast('La prueba NO salió: '+(TERRS[e.message]||e.message),false)}
+ finally{$('#wrTest').disabled=false}};
 $('#tgSetup').onclick=async()=>{try{const d=await api('/api/admin/telegram/setup',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'});
  $('#tgSetupOut').textContent='Webhook registrado ✓ (bot @'+(d.botUsername||'?')+')'}
  catch(e){$('#tgSetupOut').textContent='Error: '+(TERRS[e.message]||e.message)}};
