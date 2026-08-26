@@ -1064,8 +1064,8 @@ const EMPTY_TWIML = '<?xml version="1.0" encoding="UTF-8"?><Response></Response>
 // aviso llegaba de noche, el cliente final se quedaba en silencio cuatro horas justo
 // después de pedir ayuda. Ahora solo se cede el turno si de verdad hay alguien.
 // Devuelve si escaló, porque el que llama tiene que capturar el lead si no.
-async function escalateToHuman(env, tenant, from, lastMessage, convId = null) {
-  if (!(await advisorAvailable(env, tenant))) {
+async function escalateToHuman(env, tenant, from, lastMessage, convId = null, options = {}) {
+  if (!options.assumeAvailable && !(await advisorAvailable(env, tenant))) {
     console.log(JSON.stringify({ level: 'info', code: 'handoff_declined', tenant: tenant.slug }));
     return false;
   }
@@ -1073,7 +1073,9 @@ async function escalateToHuman(env, tenant, from, lastMessage, convId = null) {
   // gobierna la guarda del webhook y la vista de Escalaciones. Si el estado nuevo se
   // comportara mal, el fallo es «el bot se queda callado», nunca «el bot habla por encima
   // de una persona» — y de eso se sale con el botón Reanudar de siempre.
-  if (env.KV) { try { await env.KV.put(`pause:${tenant.id}:${from}`, '1', { expirationTtl: 4 * 3600 }); } catch (_) {} }
+  // En el canal web manda el ESTADO, no la clave de KV: la guarda de handleChat mira
+  // conv.state, y una escritura de KV por escalada es justo lo que no sobra.
+  if (env.KV && !options.stateOnly) { try { await env.KV.put(`pause:${tenant.id}:${from}`, '1', { expirationTtl: 4 * 3600 }); } catch (_) {} }
   if (convId && env.DB) {
     try {
       await env.DB.prepare("UPDATE conversations SET state='esperando', state_at=?, agent_email=NULL WHERE id=? AND state='bot'")
@@ -1685,6 +1687,36 @@ function calendarExecutor(env, tenant, cal, meta) {
   };
 }
 
+// La vuelta del canal web (migración 0026). El widget pregunta por lo nuevo SOLO cuando la
+// conversación no la lleva el bot: con la IA atendiendo —el 99% del tráfico— no hay ni una
+// petición extra, y eso es lo que hace que esto no se coma el plan gratuito de Workers.
+async function handleChatPoll(request, env, cors, url) {
+  if (!env.DB) throw new HttpError(503, 'conversation_storage_not_configured');
+  const cid = clean(url.searchParams.get('conversationId'), 40);
+  if (!UUID_RE.test(cid)) throw new HttpError(400, 'invalid_conversation_id');
+  // Limitador EN MEMORIA, no en KV: una escritura de KV por sondeo sería el peor uso
+  // posible del recurso más escaso del sistema (docs/VOLUMEN-Y-ALMACENAMIENTO.md).
+  if (memLimited(`poll:${cid}`, 40)) throw new HttpError(429, 'rate_limited');
+  const tenant = await webTenant(env, { tenant: clean(url.searchParams.get('tenant'), 40) });
+  const row = await env.DB.prepare(`SELECT id, state, state_at FROM conversations
+     WHERE tenant_id=? AND channel='web' AND external_id=? ORDER BY last_at DESC LIMIT 1`)
+    .bind(tenant.id, cid).first();
+  // Sin conversación no se dice nada más: quien sondea un id inventado recibe lo mismo que
+  // quien sondea uno recién creado.
+  if (!row) return json({ state: 'bot', messages: [] }, 200, cors);
+  const after = Math.max(0, Math.min(1e12, Number(url.searchParams.get('after')) || 0));
+  const rows = (await env.DB.prepare(`SELECT id, role, text, created_at FROM conv_messages
+     WHERE conversation_id=? AND id > ? AND role <> 'user' ORDER BY id ASC LIMIT 20`)
+    .bind(row.id, after).all()).results || [];
+  // La marca de presencia: es lo que le dice al panel si el visitante sigue delante. Sin
+  // ella, una persona del equipo escribiría a una pestaña cerrada creyendo que atiende.
+  try { await env.DB.prepare('UPDATE conversations SET visitor_seen_at=? WHERE id=?').bind(new Date().toISOString(), row.id).run(); } catch (_) {}
+  return json({
+    state: row.state || 'bot',
+    messages: rows.map((m) => ({ id: m.id, role: m.role, text: m.text, at: m.created_at })),
+  }, 200, cors);
+}
+
 async function handleChat(request, env, cors, ctx, config) {
   const body = await readJson(request, 8000);
   if (!UUID_RE.test(body.conversationId || '')) throw new HttpError(400, 'invalid_conversation_id');
@@ -1706,6 +1738,27 @@ async function handleChat(request, env, cors, ctx, config) {
     if (!conv.demo) ctx.waitUntil(recordConversation(env, tenant, 'web'));
   }
   if (body.demo && conv.demo !== body.demo) throw new HttpError(409, 'conversation_mode_mismatch');
+  // Mismas reglas que WhatsApp desde la migración 0026. La cuenta atrás vence aquí además
+  // de en el cron: si el visitante vuelve a escribir y el plazo pasó, la IA le contesta en
+  // este mismo mensaje en vez de hacerle esperar otra ventana del cron.
+  if (conv.state === 'esperando' && graceExpired(conv.stateAt)) {
+    conv.state = 'bot';
+    try { await env.DB.prepare("UPDATE conversations SET state='bot', state_at=? WHERE id=? AND state='esperando'").bind(new Date().toISOString(), conv.id).run(); } catch (_) {}
+    console.log(JSON.stringify({ level: 'info', code: 'takeover_expired', tenant: tenant.slug, via: 'mensaje_web' }));
+  }
+  // Con una persona al mando el bot NO contesta: el mensaje se guarda y el widget lo
+  // recogerá por el sondeo. Dos voces en el mismo hilo es peor que ninguna.
+  if (['esperando', 'humano'].includes(conv.state)) {
+    await convAppend(env, conv, [{ role: 'user', content: message }]);
+    console.log(JSON.stringify({ level: 'info', code: 'bot_paused', tenant: tenant.slug, state: conv.state, channel: 'web' }));
+    return json({ reply: null, state: conv.state, lastId: conv.lastId || 0 }, 200, cors);
+  }
+  // El widget DECLARA que sabe recibir respuestas (`live`). Sin eso no se cede el turno:
+  // los widgets cacheados en las webs de clientes (v=8, caché de un año) no saben sondear,
+  // y escalar ahí dejaría al visitante hablándole a una pared. Sin `live` se comporta
+  // exactamente como hasta ahora: la IA atiende y captura el lead.
+  const live = body.live === true && !conv.demo;
+  const hayAsesor = live && await advisorAvailable(env, tenant);
   // Se GUARDA todo y al modelo se le manda solo la ventana: el slice de antes tiraba lo
   // viejo, que es justo lo que dejamos de hacer.
   const history = [...conv.messages, { role: 'user', content: message }].slice(-CONV_WINDOW);
@@ -1718,20 +1771,29 @@ async function handleChat(request, env, cors, ctx, config) {
   if (cal) {
     reply = await runToolLoop(env, {
       model: 'claude-sonnet-4-6', max_tokens: WEB_MAX_TOKENS,
-      system: calendarSystem(config, tenant, cal), messages: history,
+      system: calendarSystem(config, tenant, cal, hayAsesor), messages: history,
     }, CALENDAR_TOOLS, calendarExecutor(env, tenant, cal, { channel: 'web', conversationKey: body.conversationId, defaultPhone: '' }), { tenant, closing: 'cita' });
     reply = reply || 'Ahora mismo no puedo consultar la agenda. Déjame tu nombre y teléfono y el equipo te confirma la cita enseguida.';
   } else {
     reply = await callAnthropic(env, {
       model: 'claude-sonnet-4-6', max_tokens: WEB_MAX_TOKENS,
       // Las DEMOS son material comercial de Velai, no de un tenant: van tal cual.
-      system: isDemoKey(config, conv.demo) ? config.DEMOS[conv.demo] : systemFor(config, tenant), messages: history,
+      // Las DEMOS van tal cual: son material comercial de Velai, no de un tenant, y ahí no
+      // hay asesores que ofrecer.
+      system: isDemoKey(config, conv.demo) ? config.DEMOS[conv.demo] : systemWithHandoff(config, tenant, hayAsesor), messages: history,
     }, { tenant, closing: 'equipo' });
   }
-  // El centinela de handoff jamás llega al usuario, tampoco en el canal web
-  // (la pausa v1 es solo del canal WhatsApp — SPEC-HANDOFF §A.1).
+  // El centinela de handoff jamás llega al usuario, tampoco en el canal web.
+  const wantsHuman = WANTS_HUMAN.test(reply);
   reply = reply.replace(WANTS_HUMAN, '').trim() || 'De acuerdo, aviso al equipo para que te contacten.';
   await convAppend(env, conv, [{ role: 'user', content: message }, { role: 'assistant', content: reply }]);
+  // Se cede el turno DESPUÉS de guardar, para que el panel abra el hilo con el último
+  // mensaje ya dentro. assumeAvailable: la disponibilidad ya se resolvió arriba y no hace
+  // falta volver a consultarla. stateOnly: en web manda el estado, no la clave de KV.
+  if (wantsHuman && hayAsesor) {
+    ctx.waitUntil(escalateToHuman(env, tenant, body.conversationId, message, conv.id, { assumeAvailable: true, stateOnly: true })
+      .catch((error) => console.log(JSON.stringify({ level: 'error', code: 'handoff_alert_failed', tenant: tenant.slug, error: error.name }))));
+  }
   const trail = [...history, { role: 'assistant', content: reply }].slice(-CONV_WINDOW);
   const phone = extractPhone(message);
   if (!conv.demo && phone) {
@@ -1739,7 +1801,9 @@ async function handleChat(request, env, cors, ctx, config) {
       console.log(JSON.stringify({ level: 'error', code: 'chat_lead_capture_failed', conversationId: body.conversationId, error: error.name }));
     }));
   }
-  return json({ reply }, 200, cors);
+  // `state` y `lastId` los usa el widget para decidir si tiene que empezar a preguntar por
+  // mensajes nuevos, y desde qué punto. Un widget viejo ignora los dos campos.
+  return json({ reply, state: wantsHuman && hayAsesor ? 'esperando' : 'bot', lastId: conv.lastId || 0 }, 200, cors);
 }
 
 // Una conversación NUEVA (no cada mensaje): es el denominador de la tasa de captura.
@@ -1827,9 +1891,11 @@ async function convAppend(env, conv, turns) {
     : env.DB.prepare('UPDATE conversations SET msgs=msgs+?, unanswered=unanswered+?, last_at=?, expires_at=?, inbox_address=COALESCE(inbox_address,?) WHERE id=?')
       .bind(list.length, unanswered, now, expires, conv.inbox || null, conv.id);
   try {
-    await env.DB.batch([head, ...list.map((t) => env.DB
+    const out = await env.DB.batch([head, ...list.map((t) => env.DB
       .prepare('INSERT INTO conv_messages (conversation_id,role,agent_email,text,created_at) VALUES (?,?,?,?,?)')
       .bind(conv.id, t.role, t.agentEmail || null, t.content, now))]);
+    const last = out && out[out.length - 1];
+    if (last && last.meta && last.meta.last_row_id) conv.lastId = last.meta.last_row_id;
   } catch (error) {
     // Sin texto del mensaje: los logs no llevan PII, tampoco cuando fallan.
     console.log(JSON.stringify({ level: 'error', code: 'conv_state_not_saved', channel: conv.channel, error: clean(String(error.message || error), 80) }));
@@ -1907,6 +1973,10 @@ function systemWithHandoff(config, tenant, available) {
 }
 
 const META_WINDOW_HOURS = 24;
+// Margen para considerar que el visitante sigue en la página: el widget refresca cada 6 s
+// mientras hay una persona al otro lado, así que 90 s aguanta un tropiezo de red sin
+// declararlo ausente a las primeras de cambio.
+const VISITOR_AWAY_MS = 90000;
 
 // La ventana de atención al cliente de Meta: 24 h desde el ÚLTIMO mensaje ENTRANTE. Fuera
 // de ella, el texto libre se rechaza con 63016 y hace falta una plantilla aprobada. Wati es
@@ -1915,13 +1985,18 @@ const META_WINDOW_HOURS = 24;
 // Devuelve el MOTIVO cuando está cerrada: el panel lo traduce y cierra el cajón antes de
 // que alguien escriba, en vez de después.
 async function replyWindow(env, conv) {
-  // El canal web no tiene ventana… tiene el problema opuesto: el widget no tiene por dónde
-  // recibir una respuesta del panel (solo habla cuando el visitante escribe). Responder ahí
-  // exige darle al widget un canal de vuelta, y eso es otro trabajo.
-  if (conv.channel === 'web') return { open: false, reason: 'web_reply_unsupported' };
   // El cajón se abre SOLO con el control tomado (migración 0025): escribir en una
   // conversación que la IA sigue atendiendo mete dos voces en el mismo hilo.
   if (conv.state !== 'humano') return { open: false, reason: conv.state === 'esperando' ? 'sin_control' : 'atiende_la_ia' };
+  // Canal web (migración 0026): no hay ventana de Meta, pero sí la pregunta equivalente —
+  // ¿sigue delante? El mensaje se guarda igual y le llegará si vuelve dentro de la sesión,
+  // así que esto AVISA, no bloquea: bloquear le quitaría a la persona la única forma de
+  // dejar algo escrito.
+  if (conv.channel === 'web') {
+    const seen = conv.visitor_seen_at ? Date.parse(conv.visitor_seen_at) : 0;
+    const away = !seen || Date.now() - seen > VISITOR_AWAY_MS;
+    return { open: true, web: true, away, seenAt: conv.visitor_seen_at || null };
+  }
   if (!conv.inbox_address) return { open: false, reason: 'inbox_address_unknown' };
   const row = await env.DB.prepare("SELECT MAX(created_at) AS last_in FROM conv_messages WHERE conversation_id=? AND role='user'").bind(conv.id).first();
   const lastIn = row && row.last_in;
@@ -3147,12 +3222,18 @@ async function adminRouter(request, env, ctx, path, url, config, scope) {
     if (!win.open) throw new HttpError(409, win.reason);
     const tenant = await env.DB.prepare('SELECT * FROM tenants WHERE id=?').bind(conv.tenant_id).first();
     if (!tenant) throw new HttpError(404, 'not_found');
-    const sent = await sendTwilioText(env, tenant, conv.inbox_address, conv.external_id, text);
-    if (!sent.ok) throw new HttpError(502, clean(sent.error || 'twilio_failed', 40));
+    // En el canal web no hay proveedor al que enviar: el mensaje se guarda y el widget lo
+    // recoge en su siguiente sondeo. Por eso aquí no se toca Twilio.
+    if (conv.channel !== 'web') {
+      const sent = await sendTwilioText(env, tenant, conv.inbox_address, conv.external_id, text);
+      if (!sent.ok) throw new HttpError(502, clean(sent.error || 'twilio_failed', 40));
+    }
     // El bot se CALLA: dos voces en la misma conversación es peor que ninguna. Es la
     // MISMA pausa que escribe el centinela [[HUMANO]], así que la vista de escalaciones y
     // su botón de reanudar siguen valiendo tal cual — sin mecanismo nuevo.
-    if (env.KV) { try { await env.KV.put(`pause:${conv.tenant_id}:${conv.external_id}`, '1', { expirationTtl: 4 * 3600 }); } catch (_) {} }
+    // En web NO se escribe: allí manda conv.state, y gastar una escritura de KV por
+    // respuesta sería el peor uso del recurso más escaso que tenemos.
+    if (env.KV && conv.channel !== 'web') { try { await env.KV.put(`pause:${conv.tenant_id}:${conv.external_id}`, '1', { expirationTtl: 4 * 3600 }); } catch (_) {} }
     const saved = await convAppend(env, {
       id: conv.id, tenant: conv.tenant_id, channel: conv.channel, externalId: conv.external_id,
       inbox: conv.inbox_address, demo: conv.demo || '', msgs: conv.msgs, isNew: false,
@@ -4592,6 +4673,13 @@ export function createWorker(config) {
           ctx.waitUntil(cache.put(request, media.clone()).catch(() => {}));
           return media;
         }
+        if (path === '/chat/poll') {
+          const cors = await publicCors(request, env);
+          if (!cors) throw new HttpError(403, 'origin_not_allowed');
+          if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers: cors });
+          if (request.method !== 'GET') throw new HttpError(405, 'method_not_allowed');
+          return await handleChatPoll(request, env, cors, url);
+        }
         if (path === '/lead' || path === '/chat') {
           const cors = await publicCors(request, env);
           if (!cors) throw new HttpError(403, 'origin_not_allowed');
@@ -4613,4 +4701,4 @@ export function createWorker(config) {
   };
 }
 
-export const testing = { expireTakeovers, NO_ADVISOR_TEXT, graceExpired, systemWithHandoff, HANDOFF_ON, HANDOFF_OFF, supportWindows, withinSupportHours, advisorAvailable, CONV_STATES, TAKEOVER_GRACE_MIN, settleReply, TRUNCATED_CLOSING, trimToSentence, waBody, replyWindow, reportPeriod, reportMetric, weeklyReportText, weeklyStats, sendWeeklyReports, convLoad, convAppend, convLinkLead, convFilters, convRetentionDays, UNANSWERED_RE, CONV_WINDOW, cloudflareUsage, CF_FREE_LIMITS, recordConversation, aiCost, recordAiUsage, rateLimited, memLimited, applySenderProfile, pushSenderProfile, clean, persistLead, leadAlertStatus, captureWhatsAppLead, leadFromSummary, leadCaptureDone, errorResponseParts, tenantByAddress, syncPrimaryChannel, assertChannelFree, normalizePhone, extractPhone, safeUtm, publicCors, validTwilioSignature, callAnthropic, callAnthropicRaw, runToolLoop, calendarExecutor, calendarSystem, tenantCalendar, validCalendarDate, availableSlots, handleCalendarCallback, calendarCallbackFor, sendTwilioText, timingSafeEqual, telegramBotUsername, handleTelegramWebhook, sendTelegramText, tenantTelegramToken, telegramThreadFor, registerTelegramTopic, csvCell, expiryDate, leadFilters, isDemoKey, templateVar, leadTemplateVariables, readJson, deliver, drainQueuedLeads, verifyTurnstile, systemFor, validateTenant, invalidateTenantCache, tenantWriteError, assertNotActivePending, tenantChannelSummary, channelsForScope, handleProvision, pollProvisioning, fillSeries, resolveScope, scopeClause, clienteAllowed, adminRouter, recordAuthFailure, handleAdmin, handleWidgetBoot, allowedOrigins, envOrigins, syncPanelGate, envAdmins, syncAdminGate, getSetting, setSetting, withCfToken };
+export const testing = { handleChatPoll, VISITOR_AWAY_MS, expireTakeovers, NO_ADVISOR_TEXT, graceExpired, systemWithHandoff, HANDOFF_ON, HANDOFF_OFF, supportWindows, withinSupportHours, advisorAvailable, CONV_STATES, TAKEOVER_GRACE_MIN, settleReply, TRUNCATED_CLOSING, trimToSentence, waBody, replyWindow, reportPeriod, reportMetric, weeklyReportText, weeklyStats, sendWeeklyReports, convLoad, convAppend, convLinkLead, convFilters, convRetentionDays, UNANSWERED_RE, CONV_WINDOW, cloudflareUsage, CF_FREE_LIMITS, recordConversation, aiCost, recordAiUsage, rateLimited, memLimited, applySenderProfile, pushSenderProfile, clean, persistLead, leadAlertStatus, captureWhatsAppLead, leadFromSummary, leadCaptureDone, errorResponseParts, tenantByAddress, syncPrimaryChannel, assertChannelFree, normalizePhone, extractPhone, safeUtm, publicCors, validTwilioSignature, callAnthropic, callAnthropicRaw, runToolLoop, calendarExecutor, calendarSystem, tenantCalendar, validCalendarDate, availableSlots, handleCalendarCallback, calendarCallbackFor, sendTwilioText, timingSafeEqual, telegramBotUsername, handleTelegramWebhook, sendTelegramText, tenantTelegramToken, telegramThreadFor, registerTelegramTopic, csvCell, expiryDate, leadFilters, isDemoKey, templateVar, leadTemplateVariables, readJson, deliver, drainQueuedLeads, verifyTurnstile, systemFor, validateTenant, invalidateTenantCache, tenantWriteError, assertNotActivePending, tenantChannelSummary, channelsForScope, handleProvision, pollProvisioning, fillSeries, resolveScope, scopeClause, clienteAllowed, adminRouter, recordAuthFailure, handleAdmin, handleWidgetBoot, allowedOrigins, envOrigins, syncPanelGate, envAdmins, syncAdminGate, getSetting, setSetting, withCfToken };

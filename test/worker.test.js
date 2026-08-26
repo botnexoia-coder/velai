@@ -3552,9 +3552,17 @@ test('ventana de 24 h de Meta: abierta con horas, y cerrada CON MOTIVO en cada c
   const shut = await testing.replyWindow(windowEnv(hace(30)), conv());
   assert.deepEqual({ open: shut.open, reason: shut.reason }, { open: false, reason: 'window_closed' });
 
-  // El canal web no tiene ventana: tiene el problema opuesto (el widget no tiene por
-  // dónde recibir). Se dice, no se finge.
-  assert.equal((await testing.replyWindow(windowEnv(hace(1)), conv({ channel: 'web' }))).reason, 'web_reply_unsupported');
+  // El canal web SÍ se puede responder desde la migración 0026 (el widget pregunta por
+  // mensajes nuevos). No hay ventana de Meta, pero sí la pregunta equivalente: ¿sigue
+  // delante? Eso AVISA, no bloquea — el mensaje se guarda igual.
+  const presente = await testing.replyWindow(windowEnv(hace(1)), conv({ channel: 'web', visitor_seen_at: new Date().toISOString() }));
+  assert.deepEqual({ open: presente.open, away: presente.away }, { open: true, away: false });
+  const ausente = await testing.replyWindow(windowEnv(hace(1)), conv({ channel: 'web', visitor_seen_at: new Date(Date.now() - 5 * 60000).toISOString() }));
+  assert.deepEqual({ open: ausente.open, away: ausente.away }, { open: true, away: true }, 'se avisa, pero se deja escribir');
+  // Nunca visto (conversación anterior a la 0026): ausente, no abierto en falso.
+  assert.equal((await testing.replyWindow(windowEnv(hace(1)), conv({ channel: 'web' }))).away, true);
+  // Y en web el control sigue mandando: sin tomarlo, cerrado.
+  assert.equal((await testing.replyWindow(windowEnv(hace(1)), conv({ channel: 'web', state: 'bot' }))).reason, 'atiende_la_ia');
   // Conversación anterior a la migración: no sabemos por qué número contestar.
   assert.equal((await testing.replyWindow(windowEnv(hace(1)), conv({ inbox_address: null }))).reason, 'inbox_address_unknown');
   // Sin ningún mensaje entrante no hay ventana que abrir.
@@ -4065,4 +4073,53 @@ test('horario de atención humana: se valida como el del calendario, y vacío = 
   assert.throws(() => testing.validateTenant({ support_hours: '{"mon":[["9:00","14:00"]]}' }, { partial: true }), 'hora sin dos dígitos');
   assert.throws(() => testing.validateTenant({ support_hours: '{"mon":[["19:00","09:00"]]}' }, { partial: true }), 'ventana al revés');
   assert.throws(() => testing.validateTenant({ support_hours: '[["09:00","14:00"]]' }, { partial: true }), 'array en vez de objeto');
+});
+
+// ── Canal web en vivo (migración 0026) ───────────────────────────────────────
+test('el sondeo del widget devuelve solo lo del equipo y marca que el visitante sigue ahí', async () => {
+  const conv = { id: 'c-web', state: 'humano', state_at: null };
+  const mensajes = [
+    { id: 11, role: 'assistant', text: 'respuesta del bot', created_at: 'x' },
+    { id: 12, role: 'agent', text: 'Hola, soy Ana del equipo', created_at: 'y' },
+  ];
+  const writes = [];
+  const env = { DB: {
+    prepare(sql) {
+      return { bind: (...args) => ({
+        first: async () => {
+          if (/FROM conversations/.test(sql)) return conv;
+          if (/slug = \?/.test(sql)) return { id: 't-1', slug: 'zoe', active: 1 };
+          return null;
+        },
+        all: async () => ({ results: /FROM conv_messages/.test(sql) ? mensajes.filter((m) => m.id > args[1]) : [] }),
+        run: async () => { writes.push({ sql, args }); return { meta: { changes: 1 } }; },
+      }) };
+    },
+    batch: async () => [],
+  } };
+  const url = new URL('https://x/chat/poll?conversationId=f23e4567-e89b-42d3-a456-426614174000&tenant=zoe&after=10');
+  const d = await (await testing.handleChatPoll(new Request(url), env, {}, url)).json();
+  assert.equal(d.state, 'humano');
+  // El bot ya lo pintó quien lo pidió: repetirlo duplicaría la conversación en pantalla.
+  // (El filtro de rol vive en el widget; aquí se comprueba que llegan los ids para el cursor.)
+  assert.deepEqual(d.messages.map((m) => m.id), [11, 12]);
+  assert.equal(d.messages.find((m) => m.role === 'agent').text, 'Hola, soy Ana del equipo');
+  // La marca de presencia: sin ella, el panel no sabe si escribe a una pestaña cerrada.
+  assert.ok(writes.some((w) => /visitor_seen_at/.test(w.sql)), 'se marca al visitante como presente');
+  // Un conversationId que no es un uuid no llega ni a tocar la base.
+  const mala = new URL('https://x/chat/poll?conversationId=../../etc&tenant=zoe');
+  await assert.rejects(testing.handleChatPoll(new Request(mala), env, {}, mala), (e) => e.status === 400);
+});
+
+test('el widget viejo no rompe: sin la bandera live, el worker no cede el turno', async () => {
+  // Los widgets v8 cacheados en las webs de clientes (caché de un año) no saben sondear.
+  // Escalar ahí dejaría al visitante hablándole a una pared, así que la bandera `live` es
+  // la puerta: sin ella el canal web se comporta exactamente como antes.
+  const src = await readFile(new URL('../worker/app.js', import.meta.url), 'utf8');
+  assert.match(src, /const live = body\.live === true && !conv\.demo;/);
+  assert.match(src, /const hayAsesor = live && await advisorAvailable/);
+  // Y el widget nuevo la manda.
+  const w = await readFile(new URL('../assets/vai-widget.js', import.meta.url), 'utf8');
+  assert.match(w, /payload\.live = true;/);
+  assert.match(w, /v9/, 'la versión sube: /*.js va con caché inmutable de un año');
 });

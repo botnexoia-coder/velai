@@ -1,0 +1,13 @@
+-- El canal web también se conecta con el panel (pedido de Juan, 2026-08-26).
+-- Hasta ahora era el único canal sin vuelta: el widget solo habla cuando el visitante
+-- escribe, así que una respuesta desde el panel no tenía por dónde llegar y el cajón se
+-- cerraba con «web_reply_unsupported».
+--
+-- La vuelta es POLLING, y solo cuando hace falta: el widget pregunta únicamente si la
+-- conversación NO está en estado 'bot'. Con el bot atendiendo —el 99% del tráfico— no hay
+-- ni una petición extra. Es lo que hace que esto no se coma el plan gratuito de Workers.
+--
+-- visitor_seen_at es el equivalente HONESTO de la ventana de 24 h de Meta en el canal web:
+-- allí la pregunta es «¿puedo escribirle?»; aquí es «¿sigue delante?». Sin esto, una persona
+-- del equipo escribiría a una pestaña cerrada creyendo que atiende a alguien.
+ALTER TABLE conversations ADD COLUMN visitor_seen_at TEXT;
