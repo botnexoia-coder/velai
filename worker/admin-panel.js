@@ -197,6 +197,7 @@ document.querySelectorAll('.tab[data-view]').forEach(b=>b.onclick=()=>{document.
 // El cliente abre SU tarjeta; Velai elige tenant con el selector de la cabecera.
 let cxTenant=null;
 let cxLogo='';  // logo actual del cliente en Conexiones (para la miniatura)
+let cxWeekly=true;  // informe semanal del cliente abierto en Conexiones
 async function cxMenu(){tgWizOpen=null;if(ME&&ME.tenantId){cxTenant=ME.tenantId;return loadConexiones()}
  try{if(!tenantList.length){const d=await api('/api/admin/tenants');tenantList=d.tenants}
   if(!tenantList.length)return toast('Aún no hay clientes dados de alta',false);
@@ -218,6 +219,13 @@ async function loadConexiones(){$('#tgLinkBox').hidden=true;
   $('#tgWlToggle').textContent=t.whitelabel?'Desactivar':'Activar';
   $('#tgBotState').innerHTML=t.botUsername?'<span class="flag ok">Bot del negocio: @'+esc(t.botUsername)+' ✓</span>':'<span class="flag off">Aún sin bot propio (se usa el bot de Velai)</span>';
   $('#tgBotDel').hidden=!t.botUsername;$('#tgBotToken').value='';
+  // Informe semanal: el interruptor solo tiene sentido con el grupo vinculado — sin
+  // Telegram no hay a dónde mandarlo, y decirlo es mejor que ofrecer un botón inútil.
+  cxWeekly=t.weeklyReport!==false;
+  $('#wrState').textContent=cxWeekly?'activado':'desactivado';
+  $('#wrState').className='flag '+(cxWeekly?'ok':'off');
+  $('#wrToggle').textContent=cxWeekly?'Desactivar':'Activar';
+  $('#wrNote').textContent=t.linked?'':'Vincula primero el grupo de Telegram: es por donde llega el informe.';
   $('#tgTopics').innerHTML=(t.topics&&t.topics.length)
    ?t.topics.map(tp=>'<div class="mb6"><span class="flag off">'+esc(tp.name)+' <a href="#" data-tdel="'+esc(String(tp.thread_id))+'" title="Quitar del enrutado">✕</a></span> <span class="muted">'+(tp.description?esc(tp.description):'sin descripción')+' · <a href="#" data-tdesc="'+esc(String(tp.thread_id))+'">editar</a></span></div>').join('')
    :'Aún no hay temas: crea el primero arriba.';
@@ -346,6 +354,10 @@ $('#tgLink').onclick=async()=>{try{const d=await api('/api/admin/tenants/'+cxTen
 $('#tgUnlink').onclick=async()=>{if(!confirm('¿Desvincular el Telegram? Los avisos de leads dejarán de llegar a ese chat.'))return;
  try{await api('/api/admin/tenants/'+cxTenant+'/telegram',{method:'DELETE'});toast('Telegram desvinculado');tgWizOpen=null;loadConexiones()}
  catch(e){toast('No se pudo desvincular: '+(TERRS[e.message]||e.message),false)}};
+$('#wrToggle').onclick=async()=>{const next=!cxWeekly;
+ try{await api('/api/admin/tenants/'+cxTenant+'/notify',{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({weekly_report:next})});
+  toast(next?'Informe semanal activado ✓ (llega el lunes)':'Informe semanal desactivado ✓');loadConexiones()}
+ catch(e){toast('No se pudo cambiar el informe: '+(TERRS[e.message]||e.message),false)}};
 $('#tgSetup').onclick=async()=>{try{const d=await api('/api/admin/telegram/setup',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'});
  $('#tgSetupOut').textContent='Webhook registrado ✓ (bot @'+(d.botUsername||'?')+')'}
  catch(e){$('#tgSetupOut').textContent='Error: '+(TERRS[e.message]||e.message)}};
