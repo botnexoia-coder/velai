@@ -108,6 +108,20 @@ Sin esto, las campañas gastarían presupuesto a ciegas (sin medir conversiones)
 - [ ] **Pendiente de comprobar en vivo:** que el gasto empiece a aparecer tras las próximas conversaciones (la tabla arranca vacía) y subir una imagen distinta para el WhatsApp de Diálogos (su isotipo cuadrado) dejando el logotipo completo en la web.
 - [ ] Cuando haya un mes de datos, revisar si algún cliente sale más caro que su cuota y ajustar su `ai_daily_limit` en la ficha.
 
+### 2o. Plan del panel frente al mercado (análisis competitivo del 2026-08-26)
+
+Del artifact «El panel de Velai frente al mercado» (25 productos revisados) salió un plan
+en tres horizontes: [`PLAN-PANEL.md`](./PLAN-PANEL.md) es el mapa y las decisiones;
+[`H1-PANEL.md`](./H1-PANEL.md), [`H2-PANEL.md`](./H2-PANEL.md) y
+[`H3-PANEL.md`](./H3-PANEL.md), el trabajo. Lo que depende de ti:
+
+- [ ] **Cuando la base pase de 100 MB o KV pase del 50% del cupo diario**, revisar [`VOLUMEN-Y-ALMACENAMIENTO.md`](./VOLUMEN-Y-ALMACENAMIENTO.md) (medido el 2026-08-26: la base entera pesa 332 KB y el cuello real es KV, no D1).
+- [x] **Retención de transcripciones + `/privacidad/`** — 90 días desde el último mensaje (`CONV_RETENTION_DAYS`), uniforme (una conversación con lead no se guarda más), y la política actualizada el 2026-08-26 con la base jurídica de la finalidad nueva. El razonamiento del plazo está en `H1-PANEL.md` §1.
+- [ ] **Coexistence y Embedded Signup: decidir antes de septiembre de 2026** (H3 §1 y §2). El 15 de octubre Meta retira Embedded Signup v2/v3 y `coex` no migra solo. Si el alta sigue siendo acompañada en la consola de Twilio, no toca nada; solo hay que decidirlo a tiempo.
+- [ ] **Verificar contra Twilio en vivo** qué campos devuelve de verdad la aprobación de plantillas (`rejection_reason`, quality rating) antes de escribir la UI de los siete estados (H1 §5). La plantilla de GOgestión sirve de caso.
+- [ ] **Supuestos del ahorro** (H1 §4): confirmar minutos por conversación y coste/hora por defecto. Referencia citable: 6–12 $ por ticket humano (informe de ROI de Intercom).
+- [ ] **Cupo de IA al agotarse** (H3 §4): ¿se corta con 429 como hoy, o se desborda con aviso como hacen Crisp y Zendesk?
+
 ### 2k. Canales múltiples por cliente (tenant_channels — fase 1 desplegada 2026-08-22)
 
 - [x] Tabla `tenant_channels` (migración 0017, backfill) + enrutado del webhook canales-primero con fallback a `tenants.channel_address`; el PATCH/POST mantienen el espejo del canal primario; chips de la lista por canal real (web siempre + whatsapp con estado del sender + messenger).
