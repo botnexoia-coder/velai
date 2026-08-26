@@ -534,6 +534,7 @@ function assertTeamNotFrom(fields, previous) {
 const TEMPLATE_RE = /^HX[0-9a-f]{32}$/i;
 const SLUG_RE = /^[a-z0-9][a-z0-9-]{1,39}$/;
 const CHAT_ID_RE = /^-?\d{5,20}$/;
+const HHMM_RE = /^\d{2}:\d{2}$/;
 // El mínimo de 50 evita que un guardado accidental con el campo casi vacío deje
 // al bot de un cliente sin contexto contestando cualquier cosa.
 const PROMPT_MIN = 50, PROMPT_MAX = 20000;
@@ -1785,6 +1786,50 @@ async function convAppend(env, conv, turns) {
   return true;
 }
 
+// ── Disponibilidad de asesores (migración 0025, docs/H2-HANDOFF.md) ─────────
+// Regla de Juan: el BOT no tiene restricción horaria; hablar con una persona SÍ. Fuera de
+// horario no se ofrece interacción humana, y si la piden se rechaza con explicación.
+const CONV_STATES = ['bot', 'esperando', 'humano'];
+const TAKEOVER_GRACE_MIN = 5;   // sin que nadie tome el control, la IA retoma
+
+// Mismo formato y mismo default que tenant_calendars.business_hours: si la interacción
+// humana va con horario, un NULL no puede significar «sin límite».
+function supportWindows(tenant, weekday) {
+  let table = null;
+  try { table = tenant && tenant.support_hours ? JSON.parse(tenant.support_hours) : null; } catch (_) {}
+  const source = table && typeof table === 'object' && !Array.isArray(table) ? table : DEFAULT_BUSINESS_HOURS;
+  const windows = source[weekday];
+  return Array.isArray(windows) ? windows.filter((w) => Array.isArray(w) && HHMM_RE.test(w[0]) && HHMM_RE.test(w[1])) : [];
+}
+
+// hourCycle h23 a propósito: con otras variantes la medianoche sale como «24:00» y la
+// comparación de cadenas dejaría fuera la primera hora del día.
+function withinSupportHours(tenant, nowMs = Date.now()) {
+  const tz = (tenant && tenant.support_tz) || 'Europe/Madrid';
+  const when = new Date(nowMs);
+  let day; let hhmm;
+  try {
+    day = new Intl.DateTimeFormat('en-US', { timeZone: tz, weekday: 'short' }).format(when).toLowerCase();
+    hhmm = new Intl.DateTimeFormat('en-GB', { timeZone: tz, hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(when);
+  } catch (_) {
+    // Zona horaria inválida en la fila: se cae al default en vez de dejar de atender.
+    return withinSupportHours({ ...tenant, support_tz: null }, nowMs);
+  }
+  return supportWindows(tenant, day).some(([from, to]) => hhmm >= from && hhmm < to);
+}
+
+// ¿Se puede ofrecer un asesor AHORA? Interruptor de alguien encendido Y dentro de horario.
+// Nunca lanza: si la tabla de presencia no existe aún (deploy antes de migrar), no hay
+// asesores y el bot sigue atendiendo — que es el comportamiento seguro.
+async function advisorAvailable(env, tenant) {
+  if (!env.DB || !tenant || !tenant.id) return false;
+  if (!withinSupportHours(tenant)) return false;
+  try {
+    const row = await env.DB.prepare('SELECT COUNT(*) AS n FROM agent_presence WHERE tenant_id=? AND available=1').bind(tenant.id).first();
+    return Number(row && row.n) > 0;
+  } catch (_) { return false; }
+}
+
 const META_WINDOW_HOURS = 24;
 
 // La ventana de atención al cliente de Meta: 24 h desde el ÚLTIMO mensaje ENTRANTE. Fuera
@@ -1798,6 +1843,9 @@ async function replyWindow(env, conv) {
   // recibir una respuesta del panel (solo habla cuando el visitante escribe). Responder ahí
   // exige darle al widget un canal de vuelta, y eso es otro trabajo.
   if (conv.channel === 'web') return { open: false, reason: 'web_reply_unsupported' };
+  // El cajón se abre SOLO con el control tomado (migración 0025): escribir en una
+  // conversación que la IA sigue atendiendo mete dos voces en el mismo hilo.
+  if (conv.state !== 'humano') return { open: false, reason: conv.state === 'esperando' ? 'sin_control' : 'atiende_la_ia' };
   if (!conv.inbox_address) return { open: false, reason: 'inbox_address_unknown' };
   const row = await env.DB.prepare("SELECT MAX(created_at) AS last_in FROM conv_messages WHERE conversation_id=? AND role='user'").bind(conv.id).first();
   const lastIn = row && row.last_in;
@@ -2712,6 +2760,9 @@ function clienteAllowed(path, method) {
   // Su bandeja y sus respuestas: el scope filtra y el handler exige que la conversación
   // sea suya (ajena = 404).
   if (path === '/api/admin/inbox' && method === 'GET') return true;
+  // Su disponibilidad y el control de SUS conversaciones (el handler exige que sean suyas).
+  if (path === '/api/admin/availability' && ['GET', 'PATCH'].includes(method)) return true;
+  if (/^\/api\/admin\/conversations\/[0-9a-f-]+\/(takeover|release)$/i.test(path) && method === 'POST') return true;
   if (/^\/api\/admin\/conversations\/[0-9a-f-]+\/reply$/i.test(path) && method === 'POST') return true;
   if (path === '/api/admin/escalations/resume' && method === 'POST') return true;
   if (/^\/api\/admin\/leads\/[0-9a-f-]+$/i.test(path) && (method === 'GET' || method === 'PATCH')) return true;
@@ -2912,6 +2963,73 @@ async function adminRouter(request, env, ctx, path, url, config, scope) {
       }
     }
     return json({ conversations: rows, counts, thread }, 200, NO_STORE);
+  }
+
+  // Disponibilidad de la persona que mira el panel. El interruptor es POR PERSONA; el
+  // horario es del cliente y lo cierra por fuera (docs/H2-HANDOFF.md).
+  if (path === '/api/admin/availability' && ['GET', 'PATCH'].includes(request.method)) {
+    const asked = clean(url.searchParams.get('tenant'), 40);
+    const tenantId = scope.tenantId || (asked && UUID_RE.test(asked) ? asked : null);
+    if (!tenantId) throw new HttpError(400, 'tenant_required');
+    if (scope.tenantId && asked && asked !== scope.tenantId) throw new HttpError(404, 'not_found');
+    const tenantRow = await env.DB.prepare('SELECT id, support_hours, support_tz FROM tenants WHERE id=?').bind(tenantId).first();
+    if (!tenantRow) throw new HttpError(404, 'not_found');
+    if (request.method === 'PATCH') {
+      const body = await readJson(request, 2000);
+      const on = body.available ? 1 : 0;
+      const now = new Date().toISOString();
+      await env.DB.prepare(`INSERT INTO agent_presence (tenant_id,email,available,updated_at) VALUES (?,?,?,?)
+        ON CONFLICT(tenant_id,email) DO UPDATE SET available=excluded.available, updated_at=excluded.updated_at`)
+        .bind(tenantId, String(actor).toLowerCase(), on, now).run();
+      console.log(JSON.stringify({ level: 'info', code: 'agent_availability', available: on === 1, actor_role: scope.role }));
+    }
+    const mine = await env.DB.prepare('SELECT available FROM agent_presence WHERE tenant_id=? AND email=?')
+      .bind(tenantId, String(actor).toLowerCase()).first();
+    const total = await env.DB.prepare('SELECT COUNT(*) AS n FROM agent_presence WHERE tenant_id=? AND available=1').bind(tenantId).first();
+    const dentro = withinSupportHours(tenantRow);
+    return json({
+      available: Boolean(mine && mine.available),
+      withinHours: dentro,
+      // Lo que de verdad decide si se ofrece un asesor: el interruptor Y el horario.
+      offering: dentro && Number(total && total.n) > 0,
+      advisors: Number(total && total.n) || 0,
+      hours: tenantRow.support_hours ? JSON.parse(tenantRow.support_hours) : DEFAULT_BUSINESS_HOURS,
+      tz: tenantRow.support_tz || 'Europe/Madrid',
+      graceMin: TAKEOVER_GRACE_MIN,
+    }, 200, NO_STORE);
+  }
+
+  // Tomar / devolver el control de una conversación. Es un CERROJO de una conversación, no
+  // una cola con dueños: la asignación sigue descartada en PLAN-PANEL.md.
+  const ctrlMatch = path.match(/^\/api\/admin\/conversations\/([0-9a-f-]+)\/(takeover|release)$/i);
+  if (ctrlMatch && request.method === 'POST') {
+    if (!UUID_RE.test(ctrlMatch[1])) throw new HttpError(404, 'not_found');
+    const scc = scopeClause(scope, 'c');
+    const conv = await env.DB.prepare(`SELECT c.id, c.state, c.agent_email, c.channel, c.tenant_id, c.external_id FROM conversations c WHERE c.id=?${scc.sql}`)
+      .bind(ctrlMatch[1], ...scc.args).first();
+    if (!conv) throw new HttpError(404, 'not_found');
+    const now = new Date().toISOString();
+    const who = String(actor).toLowerCase();
+    if (ctrlMatch[2] === 'takeover') {
+      // Ya lo tiene OTRA persona: se dice quién, en vez de dejar que dos escriban a la vez
+      // creyendo cada una que la otra no está.
+      if (conv.state === 'humano' && conv.agent_email && conv.agent_email !== who) {
+        throw new HttpError(409, 'ya_tomada');
+      }
+      if (!['esperando', 'humano'].includes(conv.state)) throw new HttpError(409, 'nada_que_tomar');
+      await env.DB.prepare("UPDATE conversations SET state='humano', agent_email=?, state_at=? WHERE id=?").bind(who, now, conv.id).run();
+      console.log(JSON.stringify({ level: 'info', code: 'takeover', channel: conv.channel, actor_role: scope.role }));
+      return json({ ok: true, state: 'humano', agent_email: who }, 200, NO_STORE);
+    }
+    // Devolver: la IA retoma a partir del siguiente mensaje. No se manda nada al cliente
+    // final — la persona acaba de hablar con él y un «te devuelvo al bot» sobra.
+    await env.DB.prepare("UPDATE conversations SET state='bot', agent_email=NULL, state_at=? WHERE id=?").bind(now, conv.id).run();
+    // La clave de pausa se borra con el tenant y el destinatario REALES de la conversación,
+    // no con el scope: para un admin de Velai scope.tenantId es null y la clave saldría
+    // malformada, dejando al bot callado para siempre.
+    if (env.KV) { try { await env.KV.delete(`pause:${conv.tenant_id}:${conv.external_id}`); } catch (_) {} }
+    console.log(JSON.stringify({ level: 'info', code: 'control_released', channel: conv.channel, actor_role: scope.role }));
+    return json({ ok: true, state: 'bot' }, 200, NO_STORE);
   }
 
   // Responder desde el panel. La parte difícil no es enviar: es NO enviar cuando no se
@@ -4352,4 +4470,4 @@ export function createWorker(config) {
   };
 }
 
-export const testing = { settleReply, TRUNCATED_CLOSING, trimToSentence, waBody, replyWindow, reportPeriod, reportMetric, weeklyReportText, weeklyStats, sendWeeklyReports, convLoad, convAppend, convLinkLead, convFilters, convRetentionDays, UNANSWERED_RE, CONV_WINDOW, cloudflareUsage, CF_FREE_LIMITS, recordConversation, aiCost, recordAiUsage, rateLimited, memLimited, applySenderProfile, pushSenderProfile, clean, persistLead, leadAlertStatus, captureWhatsAppLead, leadFromSummary, leadCaptureDone, errorResponseParts, tenantByAddress, syncPrimaryChannel, assertChannelFree, normalizePhone, extractPhone, safeUtm, publicCors, validTwilioSignature, callAnthropic, callAnthropicRaw, runToolLoop, calendarExecutor, calendarSystem, tenantCalendar, validCalendarDate, availableSlots, handleCalendarCallback, calendarCallbackFor, sendTwilioText, timingSafeEqual, telegramBotUsername, handleTelegramWebhook, sendTelegramText, tenantTelegramToken, telegramThreadFor, registerTelegramTopic, csvCell, expiryDate, leadFilters, isDemoKey, templateVar, leadTemplateVariables, readJson, deliver, drainQueuedLeads, verifyTurnstile, systemFor, validateTenant, invalidateTenantCache, tenantWriteError, assertNotActivePending, tenantChannelSummary, channelsForScope, handleProvision, pollProvisioning, fillSeries, resolveScope, scopeClause, clienteAllowed, adminRouter, recordAuthFailure, handleAdmin, handleWidgetBoot, allowedOrigins, envOrigins, syncPanelGate, envAdmins, syncAdminGate, getSetting, setSetting, withCfToken };
+export const testing = { supportWindows, withinSupportHours, advisorAvailable, CONV_STATES, TAKEOVER_GRACE_MIN, settleReply, TRUNCATED_CLOSING, trimToSentence, waBody, replyWindow, reportPeriod, reportMetric, weeklyReportText, weeklyStats, sendWeeklyReports, convLoad, convAppend, convLinkLead, convFilters, convRetentionDays, UNANSWERED_RE, CONV_WINDOW, cloudflareUsage, CF_FREE_LIMITS, recordConversation, aiCost, recordAiUsage, rateLimited, memLimited, applySenderProfile, pushSenderProfile, clean, persistLead, leadAlertStatus, captureWhatsAppLead, leadFromSummary, leadCaptureDone, errorResponseParts, tenantByAddress, syncPrimaryChannel, assertChannelFree, normalizePhone, extractPhone, safeUtm, publicCors, validTwilioSignature, callAnthropic, callAnthropicRaw, runToolLoop, calendarExecutor, calendarSystem, tenantCalendar, validCalendarDate, availableSlots, handleCalendarCallback, calendarCallbackFor, sendTwilioText, timingSafeEqual, telegramBotUsername, handleTelegramWebhook, sendTelegramText, tenantTelegramToken, telegramThreadFor, registerTelegramTopic, csvCell, expiryDate, leadFilters, isDemoKey, templateVar, leadTemplateVariables, readJson, deliver, drainQueuedLeads, verifyTurnstile, systemFor, validateTenant, invalidateTenantCache, tenantWriteError, assertNotActivePending, tenantChannelSummary, channelsForScope, handleProvision, pollProvisioning, fillSeries, resolveScope, scopeClause, clienteAllowed, adminRouter, recordAuthFailure, handleAdmin, handleWidgetBoot, allowedOrigins, envOrigins, syncPanelGate, envAdmins, syncAdminGate, getSetting, setSetting, withCfToken };

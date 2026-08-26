@@ -3509,7 +3509,7 @@ function windowEnv(lastIn) {
 
 test('ventana de 24 h de Meta: abierta con horas, y cerrada CON MOTIVO en cada caso', async () => {
   const hace = (h) => new Date(Date.now() - h * 3600000).toISOString();
-  const conv = (over) => ({ id: 'c1', channel: 'whatsapp', inbox_address: 'whatsapp:+15550000001', ...over });
+  const conv = (over) => ({ id: 'c1', channel: 'whatsapp', inbox_address: 'whatsapp:+15550000001', state: 'humano', ...over });
 
   // Dentro de la ventana: abierta, y con la hora de cierre para que el panel pinte «quedan N h».
   const open = await testing.replyWindow(windowEnv(hace(2)), conv());
@@ -3527,6 +3527,12 @@ test('ventana de 24 h de Meta: abierta con horas, y cerrada CON MOTIVO en cada c
   assert.equal((await testing.replyWindow(windowEnv(hace(1)), conv({ inbox_address: null }))).reason, 'inbox_address_unknown');
   // Sin ningún mensaje entrante no hay ventana que abrir.
   assert.equal((await testing.replyWindow(windowEnv(null), conv())).reason, 'no_inbound');
+
+  // La puerta nueva (migración 0025): el cajón SOLO se abre con el control tomado. Escribir
+  // en una conversación que la IA sigue atendiendo mete dos voces en el mismo hilo.
+  assert.equal((await testing.replyWindow(windowEnv(hace(1)), conv({ state: 'bot' }))).reason, 'atiende_la_ia');
+  assert.equal((await testing.replyWindow(windowEnv(hace(1)), conv({ state: 'esperando' }))).reason, 'sin_control',
+    'esperando: hay que tomar el control primero, y el panel lo dice así');
 });
 
 function inboxDb(conv, tenant, lastIn) {
@@ -3556,7 +3562,7 @@ function inboxDb(conv, tenant, lastIn) {
 test('responder desde el panel: sale por el número de LLEGADA, se guarda como agent y calla al bot', async () => {
   const CID = '00000000-0000-4000-8000-0000000000f1';
   const conv = { id: CID, tenant_id: 't-mio', channel: 'whatsapp', external_id: 'whatsapp:+34600000000',
-    inbox_address: 'whatsapp:+15550000002', demo: '', msgs: 4 };
+    inbox_address: 'whatsapp:+15550000002', demo: '', msgs: 4, state: 'humano', agent_email: 'agente@cliente.com' };
   // twilio_from DISTINTO de inbox_address a propósito: es el fallo que la migración 0023
   // viene a evitar — el cliente final vería la respuesta llegar desde otro número.
   const tenant = { id: 't-mio', slug: 'mio', name: 'Mío', twilio_from: 'whatsapp:+15559999999', twilio_subaccount_sid: null };
@@ -3592,7 +3598,7 @@ test('responder desde el panel: sale por el número de LLEGADA, se guarda como a
 
 test('responder desde el panel: fuera de ventana es 409 SIN tocar Twilio, y la ajena es 404', async () => {
   const CID = '00000000-0000-4000-8000-0000000000f2';
-  const conv = { id: CID, tenant_id: 't-mio', channel: 'whatsapp', external_id: 'whatsapp:+34600000000', inbox_address: 'whatsapp:+15550000002', demo: '', msgs: 2 };
+  const conv = { id: CID, tenant_id: 't-mio', channel: 'whatsapp', external_id: 'whatsapp:+34600000000', inbox_address: 'whatsapp:+15550000002', demo: '', msgs: 2, state: 'humano', agent_email: 'agente@cliente.com' };
   const tenant = { id: 't-mio', slug: 'mio', name: 'Mío', twilio_from: 'whatsapp:+15550000002' };
   const db = inboxDb(conv, tenant, new Date(Date.now() - 30 * 3600000).toISOString());
   const env = { DB: db, KV: mapKV(), TWILIO_ACCOUNT_SID: 'AC' + 'p'.repeat(32), TWILIO_AUTH_TOKEN: 'tok' };
@@ -3823,4 +3829,128 @@ test('el panel no pierde manejadores por el camino: inventario congelado', async
     'pSub', 'pTpl', 'pTplRe', 'pTplChk', 'pSender', 'pVerify'];
   const sinManejador = CLICABLES.filter((id) => !handlers.has(id));
   assert.deepEqual(sinManejador, [], 'elementos del panel que se quedaron sin manejador');
+});
+// ── Handoff con horario (migración 0025) ─────────────────────────────────────
+// Regla de Juan: el BOT no tiene restricción horaria; hablar con una persona SÍ.
+const L_A_V = '2026-08-26T12:00:00Z';   // miércoles 14:00 en Madrid
+test('horario de asesores: el default es L-V 9-19 y la medianoche no se cuela', () => {
+  const t = { support_hours: null, support_tz: 'Europe/Madrid' };
+  assert.equal(testing.withinSupportHours(t, Date.parse(L_A_V)), true, 'miércoles 14:00');
+  assert.equal(testing.withinSupportHours(t, Date.parse('2026-08-26T05:00:00Z')), false, 'miércoles 07:00, antes de abrir');
+  assert.equal(testing.withinSupportHours(t, Date.parse('2026-08-26T18:00:00Z')), false, 'miércoles 20:00, ya cerrado');
+  assert.equal(testing.withinSupportHours(t, Date.parse('2026-08-30T12:00:00Z')), false, 'domingo');
+  // La medianoche es el caso que rompe si el formateador devuelve «24:00» en vez de «00:00»:
+  // la comparación de cadenas dejaría fuera toda la primera hora del día.
+  const nocturno = { support_hours: JSON.stringify({ thu: [['00:00', '02:00']] }), support_tz: 'Europe/Madrid' };
+  assert.equal(testing.withinSupportHours(nocturno, Date.parse('2026-08-26T22:00:00Z')), true, 'jueves 00:00 en Madrid');
+
+  // Horario propio del cliente, con dos ventanas (mañana y tarde).
+  const partido = { support_hours: JSON.stringify({ wed: [['09:00', '13:00'], ['16:00', '19:00']] }), support_tz: 'Europe/Madrid' };
+  assert.equal(testing.withinSupportHours(partido, Date.parse('2026-08-26T09:00:00Z')), true, '11:00, dentro de la mañana');
+  assert.equal(testing.withinSupportHours(partido, Date.parse('2026-08-26T12:30:00Z')), false, '14:30, en la pausa');
+  assert.equal(testing.withinSupportHours(partido, Date.parse('2026-08-26T15:00:00Z')), true, '17:00, dentro de la tarde');
+
+  // Zona horaria basura en la fila: se cae al default en vez de dejar de atender.
+  assert.equal(testing.withinSupportHours({ support_hours: null, support_tz: 'Marte/Olympus' }, Date.parse(L_A_V)), true);
+  // Y un JSON corrupto también cae al default, no deja el horario vacío.
+  assert.equal(testing.withinSupportHours({ support_hours: '{roto', support_tz: 'Europe/Madrid' }, Date.parse(L_A_V)), true);
+});
+
+test('asesor disponible = interruptor de alguien Y dentro de horario', async () => {
+  const presencia = (n) => ({
+    prepare: () => ({ bind: () => ({ first: async () => ({ n }), all: async () => ({ results: [] }), run: async () => ({}) }) }),
+    batch: async () => [],
+  });
+  const dentro = { id: 't-1', support_hours: JSON.stringify({ wed: [['09:00', '19:00']] }), support_tz: 'Europe/Madrid' };
+  // Nota: withinSupportHours usa Date.now(), así que estos dos casos comprueban la
+  // combinación, no la hora — el horario ya está cubierto arriba con reloj inyectado.
+  const fuera = { id: 't-1', support_hours: JSON.stringify({}), support_tz: 'Europe/Madrid' };
+  assert.equal(await testing.advisorAvailable({ DB: presencia(1) }, fuera), false, 'fuera de horario, aunque haya interruptor');
+  assert.equal(await testing.advisorAvailable({ DB: presencia(0) }, dentro), false, 'en horario pero sin nadie disponible');
+  // Sin la tabla (deploy antes de migrar) no hay asesores y el bot sigue: el seguro es
+  // que el cliente final NUNCA se quede sin quien le atienda.
+  const revienta = { prepare: () => ({ bind: () => ({ first: async () => { throw new Error('no such table'); } }) }) };
+  assert.equal(await testing.advisorAvailable({ DB: revienta }, dentro), false);
+  assert.equal(await testing.advisorAvailable({}, dentro), false, 'sin DB tampoco');
+});
+
+function handoffDb(conv, tenantRow, presencia = { n: 0 }, mine = null) {
+  const writes = [];
+  return {
+    writes,
+    prepare(sql) {
+      return { bind: (...args) => ({
+        first: async () => {
+          if (/FROM tenants WHERE id=\?/.test(sql)) return tenantRow && tenantRow.id === args[0] ? tenantRow : null;
+          if (/FROM conversations c WHERE c\.id=\?/.test(sql)) {
+            const scoped = sql.includes('c.tenant_id = ?') ? (conv.tenant_id === args[1] ? conv : null) : conv;
+            return scoped && scoped.id === args[0] ? { ...scoped } : null;
+          }
+          if (/COUNT\(\*\) AS n FROM agent_presence/.test(sql)) return presencia;
+          if (/SELECT available FROM agent_presence/.test(sql)) return mine;
+          return null;
+        },
+        all: async () => ({ results: [] }),
+        run: async () => { writes.push({ sql, args }); return { meta: { changes: 1 } }; },
+      }) };
+    },
+    batch: async () => [],
+  };
+}
+
+test('tomar el control: cerrojo por conversación, y si ya la tiene otra persona se dice quién', async () => {
+  const CID = '00000000-0000-4000-8000-000000000b01';
+  const conv = { id: CID, tenant_id: 't-mio', channel: 'whatsapp', external_id: 'whatsapp:+34600000000', state: 'esperando', agent_email: null };
+  const db = handoffDb(conv, { id: 't-mio' });
+  const kv = mapKV();
+  const env = { DB: db, KV: kv };
+  const ctx = { waitUntil() {} };
+  const OWN = { role: 'cliente', tenantId: 't-mio', email: 'ana@cliente.com' };
+  const call = (accion, scope) => { const p = `/api/admin/conversations/${CID}/${accion}`;
+    return testing.adminRouter(adminReq(p, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }), env, ctx, p, new URL('https://x' + p), {}, scope); };
+
+  const d = await (await call('takeover', OWN)).json();
+  assert.deepEqual({ state: d.state, quien: d.agent_email }, { state: 'humano', quien: 'ana@cliente.com' });
+  const upd = db.writes.find((w) => /state='humano'/.test(w.sql));
+  assert.equal(upd.args[0], 'ana@cliente.com', 'se guarda QUIÉN tomó el control');
+
+  // Otra persona del mismo cliente no puede pisarla: dos escribiendo a la vez creyendo cada
+  // una que la otra no está es peor que no poder entrar.
+  conv.state = 'humano'; conv.agent_email = 'ana@cliente.com';
+  await assert.rejects(call('takeover', { role: 'cliente', tenantId: 't-mio', email: 'luis@cliente.com' }),
+    (e) => e.status === 409 && e.code === 'ya_tomada');
+  // Quien ya la tiene puede volver a pulsar sin error (idempotente).
+  assert.equal((await (await call('takeover', OWN)).json()).state, 'humano');
+
+  // Devolver: la IA retoma, y la pausa se borra con el tenant y el destinatario REALES.
+  kv.map.set('pause:t-mio:whatsapp:+34600000000', '1');
+  assert.equal((await (await call('release', OWN)).json()).state, 'bot');
+  assert.ok(!kv.map.has('pause:t-mio:whatsapp:+34600000000'), 'la pausa se levanta al devolver el control');
+
+  // Una conversación que la IA atiende no tiene control que tomar.
+  conv.state = 'bot'; conv.agent_email = null;
+  await assert.rejects(call('takeover', OWN), (e) => e.status === 409 && e.code === 'nada_que_tomar');
+  // Y la de otro cliente es 404, nunca 403.
+  await assert.rejects(call('takeover', { role: 'cliente', tenantId: 't-otro', email: 'x@y.com' }), (e) => e.status === 404);
+});
+
+test('disponibilidad: el interruptor es por persona y el horario lo cierra por fuera', async () => {
+  const TID = '00000000-0000-4000-8000-000000000b02';
+  // Horario vacío = fuera de horario siempre: el interruptor no basta.
+  const cerrado = { id: TID, support_hours: JSON.stringify({}), support_tz: 'Europe/Madrid' };
+  const db = handoffDb({ id: 'x' }, cerrado, { n: 1 }, { available: 1 });
+  const env = { DB: db, KV: mapKV() };
+  const ctx = { waitUntil() {} };
+  const OWN = { role: 'cliente', tenantId: TID, email: 'ana@cliente.com' };
+  const path = '/api/admin/availability';
+  const d = await (await testing.adminRouter(adminReq(path), env, ctx, path, new URL('https://x' + path), {}, OWN)).json();
+  assert.equal(d.available, true, 'su interruptor está encendido');
+  assert.equal(d.withinHours, false, 'pero fuera de horario');
+  assert.equal(d.offering, false, 'así que NO se ofrece asesor: el bot atiende');
+  assert.equal(d.graceMin, testing.TAKEOVER_GRACE_MIN);
+  // El PATCH escribe la presencia de ESA persona, no del cliente entero.
+  const patch = await testing.adminRouter(adminReq(path, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ available: true }) }), env, ctx, path, new URL('https://x' + path), {}, OWN);
+  assert.equal((await patch.json()).available, true);
+  const ins = db.writes.find((w) => /INSERT INTO agent_presence/.test(w.sql));
+  assert.deepEqual([ins.args[0], ins.args[1], ins.args[2]], [TID, 'ana@cliente.com', 1]);
 });
