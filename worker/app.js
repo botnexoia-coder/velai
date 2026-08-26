@@ -1646,12 +1646,12 @@ const UNANSWERED_RE = /no (?:lo )?sé(?![a-z])|no tengo (?:esa|esta|la) informac
 // si no hay sesión viva devuelve una nueva SIN escribir nada — el INSERT ocurre en
 // convAppend, porque en el camino web todavía falta pasar Turnstile y una conversación
 // rechazada no debe dejar fila.
-async function convLoad(env, tenant, channel, externalId) {
+async function convLoad(env, tenant, channel, externalId, inbox = null) {
   const since = new Date(Date.now() - CONV_SESSION_HOURS * 3600000).toISOString();
   const row = await env.DB.prepare(`SELECT id, demo, msgs FROM conversations
      WHERE tenant_id=? AND channel=? AND external_id=? AND last_at > ?
      ORDER BY last_at DESC LIMIT 1`).bind(tenant.id, channel, externalId, since).first();
-  const base = { tenant: tenant.id, channel, externalId };
+  const base = { tenant: tenant.id, channel, externalId, inbox };
   if (!row) return { ...base, id: crypto.randomUUID(), demo: '', msgs: 0, isNew: true, messages: [] };
   // DESC + LIMIT + reverse: leer la cola de una conversación larga por el índice, no
   // barrer la conversación entera para quedarse con el final.
@@ -1659,7 +1659,10 @@ async function convLoad(env, tenant, channel, externalId) {
     .bind(row.id, CONV_WINDOW).all()).results || [];
   return {
     ...base, id: row.id, demo: row.demo || '', msgs: Number(row.msgs) || 0, isNew: false,
-    messages: rows.reverse().map((m) => ({ role: m.role, content: m.text })),
+    // 'agent' se le presenta al modelo como 'assistant': la API solo conoce user y
+    // assistant, y el modelo TIENE que ver lo que dijo la persona del equipo — si no, al
+    // expirar la pausa retomaría la conversación contradiciéndola.
+    messages: rows.reverse().map((m) => ({ role: m.role === 'user' ? 'user' : 'assistant', content: m.text })),
   };
 }
 
@@ -1677,15 +1680,18 @@ async function convAppend(env, conv, turns) {
   const expires = new Date(Date.now() + convRetentionDays(env) * 86400000).toISOString();
   const unanswered = list.filter((t) => t.role === 'assistant' && UNANSWERED_RE.test(t.content)).length;
   const head = conv.isNew
-    ? env.DB.prepare(`INSERT INTO conversations (id,tenant_id,channel,external_id,demo,msgs,unanswered,started_at,last_at,expires_at)
-        VALUES (?,?,?,?,?,?,?,?,?,?)`)
-      .bind(conv.id, conv.tenant, conv.channel, conv.externalId, conv.demo || '', list.length, unanswered, now, now, expires)
-    : env.DB.prepare('UPDATE conversations SET msgs=msgs+?, unanswered=unanswered+?, last_at=?, expires_at=? WHERE id=?')
-      .bind(list.length, unanswered, now, expires, conv.id);
+    ? env.DB.prepare(`INSERT INTO conversations (id,tenant_id,channel,external_id,demo,msgs,unanswered,started_at,last_at,expires_at,inbox_address)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?)`)
+      .bind(conv.id, conv.tenant, conv.channel, conv.externalId, conv.demo || '', list.length, unanswered, now, now, expires, conv.inbox || null)
+    // COALESCE en inbox_address: una conversación abierta antes de la migración 0023 lo
+    // tiene a NULL y el siguiente mensaje entrante lo rellena, en vez de quedarse muda
+    // para siempre. Y un valor ya guardado no se pisa con NULL.
+    : env.DB.prepare('UPDATE conversations SET msgs=msgs+?, unanswered=unanswered+?, last_at=?, expires_at=?, inbox_address=COALESCE(inbox_address,?) WHERE id=?')
+      .bind(list.length, unanswered, now, expires, conv.inbox || null, conv.id);
   try {
     await env.DB.batch([head, ...list.map((t) => env.DB
-      .prepare('INSERT INTO conv_messages (conversation_id,role,text,created_at) VALUES (?,?,?,?)')
-      .bind(conv.id, t.role, t.content, now))]);
+      .prepare('INSERT INTO conv_messages (conversation_id,role,agent_email,text,created_at) VALUES (?,?,?,?,?)')
+      .bind(conv.id, t.role, t.agentEmail || null, t.content, now))]);
   } catch (error) {
     // Sin texto del mensaje: los logs no llevan PII, tampoco cuando fallan.
     console.log(JSON.stringify({ level: 'error', code: 'conv_state_not_saved', channel: conv.channel, error: clean(String(error.message || error), 80) }));
@@ -1694,6 +1700,29 @@ async function convAppend(env, conv, turns) {
   conv.isNew = false;
   conv.msgs += list.length;
   return true;
+}
+
+const META_WINDOW_HOURS = 24;
+
+// La ventana de atención al cliente de Meta: 24 h desde el ÚLTIMO mensaje ENTRANTE. Fuera
+// de ella, el texto libre se rechaza con 63016 y hace falta una plantilla aprobada. Wati es
+// el único del grupo que la expone; un cajón de escritura que no la conoce es una trampa —
+// el agente escribe, pulsa enviar y el mensaje muere en Twilio.
+// Devuelve el MOTIVO cuando está cerrada: el panel lo traduce y cierra el cajón antes de
+// que alguien escriba, en vez de después.
+async function replyWindow(env, conv) {
+  // El canal web no tiene ventana… tiene el problema opuesto: el widget no tiene por dónde
+  // recibir una respuesta del panel (solo habla cuando el visitante escribe). Responder ahí
+  // exige darle al widget un canal de vuelta, y eso es otro trabajo.
+  if (conv.channel === 'web') return { open: false, reason: 'web_reply_unsupported' };
+  if (!conv.inbox_address) return { open: false, reason: 'inbox_address_unknown' };
+  const row = await env.DB.prepare("SELECT MAX(created_at) AS last_in FROM conv_messages WHERE conversation_id=? AND role='user'").bind(conv.id).first();
+  const lastIn = row && row.last_in;
+  if (!lastIn) return { open: false, reason: 'no_inbound' };
+  const closesAt = new Date(new Date(lastIn).getTime() + META_WINDOW_HOURS * 3600000).toISOString();
+  return closesAt > new Date().toISOString()
+    ? { open: true, closesAt, lastIn }
+    : { open: false, reason: 'window_closed', closesAt, lastIn };
 }
 
 // Enlaza la conversación con el lead que salió de ella. `leads.conversation_id` existe
@@ -1916,7 +1945,9 @@ async function handleTwilio(request, env, ctx, config) {
   // del teléfono: el panel enseña conversaciones discretas en vez de un hilo infinito.
   if (!env.DB) throw new HttpError(503, 'conversation_storage_not_configured');
   const channel = from.startsWith('messenger:') ? 'messenger' : 'whatsapp';
-  const conv = await convLoad(env, tenant, channel, from);
+  // `to` es la dirección del tenant a la que escribió el cliente final: es por la que
+  // hay que responder desde el panel, no por tenants.twilio_from (migración 0023).
+  const conv = await convLoad(env, tenant, channel, from, to);
   // OJO: el CONTADOR sigue diciendo 'whatsapp' también para Messenger, aunque la
   // conversación se guarde con su canal real. No es descuido: el panel cruza este
   // denominador con `leads.source`, y captureWhatsAppLead escribe 'whatsapp' para los dos
@@ -2592,6 +2623,10 @@ function clienteAllowed(path, method) {
   if (path === '/api/admin/conversations' && method === 'GET') return true;
   if (path === '/api/admin/conversations/export.csv' && method === 'GET') return true;
   if (/^\/api\/admin\/conversations\/[0-9a-f-]+$/i.test(path) && method === 'GET') return true;
+  // Su bandeja y sus respuestas: el scope filtra y el handler exige que la conversación
+  // sea suya (ajena = 404).
+  if (path === '/api/admin/inbox' && method === 'GET') return true;
+  if (/^\/api\/admin\/conversations\/[0-9a-f-]+\/reply$/i.test(path) && method === 'POST') return true;
   if (path === '/api/admin/escalations/resume' && method === 'POST') return true;
   if (/^\/api\/admin\/leads\/[0-9a-f-]+$/i.test(path) && (method === 'GET' || method === 'PATCH')) return true;
   if (/^\/api\/admin\/leads\/[0-9a-f-]+\/notes$/i.test(path) && method === 'POST') return true;
@@ -2746,6 +2781,85 @@ async function adminRouter(request, env, ctx, path, url, config, scope) {
     const csv = [keys.join(','), ...rows.map((row) => keys.map((key) => csvCell(row[key])).join(','))].join('\r\n');
     return new Response('\uFEFF' + csv, { headers: { 'Content-Type': 'text/csv; charset=utf-8', 'Content-Disposition': 'attachment; filename="velai-conversaciones.csv"', 'Cache-Control': 'no-store' } });
   }
+  // ── Bandeja: lista + hilo abierto en UNA llamada (docs/H2-BANDEJA.md §5) ────
+  // Un solo endpoint porque el panel hace polling: dos llamadas cada 5 s con seis paneles
+  // abiertos son 35.000 peticiones/día, un tercio del plan gratuito de Workers en
+  // refrescar una pantalla. Con una cada 15 s y solo con la pestaña visible, ~11.500.
+  if (path === '/api/admin/inbox' && request.method === 'GET') {
+    const f = convFilters(url);
+    const scc = scopeClause(scope, 'c');
+    const limit = Math.min(100, Math.max(1, Number(url.searchParams.get('limit')) || 40));
+    const rows = (await env.DB.prepare(`
+      SELECT c.id, c.channel, c.external_id, c.msgs, c.unanswered, c.last_at, c.lead_id,
+             (c.last_read_at IS NULL OR c.last_read_at < c.last_at) AS unread,
+             t.name AS tenant_name, c.tenant_id, l.name AS lead_name, l.status AS lead_status,
+             (SELECT m.text FROM conv_messages m WHERE m.conversation_id = c.id ORDER BY m.id DESC LIMIT 1) AS preview,
+             (SELECT m.role FROM conv_messages m WHERE m.conversation_id = c.id ORDER BY m.id DESC LIMIT 1) AS preview_role
+      FROM conversations c
+      LEFT JOIN tenants t ON t.id = c.tenant_id
+      LEFT JOIN leads l ON l.id = c.lead_id
+      WHERE ${f.sql}${scc.sql} ORDER BY c.last_at DESC LIMIT ?`)
+      .bind(...f.values, ...scc.args, limit).all()).results;
+    // Contadores por canal para las pestañas: se cuentan SOBRE EL MISMO filtro de scope,
+    // no sobre el de canal — si no, la pestaña activa se contaría a sí misma y las demás
+    // saldrían a cero.
+    const counts = (await env.DB.prepare(`SELECT channel, COUNT(*) AS n,
+        SUM(CASE WHEN last_read_at IS NULL OR last_read_at < last_at THEN 1 ELSE 0 END) AS unread
+      FROM conversations c WHERE demo = ''${scc.sql} GROUP BY channel`).bind(...scc.args).all()).results;
+    if (scope.role !== 'velai') for (const row of rows) { delete row.tenant_name; delete row.tenant_id; }
+    let thread = null;
+    const wanted = clean(url.searchParams.get('conversation'), 40);
+    if (wanted && UUID_RE.test(wanted)) {
+      const head = await env.DB.prepare(`SELECT c.*, t.name AS tenant_name FROM conversations c
+        LEFT JOIN tenants t ON t.id = c.tenant_id WHERE c.id=?${scc.sql}`).bind(wanted, ...scc.args).first();
+      if (head) {
+        const messages = (await env.DB.prepare('SELECT role, agent_email, text, created_at FROM conv_messages WHERE conversation_id=? ORDER BY id ASC LIMIT 500').bind(head.id).all()).results;
+        const win = await replyWindow(env, head);
+        // Marcar leído SOLO si hay algo nuevo: en un polling cada 15 s, un UPDATE
+        // incondicional serían 1.900 escrituras al día por panel abierto para nada.
+        if (!head.last_read_at || head.last_read_at < head.last_at) {
+          await env.DB.prepare('UPDATE conversations SET last_read_at=? WHERE id=?').bind(new Date().toISOString(), head.id).run();
+        }
+        // El token cifrado del bot y el interno del tenant no salen del worker.
+        delete head.demo; if (scope.role !== 'velai') { delete head.tenant_name; delete head.tenant_id; }
+        thread = { conversation: head, messages, window: win };
+      }
+    }
+    return json({ conversations: rows, counts, thread }, 200, NO_STORE);
+  }
+
+  // Responder desde el panel. La parte difícil no es enviar: es NO enviar cuando no se
+  // puede, y decir por qué (docs/H2-BANDEJA.md §1 y §2).
+  const replyMatch = path.match(/^\/api\/admin\/conversations\/([0-9a-f-]+)\/reply$/i);
+  if (replyMatch && request.method === 'POST') {
+    if (!UUID_RE.test(replyMatch[1])) throw new HttpError(404, 'not_found');
+    const scc = scopeClause(scope, 'c');
+    const conv = await env.DB.prepare(`SELECT c.* FROM conversations c WHERE c.id=?${scc.sql}`).bind(replyMatch[1], ...scc.args).first();
+    if (!conv) throw new HttpError(404, 'not_found');   // ajena = 404, nunca 403
+    const body = await readJson(request, 4000);
+    const text = clean(body.text, 1500);
+    if (!text) throw new HttpError(400, 'invalid_message');
+    if (await rateLimited(env, `${actor}:${conv.id}`, 'convreply', 30)) throw new HttpError(429, 'rate_limited');
+    // La guarda va ANTES de tocar Twilio: el 63016 de un texto libre fuera de ventana
+    // llega cuando el mensaje ya se dio por enviado en la pantalla.
+    const win = await replyWindow(env, conv);
+    if (!win.open) throw new HttpError(409, win.reason);
+    const tenant = await env.DB.prepare('SELECT * FROM tenants WHERE id=?').bind(conv.tenant_id).first();
+    if (!tenant) throw new HttpError(404, 'not_found');
+    const sent = await sendTwilioText(env, tenant, conv.inbox_address, conv.external_id, text);
+    if (!sent.ok) throw new HttpError(502, clean(sent.error || 'twilio_failed', 40));
+    // El bot se CALLA: dos voces en la misma conversación es peor que ninguna. Es la
+    // MISMA pausa que escribe el centinela [[HUMANO]], así que la vista de escalaciones y
+    // su botón de reanudar siguen valiendo tal cual — sin mecanismo nuevo.
+    if (env.KV) { try { await env.KV.put(`pause:${conv.tenant_id}:${conv.external_id}`, '1', { expirationTtl: 4 * 3600 }); } catch (_) {} }
+    const saved = await convAppend(env, {
+      id: conv.id, tenant: conv.tenant_id, channel: conv.channel, externalId: conv.external_id,
+      inbox: conv.inbox_address, demo: conv.demo || '', msgs: conv.msgs, isNew: false,
+    }, [{ role: 'agent', content: text, agentEmail: actor }]);
+    console.log(JSON.stringify({ level: 'info', code: 'agent_reply', channel: conv.channel, saved, actor_role: scope.role }));
+    return json({ ok: true, window: win }, 200, NO_STORE);
+  }
+
   const convMatch = path.match(/^\/api\/admin\/conversations\/([0-9a-f-]+)$/i);
   if (convMatch && request.method === 'GET') {
     if (!UUID_RE.test(convMatch[1])) throw new HttpError(404, 'not_found');
@@ -4107,4 +4221,4 @@ export function createWorker(config) {
   };
 }
 
-export const testing = { reportPeriod, reportMetric, weeklyReportText, weeklyStats, sendWeeklyReports, convLoad, convAppend, convLinkLead, convFilters, convRetentionDays, UNANSWERED_RE, CONV_WINDOW, cloudflareUsage, CF_FREE_LIMITS, recordConversation, aiCost, recordAiUsage, rateLimited, memLimited, applySenderProfile, pushSenderProfile, clean, persistLead, leadAlertStatus, captureWhatsAppLead, leadFromSummary, leadCaptureDone, errorResponseParts, tenantByAddress, syncPrimaryChannel, assertChannelFree, normalizePhone, extractPhone, safeUtm, publicCors, validTwilioSignature, callAnthropic, callAnthropicRaw, runToolLoop, calendarExecutor, calendarSystem, tenantCalendar, validCalendarDate, availableSlots, handleCalendarCallback, calendarCallbackFor, sendTwilioText, timingSafeEqual, telegramBotUsername, handleTelegramWebhook, sendTelegramText, tenantTelegramToken, telegramThreadFor, registerTelegramTopic, csvCell, expiryDate, leadFilters, isDemoKey, templateVar, leadTemplateVariables, readJson, deliver, drainQueuedLeads, verifyTurnstile, systemFor, validateTenant, invalidateTenantCache, tenantWriteError, assertNotActivePending, tenantChannelSummary, channelsForScope, handleProvision, pollProvisioning, fillSeries, resolveScope, scopeClause, clienteAllowed, adminRouter, recordAuthFailure, handleAdmin, handleWidgetBoot, allowedOrigins, envOrigins, syncPanelGate, envAdmins, syncAdminGate, getSetting, setSetting, withCfToken };
+export const testing = { replyWindow, reportPeriod, reportMetric, weeklyReportText, weeklyStats, sendWeeklyReports, convLoad, convAppend, convLinkLead, convFilters, convRetentionDays, UNANSWERED_RE, CONV_WINDOW, cloudflareUsage, CF_FREE_LIMITS, recordConversation, aiCost, recordAiUsage, rateLimited, memLimited, applySenderProfile, pushSenderProfile, clean, persistLead, leadAlertStatus, captureWhatsAppLead, leadFromSummary, leadCaptureDone, errorResponseParts, tenantByAddress, syncPrimaryChannel, assertChannelFree, normalizePhone, extractPhone, safeUtm, publicCors, validTwilioSignature, callAnthropic, callAnthropicRaw, runToolLoop, calendarExecutor, calendarSystem, tenantCalendar, validCalendarDate, availableSlots, handleCalendarCallback, calendarCallbackFor, sendTwilioText, timingSafeEqual, telegramBotUsername, handleTelegramWebhook, sendTelegramText, tenantTelegramToken, telegramThreadFor, registerTelegramTopic, csvCell, expiryDate, leadFilters, isDemoKey, templateVar, leadTemplateVariables, readJson, deliver, drainQueuedLeads, verifyTurnstile, systemFor, validateTenant, invalidateTenantCache, tenantWriteError, assertNotActivePending, tenantChannelSummary, channelsForScope, handleProvision, pollProvisioning, fillSeries, resolveScope, scopeClause, clienteAllowed, adminRouter, recordAuthFailure, handleAdmin, handleWidgetBoot, allowedOrigins, envOrigins, syncPanelGate, envAdmins, syncAdminGate, getSetting, setSetting, withCfToken };

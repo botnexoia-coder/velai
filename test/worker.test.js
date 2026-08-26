@@ -1494,7 +1494,8 @@ function withConversations(inner) {
           const c = convs.find((x) => x.id === st.args.at(-1));
           if (c) { c.msgs += st.args[0]; c.last_at = st.args[2]; }
         } else if (/INSERT INTO conv_messages/.test(st.sql)) {
-          msgs.push({ conversation_id: st.args[0], role: st.args[1], text: st.args[2] });
+          // (conversation_id, role, agent_email, text, created_at) desde la migración 0023
+          msgs.push({ conversation_id: st.args[0], role: st.args[1], agent_email: st.args[2], text: st.args[3] });
         }
       }
       return stmts.map(() => ({}));
@@ -3498,5 +3499,118 @@ test('prueba del informe: manda los últimos 7 días marcado como PRUEBA, y no c
     row.telegram_chat_id = null;
     await assert.rejects(testing.adminRouter(adminReq(path, { method: 'POST', body: '{}' }), env, ctx, path, new URL('https://x' + path), {}, OWN),
       (e) => e.status === 400 && e.code === 'telegram_no_vinculado');
+  } finally { globalThis.fetch = realFetch; }
+});
+
+// ── Bandeja: responder desde el panel (migración 0023) ───────────────────────
+function windowEnv(lastIn) {
+  return { DB: { prepare: () => ({ bind: () => ({ first: async () => ({ last_in: lastIn }), all: async () => ({ results: [] }), run: async () => ({}) }) }), batch: async () => [] } };
+}
+
+test('ventana de 24 h de Meta: abierta con horas, y cerrada CON MOTIVO en cada caso', async () => {
+  const hace = (h) => new Date(Date.now() - h * 3600000).toISOString();
+  const conv = (over) => ({ id: 'c1', channel: 'whatsapp', inbox_address: 'whatsapp:+15550000001', ...over });
+
+  // Dentro de la ventana: abierta, y con la hora de cierre para que el panel pinte «quedan N h».
+  const open = await testing.replyWindow(windowEnv(hace(2)), conv());
+  assert.equal(open.open, true);
+  assert.ok(new Date(open.closesAt) > new Date(), 'closesAt en el futuro');
+
+  // Fuera: cerrada con motivo. Este es el 63016 que se evita ANTES de tocar Twilio.
+  const shut = await testing.replyWindow(windowEnv(hace(30)), conv());
+  assert.deepEqual({ open: shut.open, reason: shut.reason }, { open: false, reason: 'window_closed' });
+
+  // El canal web no tiene ventana: tiene el problema opuesto (el widget no tiene por
+  // dónde recibir). Se dice, no se finge.
+  assert.equal((await testing.replyWindow(windowEnv(hace(1)), conv({ channel: 'web' }))).reason, 'web_reply_unsupported');
+  // Conversación anterior a la migración: no sabemos por qué número contestar.
+  assert.equal((await testing.replyWindow(windowEnv(hace(1)), conv({ inbox_address: null }))).reason, 'inbox_address_unknown');
+  // Sin ningún mensaje entrante no hay ventana que abrir.
+  assert.equal((await testing.replyWindow(windowEnv(null), conv())).reason, 'no_inbound');
+});
+
+function inboxDb(conv, tenant, lastIn) {
+  const writes = []; const batches = [];
+  return {
+    writes, batches,
+    prepare(sql) {
+      return { sql, bind: (...args) => ({
+        sql, args,
+        first: async () => {
+          if (/FROM conversations c WHERE c\.id=\?/.test(sql)) {
+            const scoped = sql.includes('c.tenant_id = ?') ? (conv.tenant_id === args[1] ? conv : null) : conv;
+            return scoped && scoped.id === args[0] ? { ...scoped } : null;
+          }
+          if (/FROM tenants WHERE id=\?/.test(sql)) return tenant;
+          if (/MAX\(created_at\)/.test(sql)) return { last_in: lastIn };
+          return null;
+        },
+        all: async () => ({ results: [] }),
+        run: async () => { writes.push({ sql, args }); return { meta: { changes: 1 } }; },
+      }) };
+    },
+    batch: async (stmts) => { batches.push(stmts.map((st) => ({ sql: st.sql, args: st.args }))); return stmts.map(() => ({})); },
+  };
+}
+
+test('responder desde el panel: sale por el número de LLEGADA, se guarda como agent y calla al bot', async () => {
+  const CID = '00000000-0000-4000-8000-0000000000f1';
+  const conv = { id: CID, tenant_id: 't-mio', channel: 'whatsapp', external_id: 'whatsapp:+34600000000',
+    inbox_address: 'whatsapp:+15550000002', demo: '', msgs: 4 };
+  // twilio_from DISTINTO de inbox_address a propósito: es el fallo que la migración 0023
+  // viene a evitar — el cliente final vería la respuesta llegar desde otro número.
+  const tenant = { id: 't-mio', slug: 'mio', name: 'Mío', twilio_from: 'whatsapp:+15559999999', twilio_subaccount_sid: null };
+  const db = inboxDb(conv, tenant, new Date(Date.now() - 3600000).toISOString());
+  const kv = mapKV();
+  const env = { DB: db, KV: kv, TWILIO_ACCOUNT_SID: 'AC' + 'p'.repeat(32), TWILIO_AUTH_TOKEN: 'tok' };
+  const ctx = { waitUntil() {} };
+  const OWN = { role: 'cliente', tenantId: 't-mio', email: 'agente@cliente.com' };
+  const path = `/api/admin/conversations/${CID}/reply`;
+  const twilio = [];
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = async (url, init) => {
+    if (String(url).includes('api.twilio.com')) { twilio.push(new URLSearchParams(String(init.body))); return new Response('{}', { status: 201 }); }
+    return new Response('{}', { status: 200 });
+  };
+  try {
+    const res = await testing.adminRouter(adminReq(path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text: 'Te confirmo la cita' }) }), env, ctx, path, new URL('https://x' + path), {}, OWN);
+    assert.equal((await res.json()).ok, true);
+    assert.equal(twilio.length, 1);
+    assert.equal(twilio[0].get('From'), 'whatsapp:+15550000002', 'el número de LLEGADA, no twilio_from');
+    assert.equal(twilio[0].get('To'), 'whatsapp:+34600000000');
+    assert.equal(twilio[0].get('Body'), 'Te confirmo la cita');
+    // Se guarda como 'agent' CON quién respondió: si se confundiera con el bot, la tasa
+    // de resolución y «lo que no supo contestar» mentirían.
+    const msg = db.batches.flat().find((st) => /INSERT INTO conv_messages/.test(st.sql));
+    assert.equal(msg.args[1], 'agent');
+    assert.equal(msg.args[2], 'agente@cliente.com');
+    assert.equal(msg.args[3], 'Te confirmo la cita');
+    // Y el bot se calla: la MISMA pausa del centinela [[HUMANO]], sin mecanismo nuevo.
+    assert.ok(kv.map.has('pause:t-mio:whatsapp:+34600000000'), 'dos voces es peor que ninguna');
+  } finally { globalThis.fetch = realFetch; }
+});
+
+test('responder desde el panel: fuera de ventana es 409 SIN tocar Twilio, y la ajena es 404', async () => {
+  const CID = '00000000-0000-4000-8000-0000000000f2';
+  const conv = { id: CID, tenant_id: 't-mio', channel: 'whatsapp', external_id: 'whatsapp:+34600000000', inbox_address: 'whatsapp:+15550000002', demo: '', msgs: 2 };
+  const tenant = { id: 't-mio', slug: 'mio', name: 'Mío', twilio_from: 'whatsapp:+15550000002' };
+  const db = inboxDb(conv, tenant, new Date(Date.now() - 30 * 3600000).toISOString());
+  const env = { DB: db, KV: mapKV(), TWILIO_ACCOUNT_SID: 'AC' + 'p'.repeat(32), TWILIO_AUTH_TOKEN: 'tok' };
+  const ctx = { waitUntil() {} };
+  const OWN = { role: 'cliente', tenantId: 't-mio', email: 'agente@cliente.com' };
+  const path = `/api/admin/conversations/${CID}/reply`;
+  let twilioTocado = false;
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = async (url) => { if (String(url).includes('api.twilio.com')) twilioTocado = true; return new Response('{}', { status: 201 }); };
+  try {
+    await assert.rejects(
+      testing.adminRouter(adminReq(path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text: 'hola' }) }), env, ctx, path, new URL('https://x' + path), {}, OWN),
+      (e) => e.status === 409 && e.code === 'window_closed');
+    assert.equal(twilioTocado, false, 'la guarda va ANTES de gastar una llamada a Twilio');
+    // Conversación de otro tenant: 404, nunca 403 — un 403 confirmaría que existe.
+    const ajena = { role: 'cliente', tenantId: 't-otro', email: 'otro@x.com' };
+    await assert.rejects(
+      testing.adminRouter(adminReq(path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text: 'hola' }) }), env, ctx, path, new URL('https://x' + path), {}, ajena),
+      (e) => e.status === 404);
   } finally { globalThis.fetch = realFetch; }
 });
