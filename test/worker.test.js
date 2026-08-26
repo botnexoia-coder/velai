@@ -800,12 +800,17 @@ test('la serie de 14 días devuelve 14 entradas incluso sin leads y la respuesta
 });
 
 // ── SPEC-HANDOFF parte A: el bot se calla cuando entra un humano ──
-function handoffHarness() {
+const SIEMPRE_ABIERTO = JSON.stringify(Object.fromEntries(
+  ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'].map((d) => [d, [['00:00', '23:59']]])));
+function handoffHarness({ advisor = false } = {}) {
   const kvStore = new Map();
   const telegram = [];
   let modelCalls = 0;
-  const tenant = { id: 't-h', slug: 'barberia', name: 'Barbería', channel_address: 'whatsapp:+34910000001', system_prompt: 'x'.repeat(60) };
-  const tenantB = { id: 't-i', slug: 'clinica', name: 'Clínica', channel_address: 'whatsapp:+34910000002', system_prompt: 'y'.repeat(60) };
+  // support_hours explícito (todo el día, todos los días) en vez del default L-V 9-19: si no,
+  // el test pasaría a las 14:00 y fallaría a las 22:00.
+  const horas = advisor ? SIEMPRE_ABIERTO : JSON.stringify({});
+  const tenant = { id: 't-h', slug: 'barberia', name: 'Barbería', channel_address: 'whatsapp:+34910000001', system_prompt: 'x'.repeat(60), support_hours: horas, support_tz: 'Europe/Madrid' };
+  const tenantB = { id: 't-i', slug: 'clinica', name: 'Clínica', channel_address: 'whatsapp:+34910000002', system_prompt: 'y'.repeat(60), support_hours: horas, support_tz: 'Europe/Madrid' };
   const env = {
     TWILIO_ACCOUNT_SID: 'AC' + 'p'.repeat(32), TWILIO_AUTH_TOKEN: 'tok', ANTHROPIC_API_KEY: 'k',
     TELEGRAM_TOKEN: 'tg', TELEGRAM_CHAT_ID: '-1',
@@ -815,7 +820,11 @@ function handoffHarness() {
       async delete(k) { kvStore.delete(k); },
     },
     DB: withConversations({ prepare: (sql) => ({ bind: (...args) => ({
-      first: async () => sql.includes('channel_address') ? ([tenant, tenantB].find((t) => t.channel_address === args[0]) || null) : null,
+      first: async () => {
+        if (sql.includes('channel_address')) return [tenant, tenantB].find((t) => t.channel_address === args[0]) || null;
+        if (/COUNT\(\*\) AS n FROM agent_presence/.test(sql)) return { n: advisor ? 1 : 0 };
+        return null;
+      },
       all: async () => ({ results: [] }), run: async () => ({ meta: { changes: 1 } }),
     }) }), batch: async () => [] }),
   };
@@ -834,10 +843,10 @@ function handoffHarness() {
     send: async (worker, ctx, to, body) => worker.fetch(await twilioRequest('https://worker.test/', { AccountSid: env.TWILIO_ACCOUNT_SID, From: 'whatsapp:+34600000000', To: to, Body: body }, 'tok'), env, ctx) };
 }
 
-test('handoff: el centinela pausa por tenant+remitente, avisa una vez y nunca llega al cliente', async () => {
+test('handoff CON asesor disponible: pausa, avisa una vez y el centinela nunca llega al cliente', async () => {
   const worker = createWorker({ SYSTEM: 's', DEMOS: {}, SUMMARY_PROMPT: '', GUARDRAILS: 'REGLA' });
   const promises = []; const ctx = { waitUntil(p) { promises.push(p); } };
-  const h = handoffHarness();
+  const h = handoffHarness({ advisor: true });
   try {
     // 1) conversación normal: contesta
     const ok = await h.send(worker, ctx, 'whatsapp:+34910000001', 'hola');
@@ -849,14 +858,16 @@ test('handoff: el centinela pausa por tenant+remitente, avisa una vez y nunca ll
     assert.match(twiml, /aviso al equipo/);
     await Promise.allSettled(promises);
     assert.ok(h.kvStore.has('pause:t-h:whatsapp:+34600000000'), 'clave de pausa creada');
-    assert.equal(h.telegram.length, 1, 'un aviso de escalada');
+    const handoffs = h.telegram.filter((m) => /Handoff/.test(m));
+    assert.equal(handoffs.length, 1, 'un aviso de escalada');
+    assert.match(handoffs[0], /Toma el control en el panel/, 'y dice qué hacer con él');
     // 3) pausado: 200 TwiML vacío, sin modelo, sin aviso nuevo, mensaje guardado
     const before = h.modelCalls();
     const paused = await h.send(worker, ctx, 'whatsapp:+34910000001', '¿hola?');
     assert.equal(paused.status, 200);
     assert.match(await paused.text(), /<Response><\/Response>/);
     assert.equal(h.modelCalls(), before, 'cero llamadas al modelo en pausa');
-    assert.equal(h.telegram.length, 1, 'sin aviso repetido');
+    assert.equal(h.telegram.filter((m) => /Handoff/.test(m)).length, 1, 'sin aviso repetido');
     const hist = h.env.DB.history('t-h', 'whatsapp', 'whatsapp:+34600000000');
     assert.equal(hist.at(-1).content, '¿hola?', 'el mensaje queda en el historial');
     // 4) la pausa NO es global: el mismo remitente con OTRO tenant recibe respuesta
@@ -866,6 +877,27 @@ test('handoff: el centinela pausa por tenant+remitente, avisa una vez y nunca ll
     h.kvStore.delete('pause:t-h:whatsapp:+34600000000');
     const back = await h.send(worker, ctx, 'whatsapp:+34910000001', 'hola de nuevo');
     assert.match(await back.text(), /en qué te ayudo/);
+  } finally { h.restore(); }
+});
+
+test('handoff SIN asesores: no se cede el turno, la IA sigue y el lead se fuerza', async () => {
+  // El cambio que pidió Juan. Antes esto pausaba el bot 4 h aunque no hubiera nadie para
+  // contestar: si el aviso llegaba de noche, el cliente final se quedaba en silencio cuatro
+  // horas justo después de pedir ayuda.
+  const worker = createWorker({ SYSTEM: 's', DEMOS: {}, SUMMARY_PROMPT: '', GUARDRAILS: 'REGLA' });
+  const promises = []; const ctx = { waitUntil(p) { promises.push(p); } };
+  const h = handoffHarness({ advisor: false });
+  try {
+    const esc = await h.send(worker, ctx, 'whatsapp:+34910000001', 'quiero hablar con una persona');
+    const twiml = await esc.text();
+    assert.ok(!twiml.includes('[[HUMANO]]'), 'el centinela sigue sin llegar al cliente final');
+    await Promise.allSettled(promises);
+    // Lo esencial: NO hay pausa, así que el bot sigue atendiendo.
+    assert.ok(!h.kvStore.has('pause:t-h:whatsapp:+34600000000'), 'sin nadie disponible NO se pausa el bot');
+    assert.equal(h.telegram.filter((m) => /Handoff/.test(m)).length, 0, 'ni aviso de escalada que nadie va a atender');
+    // Y el bot responde al mensaje siguiente en vez de callarse.
+    const sigue = await h.send(worker, ctx, 'whatsapp:+34910000001', '¿sigues ahí?');
+    assert.match(await sigue.text(), /en qué te ayudo/, 'la IA sigue atendiendo');
   } finally { h.restore(); }
 });
 
@@ -3810,6 +3842,7 @@ test('el panel no pierde manejadores por el camino: inventario congelado', async
   const FUNCIONES = ['applyTheme', 'openLead', 'wireDetail', 'load', 'loadStats', 'loadTenants',
     'loadAiUsage', 'loadInfra', 'loadSaldo', 'loadInbox', 'renderThread', 'composer', 'sendReply',
     'loadConexiones', 'cxMenu', 'loadChannels', 'loadTenantList', 'loadAdmins', 'loadConfig',
+    'loadAvailability', 'control', 'shToForm', 'shFromForm', 'shSummary',
     'calMenu', 'loadEscalations', 'whoOf', 'prevPrefix', 'chTabs', 'convParams', 'api', 'toast', 'paint'];
   const sinFuncion = FUNCIONES.filter((f) => !fns.has(f));
   assert.deepEqual(sinFuncion, [], 'funciones del panel desaparecidas');
@@ -3821,7 +3854,7 @@ test('el panel no pierde manejadores por el camino: inventario congelado', async
     'aiDays', 'escalations', 'tenantRows', 'newTenant', 'tenantSave', 'tenantClose', 'tenantPreview',
     'wizBack', 'wizNext', 'tDupSel', 'ttabs', 'tLogoUp', 'tVersions', 'tSyncDomains',
     'uAdd', 'tUsersList', 'aAdd', 'adminsList', 'cfgTokenSave', 'cfgTokenClear',
-    'cxTenantSel', 'cxLogoUp', 'cxLogoApply', 'nfSave', 'wrToggle', 'wrTest',
+    'cxTenantSel', 'cxLogoUp', 'cxLogoApply', 'nfSave', 'wrToggle', 'wrTest', 'availToggle', 'shSave', 'shCopy',
     'tgLink', 'tgUnlink', 'tgWlToggle', 'tgBotSave', 'tgBotDel', 'tgSetup', 'tgTopicAdd', 'tgTopics',
     'calTenantSel', 'calGrid', 'calToday', 'calPrev', 'calNext', 'calBack',
     'calConnect', 'calReconnect', 'calDisconnect', 'calSave', 'calDayClose',
@@ -3953,4 +3986,83 @@ test('disponibilidad: el interruptor es por persona y el horario lo cierra por f
   assert.equal((await patch.json()).available, true);
   const ins = db.writes.find((w) => /INSERT INTO agent_presence/.test(w.sql));
   assert.deepEqual([ins.args[0], ins.args[1], ins.args[2]], [TID, 'ana@cliente.com', 1]);
+});
+
+test('la espera de toma de control vence: la IA retoma y avisa de que no hay asesores', async () => {
+  assert.equal(testing.graceExpired(new Date(Date.now() - 6 * 60000).toISOString()), true, '6 min: vencida');
+  assert.equal(testing.graceExpired(new Date(Date.now() - 60000).toISOString()), false, '1 min: aún espera');
+  // Sin marca de tiempo se considera VENCIDA: una fila a medias no puede dejar al cliente
+  // final esperando para siempre.
+  assert.equal(testing.graceExpired(null), true);
+  assert.equal(testing.graceExpired('no es una fecha'), true);
+
+  const conv = { id: 'c-1', tenant_id: 't-1', external_id: 'whatsapp:+34600000000', channel: 'whatsapp',
+    inbox_address: 'whatsapp:+15550000001', demo: '', msgs: 4 };
+  const tenant = { id: 't-1', slug: 'mio', name: 'Mío', twilio_from: 'whatsapp:+15550000001' };
+  const writes = []; const batches = [];
+  const env = {
+    KV: mapKV(), TWILIO_ACCOUNT_SID: 'AC' + 'p'.repeat(32), TWILIO_AUTH_TOKEN: 'tok',
+    DB: {
+      prepare(sql) {
+        return { sql, bind: (...args) => ({
+          sql, args,
+          first: async () => (/FROM tenants WHERE id=\?/.test(sql) ? tenant : null),
+          all: async () => ({ results: /FROM conversations WHERE state='esperando'/.test(sql) ? [conv] : [] }),
+          run: async () => { writes.push({ sql, args }); return { meta: { changes: 1 } }; },
+        }) };
+      },
+      batch: async (stmts) => { batches.push(stmts.map((st) => ({ sql: st.sql, args: st.args }))); return stmts.map(() => ({})); },
+    },
+  };
+  env.KV.map.set('pause:t-1:whatsapp:+34600000000', '1');
+  const enviados = [];
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = async (url, init) => {
+    if (String(url).includes('api.twilio.com')) { enviados.push(new URLSearchParams(String(init.body))); return new Response('{}', { status: 201 }); }
+    return new Response('{}', { status: 200 });
+  };
+  try {
+    await testing.expireTakeovers(env);
+    // 1) se libera: si no, la conversación quedaría congelada y el bot no volvería nunca.
+    assert.ok(writes.some((w) => /state='bot'/.test(w.sql)), 'vuelve a estado bot');
+    assert.ok(!env.KV.map.has('pause:t-1:whatsapp:+34600000000'), 'y se levanta la pausa');
+    // 2) avisa al cliente final, por el número de LLEGADA.
+    assert.equal(enviados.length, 1);
+    assert.equal(enviados[0].get('From'), 'whatsapp:+15550000001');
+    assert.equal(enviados[0].get('To'), 'whatsapp:+34600000000');
+    assert.match(enviados[0].get('Body'), /no tengo a nadie del equipo disponible/);
+    // 3) y queda en el historial: si no, el panel enseñaría un salto del silencio a la nada.
+    const guardado = batches.flat().find((st) => /INSERT INTO conv_messages/.test(st.sql));
+    assert.equal(guardado.args[1], 'assistant');
+    assert.equal(guardado.args[3], testing.NO_ADVISOR_TEXT);
+  } finally { globalThis.fetch = realFetch; }
+});
+
+test('el bot sabe si puede ofrecer una persona: va en el bloque VOLÁTIL del prompt', () => {
+  const config = { SYSTEM: 'BASE', GUARDRAILS: 'REGLAS' };
+  const tenant = { system_prompt: 'P'.repeat(60) };
+  const con = testing.systemWithHandoff(config, tenant, true);
+  const sin = testing.systemWithHandoff(config, tenant, false);
+  // El bloque ESTABLE es idéntico en los dos: si el aviso de disponibilidad entrara ahí,
+  // partiría el caché de prompt en dos por cliente y cada turno pagaría escritura.
+  assert.equal(con[0].text, sin[0].text, 'el bloque cacheado no cambia');
+  assert.equal(con[0].cache_control.type, 'ephemeral');
+  assert.equal(con[1].cache_control, undefined, 'el volátil NO se cachea');
+  // Y dice lo que toca: fuera de horario, que NO ofrezca pasar con una persona.
+  assert.match(sin[1].text, /NO ofrezcas pasar la conversación a una persona/);
+  assert.match(sin[1].text, /NO uses el marcador/);
+  assert.match(con[1].text, /\[\[HUMANO\]\]/);
+});
+
+test('horario de atención humana: se valida como el del calendario, y vacío = default', () => {
+  assert.deepEqual(testing.validateTenant({ support_hours: '', support_tz: '' }, { partial: true }),
+    { support_hours: null, support_tz: null }, 'vacío = NULL = L-V 9-19');
+  const ok = testing.validateTenant({ support_hours: '{"mon":[["09:00","14:00"],["16:00","19:00"]],"sat":[["10:00","13:00"]]}' }, { partial: true });
+  assert.deepEqual(JSON.parse(ok.support_hours).sat, [['10:00', '13:00']]);
+  // Basura dentro: si entrara, la interacción humana quedaría abierta o cerrada a lo loco.
+  assert.throws(() => testing.validateTenant({ support_hours: '{roto' }, { partial: true }));
+  assert.throws(() => testing.validateTenant({ support_hours: '{"lunes":[["09:00","14:00"]]}' }, { partial: true }), 'día inventado');
+  assert.throws(() => testing.validateTenant({ support_hours: '{"mon":[["9:00","14:00"]]}' }, { partial: true }), 'hora sin dos dígitos');
+  assert.throws(() => testing.validateTenant({ support_hours: '{"mon":[["19:00","09:00"]]}' }, { partial: true }), 'ventana al revés');
+  assert.throws(() => testing.validateTenant({ support_hours: '[["09:00","14:00"]]' }, { partial: true }), 'array en vez de objeto');
 });

@@ -648,6 +648,33 @@ function validateTenant(body, { partial = false } = {}) {
   // Saldo mensual de tokens del plan (contador, no corta) y cupo diario de llamadas
   // (guarda anti-abuso, sí corta). Vacío = NULL = el default del toml, para no tener que
   // tocar seis filas cuando cambie el plan estándar.
+  // Horario de atención HUMANA. Llega como texto desde el textarea de la ficha (misma
+  // convención que el horario del calendario) y se valida con las mismas reglas: si entra
+  // basura, la interacción humana quedaría abierta o cerrada a lo loco.
+  if (has('support_tz')) out.support_tz = clean(body.support_tz, 60) || null;
+  if (has('support_hours')) {
+    const raw = String(body.support_hours ?? '').trim();
+    if (!raw) out.support_hours = null;
+    else {
+      let table = null;
+      try { table = JSON.parse(raw); } catch (_) { bad('support_hours'); }
+      if (table !== null) {
+        if (!table || typeof table !== 'object' || Array.isArray(table)) bad('support_hours');
+        else {
+          const DIAS = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'];
+          let malo = false;
+          for (const [day, windows] of Object.entries(table)) {
+            if (!DIAS.includes(day) || !Array.isArray(windows) || windows.length > 4) { malo = true; break; }
+            for (const w of windows) {
+              if (!Array.isArray(w) || w.length !== 2 || !HHMM_RE.test(w[0]) || !HHMM_RE.test(w[1]) || w[0] >= w[1]) { malo = true; break; }
+            }
+            if (malo) break;
+          }
+          if (malo) bad('support_hours'); else out.support_hours = JSON.stringify(table);
+        }
+      }
+    }
+  }
   for (const [field, min, max] of [['ai_monthly_tokens', 10000, 1e10], ['ai_daily_limit', 1, 100000]]) {
     if (!has(field)) continue;
     const raw = String(body[field] ?? '').trim();
@@ -1033,9 +1060,30 @@ const EMPTY_TWIML = '<?xml version="1.0" encoding="UTF-8"?><Response></Response>
 // Pausa por tenant + cliente final (nunca global): crear la clave ES el antirebote —
 // con el bot pausado no hay modelo, no hay centinela y no hay aviso repetido.
 // TTL 4 h: si nadie atendió, mejor que el bot vuelva a un silencio indefinido.
-async function escalateToHuman(env, tenant, from, lastMessage) {
+// Antes esto pausaba el bot 4 h SIEMPRE, aunque no hubiera nadie para contestar: si el
+// aviso llegaba de noche, el cliente final se quedaba en silencio cuatro horas justo
+// después de pedir ayuda. Ahora solo se cede el turno si de verdad hay alguien.
+// Devuelve si escaló, porque el que llama tiene que capturar el lead si no.
+async function escalateToHuman(env, tenant, from, lastMessage, convId = null) {
+  if (!(await advisorAvailable(env, tenant))) {
+    console.log(JSON.stringify({ level: 'info', code: 'handoff_declined', tenant: tenant.slug }));
+    return false;
+  }
+  // La pausa de KV se mantiene EN PARALELO al estado nuevo a propósito: es la que ya
+  // gobierna la guarda del webhook y la vista de Escalaciones. Si el estado nuevo se
+  // comportara mal, el fallo es «el bot se queda callado», nunca «el bot habla por encima
+  // de una persona» — y de eso se sale con el botón Reanudar de siempre.
   if (env.KV) { try { await env.KV.put(`pause:${tenant.id}:${from}`, '1', { expirationTtl: 4 * 3600 }); } catch (_) {} }
-  await sendTelegramText(env, `🙋 <b>Handoff</b> — <b>${escapeHtml(tenant.name)}</b>: <code>${escapeHtml(from)}</code> pide hablar con una persona.\nÚltimo mensaje: «${escapeHtml(String(lastMessage).slice(0, 300))}»\nEl bot queda en pausa 4 h (o hasta Reanudar en el panel).`);
+  if (convId && env.DB) {
+    try {
+      await env.DB.prepare("UPDATE conversations SET state='esperando', state_at=?, agent_email=NULL WHERE id=? AND state='bot'")
+        .bind(new Date().toISOString(), convId).run();
+    } catch (error) {
+      console.log(JSON.stringify({ level: 'error', code: 'handoff_state_failed', tenant: tenant.slug, error: clean(String(error.message || error), 60) }));
+    }
+  }
+  await sendTelegramText(env, `🙋 <b>Handoff</b> — <b>${escapeHtml(tenant.name)}</b>: <code>${escapeHtml(from)}</code> pide hablar con una persona.\nÚltimo mensaje: «${escapeHtml(String(lastMessage).slice(0, 300))}»\nToma el control en el panel (Conversaciones). Si nadie lo toma en ${TAKEOVER_GRACE_MIN} min, Vai retoma diciendo que no hay asesores.`);
+  return true;
 }
 
 // prompt efectivo = negocio del tenant (D1) + guardrails (código, innegociables).
@@ -1453,14 +1501,17 @@ async function captureChatLead(config, env, ctx, tenant, body, phone, messages, 
 // sola vez por remitente (marca en KV + request_id idempotente `wa:<phone>`).
 // Se dispara con intención comercial mínima: ≥2 turnos del cliente y un resumen
 // de Haiku que detecte negocio o necesidad.
-async function captureWhatsAppLead(config, env, ctx, tenant, from, phone, messages, convId) {
+async function captureWhatsAppLead(config, env, ctx, tenant, from, phone, messages, convId, options = {}) {
   const mark = `lead:wa:${tenant.id}:${from}`;
   if (env.KV && await env.KV.get(mark)) return;
   const userTurns = messages.filter((m) => m.role === 'user').length;
-  if (userTurns < 2) return;
+  // Con force (pidió una persona y no había nadie) basta UN turno: el lead es lo único que
+  // le queda al negocio de esa petición, y perderlo por la guarda de dos turnos sería peor.
+  if (userTurns < (options.force ? 1 : 2)) return;
   const summary = await summarizeLead(config, env, tenant, messages);
   const fields = leadFromSummary(summary);
-  if (!fields.need && !fields.sector) return;
+  if (!options.force && !fields.need && !fields.sector) return;
+  if (options.force && !fields.need) fields.need = 'Pidió hablar con una persona del equipo';
   const result = await storeLead(env, ctx, {
     requestId: `wa:${tenant.id}:${phone}`, source: 'whatsapp',
     tenantId: tenant.id, tenantIsDefault: tenant.slug === defaultTenantSlug(env),
@@ -1526,12 +1577,14 @@ async function calendarAccessToken(env, cal) {
 // system con calendario = [bloque ESTABLE cacheado (negocio + guardrails de citas),
 // bloque VOLÁTIL sin cache_control (fecha/hora actual)]. La fecha JAMÁS puede entrar
 // en el bloque cacheado: rompería el contrato byte-a-byte de CONTEXTOS-AMPLIOS.
-function calendarSystem(config, tenant, cal) {
+function calendarSystem(config, tenant, cal, handoff = null) {
   const tz = cal.timezone || 'Europe/Madrid';
   const now = new Intl.DateTimeFormat('es-ES', { timeZone: tz, dateStyle: 'full', timeStyle: 'short' }).format(new Date());
   return [
     { type: 'text', text: `${systemFor(config, tenant)}\n${CALENDAR_GUARDRAILS}`, cache_control: { type: 'ephemeral' } },
-    { type: 'text', text: `Ahora mismo es ${now} (zona horaria del negocio: ${tz}). Las citas duran ${Number(cal.slot_minutes) || 30} minutos.` },
+    // Volátil: la fecha y, cuando el canal lo sabe, si hay asesores disponibles ahora.
+    { type: 'text', text: `Ahora mismo es ${now} (zona horaria del negocio: ${tz}). Las citas duran ${Number(cal.slot_minutes) || 30} minutos.`
+      + (handoff === null ? '' : `\n${handoff ? HANDOFF_ON : HANDOFF_OFF}`) },
   ];
 }
 
@@ -1732,17 +1785,18 @@ const UNANSWERED_RE = /no (?:lo )?sé(?![a-z])|no tengo (?:esa|esta|la) informac
 // rechazada no debe dejar fila.
 async function convLoad(env, tenant, channel, externalId, inbox = null) {
   const since = new Date(Date.now() - CONV_SESSION_HOURS * 3600000).toISOString();
-  const row = await env.DB.prepare(`SELECT id, demo, msgs FROM conversations
+  const row = await env.DB.prepare(`SELECT id, demo, msgs, state, state_at, agent_email FROM conversations
      WHERE tenant_id=? AND channel=? AND external_id=? AND last_at > ?
      ORDER BY last_at DESC LIMIT 1`).bind(tenant.id, channel, externalId, since).first();
   const base = { tenant: tenant.id, channel, externalId, inbox };
-  if (!row) return { ...base, id: crypto.randomUUID(), demo: '', msgs: 0, isNew: true, messages: [] };
+  if (!row) return { ...base, id: crypto.randomUUID(), demo: '', msgs: 0, isNew: true, messages: [], state: 'bot', stateAt: null };
   // DESC + LIMIT + reverse: leer la cola de una conversación larga por el índice, no
   // barrer la conversación entera para quedarse con el final.
   const rows = (await env.DB.prepare('SELECT role, text FROM conv_messages WHERE conversation_id=? ORDER BY id DESC LIMIT ?')
     .bind(row.id, CONV_WINDOW).all()).results || [];
   return {
     ...base, id: row.id, demo: row.demo || '', msgs: Number(row.msgs) || 0, isNew: false,
+    state: row.state || 'bot', stateAt: row.state_at || null, agentEmail: row.agent_email || null,
     // 'agent' se le presenta al modelo como 'assistant': la API solo conoce user y
     // assistant, y el modelo TIENE que ver lo que dijo la persona del equipo — si no, al
     // expirar la pausa retomaría la conversación contradiciéndola.
@@ -1818,6 +1872,15 @@ function withinSupportHours(tenant, nowMs = Date.now()) {
   return supportWindows(tenant, day).some(([from, to]) => hhmm >= from && hhmm < to);
 }
 
+// ¿Venció la espera de la toma de control? Sin state_at se considera vencida: una fila a
+// medias no puede dejar al cliente final esperando para siempre.
+function graceExpired(stateAt, nowMs = Date.now()) {
+  if (!stateAt) return true;
+  const at = Date.parse(stateAt);
+  if (!Number.isFinite(at)) return true;
+  return nowMs - at >= TAKEOVER_GRACE_MIN * 60000;
+}
+
 // ¿Se puede ofrecer un asesor AHORA? Interruptor de alguien encendido Y dentro de horario.
 // Nunca lanza: si la tabla de presencia no existe aún (deploy antes de migrar), no hay
 // asesores y el bot sigue atendiendo — que es el comportamiento seguro.
@@ -1828,6 +1891,19 @@ async function advisorAvailable(env, tenant) {
     const row = await env.DB.prepare('SELECT COUNT(*) AS n FROM agent_presence WHERE tenant_id=? AND available=1').bind(tenant.id).first();
     return Number(row && row.n) > 0;
   } catch (_) { return false; }
+}
+
+// «Fuera de horario NO se ofrece interacción humana» (Juan). La forma limpia de que el bot
+// no prometa lo que no puede dar es DECÍRSELO, no censurar su respuesta después. Va en un
+// bloque volátil, sin cache_control: el bloque estable del system sigue cacheando igual.
+const HANDOFF_ON = 'AHORA MISMO hay alguien del equipo disponible. Si la persona pide hablar con una persona, confírmalo con naturalidad y termina tu mensaje con el marcador [[HUMANO]].';
+const HANDOFF_OFF = 'AHORA MISMO no hay nadie del equipo disponible (fuera del horario de atención, o sin nadie conectado). NO ofrezcas pasar la conversación a una persona ni digas que alguien va a entrar ahora. Si la persona lo pide, dile con naturalidad que en este momento no hay nadie del equipo, pídele su nombre y su teléfono si no los tienes, y dile que el equipo le escribe en cuanto pueda. Sigue ayudándole tú con lo que puedas. NO uses el marcador [[HUMANO]].';
+
+function systemWithHandoff(config, tenant, available) {
+  return [
+    { type: 'text', text: systemFor(config, tenant), cache_control: { type: 'ephemeral' } },
+    { type: 'text', text: available ? HANDOFF_ON : HANDOFF_OFF },
+  ];
 }
 
 const META_WINDOW_HOURS = 24;
@@ -1974,7 +2050,7 @@ async function settleTwilioReply(config, env, ctx, tenant, from, message, conv, 
   const wantsHuman = WANTS_HUMAN.test(reply);
   reply = reply.replace(WANTS_HUMAN, '').trim();
   if (wantsHuman) {
-    ctx.waitUntil(escalateToHuman(env, tenant, from, message).catch((error) => {
+    ctx.waitUntil(escalateToHuman(env, tenant, from, message, conv.id).catch((error) => {
       console.log(JSON.stringify({ level: 'error', code: 'handoff_alert_failed', tenant: tenant.slug, error: error.name }));
     }));
   }
@@ -1984,7 +2060,10 @@ async function settleTwilioReply(config, env, ctx, tenant, from, message, conv, 
   await convAppend(env, conv, turns);
   const phone = normalizePhone(from.replace(/^whatsapp:/i, ''));
   if (phone) {
-    ctx.waitUntil(captureWhatsAppLead(config, env, ctx, tenant, from, phone, trail, conv.id).catch((error) => {
+    // Pedir hablar con una persona ES intención comercial suficiente: si nadie pudo
+    // atender, el lead se fuerza en vez de esperar a que el resumen traiga sector o
+    // necesidad. Es lo único que queda del handoff cuando no hay asesores.
+    ctx.waitUntil(captureWhatsAppLead(config, env, ctx, tenant, from, phone, trail, conv.id, { force: wantsHuman }).catch((error) => {
       console.log(JSON.stringify({ level: 'error', code: 'wa_lead_capture_failed', tenant: tenant.slug, error: error.name }));
     }));
   }
@@ -2086,17 +2165,35 @@ async function handleTwilio(request, env, ctx, config) {
   // le inflaría la tasa a WhatsApp. Se separan cuando se separe también el origen del lead.
   if (conv.isNew) ctx.waitUntil(recordConversation(env, tenant, 'whatsapp'));
   const history = [...conv.messages, { role: 'user', content: message }].slice(-CONV_WINDOW);
-  // Conversación escalada a humano: el mensaje se guarda pero NO se contesta ni se
-  // llama al modelo — hay una persona en la conversación y dos voces es peor que ninguna.
-  if (env.KV && await env.KV.get(`pause:${tenant.id}:${from}`)) {
+  // La cuenta atrás de la toma de control vence AQUÍ además de en el cron: el cron corre
+  // cada 5 min, así que si la persona vuelve a escribir y el plazo ya pasó, la IA le
+  // contesta en este mismo mensaje en vez de hacerle esperar otra ventana del cron.
+  if (conv.state === 'esperando' && graceExpired(conv.stateAt)) {
+    conv.state = 'bot';
+    try {
+      await env.DB.prepare("UPDATE conversations SET state='bot', state_at=? WHERE id=? AND state='esperando'").bind(new Date().toISOString(), conv.id).run();
+      if (env.KV) await env.KV.delete(`pause:${tenant.id}:${from}`);
+    } catch (_) { /* si falla, la guarda de abajo mantiene al bot callado: es el lado seguro */ }
+    console.log(JSON.stringify({ level: 'info', code: 'takeover_expired', tenant: tenant.slug, via: 'mensaje' }));
+  }
+  // Conversación en manos de una persona (o esperando a que alguien la tome): el mensaje se
+  // guarda pero NO se contesta ni se llama al modelo — dos voces es peor que ninguna.
+  // La clave `pause:` se consulta EN PARALELO al estado a propósito: mientras las dos
+  // convivan, el fallo posible es «el bot se queda callado», nunca «el bot habla por encima
+  // de una persona», y de eso se sale con el botón Reanudar de siempre.
+  const humanoAlMando = ['esperando', 'humano'].includes(conv.state);
+  if (humanoAlMando || (env.KV && await env.KV.get(`pause:${tenant.id}:${from}`))) {
     await convAppend(env, conv, [{ role: 'user', content: message }]);
-    console.log(JSON.stringify({ level: 'info', code: 'bot_paused', tenant: tenant.slug }));
+    console.log(JSON.stringify({ level: 'info', code: 'bot_paused', tenant: tenant.slug, state: conv.state }));
     return new Response(EMPTY_TWIML, { headers: { 'Content-Type': 'text/xml; charset=utf-8' } });
   }
+  // Se resuelve UNA vez por mensaje y viaja al modelo en el bloque volátil del system: así
+  // el bot no ofrece pasar con una persona cuando no hay nadie que pueda entrar.
+  const hayAsesor = await advisorAvailable(env, tenant);
   const twiml = (text) => new Response(`<?xml version="1.0" encoding="UTF-8"?><Response><Message>${escapeHtml(waBody(text))}</Message></Response>`, { headers: { 'Content-Type': 'text/xml; charset=utf-8' } });
   const cal = await tenantCalendar(env, tenant);
   if (!cal) {
-    const raw = await callAnthropic(env, { model: 'claude-sonnet-4-6', max_tokens: WA_MAX_TOKENS, system: systemFor(config, tenant), messages: history }, { tenant, retries: 0, timeoutMs: 10000, closing: 'equipo', bodyLimit: WA_BODY_LIMIT });
+    const raw = await callAnthropic(env, { model: 'claude-sonnet-4-6', max_tokens: WA_MAX_TOKENS, system: systemWithHandoff(config, tenant, hayAsesor), messages: history }, { tenant, retries: 0, timeoutMs: 10000, closing: 'equipo', bodyLimit: WA_BODY_LIMIT });
     return twiml(await settleTwilioReply(config, env, ctx, tenant, from, message, conv, raw));
   }
   // Con calendario: híbrido síncrono/asíncrono (SPEC-CALENDARIO §3.4). La primera
@@ -2105,7 +2202,7 @@ async function handleTwilio(request, env, ctx, config) {
   // de ~15 s de Twilio) y el resto sigue en waitUntil, entregando la respuesta
   // final por la Messages API — el dedupe por MessageSid impide que el reintento
   // de Twilio (si lo hubiera) duplique el trabajo.
-  const payload = { model: 'claude-sonnet-4-6', max_tokens: WA_TOOL_MAX_TOKENS, system: calendarSystem(config, tenant, cal), messages: history };
+  const payload = { model: 'claude-sonnet-4-6', max_tokens: WA_TOOL_MAX_TOKENS, system: calendarSystem(config, tenant, cal, hayAsesor), messages: history };
   const waOpts = { tenant, retries: 0, timeoutMs: 10000, closing: 'cita', bodyLimit: WA_BODY_LIMIT };
   const first = await callAnthropicRaw(env, { ...payload, tools: CALENDAR_TOOLS }, waOpts);
   if (first.stop_reason !== 'tool_use') {
@@ -3542,13 +3639,16 @@ async function adminRouter(request, env, ctx, path, url, config, scope) {
     if (!UUID_RE.test(notifyMatch[1])) throw new HttpError(404, 'not_found');
     const tenantId = notifyMatch[1];
     if (scope.role !== 'velai' && scope.tenantId !== tenantId) throw new HttpError(404, 'not_found');
-    const previous = await env.DB.prepare('SELECT id, slug, channel_address, twilio_from, team_whatsapp, wa_number, weekly_report FROM tenants WHERE id=?').bind(tenantId).first();
+    const previous = await env.DB.prepare('SELECT id, slug, channel_address, twilio_from, team_whatsapp, wa_number, weekly_report, support_hours, support_tz FROM tenants WHERE id=?').bind(tenantId).first();
     if (!previous) throw new HttpError(404, 'not_found');
     const body = await readJson(request, 4000);
     const subset = {};
     if (body.team_whatsapp !== undefined) subset.team_whatsapp = body.team_whatsapp;
     if (body.wa_number !== undefined) subset.wa_number = body.wa_number;
     if (body.weekly_report !== undefined) subset.weekly_report = body.weekly_report;
+    // Horario de atención humana: es configuración del negocio y la decide el cliente.
+    if (body.support_hours !== undefined) subset.support_hours = body.support_hours;
+    if (body.support_tz !== undefined) subset.support_tz = body.support_tz;
     if (!Object.keys(subset).length) throw new HttpError(400, 'nothing_to_update');
     const fields = validateTenant(subset, { partial: true }); // WA_RE / WA_DIGITS_RE de siempre
     assertTeamNotFrom(fields, previous);
@@ -3935,7 +4035,7 @@ async function adminRouter(request, env, ctx, path, url, config, scope) {
         lead_template_sid, twilio_from, twilio_subaccount_sid, waba_id, meta_partner_status, system_prompt,
         bot_name, brand_name, logo_url, brand_color, brand_color_2, greeting, greeting_en, chips_json,
         placeholder, wa_number, theme, web_origins, sender_sid, sender_status, telegram_chat_title,
-        ai_monthly_tokens, ai_daily_limit,
+        ai_monthly_tokens, ai_daily_limit, support_hours, support_tz,
         active, created_at, updated_at, twilio_auth_token_enc IS NOT NULL AS has_twilio_token
         FROM tenants WHERE id=?`).bind(tenantId).first();
       if (!tenant) throw new HttpError(404, 'not_found');
@@ -4351,6 +4451,44 @@ async function sendWeeklyReports(env, now) {
   }
 }
 
+// «Si pasados 5 min nadie toma el control, la IA retoma diciendo que no hay asesores
+// disponibles» (Juan, 2026-08-26). Este camino cubre el caso en que el cliente final se
+// queda CALLADO; si vuelve a escribir, handleTwilio lo resuelve en ese mismo mensaje sin
+// esperar al cron. El cron corre cada 5 min, así que el plazo real está entre 5 y 10: no se
+// disimula, se compensa con el otro camino.
+const NO_ADVISOR_TEXT = 'Ahora mismo no tengo a nadie del equipo disponible para entrar en la conversación. Sigo yo y te ayudo con lo que pueda, y les paso tu caso para que te escriban en cuanto puedan.';
+
+async function expireTakeovers(env) {
+  const cutoff = new Date(Date.now() - TAKEOVER_GRACE_MIN * 60000).toISOString();
+  // LIMIT bajo a propósito: el cron ya gasta consultas en la cola de leads y los avisos, y
+  // el plan gratuito de D1 corta en 50 por invocación. Esto es un evento raro.
+  const rows = (await env.DB.prepare(`SELECT id, tenant_id, external_id, channel, inbox_address, demo, msgs
+    FROM conversations WHERE state='esperando' AND state_at <= ? LIMIT 3`).bind(cutoff).all()).results || [];
+  for (const c of rows) {
+    // Se libera SIEMPRE, aunque el aviso no pueda salir: dejarla en 'esperando' la
+    // congelaría para siempre y el bot no volvería a contestarle nunca.
+    await env.DB.prepare("UPDATE conversations SET state='bot', state_at=? WHERE id=? AND state='esperando'")
+      .bind(new Date().toISOString(), c.id).run();
+    if (env.KV) { try { await env.KV.delete(`pause:${c.tenant_id}:${c.external_id}`); } catch (_) {} }
+    console.log(JSON.stringify({ level: 'info', code: 'takeover_expired', via: 'cron', channel: c.channel }));
+    // Sin dirección de salida no hay por dónde avisar (conversación anterior a la 0023).
+    // Queda liberada igual: el siguiente mensaje del cliente lo atiende la IA.
+    if (!c.inbox_address) continue;
+    const tenant = await env.DB.prepare('SELECT * FROM tenants WHERE id=?').bind(c.tenant_id).first();
+    if (!tenant) continue;
+    const sent = await sendTwilioText(env, tenant, c.inbox_address, c.external_id, NO_ADVISOR_TEXT);
+    if (!sent.ok) {
+      console.log(JSON.stringify({ level: 'error', code: 'no_advisor_notice_failed', tenant: tenant.slug, error: clean(sent.error || 'skipped', 40) }));
+      continue;
+    }
+    // Queda en el historial: si no, el panel enseñaría una conversación que salta del
+    // silencio a la nada y nadie sabría que se avisó.
+    await convAppend(env, { id: c.id, tenant: c.tenant_id, channel: c.channel, externalId: c.external_id,
+      inbox: c.inbox_address, demo: c.demo || '', msgs: c.msgs, isNew: false },
+    [{ role: 'assistant', content: NO_ADVISOR_TEXT }]);
+  }
+}
+
 async function scheduled(env) {
   if (!env.DB) return;
   const now = new Date().toISOString();
@@ -4358,6 +4496,11 @@ async function scheduled(env) {
   try { await pollProvisioning(env); } catch (_) {}
   // Dos consultas con ORDER BY: lo entregable (pending/failed) tiene prioridad y las
   // filas 'skipped' perpetuas no pueden acaparar la ventana del cron (inanición).
+  // La espera de toma de control vence aquí para el cliente que se quedó callado. Nunca
+  // lanza: no puede impedir que se entreguen los avisos de leads.
+  try { await expireTakeovers(env); } catch (error) {
+    console.log(JSON.stringify({ level: 'error', code: 'takeover_expiry_failed', error: clean(String(error.message || error), 80) }));
+  }
   // El informe semanal vive aquí y no en un trigger propio: así un fallo se reintenta en
   // el tick siguiente en vez de esperar una semana. Fuera de la ventana del lunes, sale
   // sin tocar D1. Nunca lanza: no puede impedir que se entreguen los avisos de leads.
@@ -4470,4 +4613,4 @@ export function createWorker(config) {
   };
 }
 
-export const testing = { supportWindows, withinSupportHours, advisorAvailable, CONV_STATES, TAKEOVER_GRACE_MIN, settleReply, TRUNCATED_CLOSING, trimToSentence, waBody, replyWindow, reportPeriod, reportMetric, weeklyReportText, weeklyStats, sendWeeklyReports, convLoad, convAppend, convLinkLead, convFilters, convRetentionDays, UNANSWERED_RE, CONV_WINDOW, cloudflareUsage, CF_FREE_LIMITS, recordConversation, aiCost, recordAiUsage, rateLimited, memLimited, applySenderProfile, pushSenderProfile, clean, persistLead, leadAlertStatus, captureWhatsAppLead, leadFromSummary, leadCaptureDone, errorResponseParts, tenantByAddress, syncPrimaryChannel, assertChannelFree, normalizePhone, extractPhone, safeUtm, publicCors, validTwilioSignature, callAnthropic, callAnthropicRaw, runToolLoop, calendarExecutor, calendarSystem, tenantCalendar, validCalendarDate, availableSlots, handleCalendarCallback, calendarCallbackFor, sendTwilioText, timingSafeEqual, telegramBotUsername, handleTelegramWebhook, sendTelegramText, tenantTelegramToken, telegramThreadFor, registerTelegramTopic, csvCell, expiryDate, leadFilters, isDemoKey, templateVar, leadTemplateVariables, readJson, deliver, drainQueuedLeads, verifyTurnstile, systemFor, validateTenant, invalidateTenantCache, tenantWriteError, assertNotActivePending, tenantChannelSummary, channelsForScope, handleProvision, pollProvisioning, fillSeries, resolveScope, scopeClause, clienteAllowed, adminRouter, recordAuthFailure, handleAdmin, handleWidgetBoot, allowedOrigins, envOrigins, syncPanelGate, envAdmins, syncAdminGate, getSetting, setSetting, withCfToken };
+export const testing = { expireTakeovers, NO_ADVISOR_TEXT, graceExpired, systemWithHandoff, HANDOFF_ON, HANDOFF_OFF, supportWindows, withinSupportHours, advisorAvailable, CONV_STATES, TAKEOVER_GRACE_MIN, settleReply, TRUNCATED_CLOSING, trimToSentence, waBody, replyWindow, reportPeriod, reportMetric, weeklyReportText, weeklyStats, sendWeeklyReports, convLoad, convAppend, convLinkLead, convFilters, convRetentionDays, UNANSWERED_RE, CONV_WINDOW, cloudflareUsage, CF_FREE_LIMITS, recordConversation, aiCost, recordAiUsage, rateLimited, memLimited, applySenderProfile, pushSenderProfile, clean, persistLead, leadAlertStatus, captureWhatsAppLead, leadFromSummary, leadCaptureDone, errorResponseParts, tenantByAddress, syncPrimaryChannel, assertChannelFree, normalizePhone, extractPhone, safeUtm, publicCors, validTwilioSignature, callAnthropic, callAnthropicRaw, runToolLoop, calendarExecutor, calendarSystem, tenantCalendar, validCalendarDate, availableSlots, handleCalendarCallback, calendarCallbackFor, sendTwilioText, timingSafeEqual, telegramBotUsername, handleTelegramWebhook, sendTelegramText, tenantTelegramToken, telegramThreadFor, registerTelegramTopic, csvCell, expiryDate, leadFilters, isDemoKey, templateVar, leadTemplateVariables, readJson, deliver, drainQueuedLeads, verifyTurnstile, systemFor, validateTenant, invalidateTenantCache, tenantWriteError, assertNotActivePending, tenantChannelSummary, channelsForScope, handleProvision, pollProvisioning, fillSeries, resolveScope, scopeClause, clienteAllowed, adminRouter, recordAuthFailure, handleAdmin, handleWidgetBoot, allowedOrigins, envOrigins, syncPanelGate, envAdmins, syncAdminGate, getSetting, setSetting, withCfToken };
