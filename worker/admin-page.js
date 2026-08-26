@@ -292,13 +292,49 @@ dialog::backdrop{background:rgba(5,3,6,.78);backdrop-filter:blur(3px)}
 .note{display:flex;gap:8px}
 .lead-meta{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
 .note textarea{flex:1}
+/* Bandeja de dos paneles: lista a la izquierda, hilo a la derecha. Altura ACOTADA a
+   propósito — el hilo tiene que scrollar dentro de su panel, no empujar la página. */
+.inbox{display:grid;grid-template-columns:320px minmax(0,1fr);border:1px solid var(--border2);border-radius:var(--r);overflow:hidden;height:min(72vh,760px);background:var(--bg2)}
+.inbox-l{border-right:1px solid var(--border2);display:flex;flex-direction:column;min-width:0}
+.inbox-list{overflow-y:auto;flex:1}
+.chtabs{display:flex;gap:6px;padding:10px;border-bottom:1px solid var(--border2);flex-wrap:wrap}
+.chtab{border:1px solid var(--border2);background:none;color:var(--muted);border-radius:999px;padding:5px 11px;font-size:12px;font-weight:600;cursor:pointer;display:inline-flex;gap:6px;align-items:center}
+.chtab.is-on{border-color:var(--orange);color:var(--orange)}
+.chtab b{font-weight:800}
+.cvrow{display:flex;gap:10px;padding:11px 12px;border-bottom:1px solid var(--line);cursor:pointer;align-items:flex-start}
+.cvrow:hover{background:var(--bg3)}
+.cvrow.is-on{background:var(--surface)}
+.cvav{width:34px;height:34px;border-radius:50%;flex:0 0 34px;display:grid;place-items:center;font-size:12px;font-weight:800;color:#fff}
+.cvmain{min-width:0;flex:1}
+.cvtop{display:flex;gap:8px;align-items:baseline}
+.cvwho{font-weight:700;font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1}
+.cvwhen{font-size:11px;color:var(--muted2);white-space:nowrap}
+.cvprev{font-size:12px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-top:2px}
+.cvdot{width:8px;height:8px;border-radius:50%;background:var(--orange);flex:0 0 8px;margin-top:6px}
+.inbox-r{display:flex;flex-direction:column;min-width:0}
+.thread-empty{flex:1;display:grid;place-items:center;color:var(--muted2);padding:20px;text-align:center}
+.thread{display:flex;flex-direction:column;min-height:0;height:100%}
+.thread-h{padding:12px 14px;border-bottom:1px solid var(--border2);display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+.thread-log{flex:1;overflow-y:auto;padding:14px;min-height:0}
+.composer{border-top:1px solid var(--border2);padding:10px 12px}
+.composer textarea{width:100%;resize:vertical;min-height:52px;background:var(--bg2);color:var(--white);border:1px solid var(--border2);border-radius:var(--r-sm);padding:10px 12px;font:inherit;font-size:13px}
+.composer textarea:disabled{opacity:.55;cursor:not-allowed}
+.composer .crow{display:flex;gap:8px;align-items:center;margin-top:7px}
+.cwin{font-size:12px;color:var(--muted)}
+.cwin.shut{color:var(--bad)}
+@media(max-width:900px){.inbox{grid-template-columns:1fr;height:auto}.inbox-l{border-right:0;border-bottom:1px solid var(--border2)}.inbox-list{max-height:44vh}.thread-log{max-height:52vh}}
+
 /* Transcripción: burbujas de chat. El visitante a la izquierda y Vai a la derecha —
    leerlo tiene que parecerse a leer el chat, no a leer una tabla de filas. */
 .chatlog{display:flex;flex-direction:column;gap:8px;margin-top:12px}
 .bub{max-width:76%;padding:8px 12px;border-radius:14px;line-height:1.45;white-space:pre-wrap;overflow-wrap:anywhere}
 .bub.user{align-self:flex-start;background:var(--card2);border:1px solid var(--line);border-bottom-left-radius:4px}
 .bub.bot{align-self:flex-end;background:rgba(255,107,26,.10);border:1px solid rgba(255,107,26,.30);border-bottom-right-radius:4px}
+/* La respuesta HUMANA no se disfraza de bot: si no se distinguen, nadie sabe si el
+   cliente habló con Vai o con una persona, y la tasa de resolución miente. */
+.bub.agent{align-self:flex-end;background:rgba(25,158,112,.12);border:1px solid rgba(25,158,112,.35);border-bottom-right-radius:4px}
 .bub time{display:block;margin-top:4px;font-size:11px;opacity:.6}
+.bub .who{display:block;font-size:11px;font-weight:700;opacity:.75;margin-bottom:2px}
 .timeline{margin-top:20px}
 .timeline h3{font-family:var(--font-d);font-weight:900;letter-spacing:-.01em}
 .timeline article{border-left:2px solid rgba(255,107,26,.25);padding:0 0 14px 14px}
@@ -462,17 +498,25 @@ body.cliente .cliente-only{display:flex}
 <div class="legend"><span><i class="d-new"></i>nuevo</span><span><i class="d-contacted"></i>contactado</span><span><i class="d-qualified"></i>cualificado</span><span><i class="d-won"></i>ganado</span><span><i class="d-lost"></i>perdido</span></div>
 <div class="pager"><button class="btn alt" id="more" hidden>Cargar más</button></div></div>
 <div id="viewConversaciones" hidden>
-<div class="vhead"><div><h1>Conversaciones</h1><p>Lo que se dijo, no solo lo que salió de ahí</p></div><button class="btn alt" id="convExport" type="button">Exportar CSV</button></div>
+<div class="vhead"><div><h1>Conversaciones</h1><p>Lo que se dijo — y responder sin salir del panel</p></div><button class="btn alt" id="convExport" type="button">Exportar CSV</button></div>
 <form class="filters" id="convFilters">
-<span class="sel"><select name="channel"><option value="">Todos los canales</option><option value="web">Web</option><option value="whatsapp">WhatsApp</option><option value="messenger">Messenger</option></select></span>
-<span class="sel"><select name="lead"><option value="">Con lead y sin lead</option><option value="si">Solo las que dieron lead</option><option value="no">Solo las que no</option></select></span>
+<input type="hidden" name="channel" id="convChannel">
 <span class="sel velai-only"><select name="tenant" id="convTenant"><option value="">Todos los clientes</option></select></span>
 <input name="from" type="date" title="Desde"><input name="to" type="date" title="Hasta">
+<label class="fchk"><input type="checkbox" name="lead" value="si">Solo las que dieron lead</label>
 <label class="fchk"><input type="checkbox" name="sinResolver" value="1">Solo con preguntas sin respuesta</label>
 <button class="btn">Filtrar</button><span id="convCount"></span>
 </form>
-<div id="convMessage"></div><div class="table"><table><thead><tr><th>Última actividad</th><th class="velai-only">Cliente</th><th>Canal</th><th>Mensajes</th><th>Sin respuesta</th><th>Lead</th></tr></thead><tbody id="convRows"></tbody></table></div>
-<div class="pager"><button class="btn alt" id="convMore" hidden>Cargar más</button></div></div>
+<div id="convMessage"></div>
+<div class="inbox">
+<div class="inbox-l"><div class="chtabs" id="chTabs"></div><div class="inbox-list" id="convRows"></div></div>
+<div class="inbox-r">
+<div class="thread-empty" id="threadEmpty">Elige una conversación de la izquierda.</div>
+<div class="thread" id="thread" hidden>
+<div class="thread-h" id="threadHead"></div>
+<div class="chatlog thread-log" id="threadLog"></div>
+<div class="composer" id="composer"></div>
+</div></div></div></div>
 <div id="viewTenants" hidden>
 <div class="vhead"><div><h1>Clientes</h1><p>Canal, contexto y estado de cada cliente</p></div><button class="btn" id="newTenant" type="button">Nuevo cliente</button></div>
 <div class="table"><table><thead><tr><th>Nombre</th><th>Canal</th><th>Leads</th><th>Contexto</th><th>Configuración</th><th>Estado</th><th>Calendario</th></tr></thead><tbody id="tenantRows"></tbody></table></div></div>
@@ -627,7 +671,6 @@ body.cliente .cliente-only{display:flex}
 </div></div></main>
 <div class="foot" id="foot">Panel de <b>Velai</b> · <span id="footYear"></span> · Todos los derechos reservados</div>
 <dialog id="detail"><div class="modal-h"><strong id="detailTitle">Detalle del lead</strong><button class="btn alt" id="close">Cerrar</button></div><div class="modal-b" id="detailBody"></div></dialog>
-<dialog id="convDetail"><div class="modal-h"><strong id="convTitle">Conversación</strong><button class="btn alt" id="convClose" type="button">Cerrar</button></div><div class="modal-b" id="convBody"></div></dialog>
 <dialog id="tenantModal"><div class="modal-top"><div class="modal-h"><strong id="tenantTitle">Cliente</strong><div class="mh-r"><input id="tNote" placeholder="Nota del cambio (opcional)" class="inpill"><button class="btn" id="tenantSave" type="button">Guardar</button><button class="btn alt" id="tenantClose" type="button">Cerrar</button></div></div>
 <nav class="ttabs" id="ttabs">
 <button type="button" class="ttab is-on" data-tt="identidad">Identidad y canal<i class="dot"></i></button>

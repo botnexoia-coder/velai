@@ -102,88 +102,103 @@ async function load(append=false){try{const p=params();if(append&&cursor)p.set('
  $('#message').textContent=''}catch(e){$('#message').innerHTML='<p class="error">'+esc(e.message)+'</p>'}}
 async function loadTenants(){try{const d=await api('/api/admin/tenants');for(const t of d.tenants){const opt='<option value="'+esc(t.id)+'">'+esc(t.name)+'</option>';$('#tenantFilter').insertAdjacentHTML('beforeend',opt);$('#convTenant').insertAdjacentHTML('beforeend',opt)}}catch(e){/* sin tenants: los filtros quedan en Todos */}}
 
-// ── Conversaciones (migración 0021) ──────────────────────────────────────────
-// El hueco de paridad número uno: hasta ahora la conversación vivía en KV con TTL de
-// 24 h y cuando un lead salía mal no había forma de mirar qué pasó.
-let convCursor=null,convCount=0;
+// ── Bandeja de conversaciones (migraciones 0021 y 0023) ──────────────────────
+// Dos paneles: lista a la izquierda, hilo y cajón de escritura a la derecha. Una sola
+// llamada (/api/admin/inbox) porque esto hace polling — dos llamadas cada 5 s con seis
+// paneles abiertos serían un tercio del plan gratuito de Workers en refrescar una pantalla.
+let convOpen=null,inboxPoll=null,convCount=0;
 const CH_LABEL={web:'Web',whatsapp:'WhatsApp',messenger:'Messenger'};
+// Por qué NO se puede responder, en palabras del dueño. El cajón se cierra ANTES de que
+// alguien escriba: el 63016 de Twilio llega cuando el mensaje ya se dio por enviado.
+const WIN_WHY={
+ web_reply_unsupported:'El canal web no admite respuesta desde el panel: el widget solo habla cuando el visitante escribe.',
+ inbox_address_unknown:'No sabemos por qué número responder (conversación anterior a la bandeja). En cuanto el cliente vuelva a escribir, se podrá.',
+ no_inbound:'Todavía no hay ningún mensaje del cliente en esta conversación.',
+ window_closed:'La ventana de 24 h de WhatsApp se cerró. Para escribir ahora hace falta una plantilla aprobada por Meta.'};
+function fmtShort(v){if(!v)return '';const d=new Date(v),now=new Date();
+ return (d.toDateString()===now.toDateString())
+  ?new Intl.DateTimeFormat('es-ES',{hour:'2-digit',minute:'2-digit'}).format(d)
+  :new Intl.DateTimeFormat('es-ES',{day:'2-digit',month:'short'}).format(d)}
 function convParams(){const p=new URLSearchParams(new FormData($('#convFilters')));for(const[k,v]of[...p])if(!v)p.delete(k);return p}
-async function loadConversations(append=false){try{const p=convParams();if(append&&convCursor)p.set('cursor',convCursor);
- const d=await api('/api/admin/conversations?'+p);if(!append){$('#convRows').innerHTML='';convCount=0}
- if(!d.conversations.length&&!append)$('#convRows').innerHTML='<tr><td colspan="6" class="empty">No hay conversaciones con estos filtros. Solo se guardan desde el 26 de agosto de 2026: las anteriores vivían en KV y caducaban a las 24 h.</td></tr>';
- for(const c of d.conversations)$('#convRows').insertAdjacentHTML('beforeend','<tr data-id="'+esc(c.id)+'"><td>'+fmt(c.last_at)+'</td>'
-  +'<td class="velai-only">'+tenantChip(c.tenant_id,c.tenant_name)+'</td>'
-  +'<td>'+esc(CH_LABEL[c.channel]||c.channel)+'</td><td>'+esc(c.msgs)+'</td>'
-  // Sin respuesta en rojo solo si hay alguna: un cero en rojo es ruido.
-  +'<td>'+(c.unanswered>0?'<span class="nb bad"><i></i>'+esc(c.unanswered)+'</span>':'<span class="muted">0</span>')+'</td>'
-  +'<td>'+(c.lead_id?(statusPill(c.lead_status||'new')+' '+esc(c.lead_name||'')):'<span class="muted">—</span>')+'</td></tr>');
- paint($('#convRows'));
- convCount+=d.conversations.length;convCursor=d.nextCursor;$('#convMore').hidden=!convCursor;
- $('#convCount').textContent=convCount+(convCursor?'+':'')+' conversaci'+((convCount===1&&!convCursor)?'ón':'ones');
- $('#convMessage').textContent=''}catch(e){$('#convMessage').innerHTML='<p class="error">'+esc(TERRS[e.message]||e.message)+'</p>'}}
-$('#convFilters').onsubmit=e=>{e.preventDefault();convCursor=null;loadConversations()};
-$('#convMore').onclick=()=>loadConversations(true);
-$('#convExport').onclick=()=>{location.href='/api/admin/conversations/export.csv?'+convParams()};
-$('#convClose').onclick=()=>$('#convDetail').close();
-$('#convRows').onclick=e=>{const tr=e.target.closest('[data-id]');if(tr)openConv(tr.dataset.id)};
-async function openConv(id){try{const d=await api('/api/admin/conversations/'+id);const c=d.conversation;
- $('#convTitle').textContent=(CH_LABEL[c.channel]||c.channel)+' · '+fmt(c.started_at);
- const meta='<div class="lead-meta">'+tenantChip(null,c.tenant_name)
-  +'<span class="chip">'+esc(c.msgs)+' mensajes</span>'
+function initials(v){const t=String(v||'').replace(/^(whatsapp:|messenger:)/,'').replace(/[^A-Za-z0-9]/g,'');return (t.slice(0,2)||'··').toUpperCase()}
+function chTabs(counts){const cur=$('#convChannel').value;
+ const total=counts.reduce((a,c)=>a+c.n,0),unread=counts.reduce((a,c)=>a+(c.unread||0),0);
+ // Instagram NO se pinta: no hay canal desplegado, y un filtro que no filtra nada es
+ // exactamente la clase de mentira que este panel no se permite. Aparece cuando exista.
+ const tabs=[{k:'',label:'Todos',n:total,u:unread}].concat(counts.filter(c=>c.n).map(c=>({k:c.channel,label:CH_LABEL[c.channel]||c.channel,n:c.n,u:c.unread||0})));
+ $('#chTabs').innerHTML=tabs.map(t=>'<button type="button" class="chtab'+(t.k===cur?' is-on':'')+'" data-ch="'+esc(t.k)+'">'+esc(t.label)+' <b>'+esc(t.n)+'</b>'+(t.u?' <i class="cvdot"></i>':'')+'</button>').join('')}
+$('#chTabs').onclick=e=>{const b=e.target.closest('[data-ch]');if(!b)return;$('#convChannel').value=b.dataset.ch;loadInbox()};
+function composer(win){const box=$('#composer');
+ if(!win||!win.open){const why=WIN_WHY[win&&win.reason]||'No se puede responder a esta conversación ahora mismo.';
+  box.innerHTML='<textarea disabled placeholder="Cajón cerrado"></textarea><div class="crow"><span class="cwin shut">'+esc(why)+'</span></div>';return}
+ // Las HORAS que quedan, no un semáforo verde: es el dato con el que se decide si contestar
+ // ahora o mandar plantilla. Wati es el único del mercado que lo expone.
+ const left=Math.max(0,Math.round((new Date(win.closesAt)-new Date())/3600000));
+ box.innerHTML='<textarea id="cmsg" rows="2" placeholder="Escribe tu respuesta…"></textarea>'
+  +'<div class="crow"><button class="btn" id="csend" type="button">Enviar</button>'
+  +'<span class="cwin">Quedan <b>'+left+' h</b> de la ventana de WhatsApp. Al responder, Vai se calla 4 h en esta conversación.</span></div>';
+ $('#csend').onclick=sendReply;
+ $('#cmsg').onkeydown=ev=>{if(ev.key==='Enter'&&!ev.shiftKey){ev.preventDefault();sendReply()}}}
+async function sendReply(){const el=$('#cmsg');const text=(el.value||'').trim();if(!text||!convOpen)return;
+ $('#csend').disabled=true;el.disabled=true;
+ try{await api('/api/admin/conversations/'+convOpen+'/reply',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text})});
+  el.value='';toast('Enviado ✓');await loadInbox(true)}
+ catch(e){toast('NO se envió: '+(WIN_WHY[e.message]||TERRS[e.message]||e.message),false);
+  // Si falló por la ventana, el estado de la pantalla estaba viejo: se refresca para que
+  // el cajón se cierre y no se vuelva a intentar a ciegas.
+  if(WIN_WHY[e.message])await loadInbox(true)}
+ finally{$('#csend')&&($('#csend').disabled=false);el.disabled=false;el.focus()}}
+function renderThread(t){
+ if(!t){$('#thread').hidden=true;$('#threadEmpty').hidden=false;return}
+ $('#threadEmpty').hidden=true;$('#thread').hidden=false;
+ const c=t.conversation;
+ $('#threadHead').innerHTML='<span class="cvav" data-c="'+tenantColor(c.external_id)+'">'+esc(initials(c.lead_name||c.external_id))+'</span>'
+  +'<span><b>'+esc(c.lead_name||String(c.external_id||'').replace(/^(whatsapp:|messenger:)/,''))+'</b>'
+  +'<div class="muted">'+esc(CH_LABEL[c.channel]||c.channel)+(c.tenant_name?' · '+esc(c.tenant_name):'')+'</div></span>'
+  +'<span class="grow"></span>'
   +(c.unanswered>0?'<span class="chip">'+esc(c.unanswered)+' sin respuesta</span>':'')
-  +(c.is_demo?'<span class="chip">demo</span>':'')
-  +'<span class="chip">'+esc(c.external_id)+'</span></div>';
- // La retención a la vista: quien lee una transcripción debe saber cuándo desaparece.
- const caduca='<small class="muted">Se borra automáticamente el '+fmt(c.expires_at)+'.</small>';
- const log=d.messages.map(m=>'<div class="bub '+(m.role==='user'?'user':'bot')+'">'+esc(m.text)+'<time>'+fmt(m.created_at)+'</time></div>').join('')
-  ||'<p class="muted">Esta conversación no tiene mensajes guardados.</p>';
- const verLead=c.lead_id?'<div class="actions"><button class="btn alt" id="convLead">Ver el lead que salió de aquí</button></div>':'';
- $('#convBody').innerHTML=meta+'<div class="chatlog">'+log+'</div>'+verLead+'<div class="mt12">'+caduca+'</div>';
- if(c.lead_id)$('#convLead').onclick=()=>{$('#convDetail').close();openLead(c.lead_id)};
- paint($('#convBody'));$('#convDetail').showModal()}
- catch(e){toast('No se pudo abrir la conversación: '+(e.message==='not_found'?'ya no existe (retención cumplida)':e.message),false)}}
-// Cerrar sesión = logout de Cloudflare Access (borra la cookie CF_Authorization de
-// esta app y redirige al login). La ruta la atiende Access, nunca llega al worker.
-$('#logout').onclick=()=>{location.href='/cdn-cgi/access/logout'};
-// Tema de las VISTAS (canvas «Panel Velai — Tema claro»): claro por defecto, el
-// botón del pie de la barra alterna a oscuro. La barra lateral no cambia nunca
-// (los tokens oscuros de :root no entran en el ámbito de main/dialog). La elección
-// se recuerda POR PESTAÑA en sessionStorage — la invariante del panel prohíbe el
-// almacenamiento persistente del navegador.
-function applyTheme(dark){document.body.classList.toggle('dark',!!dark);
- $('#thSun').hidden=!dark;$('#thMoon').hidden=!!dark;
- $('#themeLabel').textContent=dark?'Tema claro':'Tema oscuro';
- try{sessionStorage.setItem('velai-panel-dark',dark?'1':'')}catch(e){}}
-$('#themeBtn').onclick=()=>applyTheme(!document.body.classList.contains('dark'));
-(function(){let dark=false;try{dark=sessionStorage.getItem('velai-panel-dark')==='1'}catch(e){}if(dark)applyTheme(true)})();
-$('#filters').onsubmit=e=>{e.preventDefault();cursor=null;load()};$('#more').onclick=()=>load(true);$('#export').onclick=()=>location.href='/api/admin/leads/export.csv?'+params();$('#close').onclick=()=>$('#detail').close();
-$('#rows').onclick=e=>{const tr=e.target.closest('[data-id]');if(tr)openLead(tr.dataset.id)};
-async function openLead(id){try{const d=await api('/api/admin/leads/'+id);current=d.lead;const l=d.lead;
- $('#detailTitle').textContent=l.name||(l.need?'Sin nombre · '+l.need:'Lead sin nombre');
- // Contexto arriba en píldoras; abajo SOLO las tarjetas con dato (nada de parrilla de guiones).
- const meta='<div class="lead-meta">'+statusPill(l.status)+tenantChip(l.tenant_id,l.tenant_name)+'<span class="chip">'+fmt(l.created_at)+'</span><span class="chip">fuente: '+esc(l.source)+'</span></div>';
- const waCard='<div class="card"><b>WhatsApp</b><span class="tel">'+esc(l.whatsapp||'—')+'</span></div>';
- // Lo PRIMERO que necesita quien atiende: qué buscaba la persona. Se guardaba en D1 desde
- // el principio (need/context del resumen) y no se pintaba en ningún sitio.
- const asunto=(l.need||l.context)?'<div class="card asunto mt12"><b>Qué buscaba</b>'
-  +(l.need?'<p class="as-need">'+esc(l.need)+'</p>':'')
-  +(l.context?'<p class="as-ctx">'+esc(l.context)+'</p>':'')+'</div>':'';
- const cards=[['Sector',l.sector],['Canal',l.channel],['Mensajes/día',l.messages_per_day],['Puntuación',l.score],['Nota del lead',l.note],['Página',l.page_url]]
-  .filter(x=>x[1]!=null&&x[1]!=='').map(x=>'<div class="card"><b>'+x[0]+'</b>'+esc(x[1])+'</div>').join('');
- const options=['new','contacted','qualified','won','lost','spam'].map(s=>'<option value="'+s+'"'+(s===l.status?' selected':'')+'>'+ST_LABEL[s]+'</option>').join('');
- const notices=d.notifications.map(n=>'<article><b>Aviso '+esc(n.channel)+': '+esc(n.status)+'</b><div class="muted">Intentos: '+n.attempts+(n.last_error?' · '+esc(n.last_error):'')+'</div></article>').join('');
- const notes=d.notes.map(n=>'<article><b>'+esc(n.author_email)+'</b><div>'+esc(n.text)+'</div><small class="muted">'+fmt(n.created_at)+'</small></article>').join('');
- const events=d.events.map(n=>'<article><b>'+esc(n.event_type)+'</b><div>'+esc(n.detail||'')+'</div><small class="muted">'+fmt(n.created_at)+' · '+esc(n.actor_email)+'</small></article>').join('');
- const acts=notices+notes+events;
- const velaiBtns=ME.role==='velai'?'<button class="btn alt" id="retry">Reintentar avisos</button><button class="btn bad" id="delete">Borrar lead</button>':'';
- $('#detailBody').innerHTML=meta+asunto+'<div class="grid mt12">'+waCard+cards+'</div>'
- +'<div class="actions"><span class="sel"><select id="status">'+options+'</select></span><button class="btn" id="saveStatus">Guardar estado</button><span class="grow"></span>'+velaiBtns+'</div>'
- +'<div class="card"><b>Añadir nota</b><div class="note mt6"><textarea id="note" rows="2" placeholder="Escribe la nota…"></textarea><button class="btn" id="addNote">Añadir</button></div></div>'
- +'<div class="timeline"><h3>Actividad</h3>'+(acts||'<p class="muted">Sin actividad todavía: ni avisos, ni notas, ni cambios.</p>')+'</div>';
- paint($('#detailBody'));wireDetail();$('#detail').showModal()}catch(e){toast('No se pudo abrir el lead: '+e.message,false)}}
-// Cada acción confirma con toast; sin el try/catch un fallo del PATCH era INVISIBLE
-// (la promesa moría sin aviso y el usuario creía que había guardado).
-function wireDetail(){$('#saveStatus').onclick=async()=>{try{await api('/api/admin/leads/'+current.id,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({status:$('#status').value})});toast('Estado guardado ✓ («'+(ST_LABEL[$('#status').value]||$('#status').value)+'»)');$('#detail').close();load();loadStats()}catch(e){toast('Estado NO guardado: '+e.message,false)}};if($('#retry'))$('#retry').onclick=async()=>{try{await api('/api/admin/leads/'+current.id+'/retry',{method:'POST'});toast('Reintento de avisos lanzado ✓');openLead(current.id)}catch(e){toast('Reintento fallido: '+e.message,false)}};$('#addNote').onclick=async()=>{const text=$('#note').value.trim();if(!text)return;try{await api('/api/admin/leads/'+current.id+'/notes',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text})});toast('Nota guardada ✓');openLead(current.id)}catch(e){toast('Nota NO guardada: '+e.message,false)}};if($('#delete'))$('#delete').onclick=async()=>{if(!confirm('¿Borrar definitivamente este lead y todos sus datos?'))return;try{await api('/api/admin/leads/'+current.id,{method:'DELETE'});toast('Lead borrado ✓');$('#detail').close();load();loadStats()}catch(e){toast('Lead NO borrado: '+e.message,false)}}}
+  +'<span class="chip">se borra el '+fmt(c.expires_at)+'</span>';
+ const log=$('#threadLog');const atBottom=log.scrollHeight-log.scrollTop-log.clientHeight<60;
+ log.innerHTML=t.messages.map(m=>{const kind=m.role==='user'?'user':(m.role==='agent'?'agent':'bot');
+  return '<div class="bub '+kind+'">'+(m.role==='agent'?'<span class="who">'+esc(m.agent_email||'equipo')+'</span>':'')
+   +esc(m.text)+'<time>'+fmt(m.created_at)+'</time></div>'}).join('')
+  ||'<p class="muted">Sin mensajes guardados.</p>';
+ paint($('#threadHead'));
+ // Solo se baja el scroll si el lector YA estaba abajo: en un polling cada 15 s, saltar al
+ // final mientras alguien lee hacia arriba es insoportable.
+ if(atBottom)log.scrollTop=log.scrollHeight;
+ composer(t.window)}
+async function loadInbox(quiet=false){
+ try{const p=convParams();if(convOpen)p.set('conversation',convOpen);
+  const d=await api('/api/admin/inbox?'+p);
+  chTabs(d.counts||[]);
+  const rows=d.conversations||[];
+  $('#convRows').innerHTML=rows.length?rows.map(c=>{
+   const who=c.lead_name||String(c.external_id||'').replace(/^(whatsapp:|messenger:)/,'');
+   const prev=(c.preview_role==='user'?'':'tú: ')+String(c.preview||'');
+   return '<div class="cvrow'+(c.id===convOpen?' is-on':'')+'" data-id="'+esc(c.id)+'">'
+    +'<span class="cvav" data-c="'+tenantColor(c.external_id)+'">'+esc(initials(who))+'</span>'
+    +'<span class="cvmain"><span class="cvtop"><span class="cvwho">'+esc(who)+'</span><span class="cvwhen">'+esc(fmtShort(c.last_at))+'</span></span>'
+    +'<span class="cvprev">'+esc(prev)+'</span></span>'
+    +(c.unread?'<i class="cvdot"></i>':'')+'</div>'}).join('')
+   :'<div class="cvrow"><span class="cvmain muted">No hay conversaciones con estos filtros. Solo se guardan desde el 26 de agosto de 2026.</span></div>';
+  paint($('#convRows'));
+  convCount=rows.length;
+  // Un tope que no se dice se lee como «esto es todo». La bandeja trae las 40 más
+  // recientes: si vienen 40, hay más detrás y se avisa.
+  $('#convCount').textContent=convCount+' conversaci'+(convCount===1?'ón':'ones')
+   +(convCount>=40?' — las más recientes; filtra por fecha o canal para ver más atrás':'');
+  renderThread(d.thread);
+  $('#convMessage').textContent=''}
+ catch(e){if(!quiet)$('#convMessage').innerHTML='<p class="error">'+esc(TERRS[e.message]||e.message)+'</p>'}}
+$('#convRows').onclick=e=>{const r=e.target.closest('[data-id]');if(r){convOpen=r.dataset.id;loadInbox()}};
+$('#convFilters').onsubmit=e=>{e.preventDefault();loadInbox()};
+$('#convExport').onclick=()=>{location.href='/api/admin/conversations/export.csv?'+convParams()};
+// Polling solo con la pestaña visible Y la vista abierta: 15 s en vez de 5 baja el gasto
+// de ~35.000 peticiones/día a ~11.500 con seis paneles abiertos.
+function inboxPolling(on){if(inboxPoll){clearInterval(inboxPoll);inboxPoll=null}
+ if(on)inboxPoll=setInterval(()=>{if(document.visibilityState==='visible')loadInbox(true)},15000)}
+
 // ── Vistas (barra lateral) ──
 const TERRS={already_provisioned:'Ese paso ya está hecho (idempotente: un doble clic no crea recursos duplicados).',provision_in_progress:'Ese paso ya está en curso, espera unos segundos.',waba_required:'Rellena y guarda primero la WABA del cliente.',subaccount_required:'Crea primero la subcuenta (paso 1).',subaccount_unusable:'Esa subcuenta no existe en Twilio o no está activa: revisa el SID pegado en la ficha.',sender_required:'Este cliente aún no tiene número de WhatsApp: haz primero el alta y sincroniza.',template_required:'Este cliente aún no tiene plantilla creada: haz primero el paso 2.',brand_empty:'Rellena al menos el nombre de marca o el logo en la ficha antes de aplicar el perfil.',logo_missing:'Sube primero tu imagen.',channels_required:'Marca al menos un canal para esa imagen.',sender_profile_failed:'Twilio rechazó la actualización del perfil (mira el detalle).',twilio_400_63100:'Twilio rechazó los datos del perfil (validación). El detalle dice qué campo falla.',twilio_400_63101:'La foto no es válida para WhatsApp: prueba una cuadrada de 640×640 en PNG o JPG.',invalid_image:'Solo PNG, JPG o WebP (y que sea una imagen de verdad).',image_too_large:'La imagen pesa más de 2 MB.',media_not_configured:'El almacenamiento de imágenes no está disponible en el worker.',twilio_auth_token_missing:'La subcuenta no tiene auth token guardado.',provision_orphan:'Twilio creó el recurso pero D1 no lo guardó: revisa Telegram y reconcilia a mano.',invalid_code:'El OTP son 4-8 dígitos.',slug_taken:'Ese slug ya existe.',address_taken:'Ese canal ya está asignado a otro cliente: guardarlo desviaría sus conversaciones.',subaccount_taken:'Esa subcuenta de Twilio ya está asignada a otro cliente.',pending_tenant_cannot_be_active:'Un prospecto (canal pending:) no puede activarse: ponle primero su canal real.',invalid_twilio_auth_token:'El auth token debe ser 32 caracteres hexadecimales (Twilio → Keys & Credentials).',stale_tenant:'Alguien modificó este cliente mientras editabas. Recarga la ficha y vuelve a aplicar tus cambios.',nothing_to_update:'No hay cambios que guardar.',invalid_preview:'Escribe un mensaje de prueba y un contexto de al menos 50 caracteres.',rate_limited:'Demasiadas pruebas seguidas: espera un minuto.',email_taken:'Ese correo ya tiene acceso al panel de OTRO cliente (un correo pertenece a un solo cliente).',email_is_admin:'Ese correo es admin de Velai (ADMIN_EMAILS): ya ve todo, no puede ser usuario de un cliente.',invalid_email:'Eso no parece un correo válido.',cloudflare_api_not_configured:'Falta CF_API_TOKEN (secret) o CF_ACCOUNT_ID en el worker: la sincronización con Cloudflare no está activa.',turnstile_sync_failed:'El PUT a Turnstile falló DESPUÉS de guardar en D1: el worker acepta el origen pero Turnstile no emitirá token. Reintenta Sincronizar Turnstile.',turnstile_domains_limit:'Turnstile admite 10 dominios por widget y ya se superan incluso plegando los www: toca pasar a un widget por cliente (alternativa §4 de la spec).',already_admin:'Ese correo ya es admin.',email_is_client:'Ese correo es usuario de un CLIENTE: primero quítalo de la ficha del cliente y luego dale admin.',admin_is_root:'Ese admin es raíz (vive en la configuración del worker): no se puede quitar desde el panel.',cannot_remove_self:'No puedes quitarte a ti mismo (que lo haga otro admin): evita el cierre accidental.',root_only:'Solo los admins raíz (los de la configuración del worker) pueden tocar la configuración.',invalid_token_format:'Eso no parece un token de API de Cloudflare.',token_invalid:'Cloudflare rechazó el token (no está activo): NO se guardó.',token_verify_unavailable:'No se pudo validar contra Cloudflare (red): NO se guardó.',sender_not_found:'La subcuenta no tiene ningún sender de WhatsApp aún: haz primero el Self Sign-up con el cliente.',multiple_senders:'La subcuenta tiene VARIOS senders: reconcíliala a mano desde la ficha.',team_whatsapp_equals_from:'Ese número es el DEL BOT: si se avisa a sí mismo, WhatsApp rechaza todos los avisos (error 63031). Usa los números del equipo.',telegram_not_configured:'Falta configurar Telegram en el worker (token del bot o secreto del webhook).',telegram_no_vinculado:'Vincula primero el grupo de Telegram (botón Conectar Telegram).',marca_blanca_requerida:'Los Temas son parte de la marca blanca: actívala en el paso 1 para este cliente.',group_sin_temas:'El grupo no tiene «Temas» activados: actívalos en los ajustes del grupo de Telegram y reintenta.',bot_sin_permisos:'El bot necesita ser ADMIN del grupo con permiso «Gestionar temas»: dáselo y reintenta.',telegram_topic_failed:'Telegram no pudo crear el tema: reintenta en unos segundos.',demasiados_temas:'Máximo 25 temas por grupo.',invalid_topic_name:'Ponle nombre al tema.',invalid_bot_token:'Ese token no parece de @BotFather o Telegram lo rechazó.',telegram_setup_failed:'Telegram rechazó el registro del webhook: reintenta.'};
 let tenantList=[],editing=null;
@@ -192,7 +207,8 @@ let tenantList=[],editing=null;
 const VIEWS={dashboard:'#viewDashboard',leads:'#viewLeads',conversaciones:'#viewConversaciones',tenants:'#viewTenants',config:'#viewConfig',calendario:'#viewCalendario',conexiones:'#viewConexiones',canales:'#viewCanales'};
 document.querySelectorAll('.tab[data-view]').forEach(b=>b.onclick=()=>{document.querySelectorAll('.tab[data-view]').forEach(x=>{x.classList.toggle('is-on',x===b);x.setAttribute('aria-selected',x===b?'true':'false')});const v=b.dataset.view;
  Object.entries(VIEWS).forEach(([k,sel])=>{$(sel).hidden=k!==v});
- if(v==='dashboard'){loadStats();loadAiUsage();loadInfra()}else if(v==='leads'){load();loadEscalations()}else if(v==='conversaciones'){loadConversations()}else if(v==='tenants')loadTenantList();else if(v==='config'){loadAdmins();loadConfig()}else if(v==='calendario'){calMenu()}else if(v==='conexiones'){cxMenu()}else if(v==='canales'){loadChannels()}});
+ inboxPolling(v==='conversaciones');
+ if(v==='dashboard'){loadStats();loadAiUsage();loadInfra()}else if(v==='leads'){load();loadEscalations()}else if(v==='conversaciones'){loadInbox()}else if(v==='tenants')loadTenantList();else if(v==='config'){loadAdmins();loadConfig()}else if(v==='calendario'){calMenu()}else if(v==='conexiones'){cxMenu()}else if(v==='canales'){loadChannels()}});
 // ── Conexiones (SPEC-CONEXIONES PR1): Telegram de avisos en autoservicio ──
 // El cliente abre SU tarjeta; Velai elige tenant con el selector de la cabecera.
 let cxTenant=null;
