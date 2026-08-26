@@ -234,6 +234,26 @@ const AI_PRICES = {
 };
 const AI_PRICE_FALLBACK = { in: 3, out: 15 };   // modelo desconocido: se estima como Sonnet
 
+// Topes de salida del modelo, por canal.
+// Web: sin límite de canal, así que manda la calidad de la respuesta. Con 300 se cortaban
+// consultas legítimas por la mitad (GOgestión, 2026-08-26).
+const WEB_MAX_TOKENS = 700;
+// WhatsApp: el tope lo pone el CANAL, no el modelo — Twilio corta el cuerpo en 1.600
+// caracteres y rechaza de largo (21617). ~400 tokens de español son ~1.500 caracteres:
+// subir más cambiaría un truncado por un envío fallido, que es peor porque el cliente
+// final no recibe nada.
+const WA_MAX_TOKENS = 400;
+const WA_TOOL_MAX_TOKENS = 500;   // el JSON de tool_use consume output aparte del texto
+const WA_BODY_LIMIT = 1500;       // margen sobre los 1.600 de WhatsApp
+
+// Cuerpo apto para WhatsApp: recorta a la última frase completa dentro del límite del
+// canal, en vez de partir una palabra o dejar que Twilio rechace el mensaje entero.
+function waBody(text) {
+  const value = String(text || '');
+  return value.length <= WA_BODY_LIMIT ? value : trimToSentence(value.slice(0, WA_BODY_LIMIT));
+}
+
+
 function aiCost(row) {
   const p = AI_PRICES[row.model] || AI_PRICE_FALLBACK;
   const m = 1e6;
@@ -298,11 +318,34 @@ async function callAnthropicRaw(env, payload, options = {}) {
   return data;
 }
 
+// Un corte por max_tokens deja la frase a medias («…te recomiendo que») y eso llega tal
+// cual al cliente final del cliente. Se recorta a la última frase COMPLETA: mejor una
+// respuesta que acaba antes que una que acaba a mitad de palabra.
+// El guarda de 40 evita dejar un fragmento inútil cuando se cortó muy pronto: ahí es menos
+// malo mandar la frase incompleta que un saludo suelto.
+function trimToSentence(text) {
+  const value = String(text || '').trimEnd();
+  for (let i = value.length - 1; i > 40; i--) {
+    if ('.!?…'.includes(value[i])) return value.slice(0, i + 1);
+  }
+  return value;
+}
+
+// Truncado por max_tokens: hasta ahora era INVISIBLE — stop_reason solo se miraba para
+// tool_use, así que una respuesta cortada salía al cliente y no quedaba rastro en ninguna
+// parte. Se registra con el cliente y el modelo para poder subir el tope donde haga falta.
+function settleReply(data, options, raw) {
+  if (data.stop_reason !== 'max_tokens') return raw;
+  console.log(JSON.stringify({ level: 'warn', code: 'reply_truncated',
+    tenant: (options.tenant && options.tenant.slug) || null, model: data.model || null, chars: raw.length }));
+  return trimToSentence(raw);
+}
+
 async function callAnthropic(env, payload, options = {}) {
   const data = await callAnthropicRaw(env, payload, options);
   const reply = data.content?.[0]?.text;
   if (!reply) throw new HttpError(502, 'ai_invalid_response');
-  return reply;
+  return settleReply(data, options, reply);
 }
 
 function contentText(data) {
@@ -321,7 +364,7 @@ async function runToolLoop(env, payload, tools, executor, options = {}, first = 
   for (let round = 0; ; round++) {
     if (!data) data = await callAnthropicRaw(env, { ...payload, messages, tools }, options);
     const toolUses = (data.content || []).filter((b) => b.type === 'tool_use');
-    if (data.stop_reason !== 'tool_use' || !toolUses.length) return contentText(data);
+    if (data.stop_reason !== 'tool_use' || !toolUses.length) return settleReply(data, options, contentText(data));
     if (round >= MAX_TOOL_ITERATIONS) {
       console.log(JSON.stringify({ level: 'warn', code: 'tool_loop_overflow', rounds: round }));
       return null; // el llamador pone la disculpa del canal
@@ -1573,20 +1616,21 @@ async function handleChat(request, env, cors, ctx, config) {
   // Se GUARDA todo y al modelo se le manda solo la ventana: el slice de antes tiraba lo
   // viejo, que es justo lo que dejamos de hacer.
   const history = [...conv.messages, { role: 'user', content: message }].slice(-CONV_WINDOW);
-  // Con calendario conectado (y fuera de demo) el turno va por el bucle de tools;
-  // max_tokens sube a 500 SOLO ahí: el JSON de tool_use consume output y con 300
-  // un agendar_cita con motivo largo se truncaba a mitad de JSON.
+  // Con calendario conectado (y fuera de demo) el turno va por el bucle de tools.
+  // WEB_MAX_TOKENS: el canal web no tiene límite de longitud, y 300 cortaba respuestas
+  // legítimas por la mitad (una consulta de trámites en GOgestión, 2026-08-26). El JSON de
+  // tool_use consume output, así que el camino del calendario necesita al menos tanto.
   const cal = isDemoKey(config, conv.demo) ? null : await tenantCalendar(env, tenant);
   let reply;
   if (cal) {
     reply = await runToolLoop(env, {
-      model: 'claude-sonnet-4-6', max_tokens: 500,
+      model: 'claude-sonnet-4-6', max_tokens: WEB_MAX_TOKENS,
       system: calendarSystem(config, tenant, cal), messages: history,
     }, CALENDAR_TOOLS, calendarExecutor(env, tenant, cal, { channel: 'web', conversationKey: body.conversationId, defaultPhone: '' }), { tenant });
     reply = reply || 'Ahora mismo no puedo consultar la agenda. Déjame tu nombre y teléfono y el equipo te confirma la cita enseguida.';
   } else {
     reply = await callAnthropic(env, {
-      model: 'claude-sonnet-4-6', max_tokens: 300,
+      model: 'claude-sonnet-4-6', max_tokens: WEB_MAX_TOKENS,
       // Las DEMOS son material comercial de Velai, no de un tenant: van tal cual.
       system: isDemoKey(config, conv.demo) ? config.DEMOS[conv.demo] : systemFor(config, tenant), messages: history,
     }, { tenant });
@@ -1872,7 +1916,7 @@ async function sendTwilioText(env, tenant, fromAddress, toAddress, body) {
   const response = await fetch(`https://api.twilio.com/2010-04-01/Accounts/${sid}/Messages.json`, {
     method: 'POST',
     headers: { Authorization: `Basic ${btoa(`${sid}:${token}`)}`, 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: new URLSearchParams({ From: fromAddress, To: toAddress, Body: String(body).slice(0, 1500) }),
+    body: new URLSearchParams({ From: fromAddress, To: toAddress, Body: waBody(body) }),
     signal: AbortSignal.timeout(8000),
   });
   return response.ok ? { ok: true } : { error: `twilio_${response.status}` };
@@ -1962,10 +2006,10 @@ async function handleTwilio(request, env, ctx, config) {
     console.log(JSON.stringify({ level: 'info', code: 'bot_paused', tenant: tenant.slug }));
     return new Response(EMPTY_TWIML, { headers: { 'Content-Type': 'text/xml; charset=utf-8' } });
   }
-  const twiml = (text) => new Response(`<?xml version="1.0" encoding="UTF-8"?><Response><Message>${escapeHtml(text)}</Message></Response>`, { headers: { 'Content-Type': 'text/xml; charset=utf-8' } });
+  const twiml = (text) => new Response(`<?xml version="1.0" encoding="UTF-8"?><Response><Message>${escapeHtml(waBody(text))}</Message></Response>`, { headers: { 'Content-Type': 'text/xml; charset=utf-8' } });
   const cal = await tenantCalendar(env, tenant);
   if (!cal) {
-    const raw = await callAnthropic(env, { model: 'claude-sonnet-4-6', max_tokens: 300, system: systemFor(config, tenant), messages: history }, { tenant, retries: 0, timeoutMs: 10000 });
+    const raw = await callAnthropic(env, { model: 'claude-sonnet-4-6', max_tokens: WA_MAX_TOKENS, system: systemFor(config, tenant), messages: history }, { tenant, retries: 0, timeoutMs: 10000 });
     return twiml(await settleTwilioReply(config, env, ctx, tenant, from, message, conv, raw));
   }
   // Con calendario: híbrido síncrono/asíncrono (SPEC-CALENDARIO §3.4). La primera
@@ -1974,7 +2018,7 @@ async function handleTwilio(request, env, ctx, config) {
   // de ~15 s de Twilio) y el resto sigue en waitUntil, entregando la respuesta
   // final por la Messages API — el dedupe por MessageSid impide que el reintento
   // de Twilio (si lo hubiera) duplique el trabajo.
-  const payload = { model: 'claude-sonnet-4-6', max_tokens: 500, system: calendarSystem(config, tenant, cal), messages: history };
+  const payload = { model: 'claude-sonnet-4-6', max_tokens: WA_TOOL_MAX_TOKENS, system: calendarSystem(config, tenant, cal), messages: history };
   const first = await callAnthropicRaw(env, { ...payload, tools: CALENDAR_TOOLS }, { tenant, retries: 0, timeoutMs: 10000 });
   if (first.stop_reason !== 'tool_use') {
     return twiml(await settleTwilioReply(config, env, ctx, tenant, from, message, conv, contentText(first)));
@@ -4221,4 +4265,4 @@ export function createWorker(config) {
   };
 }
 
-export const testing = { replyWindow, reportPeriod, reportMetric, weeklyReportText, weeklyStats, sendWeeklyReports, convLoad, convAppend, convLinkLead, convFilters, convRetentionDays, UNANSWERED_RE, CONV_WINDOW, cloudflareUsage, CF_FREE_LIMITS, recordConversation, aiCost, recordAiUsage, rateLimited, memLimited, applySenderProfile, pushSenderProfile, clean, persistLead, leadAlertStatus, captureWhatsAppLead, leadFromSummary, leadCaptureDone, errorResponseParts, tenantByAddress, syncPrimaryChannel, assertChannelFree, normalizePhone, extractPhone, safeUtm, publicCors, validTwilioSignature, callAnthropic, callAnthropicRaw, runToolLoop, calendarExecutor, calendarSystem, tenantCalendar, validCalendarDate, availableSlots, handleCalendarCallback, calendarCallbackFor, sendTwilioText, timingSafeEqual, telegramBotUsername, handleTelegramWebhook, sendTelegramText, tenantTelegramToken, telegramThreadFor, registerTelegramTopic, csvCell, expiryDate, leadFilters, isDemoKey, templateVar, leadTemplateVariables, readJson, deliver, drainQueuedLeads, verifyTurnstile, systemFor, validateTenant, invalidateTenantCache, tenantWriteError, assertNotActivePending, tenantChannelSummary, channelsForScope, handleProvision, pollProvisioning, fillSeries, resolveScope, scopeClause, clienteAllowed, adminRouter, recordAuthFailure, handleAdmin, handleWidgetBoot, allowedOrigins, envOrigins, syncPanelGate, envAdmins, syncAdminGate, getSetting, setSetting, withCfToken };
+export const testing = { trimToSentence, waBody, replyWindow, reportPeriod, reportMetric, weeklyReportText, weeklyStats, sendWeeklyReports, convLoad, convAppend, convLinkLead, convFilters, convRetentionDays, UNANSWERED_RE, CONV_WINDOW, cloudflareUsage, CF_FREE_LIMITS, recordConversation, aiCost, recordAiUsage, rateLimited, memLimited, applySenderProfile, pushSenderProfile, clean, persistLead, leadAlertStatus, captureWhatsAppLead, leadFromSummary, leadCaptureDone, errorResponseParts, tenantByAddress, syncPrimaryChannel, assertChannelFree, normalizePhone, extractPhone, safeUtm, publicCors, validTwilioSignature, callAnthropic, callAnthropicRaw, runToolLoop, calendarExecutor, calendarSystem, tenantCalendar, validCalendarDate, availableSlots, handleCalendarCallback, calendarCallbackFor, sendTwilioText, timingSafeEqual, telegramBotUsername, handleTelegramWebhook, sendTelegramText, tenantTelegramToken, telegramThreadFor, registerTelegramTopic, csvCell, expiryDate, leadFilters, isDemoKey, templateVar, leadTemplateVariables, readJson, deliver, drainQueuedLeads, verifyTurnstile, systemFor, validateTenant, invalidateTenantCache, tenantWriteError, assertNotActivePending, tenantChannelSummary, channelsForScope, handleProvision, pollProvisioning, fillSeries, resolveScope, scopeClause, clienteAllowed, adminRouter, recordAuthFailure, handleAdmin, handleWidgetBoot, allowedOrigins, envOrigins, syncPanelGate, envAdmins, syncAdminGate, getSetting, setSetting, withCfToken };

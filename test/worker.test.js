@@ -3614,3 +3614,51 @@ test('responder desde el panel: fuera de ventana es 409 SIN tocar Twilio, y la a
       (e) => e.status === 404);
   } finally { globalThis.fetch = realFetch; }
 });
+
+// ── Truncado por max_tokens (GOgestión, 2026-08-26) ──────────────────────────
+test('un corte por max_tokens acaba en frase completa, no a mitad de palabra', () => {
+  // El caso real: la respuesta se cortó en «te recomiendo que» y eso llegó al cliente final.
+  const cortada = 'Primero, revisa el correo del 22 de agosto. Segundo, llama a la Subdelegación. Ahora bien, para acreditar tu NIE te recomiendo que';
+  const limpia = testing.trimToSentence(cortada);
+  assert.ok(limpia.endsWith('llama a la Subdelegación.'), 'acaba donde acababa la última frase');
+  assert.ok(!limpia.includes('te recomiendo que'));
+  // Interrogación y puntos suspensivos cuentan como fin de frase.
+  assert.ok(testing.trimToSentence('¿Necesitas el NIE en físico o te vale el electrónico? Porque si es el').endsWith('electrónico?'));
+  // Una respuesta que ya está completa no se toca.
+  const entera = 'Te confirmo la cita para el martes a las 10:00.';
+  assert.equal(testing.trimToSentence(entera), entera);
+  // Cortada muy pronto: peor que una frase a medias es un saludo suelto, así que se
+  // devuelve tal cual en vez de recortar hasta dejarla inútil.
+  const pronto = 'Hola, soy Faby y te ayudo con';
+  assert.equal(testing.trimToSentence(pronto), pronto);
+});
+
+test('el cuerpo de WhatsApp respeta el límite del canal recortando por frases', () => {
+  // WhatsApp corta en 1.600 y Twilio rechaza de largo (21617): sin este guarda, subir
+  // max_tokens cambiaría un truncado por un envío fallido — y eso el cliente final no lo
+  // recibe en absoluto.
+  const corto = 'Perfecto, te confirmo la cita.';
+  assert.equal(testing.waBody(corto), corto, 'lo corto pasa intacto');
+  const largo = ('Esta es una frase de relleno para pasar del límite del canal. ').repeat(40);
+  const out = testing.waBody(largo);
+  assert.ok(out.length <= 1500, 'dentro del límite del canal: ' + out.length);
+  assert.ok(out.endsWith('.'), 'y cortado por una frase, no por una palabra');
+});
+
+test('una respuesta truncada se REGISTRA: hasta ahora stop_reason solo se miraba para tool_use', async () => {
+  const env = { ANTHROPIC_API_KEY: 'k' };
+  const logs = [];
+  const realLog = console.log; console.log = (line) => logs.push(String(line));
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = async () => new Response(JSON.stringify({
+    stop_reason: 'max_tokens', model: 'claude-sonnet-4-6',
+    content: [{ type: 'text', text: 'Primero revisa el correo. Segundo llama a la Subdelegación. Y para el NIE te recomiendo que' }],
+  }), { status: 200 });
+  try {
+    const reply = await testing.callAnthropic(env, { model: 'claude-sonnet-4-6', max_tokens: 400, messages: [{ role: 'user', content: 'hola' }] }, { tenant: { slug: 'gogestion' } });
+    assert.ok(reply.endsWith('llama a la Subdelegación.'), 'llega recortada en frase completa');
+    const aviso = logs.map((l) => { try { return JSON.parse(l); } catch (_) { return {}; } }).find((l) => l.code === 'reply_truncated');
+    assert.ok(aviso, 'queda rastro: antes esto era invisible');
+    assert.equal(aviso.tenant, 'gogestion', 'y se sabe A QUIÉN le pasa, para poder subirle el tope');
+  } finally { globalThis.fetch = realFetch; console.log = realLog; }
+});

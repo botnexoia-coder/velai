@@ -77,7 +77,9 @@ CF_ADMIN_GROUP_ID = "92360e3f-8e40-4dfd-85e6-718617d140d0"
 # calendar_tool_failed, calendar_reply_failed, appointment_created,
 # tool_loop_overflow…) no se ven en ninguna parte.
 # Los logs no llevan PII por diseño, así que muestreo al 100%.
-# Códigos nuevos: weekly_report (un informe semanal por cliente y semana, con su estado:
+# Códigos nuevos: reply_truncated (el modelo se quedó sin max_tokens y la respuesta salió
+# recortada a la última frase completa — si un cliente lo repite, súbele el tope de su
+# canal), agent_reply (respuesta humana desde la bandeja), weekly_report (un informe semanal por cliente y semana, con su estado:
 # sent / skipped / failed), weekly_report_failed (el bloque entero falló; los avisos de
 # leads siguen), conv_state_not_saved (el turno NO se guardó en D1: el visitante recibió
 # su respuesta pero el turno siguiente irá sin memoria — es el código a vigilar del
