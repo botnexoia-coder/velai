@@ -3771,3 +3771,20 @@ test('el plan de IA se edita desde la ficha: sin eso, el aviso al 80% mandaría 
   assert.throws(() => testing.validateTenant({ ai_monthly_tokens: 'muchos' }, { partial: true }));
   assert.throws(() => testing.validateTenant({ ai_daily_limit: '0' }, { partial: true }), 'un cupo de 0 dejaría al cliente mudo');
 });
+
+test('el panel no referencia ids que no existen: uno solo mata TODO el script', async () => {
+  // Clase de fallo que el check del bundle NO puede cazar (su DOM stub devuelve un proxy
+  // para cualquier querySelector) y que deja el panel entero en blanco: un $('#x').onclick
+  // a nivel de módulo sobre un id que ya no está en el HTML lanza y aborta el arranque.
+  // Pasó al sustituir la tabla de Conversaciones por la bandeja, y por eso existe esto.
+  const js = await readFile(new URL('../worker/admin-panel.js', import.meta.url), 'utf8');
+  const html = await readFile(new URL('../worker/admin-page.js', import.meta.url), 'utf8');
+  const ids = new Set([...js.matchAll(/\$\('#([A-Za-z0-9_-]+)'\)/g)].map((m) => m[1]));
+  // Los que crea el propio panel al pintar (no están en el HTML estático, y solo se
+  // acceden DESPUÉS de renderizarlos).
+  const dinamicos = new Set(['csend', 'cmsg']);
+  const faltan = [...ids].filter((id) => !dinamicos.has(id) && !html.includes(`id="${id}"`));
+  assert.deepEqual(faltan, [], 'ids referenciados por el panel que no existen en el HTML');
+  // Y al revés para lo que se crea dinámicamente: que siga generándose en algún innerHTML.
+  for (const id of dinamicos) assert.ok(js.includes(`id="${id}"`), `${id} ya no se pinta en ninguna parte`);
+});
