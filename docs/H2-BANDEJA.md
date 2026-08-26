@@ -132,7 +132,46 @@ con seis. El 11%. Esa es la versión que se construye.
   `PLAN-PANEL.md` con motivo: presuponen un equipo de agentes que una pyme no tiene.
 - **Adjuntos.** El icono sale en la captura. Entra cuando alguien lo pida.
 
-## 7. Orden
+## 7. Estado: desplegado el 2026-08-26
+
+Migración **0023** + los cuatro pasos de infraestructura + la UI de dos paneles.
+
+Lo que se hizo tal como estaba escrito: la reconstrucción de `conv_messages` con
+`role='agent'` y `agent_email` (con la tabla casi vacía, como tocaba), `inbox_address`
+rellenado desde el `to` del webhook, `last_read_at`, `POST /conversations/:id/reply` con la
+guarda de ventana **antes** de tocar Twilio, y `GET /inbox` devolviendo lista, contadores y
+hilo abierto en una llamada para el polling de 15 s con la pestaña visible.
+
+Detalles que aparecieron al construir:
+
+- **`role='agent'` se le presenta al modelo como `assistant`.** La API solo conoce `user` y
+  `assistant`, y el modelo TIENE que ver lo que dijo la persona del equipo: si no, al
+  expirar la pausa de 4 h retomaría la conversación contradiciéndola. La burbuja del panel
+  sí los distingue (verde, con el correo de quien respondió) — si no se distinguieran, nadie
+  sabría si el cliente habló con Vai o con una persona, y la tasa de resolución mentiría.
+- **`inbox_address` se rellena con `COALESCE`** en cada mensaje entrante. Las conversaciones
+  abiertas antes de la migración lo tienen a `NULL`: en vez de quedarse mudas para siempre,
+  el siguiente mensaje del cliente las repara. Mientras esté a `NULL`, el cajón se cierra
+  diciendo por qué.
+- **Marcar leído solo cuando hay algo nuevo.** Con polling cada 15 s, un `UPDATE`
+  incondicional serían ~1.900 escrituras diarias por panel abierto para nada.
+- **El scroll no salta si el lector no estaba abajo.** Bajar al final cada 15 s mientras
+  alguien lee hacia arriba es insoportable.
+- **El tope de 40 conversaciones se dice.** «las más recientes; filtra por fecha o canal
+  para ver más atrás» — un tope callado se lee como «esto es todo».
+
+### Lo que sigue fuera, y por qué
+
+- **Responder por el canal web: no se puede, y lo dice.** El widget solo habla cuando el
+  visitante escribe; no hay canal de vuelta desde el panel. Darle uno es otro trabajo
+  (polling en el widget, o un canal push). El cajón se cierra con el motivo escrito.
+- **Plantillas fuera de la ventana.** La v1 **dice** que la ventana se cerró; no finge poder
+  saltarla. Comparte maquinaria con el informe semanal por WhatsApp: se harán juntas.
+- **Instagram.** No se pinta la pestaña. Va por Meta igual que Messenger, así que se conecta
+  cuando se conecte Facebook (Juan, 2026-08-26).
+- **Asignación, etiquetas y adjuntos.**
+
+## 8. Orden que se siguió
 
 1. Migración: reconstruir `conv_messages` con `role='agent'` + `agent_email`; añadir
    `inbox_address` y `last_read_at` a `conversations`. **Primero porque es lo que se
