@@ -228,7 +228,16 @@ async function control(accion){if(!convOpen)return;
 // Disponibilidad: el interruptor es de esta persona, el horario es del cliente y lo cierra
 // por fuera. Se dice cuál de los dos manda, para que nadie crea que está cubriendo y no.
 async function loadAvailability(){if(!ME)return;
- try{const d=await api('/api/admin/availability'+(ME.tenantId?'':'?tenant='+encodeURIComponent(availTenant()||'')));
+ // La disponibilidad es de (cliente, persona): agent_presence va con esa clave. Un admin de
+ // Velai no puede estar «disponible» en abstracto, así que con «Todos los clientes» no hay
+ // a quién marcarse — y antes eso se veía como un botón con un guion que no hacía nada.
+ const tid=ME.tenantId||availTenant();
+ if(!tid){$('#availState').textContent='Sin cliente';$('#availState').className='flag off';
+  $('#availToggle').hidden=true;
+  $('#availNote').textContent='Elige un cliente en el filtro de arriba para marcarte disponible en SUS conversaciones. La disponibilidad es por cliente, no global.';
+  return}
+ $('#availToggle').hidden=false;
+ try{const d=await api('/api/admin/availability'+(ME.tenantId?'':'?tenant='+encodeURIComponent(tid)));
   GRACE_MIN=d.graceMin||5;
   $('#availState').textContent=d.offering?'Asesor disponible':(d.available?'Fuera de horario':'No disponible');
   $('#availState').className='flag '+(d.offering?'ok':'off');
@@ -239,9 +248,11 @@ async function loadAvailability(){if(!ME)return;
      :'Vai atiende todo y captura leads. Nadie va a recibir conversaciones.')}
  catch(e){$('#availState').textContent='—';$('#availNote').textContent=''}}
 function availTenant(){return $('#convTenant')?$('#convTenant').value:''}
-$('#availToggle').onclick=async()=>{$('#availToggle').disabled=true;
+$('#availToggle').onclick=async()=>{const tid=ME.tenantId||availTenant();
+ if(!tid)return;
+ $('#availToggle').disabled=true;
  try{const cur=$('#availToggle').textContent.includes('no disponible');
-  await api('/api/admin/availability'+(ME.tenantId?'':'?tenant='+encodeURIComponent(availTenant()||'')),{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({available:!cur})});
+  await api('/api/admin/availability'+(ME.tenantId?'':'?tenant='+encodeURIComponent(tid)),{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({available:!cur})});
   await loadAvailability()}
  catch(e){toast('No se pudo cambiar la disponibilidad: '+(TERRS[e.message]||e.message),false)}
  finally{$('#availToggle').disabled=false}};
@@ -269,7 +280,8 @@ async function loadInbox(quiet=false){
   $('#convMessage').textContent=''}
  catch(e){if(!quiet)$('#convMessage').innerHTML='<p class="error">'+esc(TERRS[e.message]||e.message)+'</p>'}}
 $('#convRows').onclick=e=>{const r=e.target.closest('[data-id]');if(r){convOpen=r.dataset.id;loadInbox()}};
-$('#convFilters').onsubmit=e=>{e.preventDefault();loadInbox()};
+$('#convFilters').onsubmit=e=>{e.preventDefault();loadInbox();loadAvailability()};
+$('#convTenant').onchange=()=>{convOpen=null;loadInbox();loadAvailability()};
 $('#convExport').onclick=()=>{location.href='/api/admin/conversations/export.csv?'+convParams()};
 // Polling solo con la pestaña visible Y la vista abierta: 15 s en vez de 5 baja el gasto
 // de ~35.000 peticiones/día a ~11.500 con seis paneles abiertos.

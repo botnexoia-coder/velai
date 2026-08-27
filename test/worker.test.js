@@ -3862,7 +3862,7 @@ test('el panel no pierde manejadores por el camino: inventario congelado', async
     'aiDays', 'escalations', 'tenantRows', 'newTenant', 'tenantSave', 'tenantClose', 'tenantPreview',
     'wizBack', 'wizNext', 'tDupSel', 'ttabs', 'tLogoUp', 'tVersions', 'tSyncDomains',
     'uAdd', 'tUsersList', 'aAdd', 'adminsList', 'cfgTokenSave', 'cfgTokenClear',
-    'cxTenantSel', 'cxLogoUp', 'cxLogoApply', 'nfSave', 'wrToggle', 'wrTest', 'availToggle', 'shSave', 'shCopy', 'calCopy',
+    'cxTenantSel', 'cxLogoUp', 'cxLogoApply', 'nfSave', 'wrToggle', 'wrTest', 'availToggle', 'convTenant', 'shSave', 'shCopy', 'calCopy',
     'tgLink', 'tgUnlink', 'tgWlToggle', 'tgBotSave', 'tgBotDel', 'tgSetup', 'tgTopicAdd', 'tgTopics',
     'calTenantSel', 'calGrid', 'calToday', 'calPrev', 'calNext', 'calBack',
     'calConnect', 'calReconnect', 'calDisconnect', 'calSave', 'calDayClose',
