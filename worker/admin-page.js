@@ -82,6 +82,8 @@ main{padding-bottom:74px}
 .tab.is-on{background:rgba(255,107,26,.12);color:var(--orange2);font-weight:700}
 .spacer{flex:1}
 .sidefoot{border-top:1px solid var(--line);padding-top:10px}
+/* El punto vivo del botón de avisos: sin él no hay forma de saber si están encendidos. */
+.alertdot{width:7px;height:7px;border-radius:50%;background:var(--ok);margin-left:auto;flex:0 0 7px}
 .sidefoot .tab{width:100%}
 /* ── Botones ── */
 .btn{border:0;border-radius:var(--r-sm);padding:10px 17px;background:var(--orange);color:#fff;cursor:pointer;font-weight:700;transition:background .15s ease;box-shadow:0 4px 18px rgba(255,107,26,.22)}
@@ -497,6 +499,7 @@ body.cliente .cliente-only{display:flex}
 </nav>
 <span class="spacer"></span>
 <div class="sidefoot">
+<button class="tab" id="alertBtn" type="button" title="Suena un aviso y sale una notificación cuando llega un mensaje, aunque estés en otra pestaña"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"></path><path d="M13.7 21a2 2 0 0 1-3.4 0"></path></svg><span id="alertLabel">Activar avisos</span><i class="alertdot" id="alertDot" hidden></i></button>
 <button class="tab" id="themeBtn" type="button" title="Cambia el tema de las vistas (la barra lateral siempre es oscura)"><svg id="thMoon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12.8A9 9 0 1 1 11.2 3 7 7 0 0 0 21 12.8z"></path></svg><svg id="thSun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" hidden><circle cx="12" cy="12" r="4.5"></circle><line x1="12" y1="2.5" x2="12" y2="5"></line><line x1="12" y1="19" x2="12" y2="21.5"></line><line x1="2.5" y1="12" x2="5" y2="12"></line><line x1="19" y1="12" x2="21.5" y2="12"></line><line x1="5.3" y1="5.3" x2="7" y2="7"></line><line x1="17" y1="17" x2="18.7" y2="18.7"></line><line x1="5.3" y1="18.7" x2="7" y2="17"></line><line x1="17" y1="7" x2="18.7" y2="5.3"></line></svg><span id="themeLabel">Tema oscuro</span></button>
 <button class="tab" id="logout" type="button" title="Cerrar la sesión de Cloudflare Access"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path><path d="M16 17l5-5-5-5"></path><path d="M21 12H9"></path></svg>Salir</button>
 </div>

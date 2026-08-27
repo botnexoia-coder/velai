@@ -1890,15 +1890,20 @@ async function convAppend(env, conv, turns) {
   const now = new Date().toISOString();
   const expires = new Date(Date.now() + convRetentionDays(env) * 86400000).toISOString();
   const unanswered = list.filter((t) => t.role === 'assistant' && UNANSWERED_RE.test(t.content)).length;
+  // Marca de «entró algo del cliente final». El aviso del panel se apoya en esto: con
+  // last_at, una respuesta del propio equipo se avisaría a sí misma.
+  const inbound = list.some((t) => t.role === 'user') ? now : null;
   const head = conv.isNew
-    ? env.DB.prepare(`INSERT INTO conversations (id,tenant_id,channel,external_id,demo,msgs,unanswered,started_at,last_at,expires_at,inbox_address)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?)`)
-      .bind(conv.id, conv.tenant, conv.channel, conv.externalId, conv.demo || '', list.length, unanswered, now, now, expires, conv.inbox || null)
+    ? env.DB.prepare(`INSERT INTO conversations (id,tenant_id,channel,external_id,demo,msgs,unanswered,started_at,last_at,expires_at,inbox_address,last_inbound_at)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`)
+      .bind(conv.id, conv.tenant, conv.channel, conv.externalId, conv.demo || '', list.length, unanswered, now, now, expires, conv.inbox || null, inbound)
     // COALESCE en inbox_address: una conversación abierta antes de la migración 0023 lo
     // tiene a NULL y el siguiente mensaje entrante lo rellena, en vez de quedarse muda
     // para siempre. Y un valor ya guardado no se pisa con NULL.
-    : env.DB.prepare('UPDATE conversations SET msgs=msgs+?, unanswered=unanswered+?, last_at=?, expires_at=?, inbox_address=COALESCE(inbox_address,?) WHERE id=?')
-      .bind(list.length, unanswered, now, expires, conv.inbox || null, conv.id);
+    // COALESCE en last_inbound_at: un turno sin mensaje del cliente no debe borrar la marca
+    // del último que sí lo hubo.
+    : env.DB.prepare('UPDATE conversations SET msgs=msgs+?, unanswered=unanswered+?, last_at=?, expires_at=?, inbox_address=COALESCE(inbox_address,?), last_inbound_at=COALESCE(?,last_inbound_at) WHERE id=?')
+      .bind(list.length, unanswered, now, expires, conv.inbox || null, inbound, conv.id);
   try {
     const out = await env.DB.batch([head, ...list.map((t) => env.DB
       .prepare('INSERT INTO conv_messages (conversation_id,role,agent_email,text,created_at) VALUES (?,?,?,?,?)')
@@ -2972,6 +2977,7 @@ function clienteAllowed(path, method) {
   // Su bandeja y sus respuestas: el scope filtra y el handler exige que la conversación
   // sea suya (ajena = 404).
   if (path === '/api/admin/inbox' && method === 'GET') return true;
+  if (path === '/api/admin/alerts' && method === 'GET') return true;
   // Su disponibilidad y el control de SUS conversaciones (el handler exige que sean suyas).
   if (path === '/api/admin/availability' && ['GET', 'PATCH'].includes(method)) return true;
   if (/^\/api\/admin\/conversations\/[0-9a-f-]+\/(takeover|release)$/i.test(path) && method === 'POST') return true;
@@ -3188,6 +3194,23 @@ async function adminRouter(request, env, ctx, path, url, config, scope) {
     // queueMin viaja para que el panel pinte la cuenta atrás con el MISMO número que usa el
     // worker: si se escribiera a mano en el panel, un día dirían cosas distintas.
     return json({ conversations: rows, counts, thread, queueMin: QUEUE_MAX_MIN, pingMin: TAKEOVER_GRACE_MIN }, 200, NO_STORE);
+  }
+
+  // Aviso de mensajes nuevos. Deliberadamente MÍNIMO: lo sondea el panel cada 30 segundos
+  // incluso con la pestaña oculta (es el caso que hay que cubrir), así que es una sola
+  // consulta agregada sobre una tabla pequeña y devuelve tres números, nada más.
+  if (path === '/api/admin/alerts' && request.method === 'GET') {
+    const scc = scopeClause(scope, 'c');
+    const row = await env.DB.prepare(`SELECT
+        SUM(CASE WHEN c.state = 'esperando' THEN 1 ELSE 0 END) AS waiting,
+        SUM(CASE WHEN c.last_read_at IS NULL OR c.last_read_at < c.last_at THEN 1 ELSE 0 END) AS unread,
+        MAX(c.last_inbound_at) AS lastInbound
+      FROM conversations c WHERE c.demo = ''${scc.sql}`).bind(...scc.args).first();
+    return json({
+      waiting: Number(row && row.waiting) || 0,
+      unread: Number(row && row.unread) || 0,
+      lastInbound: (row && row.lastInbound) || null,
+    }, 200, NO_STORE);
   }
 
   // Disponibilidad de la persona que mira el panel. El interruptor es POR PERSONA; el

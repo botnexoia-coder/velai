@@ -175,6 +175,32 @@ Detalles que aparecieron al construir:
   cuando se conecte Facebook (Juan, 2026-08-26).
 - **Asignación, etiquetas y adjuntos.**
 
+## Avisos de mensajes nuevos (migración 0029)
+
+Pedido de Juan el 2026-08-26: sonido y notificación al llegar un mensaje, «por si está en
+otra página u otra pestaña». Botón en el pie de la barra lateral, así que está a la vista en
+todas las vistas.
+
+Tres decisiones que vienen de restricciones reales, no de gusto:
+
+- **El sonido va con Web Audio (un oscilador), no con `<audio>`.** La CSP del panel no
+  declara `media-src`, así que cae en `default-src 'none'` y cualquier archivo de audio
+  —incluido un `data:`— quedaría bloqueado. Un oscilador no carga nada. Hay un test que
+  falla si alguien mete un `new Audio()`.
+- **Este sondeo NO mira `visibilityState`**, al contrario que el de la bandeja. Es
+  deliberado: el caso a cubrir es justamente la pestaña en segundo plano. Para que salga
+  barato, `GET /api/admin/alerts` es **una sola consulta agregada** que devuelve tres
+  números, y va cada 30 s.
+- **`conversations.last_inbound_at`**, en vez de mirar `last_at`. Con `last_at`, una
+  respuesta del propio equipo se avisaría a sí misma. Y sacarlo con un `MAX` sobre
+  `conv_messages` obligaría a recorrer todos los mensajes entrantes en cada sondeo.
+
+El permiso de notificación y el `AudioContext` solo se pueden pedir dentro de un gesto del
+usuario, así que viven en el clic del botón. La preferencia se recuerda **por pestaña**
+(`sessionStorage`), como el tema: la invariante del panel prohíbe almacenamiento persistente.
+Al reabrir, el sondeo arranca solo pero el sonido espera al primer clic — el navegador no
+deja crear el `AudioContext` sin gesto, y eso no se puede rodear.
+
 ## 8. Orden que se siguió
 
 1. Migración: reconstruir `conv_messages` con `role='agent'` + `agent_email`; añadir

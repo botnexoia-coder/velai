@@ -3850,7 +3850,7 @@ test('el panel no pierde manejadores por el camino: inventario congelado', async
   const FUNCIONES = ['applyTheme', 'openLead', 'wireDetail', 'load', 'loadStats', 'loadTenants',
     'loadAiUsage', 'loadInfra', 'loadSaldo', 'loadInbox', 'renderThread', 'composer', 'sendReply',
     'loadConexiones', 'cxMenu', 'loadChannels', 'loadTenantList', 'loadAdmins', 'loadConfig',
-    'loadAvailability', 'control', 'hoursToForm', 'hoursFromForm', 'hoursCopyMon', 'shSummary',
+    'loadAvailability', 'control', 'beep', 'notify', 'checkAlerts', 'setAlerts', 'hoursToForm', 'hoursFromForm', 'hoursCopyMon', 'shSummary',
     'calMenu', 'loadEscalations', 'whoOf', 'prevPrefix', 'chTabs', 'convParams', 'api', 'toast', 'paint'];
   const sinFuncion = FUNCIONES.filter((f) => !fns.has(f));
   assert.deepEqual(sinFuncion, [], 'funciones del panel desaparecidas');
@@ -3862,7 +3862,7 @@ test('el panel no pierde manejadores por el camino: inventario congelado', async
     'aiDays', 'escalations', 'tenantRows', 'newTenant', 'tenantSave', 'tenantClose', 'tenantPreview',
     'wizBack', 'wizNext', 'tDupSel', 'ttabs', 'tLogoUp', 'tVersions', 'tSyncDomains',
     'uAdd', 'tUsersList', 'aAdd', 'adminsList', 'cfgTokenSave', 'cfgTokenClear',
-    'cxTenantSel', 'cxLogoUp', 'cxLogoApply', 'nfSave', 'wrToggle', 'wrTest', 'availToggle', 'convTenant', 'shSave', 'shCopy', 'calCopy',
+    'cxTenantSel', 'cxLogoUp', 'cxLogoApply', 'nfSave', 'wrToggle', 'wrTest', 'availToggle', 'convTenant', 'alertBtn', 'shSave', 'shCopy', 'calCopy',
     'tgLink', 'tgUnlink', 'tgWlToggle', 'tgBotSave', 'tgBotDel', 'tgSetup', 'tgTopicAdd', 'tgTopics',
     'calTenantSel', 'calGrid', 'calToday', 'calPrev', 'calNext', 'calBack',
     'calConnect', 'calReconnect', 'calDisconnect', 'calSave', 'calDayClose',
@@ -4290,4 +4290,56 @@ test('el reloj de cada minuto SOLO atiende la cola: lo demás sigue cada 5', asy
   await testing.scheduled(env, '*/5 * * * *');
   assert.equal(tocado.list, 1, 'ahí sí se drena la cola de leads');
   assert.equal(tocado.esperando, 2, 'y la cola se revisa igual (idempotente)');
+});
+
+// ── Aviso de mensajes nuevos (migración 0029) ────────────────────────────────
+test('el aviso distingue lo que entra del cliente final de lo que responde el equipo', async () => {
+  // Si el aviso mirara last_at, una respuesta del propio equipo se avisaría a sí misma. Por
+  // eso convAppend marca last_inbound_at SOLO cuando el turno trae un mensaje del cliente.
+  const env = { DB: withConversations({ prepare: () => ({ bind: () => ({ first: async () => null, all: async () => ({ results: [] }), run: async () => ({}) }) }), batch: async () => [] }) };
+  const tenant = { id: 't-1' };
+  const conv = await testing.convLoad(env, tenant, 'web', 'c-1');
+  await testing.convAppend(env, conv, [{ role: 'user', content: 'hola' }, { role: 'assistant', content: 'buenas' }]);
+  const ins = env.DB.convs[0];
+  assert.ok(ins, 'la conversación se crea');
+
+  // El INSERT lleva la marca (último argumento del insert de conversations).
+  const src = await readFile(new URL('../worker/app.js', import.meta.url), 'utf8');
+  assert.match(src, /const inbound = list\.some\(\(t\) => t\.role === 'user'\) \? now : null;/);
+  // Y el UPDATE la conserva: un turno sin mensaje del cliente no puede borrarla.
+  assert.match(src, /last_inbound_at=COALESCE\(\?,last_inbound_at\)/);
+});
+
+test('el endpoint de avisos es una sola consulta y respeta el scope del cliente', async () => {
+  let consultas = 0;
+  const env = { DB: {
+    prepare(sql) {
+      consultas++;
+      assert.match(sql, /FROM conversations c WHERE c\.demo = ''/, 'las demos no avisan');
+      assert.match(sql, /c\.tenant_id = \?/, 'y va filtrado por cliente');
+      return { bind: (...args) => ({ first: async () => ({ waiting: 2, unread: 3, lastInbound: '2026-08-26T11:00:00Z' }) }) };
+    },
+    batch: async () => [],
+  } };
+  const ctx = { waitUntil() {} };
+  const OWN = { role: 'cliente', tenantId: 't-mio', email: 'x@y.com' };
+  const p = '/api/admin/alerts';
+  const d = await (await testing.adminRouter(adminReq(p), env, ctx, p, new URL('https://x' + p), {}, OWN)).json();
+  assert.deepEqual(d, { waiting: 2, unread: 3, lastInbound: '2026-08-26T11:00:00Z' });
+  // UNA consulta: el panel lo sondea cada 30 s incluso con la pestaña oculta.
+  assert.equal(consultas, 1);
+});
+
+test('el sonido del panel no usa <audio>: la CSP lo bloquearía', async () => {
+  // La CSP del panel no declara media-src, así que cae en default-src 'none' y cualquier
+  // archivo de audio (incluido un data:) quedaría bloqueado. Web Audio no carga nada.
+  const app = await readFile(new URL('../worker/app.js', import.meta.url), 'utf8');
+  assert.ok(!/media-src/.test(app), 'la CSP sigue sin media-src');
+  const panel = await readFile(new URL('../worker/admin-panel.js', import.meta.url), 'utf8');
+  assert.match(panel, /createOscillator/, 'el aviso suena con un oscilador');
+  // Sin el comentario: la palabra <audio> aparece ahí explicando POR QUÉ no se usa.
+  const codigo = panel.replace(/\/\/[^\n]*/g, '');
+  assert.ok(!/new Audio\(|createElement\(['"]audio/.test(codigo), 'y no con un elemento de audio');
+  // El sondeo de avisos NO mira visibilityState: era el caso a cubrir (otra pestaña).
+  assert.match(panel, /alertTimer=setInterval\(checkAlerts,30000\)/);
 });

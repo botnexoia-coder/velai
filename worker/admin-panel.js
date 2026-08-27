@@ -360,6 +360,72 @@ async function openLead(id){try{const d=await api('/api/admin/leads/'+id);curren
 // Cada acción confirma con toast; sin el try/catch un fallo del PATCH era INVISIBLE
 // (la promesa moría sin aviso y el usuario creía que había guardado).
 function wireDetail(){$('#saveStatus').onclick=async()=>{try{await api('/api/admin/leads/'+current.id,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({status:$('#status').value})});toast('Estado guardado ✓ («'+(ST_LABEL[$('#status').value]||$('#status').value)+'»)');$('#detail').close();load();loadStats()}catch(e){toast('Estado NO guardado: '+e.message,false)}};if($('#retry'))$('#retry').onclick=async()=>{try{await api('/api/admin/leads/'+current.id+'/retry',{method:'POST'});toast('Reintento de avisos lanzado ✓');openLead(current.id)}catch(e){toast('Reintento fallido: '+e.message,false)}};$('#addNote').onclick=async()=>{const text=$('#note').value.trim();if(!text)return;try{await api('/api/admin/leads/'+current.id+'/notes',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text})});toast('Nota guardada ✓');openLead(current.id)}catch(e){toast('Nota NO guardada: '+e.message,false)}};if($('#delete'))$('#delete').onclick=async()=>{if(!confirm('¿Borrar definitivamente este lead y todos sus datos?'))return;try{await api('/api/admin/leads/'+current.id,{method:'DELETE'});toast('Lead borrado ✓');$('#detail').close();load();loadStats()}catch(e){toast('Lead NO borrado: '+e.message,false)}}}
+// ── Avisos de mensajes nuevos (migración 0029) ───────────────────────────────
+// Suena y notifica aunque la pestaña esté en segundo plano o el panel esté en otra vista:
+// era el caso que pidió Juan. Por eso este sondeo NO mira visibilityState, al contrario que
+// el de la bandeja — pero es una sola consulta agregada cada 30 s.
+// El sonido va con Web Audio (un oscilador), NO con <audio>: la CSP del panel no declara
+// media-src, así que cae en default-src 'none' y cualquier archivo de audio quedaría
+// bloqueado. Un oscilador no carga nada.
+const SS_ALERTS='velai-panel-alerts';
+let alertsOn=false,alertTimer=null,alertCtx=null,alertSeen=null;
+function beep(){
+ try{
+  if(!alertCtx)alertCtx=new (window.AudioContext||window.webkitAudioContext)();
+  if(alertCtx.state==='suspended')alertCtx.resume();
+  // Dos notas cortas: se reconoce sin ser estridente y no se confunde con un aviso del SO.
+  [[880,0],[1320,.12]].forEach(([hz,at])=>{
+   const o=alertCtx.createOscillator(),g=alertCtx.createGain();
+   o.type='sine';o.frequency.value=hz;
+   const t=alertCtx.currentTime+at;
+   g.gain.setValueAtTime(0,t);g.gain.linearRampToValueAtTime(.18,t+.01);
+   g.gain.exponentialRampToValueAtTime(.001,t+.11);
+   o.connect(g);g.connect(alertCtx.destination);o.start(t);o.stop(t+.12)})}
+ catch(e){/* sin audio disponible, la notificación sigue saliendo */}}
+function notify(titulo,cuerpo){
+ try{
+  if(!('Notification' in window)||Notification.permission!=='granted')return;
+  const n=new Notification(titulo,{body:cuerpo,tag:'velai-msg',icon:'/favicon.svg'});
+  n.onclick=()=>{window.focus();const b=document.querySelector('.tab[data-view="conversaciones"]');if(b)b.click();n.close()}}
+ catch(e){}}
+async function checkAlerts(){
+ try{const d=await api('/api/admin/alerts');
+  // El primer sondeo solo fija la referencia: si no, al activar los avisos sonaría por
+  // mensajes que ya estaban ahí desde hace horas.
+  if(alertSeen===null){alertSeen=d;return}
+  const nuevoMensaje=d.lastInbound&&d.lastInbound!==alertSeen.lastInbound;
+  const nuevaEspera=d.waiting>alertSeen.waiting;
+  alertSeen=d;
+  if(!nuevoMensaje&&!nuevaEspera)return;
+  beep();
+  // Con la bandeja delante ya lo está viendo: el sonido basta y una notificación del
+  // sistema encima sería ruido.
+  const mirando=document.visibilityState==='visible'&&!$('#viewConversaciones').hidden;
+  if(!mirando)notify(nuevaEspera?'Alguien espera un asesor':'Mensaje nuevo',
+   nuevaEspera?(d.waiting===1?'1 conversación esperando que alguien la tome':d.waiting+' conversaciones esperando'):'Ha llegado un mensaje nuevo a Conversaciones.');
+  $('#alertDot').hidden=false}
+ catch(e){/* un sondeo fallido no apaga los avisos: se reintenta al siguiente */}}
+function alertsPolling(on){
+ if(alertTimer){clearInterval(alertTimer);alertTimer=null}
+ if(on)alertTimer=setInterval(checkAlerts,30000)}
+async function setAlerts(on){
+ alertsOn=!!on;
+ try{sessionStorage.setItem(SS_ALERTS,alertsOn?'1':'')}catch(e){}
+ $('#alertLabel').textContent=alertsOn?'Avisos activados':'Activar avisos';
+ $('#alertDot').hidden=!alertsOn;
+ if(!alertsOn){alertsPolling(false);alertSeen=null;return}
+ // El permiso y el AudioContext SOLO se pueden pedir dentro de un gesto del usuario: por eso
+ // esto vive en el clic del botón y no en el arranque del panel.
+ try{if('Notification' in window&&Notification.permission==='default')await Notification.requestPermission()}catch(e){}
+ beep();
+ alertSeen=null;
+ await checkAlerts();
+ alertsPolling(true);
+ toast(('Notification' in window&&Notification.permission==='granted')
+  ?'Avisos activados ✓ — sonarán aunque estés en otra pestaña'
+  :'Avisos activados ✓ (sin permiso de notificaciones: solo sonará)')}
+$('#alertBtn').onclick=()=>setAlerts(!alertsOn);
+
 // ── Vistas (barra lateral) ──
 const TERRS={already_provisioned:'Ese paso ya está hecho (idempotente: un doble clic no crea recursos duplicados).',provision_in_progress:'Ese paso ya está en curso, espera unos segundos.',waba_required:'Rellena y guarda primero la WABA del cliente.',subaccount_required:'Crea primero la subcuenta (paso 1).',subaccount_unusable:'Esa subcuenta no existe en Twilio o no está activa: revisa el SID pegado en la ficha.',sender_required:'Este cliente aún no tiene número de WhatsApp: haz primero el alta y sincroniza.',template_required:'Este cliente aún no tiene plantilla creada: haz primero el paso 2.',brand_empty:'Rellena al menos el nombre de marca o el logo en la ficha antes de aplicar el perfil.',logo_missing:'Sube primero tu imagen.',channels_required:'Marca al menos un canal para esa imagen.',sender_profile_failed:'Twilio rechazó la actualización del perfil (mira el detalle).',twilio_400_63100:'Twilio rechazó los datos del perfil (validación). El detalle dice qué campo falla.',twilio_400_63101:'La foto no es válida para WhatsApp: prueba una cuadrada de 640×640 en PNG o JPG.',invalid_image:'Solo PNG, JPG o WebP (y que sea una imagen de verdad).',image_too_large:'La imagen pesa más de 2 MB.',media_not_configured:'El almacenamiento de imágenes no está disponible en el worker.',twilio_auth_token_missing:'La subcuenta no tiene auth token guardado.',provision_orphan:'Twilio creó el recurso pero D1 no lo guardó: revisa Telegram y reconcilia a mano.',invalid_code:'El OTP son 4-8 dígitos.',slug_taken:'Ese slug ya existe.',address_taken:'Ese canal ya está asignado a otro cliente: guardarlo desviaría sus conversaciones.',subaccount_taken:'Esa subcuenta de Twilio ya está asignada a otro cliente.',pending_tenant_cannot_be_active:'Un prospecto (canal pending:) no puede activarse: ponle primero su canal real.',invalid_twilio_auth_token:'El auth token debe ser 32 caracteres hexadecimales (Twilio → Keys & Credentials).',stale_tenant:'Alguien modificó este cliente mientras editabas. Recarga la ficha y vuelve a aplicar tus cambios.',nothing_to_update:'No hay cambios que guardar.',invalid_preview:'Escribe un mensaje de prueba y un contexto de al menos 50 caracteres.',rate_limited:'Demasiadas pruebas seguidas: espera un minuto.',email_taken:'Ese correo ya tiene acceso al panel de OTRO cliente (un correo pertenece a un solo cliente).',email_is_admin:'Ese correo es admin de Velai (ADMIN_EMAILS): ya ve todo, no puede ser usuario de un cliente.',invalid_email:'Eso no parece un correo válido.',cloudflare_api_not_configured:'Falta CF_API_TOKEN (secret) o CF_ACCOUNT_ID en el worker: la sincronización con Cloudflare no está activa.',turnstile_sync_failed:'El PUT a Turnstile falló DESPUÉS de guardar en D1: el worker acepta el origen pero Turnstile no emitirá token. Reintenta Sincronizar Turnstile.',turnstile_domains_limit:'Turnstile admite 10 dominios por widget y ya se superan incluso plegando los www: toca pasar a un widget por cliente (alternativa §4 de la spec).',already_admin:'Ese correo ya es admin.',email_is_client:'Ese correo es usuario de un CLIENTE: primero quítalo de la ficha del cliente y luego dale admin.',admin_is_root:'Ese admin es raíz (vive en la configuración del worker): no se puede quitar desde el panel.',cannot_remove_self:'No puedes quitarte a ti mismo (que lo haga otro admin): evita el cierre accidental.',root_only:'Solo los admins raíz (los de la configuración del worker) pueden tocar la configuración.',invalid_token_format:'Eso no parece un token de API de Cloudflare.',token_invalid:'Cloudflare rechazó el token (no está activo): NO se guardó.',token_verify_unavailable:'No se pudo validar contra Cloudflare (red): NO se guardó.',sender_not_found:'La subcuenta no tiene ningún sender de WhatsApp aún: haz primero el Self Sign-up con el cliente.',multiple_senders:'La subcuenta tiene VARIOS senders: reconcíliala a mano desde la ficha.',team_whatsapp_equals_from:'Ese número es el DEL BOT: si se avisa a sí mismo, WhatsApp rechaza todos los avisos (error 63031). Usa los números del equipo.',telegram_not_configured:'Falta configurar Telegram en el worker (token del bot o secreto del webhook).',telegram_no_vinculado:'Vincula primero el grupo de Telegram (botón Conectar Telegram).',marca_blanca_requerida:'Los Temas son parte de la marca blanca: actívala en el paso 1 para este cliente.',group_sin_temas:'El grupo no tiene «Temas» activados: actívalos en los ajustes del grupo de Telegram y reintenta.',bot_sin_permisos:'El bot necesita ser ADMIN del grupo con permiso «Gestionar temas»: dáselo y reintenta.',telegram_topic_failed:'Telegram no pudo crear el tema: reintenta en unos segundos.',demasiados_temas:'Máximo 25 temas por grupo.',invalid_topic_name:'Ponle nombre al tema.',invalid_bot_token:'Ese token no parece de @BotFather o Telegram lo rechazó.',telegram_setup_failed:'Telegram rechazó el registro del webhook: reintenta.'};
 let tenantList=[],editing=null;
@@ -995,7 +1061,12 @@ let ME={role:'velai'};
  else loadTenants();
  // Arranca en Dashboard (es la primera pestaña): sus datos primero, y los leads en
  // segundo plano para que la bandeja esté lista al pulsar Leads.
- loadStats();loadAiUsage();loadInfra();loadSaldo();load();loadEscalations()})();
+ loadStats();loadAiUsage();loadInfra();loadSaldo();load();loadEscalations();
+ // La preferencia se recuerda por pestaña, como el tema. No se puede reactivar sola sin un
+ // gesto (el navegador no deja crear el AudioContext), así que solo se deja el botón
+ // preparado y el sondeo en marcha: el sonido llegará al primer clic en cualquier parte.
+ let quiere=false;try{quiere=sessionStorage.getItem(SS_ALERTS)==='1'}catch(e){}
+ if(quiere){alertsOn=true;$('#alertLabel').textContent='Avisos activados';$('#alertDot').hidden=false;alertSeen=null;checkAlerts();alertsPolling(true)}})();
 // Sincronización del sender desde Twilio (solo Velai): rellena la fila tras el
 // Self Sign-up y repara el webhook si quedó en el default de Twilio.
 $('#waSync').onclick=async()=>{$('#waSyncOut').textContent='sincronizando…';
