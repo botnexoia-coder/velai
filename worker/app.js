@@ -1910,6 +1910,14 @@ async function convAppend(env, conv, turns) {
       .bind(conv.id, t.role, t.agentEmail || null, t.content, now))]);
     const last = out && out[out.length - 1];
     if (last && last.meta && last.meta.last_row_id) conv.lastId = last.meta.last_row_id;
+    else {
+      // Respaldo: el cursor del widget depende de esto. Sin un lastId real, /chat mandaría 0
+      // y el primer sondeo le repintaría la conversación entera al visitante.
+      try {
+        const row = await env.DB.prepare('SELECT MAX(id) AS id FROM conv_messages WHERE conversation_id=?').bind(conv.id).first();
+        if (row && row.id) conv.lastId = row.id;
+      } catch (_) { /* sin cursor el sondeo no duplica: solo pinta de más una vez */ }
+    }
   } catch (error) {
     // Sin texto del mensaje: los logs no llevan PII, tampoco cuando fallan.
     console.log(JSON.stringify({ level: 'error', code: 'conv_state_not_saved', channel: conv.channel, error: clean(String(error.message || error), 80) }));

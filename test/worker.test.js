@@ -4343,3 +4343,26 @@ test('el sonido del panel no usa <audio>: la CSP lo bloquearía', async () => {
   // El sondeo de avisos NO mira visibilityState: era el caso a cubrir (otra pestaña).
   assert.match(panel, /alertTimer=setInterval\(checkAlerts,30000\)/);
 });
+
+test('el widget pinta TODO lo nuevo del sondeo, no solo lo de una persona', async () => {
+  // El fallo que vio Juan: en el panel salían los tres mensajes de la cola y en el widget
+  // solo el primero. Filtraba por role==='agent' razonando que las respuestas del bot ya
+  // las había pintado quien las pidió — cierto para las síncronas, FALSO para las que manda
+  // el servidor solo: los avisos de cola son 'assistant'. El cursor lastId es lo que evita
+  // duplicados, no el rol.
+  const w = await readFile(new URL('../assets/vai-widget.js', import.meta.url), 'utf8');
+  const codigo = w.replace(/\/\/[^\n]*/g, '').replace(/\/\*[\s\S]*?\*\//g, '');
+  assert.ok(!/m\.role !== 'agent'\) continue/.test(codigo), 'ya no se descarta lo del bot');
+  assert.match(codigo, /var kind = m\.role === 'agent' \? 'agent' : 'bot';/);
+  // Y el cursor tiene respaldo: sin un lastId real, el primer sondeo repintaría todo.
+  const app = await readFile(new URL('../worker/app.js', import.meta.url), 'utf8');
+  assert.match(app, /SELECT MAX\(id\) AS id FROM conv_messages WHERE conversation_id=\?/);
+});
+
+test('los avisos de cola se guardan como assistant, que es lo que el widget tiene que pintar', () => {
+  // Cierra el círculo del fallo: si el texto de la cola dejara de guardarse, el visitante
+  // volvería a ver silencio mientras el panel enseña los mensajes.
+  assert.equal(typeof testing.QUEUE_WAIT_TEXT, 'string');
+  assert.equal(typeof testing.NO_ADVISOR_TEXT, 'string');
+  assert.ok(testing.QUEUE_WAIT_TEXT.length > 40 && testing.NO_ADVISOR_TEXT.length > 40);
+});

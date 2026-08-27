@@ -1,5 +1,5 @@
 /* ══════════════════════════════════════════════════════════════════════════
-   VAI CHAT WIDGET — autocontenido (CSS + markup + lógica) · v12
+   VAI CHAT WIDGET — autocontenido (CSS + markup + lógica) · v13
    ──────────────────────────────────────────────────────────────────────────
    OJO CON LA VERSIÓN: este archivo se sirve con Cache-Control immutable durante un
    año (_headers, /*.js), así que el `?v=N` de la URL ES la clave de caché. Cambiar el
@@ -9,11 +9,11 @@
    falla si las dos no coinciden.
 
    Se carga en TODAS las páginas con una sola línea:
-     <script src="/assets/vai-widget.js?v=12" defer></script>
+     <script src="/assets/vai-widget.js?v=13" defer></script>
 
    En la web de un CLIENTE van dos líneas (la primera declara el tenant):
      <script>window.VELAI_TENANT='zoe';</script>
-     <script src="https://hirevai.com/assets/vai-widget.js?v=12" defer></script>
+     <script src="https://hirevai.com/assets/vai-widget.js?v=13" defer></script>
 
    Autocontenido a propósito: solo index.html carga /assets/styles.css, el
    resto de páginas llevan CSS inline. Por eso este archivo inyecta su propio
@@ -602,11 +602,15 @@
       for (var i = 0; i < (data.messages || []).length; i++) {
         var m = data.messages[i];
         if (m.id > lastId) lastId = m.id;
-        // Solo se pinta lo que viene de una PERSONA: las respuestas del bot ya las pintó
-        // quien las pidió, y repetirlas duplicaría la conversación en pantalla.
-        if (m.role !== 'agent') continue;
-        history.push({ role: 'agent', content: m.text, t: Date.parse(m.at) || Date.now() });
-        addMsg('agent', m.text, m.at);
+        // Se pinta TODO lo que no haya visto ya, no solo lo de una persona. Al principio
+        // filtraba por role==='agent' razonando que «las respuestas del bot ya las pintó
+        // quien las pidió» — cierto para las síncronas, pero FALSO para las que manda el
+        // servidor por su cuenta: los avisos de la cola de espera son 'assistant', y el
+        // widget avanzaba el cursor por encima de ellos sin pintarlos nunca.
+        // El cursor `lastId` es lo que evita duplicados, no el rol.
+        var kind = m.role === 'agent' ? 'agent' : 'bot';
+        history.push({ role: m.role === 'agent' ? 'agent' : 'assistant', content: m.text, t: Date.parse(m.at) || Date.now() });
+        addMsg(kind, m.text, m.at);
       }
       if (data.state !== liveState) applyLive(data.state);
       else saveState();
