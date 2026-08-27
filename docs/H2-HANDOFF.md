@@ -111,6 +111,22 @@ La vista de Escalaciones y su botón de Reanudar siguen valiendo: son la salida 
 - **Asignación de conversaciones sigue descartada** (`PLAN-PANEL.md`): tomar el control no es
   asignar: es un cerrojo de una conversación, no una cola de trabajo con dueños.
 
+## Velai atiende SOLO lo de Velai
+
+Decisión de Juan el 2026-08-26, después de ver que un admin de Velai podía tomar el control
+de la conversación de un cliente: **el cliente final de un negocio no debe encontrarse a
+Velai dentro de su chat.** La burbuja del panel lleva el correo de quien escribe, así que
+habría visto `botnexo.ia@gmail.com` en el chat de su gestoría.
+
+- **Ver sí, atender no.** Velai sigue viendo todas las conversaciones —lo necesita para dar
+  soporte y diagnosticar— pero no puede responderlas ni tomar su control.
+- El cajón se cierra **antes** con el motivo escrito («la atiende su equipo, no Velai»), y
+  el endpoint devuelve **403, no 404**: fingir que la conversación no existe sería mentirle
+  al panel, que la está enseñando.
+- La disponibilidad de un admin de Velai es siempre **la del tenant `velai`**: el
+  `?tenant=` se ignora porque no hay nada que elegir. Antes dependía del selector de la
+  bandeja y con «Todos los clientes» dejaba el botón mudo — así lo descubrió Juan.
+
 ## Lo que NO hace
 
 - No toca el canal web: el widget no tiene canal de vuelta (`H2-BANDEJA.md` §1).

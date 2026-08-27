@@ -4123,3 +4123,52 @@ test('el widget viejo no rompe: sin la bandera live, el worker no cede el turno'
   assert.match(w, /payload\.live = true;/);
   assert.match(w, /v9/, 'la versión sube: /*.js va con caché inmutable de un año');
 });
+
+// ── Velai atiende SOLO lo suyo (decisión de Juan, 2026-08-26) ────────────────
+test('Velai ve las conversaciones de los clientes pero NO puede atenderlas', async () => {
+  const env = { DB: { prepare: (sql) => ({ bind: (...args) => ({
+    first: async () => (/FROM tenants WHERE slug = \?/.test(sql) ? { id: 't-velai' } : null),
+    all: async () => ({ results: [] }), run: async () => ({}),
+  }) }), batch: async () => [] } };
+  const VELAI_SCOPE = { role: 'velai', tenantId: null, email: 'admin@velai' };
+  assert.equal(await testing.velaiTenantId(env), 't-velai');
+  assert.equal(await testing.canAttend(env, VELAI_SCOPE, 't-velai'), true, 'las suyas sí');
+  assert.equal(await testing.canAttend(env, VELAI_SCOPE, 't-dialogos'), false, 'las de un cliente NO');
+  // Un cliente sigue con su regla de siempre: solo las suyas.
+  const CLI = { role: 'cliente', tenantId: 't-dialogos', email: 'x@y.com' };
+  assert.equal(await testing.canAttend(env, CLI, 't-dialogos'), true);
+  assert.equal(await testing.canAttend(env, CLI, 't-velai'), false);
+  // Sin el tenant «velai» en la base, Velai no atiende nada en vez de atenderlo todo.
+  const sinVelai = { DB: { prepare: () => ({ bind: () => ({ first: async () => null }) }) } };
+  assert.equal(await testing.canAttend(sinVelai, VELAI_SCOPE, 't-velai'), false);
+});
+
+test('tomar el control de una conversación de cliente: 403 explicado, no 404', async () => {
+  const CID = '00000000-0000-4000-8000-000000000c01';
+  const conv = { id: CID, tenant_id: 't-dialogos', channel: 'whatsapp', external_id: 'whatsapp:+34600000000', state: 'esperando', agent_email: null };
+  const env = { KV: mapKV(), DB: { prepare: (sql) => ({ bind: (...args) => ({
+    first: async () => {
+      if (/FROM tenants WHERE slug = \?/.test(sql)) return { id: 't-velai' };
+      if (/FROM conversations c WHERE c\.id=\?/.test(sql)) return conv.id === args[0] ? { ...conv } : null;
+      return null;
+    },
+    all: async () => ({ results: [] }), run: async () => ({ meta: { changes: 1 } }),
+  }) }), batch: async () => [] } };
+  const ctx = { waitUntil() {} };
+  const VELAI_SCOPE = { role: 'velai', tenantId: null, email: 'admin@velai' };
+  const p = `/api/admin/conversations/${CID}/takeover`;
+  // 403 y no 404: Velai SÍ ve esta conversación, así que fingir que no existe sería mentirle
+  // al panel. Lo que no puede es meterse a atenderla.
+  await assert.rejects(
+    testing.adminRouter(adminReq(p, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }), env, ctx, p, new URL('https://x' + p), {}, VELAI_SCOPE),
+    (e) => e.status === 403 && e.code === 'velai_no_atiende_clientes');
+  // Y responder tampoco.
+  const r = `/api/admin/conversations/${CID}/reply`;
+  await assert.rejects(
+    testing.adminRouter(adminReq(r, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text: 'hola' }) }), env, ctx, r, new URL('https://x' + r), {}, VELAI_SCOPE),
+    (e) => e.status === 403 && e.code === 'velai_no_atiende_clientes');
+  // La misma conversación siendo de Velai sí se puede tomar.
+  conv.tenant_id = 't-velai';
+  const ok = await testing.adminRouter(adminReq(p, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }), env, ctx, p, new URL('https://x' + p), {}, VELAI_SCOPE);
+  assert.equal((await ok.json()).state, 'humano');
+});

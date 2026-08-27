@@ -1972,6 +1972,27 @@ function systemWithHandoff(config, tenant, available) {
   ];
 }
 
+// Velai atiende SOLO sus propias conversaciones (decisión de Juan, 2026-08-26). Puede VER
+// las de todos los clientes —lo necesita para dar soporte y diagnosticar— pero no
+// responderlas ni tomar su control: el cliente final de un negocio no debe encontrarse a
+// Velai dentro de su chat, y la burbuja del panel lleva el correo de quien escribe.
+async function velaiTenantId(env) {
+  const slug = clean(env.DEFAULT_TENANT_SLUG, 40) || 'velai';
+  try {
+    const row = await env.DB.prepare('SELECT id FROM tenants WHERE slug = ?').bind(slug).first();
+    return row ? row.id : null;
+  } catch (_) { return null; }
+}
+
+// ¿Puede ESTA persona atender ESTA conversación? Un cliente, las suyas; Velai, solo las de
+// Velai. Devuelve booleano y no lanza: el código de error lo elige el que llama.
+async function canAttend(env, scope, tenantId) {
+  if (!tenantId) return false;
+  if (scope.role !== 'velai') return scope.tenantId === tenantId;
+  const mine = await velaiTenantId(env);
+  return Boolean(mine) && tenantId === mine;
+}
+
 const META_WINDOW_HOURS = 24;
 // Margen para considerar que el visitante sigue en la página: el widget refresca cada 6 s
 // mientras hay una persona al otro lado, así que 90 s aguanta un tropiezo de red sin
@@ -3124,6 +3145,9 @@ async function adminRouter(request, env, ctx, path, url, config, scope) {
       if (head) {
         const messages = (await env.DB.prepare('SELECT role, agent_email, text, created_at FROM conv_messages WHERE conversation_id=? ORDER BY id ASC LIMIT 500').bind(head.id).all()).results;
         const win = await replyWindow(env, head);
+        // La misma puerta que el endpoint de respuesta, pero ANTES: el cajón se cierra con
+        // el motivo escrito en vez de dejar que alguien escriba y se coma un 403.
+        if (!(await canAttend(env, scope, head.tenant_id))) { win.open = false; win.reason = 'velai_no_atiende_clientes'; }
         // Marcar leído SOLO si hay algo nuevo: en un polling cada 15 s, un UPDATE
         // incondicional serían 1.900 escrituras al día por panel abierto para nada.
         if (!head.last_read_at || head.last_read_at < head.last_at) {
@@ -3140,11 +3164,13 @@ async function adminRouter(request, env, ctx, path, url, config, scope) {
   // Disponibilidad de la persona que mira el panel. El interruptor es POR PERSONA; el
   // horario es del cliente y lo cierra por fuera (docs/H2-HANDOFF.md).
   if (path === '/api/admin/availability' && ['GET', 'PATCH'].includes(request.method)) {
+    // Velai solo puede estar disponible para SUS conversaciones: el ?tenant= se ignora a
+    // propósito, porque no hay nada que elegir.
     const asked = clean(url.searchParams.get('tenant'), 40);
-    const tenantId = scope.tenantId || (asked && UUID_RE.test(asked) ? asked : null);
-    if (!tenantId) throw new HttpError(400, 'tenant_required');
     if (scope.tenantId && asked && asked !== scope.tenantId) throw new HttpError(404, 'not_found');
-    const tenantRow = await env.DB.prepare('SELECT id, support_hours, support_tz FROM tenants WHERE id=?').bind(tenantId).first();
+    const tenantId = scope.tenantId || await velaiTenantId(env);
+    if (!tenantId) throw new HttpError(503, 'velai_tenant_missing');
+    const tenantRow = await env.DB.prepare('SELECT id, name, support_hours, support_tz FROM tenants WHERE id=?').bind(tenantId).first();
     if (!tenantRow) throw new HttpError(404, 'not_found');
     if (request.method === 'PATCH') {
       const body = await readJson(request, 2000);
@@ -3168,6 +3194,9 @@ async function adminRouter(request, env, ctx, path, url, config, scope) {
       hours: tenantRow.support_hours ? JSON.parse(tenantRow.support_hours) : DEFAULT_BUSINESS_HOURS,
       tz: tenantRow.support_tz || 'Europe/Madrid',
       graceMin: TAKEOVER_GRACE_MIN,
+      // Para quién es esta disponibilidad. El panel lo enseña porque un admin de Velai ve
+      // conversaciones de todos y tiene que saber que solo cubre las de Velai.
+      forTenant: tenantRow.name || null,
     }, 200, NO_STORE);
   }
 
@@ -3180,6 +3209,9 @@ async function adminRouter(request, env, ctx, path, url, config, scope) {
     const conv = await env.DB.prepare(`SELECT c.id, c.state, c.agent_email, c.channel, c.tenant_id, c.external_id FROM conversations c WHERE c.id=?${scc.sql}`)
       .bind(ctrlMatch[1], ...scc.args).first();
     if (!conv) throw new HttpError(404, 'not_found');
+    // 403 y no 404 a propósito: Velai SÍ ve esta conversación, así que fingir que no existe
+    // sería mentirle al panel. Lo que no puede es meterse a atenderla.
+    if (!(await canAttend(env, scope, conv.tenant_id))) throw new HttpError(403, 'velai_no_atiende_clientes');
     const now = new Date().toISOString();
     const who = String(actor).toLowerCase();
     if (ctrlMatch[2] === 'takeover') {
@@ -3211,7 +3243,8 @@ async function adminRouter(request, env, ctx, path, url, config, scope) {
     if (!UUID_RE.test(replyMatch[1])) throw new HttpError(404, 'not_found');
     const scc = scopeClause(scope, 'c');
     const conv = await env.DB.prepare(`SELECT c.* FROM conversations c WHERE c.id=?${scc.sql}`).bind(replyMatch[1], ...scc.args).first();
-    if (!conv) throw new HttpError(404, 'not_found');   // ajena = 404, nunca 403
+    if (!conv) throw new HttpError(404, 'not_found');   // de otro cliente = 404, nunca 403
+    if (!(await canAttend(env, scope, conv.tenant_id))) throw new HttpError(403, 'velai_no_atiende_clientes');
     const body = await readJson(request, 4000);
     const text = clean(body.text, 1500);
     if (!text) throw new HttpError(400, 'invalid_message');
@@ -4701,4 +4734,4 @@ export function createWorker(config) {
   };
 }
 
-export const testing = { handleChatPoll, VISITOR_AWAY_MS, expireTakeovers, NO_ADVISOR_TEXT, graceExpired, systemWithHandoff, HANDOFF_ON, HANDOFF_OFF, supportWindows, withinSupportHours, advisorAvailable, CONV_STATES, TAKEOVER_GRACE_MIN, settleReply, TRUNCATED_CLOSING, trimToSentence, waBody, replyWindow, reportPeriod, reportMetric, weeklyReportText, weeklyStats, sendWeeklyReports, convLoad, convAppend, convLinkLead, convFilters, convRetentionDays, UNANSWERED_RE, CONV_WINDOW, cloudflareUsage, CF_FREE_LIMITS, recordConversation, aiCost, recordAiUsage, rateLimited, memLimited, applySenderProfile, pushSenderProfile, clean, persistLead, leadAlertStatus, captureWhatsAppLead, leadFromSummary, leadCaptureDone, errorResponseParts, tenantByAddress, syncPrimaryChannel, assertChannelFree, normalizePhone, extractPhone, safeUtm, publicCors, validTwilioSignature, callAnthropic, callAnthropicRaw, runToolLoop, calendarExecutor, calendarSystem, tenantCalendar, validCalendarDate, availableSlots, handleCalendarCallback, calendarCallbackFor, sendTwilioText, timingSafeEqual, telegramBotUsername, handleTelegramWebhook, sendTelegramText, tenantTelegramToken, telegramThreadFor, registerTelegramTopic, csvCell, expiryDate, leadFilters, isDemoKey, templateVar, leadTemplateVariables, readJson, deliver, drainQueuedLeads, verifyTurnstile, systemFor, validateTenant, invalidateTenantCache, tenantWriteError, assertNotActivePending, tenantChannelSummary, channelsForScope, handleProvision, pollProvisioning, fillSeries, resolveScope, scopeClause, clienteAllowed, adminRouter, recordAuthFailure, handleAdmin, handleWidgetBoot, allowedOrigins, envOrigins, syncPanelGate, envAdmins, syncAdminGate, getSetting, setSetting, withCfToken };
+export const testing = { canAttend, velaiTenantId, handleChatPoll, VISITOR_AWAY_MS, expireTakeovers, NO_ADVISOR_TEXT, graceExpired, systemWithHandoff, HANDOFF_ON, HANDOFF_OFF, supportWindows, withinSupportHours, advisorAvailable, CONV_STATES, TAKEOVER_GRACE_MIN, settleReply, TRUNCATED_CLOSING, trimToSentence, waBody, replyWindow, reportPeriod, reportMetric, weeklyReportText, weeklyStats, sendWeeklyReports, convLoad, convAppend, convLinkLead, convFilters, convRetentionDays, UNANSWERED_RE, CONV_WINDOW, cloudflareUsage, CF_FREE_LIMITS, recordConversation, aiCost, recordAiUsage, rateLimited, memLimited, applySenderProfile, pushSenderProfile, clean, persistLead, leadAlertStatus, captureWhatsAppLead, leadFromSummary, leadCaptureDone, errorResponseParts, tenantByAddress, syncPrimaryChannel, assertChannelFree, normalizePhone, extractPhone, safeUtm, publicCors, validTwilioSignature, callAnthropic, callAnthropicRaw, runToolLoop, calendarExecutor, calendarSystem, tenantCalendar, validCalendarDate, availableSlots, handleCalendarCallback, calendarCallbackFor, sendTwilioText, timingSafeEqual, telegramBotUsername, handleTelegramWebhook, sendTelegramText, tenantTelegramToken, telegramThreadFor, registerTelegramTopic, csvCell, expiryDate, leadFilters, isDemoKey, templateVar, leadTemplateVariables, readJson, deliver, drainQueuedLeads, verifyTurnstile, systemFor, validateTenant, invalidateTenantCache, tenantWriteError, assertNotActivePending, tenantChannelSummary, channelsForScope, handleProvision, pollProvisioning, fillSeries, resolveScope, scopeClause, clienteAllowed, adminRouter, recordAuthFailure, handleAdmin, handleWidgetBoot, allowedOrigins, envOrigins, syncPanelGate, envAdmins, syncAdminGate, getSetting, setSetting, withCfToken };

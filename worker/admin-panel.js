@@ -139,7 +139,9 @@ const WIN_WHY={
  atiende_la_ia:'Vai está atendiendo esta conversación. El cajón se abre cuando la persona pide un asesor y alguien toma el control.',
  sin_control:'Esta persona pidió hablar con alguien del equipo. Toma el control para poder escribirle.',
  ya_tomada:'Otra persona del equipo tomó el control de esta conversación.',
- nada_que_tomar:'Aquí no hay ningún control que tomar: la está atendiendo Vai.'};
+ nada_que_tomar:'Aquí no hay ningún control que tomar: la está atendiendo Vai.',
+ velai_no_atiende_clientes:'Esta conversación es de un cliente y la atiende su equipo, no Velai. La ves para dar soporte, pero no puedes escribir en ella.',
+ velai_tenant_missing:'No encuentro el cliente «velai» en la base: sin él no se puede resolver la disponibilidad de Velai.'};
 function fmtShort(v){if(!v)return '';const d=new Date(v),now=new Date();
  return (d.toDateString()===now.toDateString())
   ?new Intl.DateTimeFormat('es-ES',{hour:'2-digit',minute:'2-digit'}).format(d)
@@ -228,31 +230,23 @@ async function control(accion){if(!convOpen)return;
 // Disponibilidad: el interruptor es de esta persona, el horario es del cliente y lo cierra
 // por fuera. Se dice cuál de los dos manda, para que nadie crea que está cubriendo y no.
 async function loadAvailability(){if(!ME)return;
- // La disponibilidad es de (cliente, persona): agent_presence va con esa clave. Un admin de
- // Velai no puede estar «disponible» en abstracto, así que con «Todos los clientes» no hay
- // a quién marcarse — y antes eso se veía como un botón con un guion que no hacía nada.
- const tid=ME.tenantId||availTenant();
- if(!tid){$('#availState').textContent='Sin cliente';$('#availState').className='flag off';
-  $('#availToggle').hidden=true;
-  $('#availNote').textContent='Elige un cliente en el filtro de arriba para marcarte disponible en SUS conversaciones. La disponibilidad es por cliente, no global.';
-  return}
+ // Velai solo atiende las conversaciones de Velai (decisión del 2026-08-26), así que su
+ // disponibilidad no depende del selector de cliente: el worker la resuelve solo.
  $('#availToggle').hidden=false;
- try{const d=await api('/api/admin/availability'+(ME.tenantId?'':'?tenant='+encodeURIComponent(tid)));
+ try{const d=await api('/api/admin/availability');
   GRACE_MIN=d.graceMin||5;
   $('#availState').textContent=d.offering?'Asesor disponible':(d.available?'Fuera de horario':'No disponible');
   $('#availState').className='flag '+(d.offering?'ok':'off');
   $('#availToggle').textContent=d.available?'Marcarme no disponible':'Marcarme disponible';
-  $('#availNote').textContent=d.available&&!d.withinHours
+  const para=(ME.role==='velai'&&d.forTenant)?' Solo cubres las conversaciones de '+esc(d.forTenant)+': las de los clientes las atienden ellos.':'';
+  $('#availNote').textContent=(d.available&&!d.withinHours
    ?'Estás marcado como disponible, pero fuera del horario de atención ('+esc(d.tz)+') no se ofrecen asesores: Vai atiende y captura el lead.'
    :(d.offering?(d.advisors===1?'Vai puede pasar una conversación a una persona.':d.advisors+' personas disponibles.')
-     :'Vai atiende todo y captura leads. Nadie va a recibir conversaciones.')}
+     :'Vai atiende todo y captura leads. Nadie va a recibir conversaciones.'))+para}
  catch(e){$('#availState').textContent='—';$('#availNote').textContent=''}}
-function availTenant(){return $('#convTenant')?$('#convTenant').value:''}
-$('#availToggle').onclick=async()=>{const tid=ME.tenantId||availTenant();
- if(!tid)return;
- $('#availToggle').disabled=true;
+$('#availToggle').onclick=async()=>{$('#availToggle').disabled=true;
  try{const cur=$('#availToggle').textContent.includes('no disponible');
-  await api('/api/admin/availability'+(ME.tenantId?'':'?tenant='+encodeURIComponent(tid)),{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({available:!cur})});
+  await api('/api/admin/availability',{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({available:!cur})});
   await loadAvailability()}
  catch(e){toast('No se pudo cambiar la disponibilidad: '+(TERRS[e.message]||e.message),false)}
  finally{$('#availToggle').disabled=false}};
