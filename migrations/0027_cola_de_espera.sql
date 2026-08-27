@@ -1,0 +1,17 @@
+-- Cola de espera de verdad, en vez de rendirse a los 5 minutos (Juan, 2026-08-26:
+-- «que no diga que no hay nadie disponible, ponerlo en lista de espera por un tiempo
+-- determinado hasta que el asesor tome el control, como hacen los chats de atención»).
+--
+-- El problema real, comprobado en el código: la disponibilidad NUNCA fue exclusiva —
+-- advisorAvailable solo cuenta filas de agent_presence y no le importa si esa persona está
+-- ocupada, así que atender varias a la vez ya funcionaba. Lo que fallaba era el final: a los
+-- 5 minutos la IA retomaba diciendo que no había podido entrar nadie, y con un asesor
+-- ocupado en otra conversación eso saltaba casi siempre. El visitante lo leía como un «no
+-- hay nadie», cuando sí había.
+--
+-- Ahora los 5 minutos son el primer AVISO («seguimos buscando»), no el final. El final son
+-- 15 minutos, y solo entonces la IA retoma y pide el teléfono.
+--
+-- queue_pings cuenta los avisos ya enviados: sin esto el cron repetiría el mismo mensaje
+-- cada 5 minutos hasta agotar la cola.
+ALTER TABLE conversations ADD COLUMN queue_pings INTEGER NOT NULL DEFAULT 0;

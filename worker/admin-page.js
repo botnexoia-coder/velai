@@ -337,6 +337,10 @@ dialog::backdrop{background:rgba(5,3,6,.78);backdrop-filter:blur(3px)}
 .cvwhen{font-size:11px;color:var(--muted2);white-space:nowrap}
 .cvprev{display:block;font-size:12px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-top:2px}
 .cvdot{width:8px;height:8px;border-radius:50%;background:var(--orange);flex:0 0 8px;margin-top:6px}
+/* Una conversación esperando a que alguien la tome no puede parecerse a las demás: con
+   varias en cola, un asesor tiene que verlas de un golpe de vista. */
+.cvrow.is-wait{background:rgba(230,103,103,.10);border-left:3px solid var(--bad)}
+.cvwait{font-size:11px;font-weight:700;color:var(--bad);white-space:nowrap}
 .inbox-r{display:flex;flex-direction:column;min-width:0;min-height:0}
 .thread-empty{flex:1;display:grid;place-items:center;color:var(--muted2);padding:20px;text-align:center}
 .thread{display:flex;flex-direction:column;min-height:0;flex:1}
@@ -535,7 +539,7 @@ body.cliente .cliente-only{display:flex}
 <div class="legend"><span><i class="d-new"></i>nuevo</span><span><i class="d-contacted"></i>contactado</span><span><i class="d-qualified"></i>cualificado</span><span><i class="d-won"></i>ganado</span><span><i class="d-lost"></i>perdido</span></div>
 <div class="pager"><button class="btn alt" id="more" hidden>Cargar más</button></div></div>
 <div id="viewConversaciones" hidden>
-<div class="vhead"><div><h1>Conversaciones</h1><p>Lo que se dijo — y responder sin salir del panel</p></div><div class="actions actions0"><span id="availState" class="flag off">—</span><button class="btn alt btnsm" id="availToggle" type="button">—</button><button class="btn alt" id="convExport" type="button">Exportar CSV</button></div></div>
+<div class="vhead"><div><h1>Conversaciones</h1><p>Lo que se dijo — y responder sin salir del panel</p></div><div class="actions actions0"><span id="waitPill" class="flag bad" hidden>—</span><span id="availState" class="flag off">—</span><button class="btn alt btnsm" id="availToggle" type="button">—</button><button class="btn alt" id="convExport" type="button">Exportar CSV</button></div></div>
 <small class="muted" id="availNote"></small>
 <form class="filters" id="convFilters">
 <input type="hidden" name="channel" id="convChannel">

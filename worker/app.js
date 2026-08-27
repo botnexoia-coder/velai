@@ -1084,7 +1084,7 @@ async function escalateToHuman(env, tenant, from, lastMessage, convId = null, op
       console.log(JSON.stringify({ level: 'error', code: 'handoff_state_failed', tenant: tenant.slug, error: clean(String(error.message || error), 60) }));
     }
   }
-  await sendTelegramText(env, `🙋 <b>Handoff</b> — <b>${escapeHtml(tenant.name)}</b>: <code>${escapeHtml(from)}</code> pide hablar con una persona.\nÚltimo mensaje: «${escapeHtml(String(lastMessage).slice(0, 300))}»\nToma el control en el panel (Conversaciones). Si nadie lo toma en ${TAKEOVER_GRACE_MIN} min, Vai retoma diciendo que no hay asesores.`);
+  await sendTelegramText(env, `🙋 <b>Handoff</b> — <b>${escapeHtml(tenant.name)}</b>: <code>${escapeHtml(from)}</code> pide hablar con una persona.\nÚltimo mensaje: «${escapeHtml(String(lastMessage).slice(0, 300))}»\nToma el control en el panel (Conversaciones). Queda en cola ${QUEUE_MAX_MIN} min: a los ${TAKEOVER_GRACE_MIN} Vai le avisa de que seguís buscando, y al final retoma y le pide el teléfono.`);
   return true;
 }
 
@@ -1910,7 +1910,11 @@ async function convAppend(env, conv, turns) {
 // Regla de Juan: el BOT no tiene restricción horaria; hablar con una persona SÍ. Fuera de
 // horario no se ofrece interacción humana, y si la piden se rechaza con explicación.
 const CONV_STATES = ['bot', 'esperando', 'humano'];
-const TAKEOVER_GRACE_MIN = 5;   // sin que nadie tome el control, la IA retoma
+// La cola de espera (migración 0027). Los 5 minutos son el primer AVISO, no el final:
+// con un asesor ocupado en otra conversación, rendirse a los 5 minutos saltaba casi
+// siempre y el visitante lo leía como «no hay nadie», cuando sí había.
+const TAKEOVER_GRACE_MIN = 5;    // primer aviso: «seguimos buscando a alguien»
+const QUEUE_MAX_MIN = 15;        // final: la IA retoma y pide el teléfono
 
 // Mismo formato y mismo default que tenant_calendars.business_hours: si la interacción
 // humana va con horario, un NULL no puede significar «sin límite».
@@ -1938,13 +1942,19 @@ function withinSupportHours(tenant, nowMs = Date.now()) {
   return supportWindows(tenant, day).some(([from, to]) => hhmm >= from && hhmm < to);
 }
 
-// ¿Venció la espera de la toma de control? Sin state_at se considera vencida: una fila a
-// medias no puede dejar al cliente final esperando para siempre.
-function graceExpired(stateAt, nowMs = Date.now()) {
-  if (!stateAt) return true;
+// Minutos que lleva esperando. Sin state_at devuelve Infinity: una fila a medias no puede
+// dejar a nadie esperando para siempre.
+function waitedMin(stateAt, nowMs = Date.now()) {
+  if (!stateAt) return Infinity;
   const at = Date.parse(stateAt);
-  if (!Number.isFinite(at)) return true;
-  return nowMs - at >= TAKEOVER_GRACE_MIN * 60000;
+  if (!Number.isFinite(at)) return Infinity;
+  return (nowMs - at) / 60000;
+}
+
+// ¿Se acabó la cola? Ojo: mide QUEUE_MAX_MIN, no los 5 del primer aviso — confundir los dos
+// es exactamente el fallo que había.
+function graceExpired(stateAt, nowMs = Date.now()) {
+  return waitedMin(stateAt, nowMs) >= QUEUE_MAX_MIN;
 }
 
 // ¿Se puede ofrecer un asesor AHORA? Interruptor de alguien encendido Y dentro de horario.
@@ -3122,19 +3132,27 @@ async function adminRouter(request, env, ctx, path, url, config, scope) {
     const rows = (await env.DB.prepare(`
       SELECT c.id, c.channel, c.external_id, c.msgs, c.unanswered, c.last_at, c.lead_id,
              (c.last_read_at IS NULL OR c.last_read_at < c.last_at) AS unread,
+             c.state, c.state_at, c.agent_email,
              t.name AS tenant_name, c.tenant_id, l.name AS lead_name, l.status AS lead_status,
              (SELECT m.text FROM conv_messages m WHERE m.conversation_id = c.id ORDER BY m.id DESC LIMIT 1) AS preview,
              (SELECT m.role FROM conv_messages m WHERE m.conversation_id = c.id ORDER BY m.id DESC LIMIT 1) AS preview_role
       FROM conversations c
       LEFT JOIN tenants t ON t.id = c.tenant_id
       LEFT JOIN leads l ON l.id = c.lead_id
-      WHERE ${f.sql}${scc.sql} ORDER BY c.last_at DESC LIMIT ?`)
+      WHERE ${f.sql}${scc.sql}
+      -- Lo que ESPERA a que alguien lo tome va primero, y lo más antiguo antes: con varias
+      -- en cola, atender por «lo último que llegó» es dejar tirado justo al que más lleva.
+      ORDER BY CASE c.state WHEN 'esperando' THEN 0 WHEN 'humano' THEN 1 ELSE 2 END,
+               CASE WHEN c.state = 'esperando' THEN c.state_at END ASC,
+               c.last_at DESC
+      LIMIT ?`)
       .bind(...f.values, ...scc.args, limit).all()).results;
     // Contadores por canal para las pestañas: se cuentan SOBRE EL MISMO filtro de scope,
     // no sobre el de canal — si no, la pestaña activa se contaría a sí misma y las demás
     // saldrían a cero.
     const counts = (await env.DB.prepare(`SELECT channel, COUNT(*) AS n,
-        SUM(CASE WHEN last_read_at IS NULL OR last_read_at < last_at THEN 1 ELSE 0 END) AS unread
+        SUM(CASE WHEN last_read_at IS NULL OR last_read_at < last_at THEN 1 ELSE 0 END) AS unread,
+        SUM(CASE WHEN state = 'esperando' THEN 1 ELSE 0 END) AS waiting
       FROM conversations c WHERE demo = ''${scc.sql} GROUP BY channel`).bind(...scc.args).all()).results;
     if (scope.role !== 'velai') for (const row of rows) { delete row.tenant_name; delete row.tenant_id; }
     let thread = null;
@@ -3158,7 +3176,9 @@ async function adminRouter(request, env, ctx, path, url, config, scope) {
         thread = { conversation: head, messages, window: win };
       }
     }
-    return json({ conversations: rows, counts, thread }, 200, NO_STORE);
+    // queueMin viaja para que el panel pinte la cuenta atrás con el MISMO número que usa el
+    // worker: si se escribiera a mano en el panel, un día dirían cosas distintas.
+    return json({ conversations: rows, counts, thread, queueMin: QUEUE_MAX_MIN, pingMin: TAKEOVER_GRACE_MIN }, 200, NO_STORE);
   }
 
   // Disponibilidad de la persona que mira el panel. El interruptor es POR PERSONA; el
@@ -4571,35 +4591,52 @@ async function sendWeeklyReports(env, now) {
 // esperar al cron. El cron corre cada 5 min, así que el plazo real está entre 5 y 10: no se
 // disimula, se compensa con el otro camino.
 const NO_ADVISOR_TEXT = 'Perdona la espera: al final no ha podido entrar nadie del equipo ahora mismo. Sigo yo y te ayudo con lo que pueda. Si quieres, déjame tu teléfono y les paso tu caso para que te escriban en cuanto puedan.';
+// Aviso a mitad de cola. Existe para que no haya silencio: un chat mudo diez minutos se
+// lee como abandono, y es justo cuando la gente cierra la pestaña.
+const QUEUE_WAIT_TEXT = 'Sigo buscando a alguien del equipo, están terminando otra conversación. Gracias por esperar — en cuanto se libere alguien te escribe aquí mismo.';
 
+// Atiende la cola: avisa a mitad y solo se rinde al final. En el canal WEB el mensaje no se
+// envía a ningún proveedor — se guarda y el widget lo recoge en su sondeo.
 async function expireTakeovers(env) {
   const cutoff = new Date(Date.now() - TAKEOVER_GRACE_MIN * 60000).toISOString();
   // LIMIT bajo a propósito: el cron ya gasta consultas en la cola de leads y los avisos, y
-  // el plan gratuito de D1 corta en 50 por invocación. Esto es un evento raro.
-  const rows = (await env.DB.prepare(`SELECT id, tenant_id, external_id, channel, inbox_address, demo, msgs
-    FROM conversations WHERE state='esperando' AND state_at <= ? LIMIT 3`).bind(cutoff).all()).results || [];
+  // el plan gratuito de D1 corta en 50 por invocación.
+  const rows = (await env.DB.prepare(`SELECT id, tenant_id, external_id, channel, inbox_address, demo, msgs, state_at, queue_pings
+    FROM conversations WHERE state='esperando' AND state_at <= ? LIMIT 5`).bind(cutoff).all()).results || [];
   for (const c of rows) {
-    // Se libera SIEMPRE, aunque el aviso no pueda salir: dejarla en 'esperando' la
-    // congelaría para siempre y el bot no volvería a contestarle nunca.
-    await env.DB.prepare("UPDATE conversations SET state='bot', state_at=? WHERE id=? AND state='esperando'")
-      .bind(new Date().toISOString(), c.id).run();
-    if (env.KV) { try { await env.KV.delete(`pause:${c.tenant_id}:${c.external_id}`); } catch (_) {} }
-    console.log(JSON.stringify({ level: 'info', code: 'takeover_expired', via: 'cron', channel: c.channel }));
-    // Sin dirección de salida no hay por dónde avisar (conversación anterior a la 0023).
-    // Queda liberada igual: el siguiente mensaje del cliente lo atiende la IA.
-    if (!c.inbox_address) continue;
+    const esperados = waitedMin(c.state_at);
+    const seRinde = esperados >= QUEUE_MAX_MIN;
+    // A mitad de cola solo se avisa UNA vez: sin queue_pings el cron repetiría el mismo
+    // mensaje cada 5 minutos hasta agotar la espera.
+    if (!seRinde && Number(c.queue_pings) > 0) continue;
+    const texto = seRinde ? NO_ADVISOR_TEXT : QUEUE_WAIT_TEXT;
+    if (seRinde) {
+      // Se libera SIEMPRE, aunque el aviso no pueda salir: dejarla en 'esperando' la
+      // congelaría y el bot no volvería a contestarle nunca.
+      await env.DB.prepare("UPDATE conversations SET state='bot', state_at=? WHERE id=? AND state='esperando'")
+        .bind(new Date().toISOString(), c.id).run();
+      if (env.KV) { try { await env.KV.delete(`pause:${c.tenant_id}:${c.external_id}`); } catch (_) {} }
+      console.log(JSON.stringify({ level: 'info', code: 'takeover_expired', via: 'cron', channel: c.channel, waited: Math.round(esperados) }));
+    } else {
+      await env.DB.prepare('UPDATE conversations SET queue_pings=queue_pings+1 WHERE id=?').bind(c.id).run();
+      console.log(JSON.stringify({ level: 'info', code: 'queue_ping', channel: c.channel, waited: Math.round(esperados) }));
+    }
     const tenant = await env.DB.prepare('SELECT * FROM tenants WHERE id=?').bind(c.tenant_id).first();
     if (!tenant) continue;
-    const sent = await sendTwilioText(env, tenant, c.inbox_address, c.external_id, NO_ADVISOR_TEXT);
-    if (!sent.ok) {
-      console.log(JSON.stringify({ level: 'error', code: 'no_advisor_notice_failed', tenant: tenant.slug, error: clean(sent.error || 'skipped', 40) }));
-      continue;
+    // El canal web no tiene proveedor de salida: el mensaje se guarda y el widget lo recoge.
+    if (c.channel !== 'web') {
+      if (!c.inbox_address) continue;   // conversación anterior a la 0023: sin por dónde avisar
+      const sent = await sendTwilioText(env, tenant, c.inbox_address, c.external_id, texto);
+      if (!sent.ok) {
+        console.log(JSON.stringify({ level: 'error', code: 'queue_notice_failed', tenant: tenant.slug, error: clean(sent.error || 'skipped', 40) }));
+        continue;
+      }
     }
     // Queda en el historial: si no, el panel enseñaría una conversación que salta del
     // silencio a la nada y nadie sabría que se avisó.
     await convAppend(env, { id: c.id, tenant: c.tenant_id, channel: c.channel, externalId: c.external_id,
       inbox: c.inbox_address, demo: c.demo || '', msgs: c.msgs, isNew: false },
-    [{ role: 'assistant', content: NO_ADVISOR_TEXT }]);
+    [{ role: 'assistant', content: texto }]);
   }
 }
 
@@ -4734,4 +4771,4 @@ export function createWorker(config) {
   };
 }
 
-export const testing = { canAttend, velaiTenantId, handleChatPoll, VISITOR_AWAY_MS, expireTakeovers, NO_ADVISOR_TEXT, graceExpired, systemWithHandoff, HANDOFF_ON, HANDOFF_OFF, supportWindows, withinSupportHours, advisorAvailable, CONV_STATES, TAKEOVER_GRACE_MIN, settleReply, TRUNCATED_CLOSING, trimToSentence, waBody, replyWindow, reportPeriod, reportMetric, weeklyReportText, weeklyStats, sendWeeklyReports, convLoad, convAppend, convLinkLead, convFilters, convRetentionDays, UNANSWERED_RE, CONV_WINDOW, cloudflareUsage, CF_FREE_LIMITS, recordConversation, aiCost, recordAiUsage, rateLimited, memLimited, applySenderProfile, pushSenderProfile, clean, persistLead, leadAlertStatus, captureWhatsAppLead, leadFromSummary, leadCaptureDone, errorResponseParts, tenantByAddress, syncPrimaryChannel, assertChannelFree, normalizePhone, extractPhone, safeUtm, publicCors, validTwilioSignature, callAnthropic, callAnthropicRaw, runToolLoop, calendarExecutor, calendarSystem, tenantCalendar, validCalendarDate, availableSlots, handleCalendarCallback, calendarCallbackFor, sendTwilioText, timingSafeEqual, telegramBotUsername, handleTelegramWebhook, sendTelegramText, tenantTelegramToken, telegramThreadFor, registerTelegramTopic, csvCell, expiryDate, leadFilters, isDemoKey, templateVar, leadTemplateVariables, readJson, deliver, drainQueuedLeads, verifyTurnstile, systemFor, validateTenant, invalidateTenantCache, tenantWriteError, assertNotActivePending, tenantChannelSummary, channelsForScope, handleProvision, pollProvisioning, fillSeries, resolveScope, scopeClause, clienteAllowed, adminRouter, recordAuthFailure, handleAdmin, handleWidgetBoot, allowedOrigins, envOrigins, syncPanelGate, envAdmins, syncAdminGate, getSetting, setSetting, withCfToken };
+export const testing = { waitedMin, QUEUE_MAX_MIN, QUEUE_WAIT_TEXT, canAttend, velaiTenantId, handleChatPoll, VISITOR_AWAY_MS, expireTakeovers, NO_ADVISOR_TEXT, graceExpired, systemWithHandoff, HANDOFF_ON, HANDOFF_OFF, supportWindows, withinSupportHours, advisorAvailable, CONV_STATES, TAKEOVER_GRACE_MIN, settleReply, TRUNCATED_CLOSING, trimToSentence, waBody, replyWindow, reportPeriod, reportMetric, weeklyReportText, weeklyStats, sendWeeklyReports, convLoad, convAppend, convLinkLead, convFilters, convRetentionDays, UNANSWERED_RE, CONV_WINDOW, cloudflareUsage, CF_FREE_LIMITS, recordConversation, aiCost, recordAiUsage, rateLimited, memLimited, applySenderProfile, pushSenderProfile, clean, persistLead, leadAlertStatus, captureWhatsAppLead, leadFromSummary, leadCaptureDone, errorResponseParts, tenantByAddress, syncPrimaryChannel, assertChannelFree, normalizePhone, extractPhone, safeUtm, publicCors, validTwilioSignature, callAnthropic, callAnthropicRaw, runToolLoop, calendarExecutor, calendarSystem, tenantCalendar, validCalendarDate, availableSlots, handleCalendarCallback, calendarCallbackFor, sendTwilioText, timingSafeEqual, telegramBotUsername, handleTelegramWebhook, sendTelegramText, tenantTelegramToken, telegramThreadFor, registerTelegramTopic, csvCell, expiryDate, leadFilters, isDemoKey, templateVar, leadTemplateVariables, readJson, deliver, drainQueuedLeads, verifyTurnstile, systemFor, validateTenant, invalidateTenantCache, tenantWriteError, assertNotActivePending, tenantChannelSummary, channelsForScope, handleProvision, pollProvisioning, fillSeries, resolveScope, scopeClause, clienteAllowed, adminRouter, recordAuthFailure, handleAdmin, handleWidgetBoot, allowedOrigins, envOrigins, syncPanelGate, envAdmins, syncAdminGate, getSetting, setSetting, withCfToken };

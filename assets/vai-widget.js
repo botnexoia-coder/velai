@@ -1,5 +1,5 @@
 /* ══════════════════════════════════════════════════════════════════════════
-   VAI CHAT WIDGET — autocontenido (CSS + markup + lógica) · v10
+   VAI CHAT WIDGET — autocontenido (CSS + markup + lógica) · v11
    ──────────────────────────────────────────────────────────────────────────
    OJO CON LA VERSIÓN: este archivo se sirve con Cache-Control immutable durante un
    año (_headers, /*.js), así que el `?v=N` de la URL ES la clave de caché. Cambiar el
@@ -9,11 +9,11 @@
    falla si las dos no coinciden.
 
    Se carga en TODAS las páginas con una sola línea:
-     <script src="/assets/vai-widget.js?v=10" defer></script>
+     <script src="/assets/vai-widget.js?v=11" defer></script>
 
    En la web de un CLIENTE van dos líneas (la primera declara el tenant):
      <script>window.VELAI_TENANT='zoe';</script>
-     <script src="https://hirevai.com/assets/vai-widget.js?v=10" defer></script>
+     <script src="https://hirevai.com/assets/vai-widget.js?v=11" defer></script>
 
    Autocontenido a propósito: solo index.html carga /assets/styles.css, el
    resto de páginas llevan CSS inline. Por eso este archivo inyecta su propio
@@ -89,7 +89,7 @@
     errHuman: "I couldn't verify you're human (an unstable network or a blocker can cause this). Reload the page and try again, or message us on WhatsApp: https://wa.me/",
     errGeneric: "Oops, I can't reply right now. Message us on WhatsApp and we'll answer in minutes: https://wa.me/",
     agentLabel: 'Team',
-    liveWaiting: 'Connecting you with someone from the team…',
+    liveWaiting: 'Waiting for someone from the team — stay on this window and their reply will appear here.',
     liveHuman: "You're now talking with someone from the team"
   } : {
     online: 'En línea ahora',
@@ -102,7 +102,7 @@
     errHuman: 'No pude verificar que eres humano (a veces lo causa una red inestable o un bloqueador). Recarga la página e inténtalo de nuevo, o escríbenos por WhatsApp: https://wa.me/',
     errGeneric: 'Ups, ahora mismo no puedo responder. Escríbenos por WhatsApp y te contestamos en minutos: https://wa.me/',
     agentLabel: 'Equipo',
-    liveWaiting: 'Avisando a alguien del equipo…',
+    liveWaiting: 'Esperando a alguien del equipo. Quédate en esta ventana: en cuanto se una, lo verás aquí.',
     liveHuman: 'Ahora hablas con una persona del equipo'
   };
 
@@ -149,11 +149,11 @@
       'transition:bottom .25s ease;' +
       '--vai-c1:#FF6B1A;--vai-head:#075e54;--vai-send:#00a884;' +
       '--vai-srf:#fff;--vai-msgbg:#ece5dd;--vai-bot:#fff;--vai-user:#dcf8c6;' +
-      '--vai-agent:#eef7f2;--vai-agentac:#12775a;' +
+      '--vai-agent:#f2eefb;--vai-agentac:#5b3fa8;' +
       '--vai-text:#111;--vai-in:#f0f2f5;--vai-inshell:#fff;' +
       '--vai-chipb:rgba(7,94,84,.25);--vai-chipc:#075e54;--vai-chiph:#f0f7f5}' +
     '#vaiWidget.vai-dark{--vai-srf:#141a1f;--vai-msgbg:#0b141a;--vai-bot:#1f2c34;--vai-user:#134d37;' +
-      '--vai-agent:#1b3a30;--vai-agentac:#6fd8ae;' +
+      '--vai-agent:#2a2340;--vai-agentac:#bda8f5;' +
       '--vai-text:#e9edef;--vai-in:#1f2c34;--vai-inshell:#2a3942;' +
       '--vai-chipb:rgba(233,237,239,.3);--vai-chipc:#e9edef;--vai-chiph:#2a3942}' +
     '#vaiBubble{width:60px;height:60px;border-radius:50%;background:var(--vai-c1);display:flex;' +
@@ -215,7 +215,7 @@
     '.vai-b.is-bot{background:var(--vai-bot);border-radius:0 8px 8px 8px}' +
     '.vai-b.is-user{background:var(--vai-user);border-radius:8px 8px 0 8px}' +
     '.vai-row.is-agent{justify-content:flex-start}' +
-    '.vai-b.is-agent{background:var(--vai-agent);border-radius:0 8px 8px 8px;border-left:3px solid var(--vai-agentac)}' +
+    '.vai-b.is-agent{background:var(--vai-agent);border-radius:0 8px 8px 8px;border-left:4px solid var(--vai-agentac)}' +
     '.vai-b-who{font-size:11px;font-weight:700;color:var(--vai-agentac);margin-bottom:2px}' +
     '.vai-live{font-size:12px;color:#8696a0;text-align:center;padding:6px 0}' +
     '.vai-b-t{font-size:13.5px;color:var(--vai-text);line-height:1.5;white-space:pre-wrap;word-break:break-word}' +

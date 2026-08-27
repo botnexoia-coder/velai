@@ -39,8 +39,17 @@ sin pausa ni escalación. Esta spec es de WhatsApp y Messenger.
 ```
 
 - **`bot`** — normal. La IA atiende con las reglas de siempre (incluida «ESPACIO Y CIERRE»).
-- **`esperando`** — la persona pidió un asesor Y había alguien disponible. **El bot calla** y
-  el panel enseña «Tomar el control» con la cuenta atrás.
+- **`esperando`** — la persona pidió un asesor Y había alguien disponible: está **en cola**.
+  El bot calla y el panel enseña «Tomo el control» con los minutos que lleva esperando.
+  A los **5 min** se le avisa de que seguís buscando (para que no haya silencio) y a los
+  **15** la IA retoma y le pide el teléfono.
+
+  Los 5 minutos eran el final en la primera versión, y estaba mal: con un asesor ocupado en
+  otra conversación saltaba casi siempre, y el visitante leía «no hay nadie disponible»
+  cuando sí había (lo vio Juan el 2026-08-26). La disponibilidad nunca fue exclusiva —
+  `advisorAvailable` solo cuenta filas de presencia— así que atender varias a la vez ya
+  funcionaba: lo que faltaba era **verlas**. Ahora la bandeja pone lo que espera primero,
+  con los minutos de espera y un contador «N esperando asesor» en la cabecera.
 - **`humano`** — alguien tomó el control. El bot sigue callado y **solo entonces se habilita
   el cajón de escritura**, con la ventana de 24 h de Meta como hasta ahora.
 - Vuelta a **`bot`** por dos caminos: el asesor suelta el control, o pasan 5 minutos sin que

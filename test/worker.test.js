@@ -3996,16 +3996,21 @@ test('disponibilidad: el interruptor es por persona y el horario lo cierra por f
   assert.deepEqual([ins.args[0], ins.args[1], ins.args[2]], [TID, 'ana@cliente.com', 1]);
 });
 
-test('la espera de toma de control vence: la IA retoma y avisa de que no hay asesores', async () => {
-  assert.equal(testing.graceExpired(new Date(Date.now() - 6 * 60000).toISOString()), true, '6 min: vencida');
-  assert.equal(testing.graceExpired(new Date(Date.now() - 60000).toISOString()), false, '1 min: aún espera');
-  // Sin marca de tiempo se considera VENCIDA: una fila a medias no puede dejar al cliente
-  // final esperando para siempre.
+test('cola de espera: aviso a mitad, y solo se rinde al final', async () => {
+  // Los 5 minutos son el primer AVISO, no el final: con un asesor ocupado en otra
+  // conversación, rendirse a los 5 saltaba casi siempre y el visitante lo leía como «no hay
+  // nadie», cuando sí había. El final son 15.
+  assert.equal(testing.graceExpired(new Date(Date.now() - 6 * 60000).toISOString()), false, '6 min: sigue en cola');
+  assert.equal(testing.graceExpired(new Date(Date.now() - 16 * 60000).toISOString()), true, '16 min: se acabó');
+  // Sin marca de tiempo se considera vencida: una fila a medias no puede dejar a nadie
+  // esperando para siempre.
   assert.equal(testing.graceExpired(null), true);
   assert.equal(testing.graceExpired('no es una fecha'), true);
+  assert.equal(testing.waitedMin(new Date(Date.now() - 3 * 60000).toISOString()) > 2.9, true);
 
   const conv = { id: 'c-1', tenant_id: 't-1', external_id: 'whatsapp:+34600000000', channel: 'whatsapp',
-    inbox_address: 'whatsapp:+15550000001', demo: '', msgs: 4 };
+    inbox_address: 'whatsapp:+15550000001', demo: '', msgs: 4,
+    state_at: new Date(Date.now() - 20 * 60000).toISOString(), queue_pings: 1 };
   const tenant = { id: 't-1', slug: 'mio', name: 'Mío', twilio_from: 'whatsapp:+15550000001' };
   const writes = []; const batches = [];
   const env = {
@@ -4189,4 +4194,74 @@ test('con asesor disponible el bot NO pide el teléfono: la persona entra en ese
   // Y sin asesor sí se pide, que es donde tiene sentido.
   assert.match(testing.HANDOFF_OFF, /pídele su nombre y su teléfono/);
   assert.match(testing.NO_ADVISOR_TEXT, /déjame tu teléfono/);
+});
+
+test('cola de espera: a los 6 minutos AVISA en vez de rendirse, y solo una vez', async () => {
+  // El fallo que vio Juan: con el asesor ocupado en otra conversación, el segundo visitante
+  // recibía «no hay nadie disponible» a los 5 minutos. Ahora recibe un aviso de espera.
+  const conv = { id: 'c-1', tenant_id: 't-1', external_id: 'whatsapp:+34600000000', channel: 'whatsapp',
+    inbox_address: 'whatsapp:+15550000001', demo: '', msgs: 4,
+    state_at: new Date(Date.now() - 6 * 60000).toISOString(), queue_pings: 0 };
+  const tenant = { id: 't-1', slug: 'mio', name: 'Mío', twilio_from: 'whatsapp:+15550000001' };
+  const writes = []; const enviados = [];
+  const env = { KV: mapKV(), TWILIO_ACCOUNT_SID: 'AC' + 'p'.repeat(32), TWILIO_AUTH_TOKEN: 'tok',
+    DB: {
+      prepare(sql) {
+        return { sql, bind: (...args) => ({
+          sql, args,
+          first: async () => (/FROM tenants WHERE id=\?/.test(sql) ? tenant : null),
+          all: async () => ({ results: /FROM conversations WHERE state='esperando'/.test(sql) ? [conv] : [] }),
+          run: async () => { writes.push({ sql, args }); return { meta: { changes: 1 } }; },
+        }) };
+      },
+      batch: async () => [],
+    } };
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = async (url, init) => {
+    if (String(url).includes('api.twilio.com')) { enviados.push(new URLSearchParams(String(init.body))); return new Response('{}', { status: 201 }); }
+    return new Response('{}', { status: 200 });
+  };
+  try {
+    await testing.expireTakeovers(env);
+    // NO se libera: sigue esperando a que alguien tome el control.
+    assert.ok(!writes.some((w) => /state='bot'/.test(w.sql)), 'a los 6 min NO se rinde');
+    assert.ok(writes.some((w) => /queue_pings=queue_pings\+1/.test(w.sql)), 'se cuenta el aviso');
+    assert.match(enviados[0].get('Body'), /Sigo buscando a alguien del equipo/);
+    assert.ok(!/no ha podido entrar nadie/.test(enviados[0].get('Body')), 'y NO dice que no haya nadie');
+
+    // Segunda pasada del cron con el aviso ya dado: silencio, no se repite cada 5 minutos.
+    conv.queue_pings = 1;
+    enviados.length = 0; writes.length = 0;
+    await testing.expireTakeovers(env);
+    assert.equal(enviados.length, 0, 'el aviso no se repite en cada tick');
+  } finally { globalThis.fetch = realFetch; }
+});
+
+test('cola de espera en el canal web: se guarda sin tocar Twilio (el widget lo recoge)', async () => {
+  const conv = { id: 'c-web', tenant_id: 't-1', external_id: 'f23e4567-e89b-42d3-a456-426614174000', channel: 'web',
+    inbox_address: null, demo: '', msgs: 4, state_at: new Date(Date.now() - 7 * 60000).toISOString(), queue_pings: 0 };
+  const tenant = { id: 't-1', slug: 'mio', name: 'Mío' };
+  const batches = []; let twilioTocado = false;
+  const env = { KV: mapKV(),
+    DB: {
+      prepare(sql) {
+        return { sql, bind: (...args) => ({
+          sql, args,
+          first: async () => (/FROM tenants WHERE id=\?/.test(sql) ? tenant : null),
+          all: async () => ({ results: /FROM conversations WHERE state='esperando'/.test(sql) ? [conv] : [] }),
+          run: async () => ({ meta: { changes: 1 } }),
+        }) };
+      },
+      batch: async (stmts) => { batches.push(stmts.map((st) => ({ sql: st.sql, args: st.args }))); return stmts.map(() => ({})); },
+    } };
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = async (url) => { if (String(url).includes('api.twilio.com')) twilioTocado = true; return new Response('{}', { status: 200 }); };
+  try {
+    await testing.expireTakeovers(env);
+    assert.equal(twilioTocado, false, 'en web no hay proveedor al que enviar');
+    // Y sin inbox_address, que en web es siempre NULL: antes ese `continue` habría saltado
+    // el guardado y el visitante no habría visto nunca el aviso.
+    const guardado = batches.flat().find((st) => /INSERT INTO conv_messages/.test(st.sql));
+    assert.equal(guardado.args[3], testing.QUEUE_WAIT_TEXT);
+  } finally { globalThis.fetch = realFetch; }
 });

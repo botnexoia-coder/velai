@@ -137,7 +137,7 @@ const WIN_WHY={
  no_inbound:'Todavía no hay ningún mensaje del cliente en esta conversación.',
  window_closed:'La ventana de 24 h de WhatsApp se cerró. Para escribir ahora hace falta una plantilla aprobada por Meta.',
  atiende_la_ia:'Vai está atendiendo esta conversación. El cajón se abre cuando la persona pide un asesor y alguien toma el control.',
- sin_control:'Esta persona pidió hablar con alguien del equipo. Toma el control para poder escribirle.',
+ sin_control:'Esta persona pidió hablar con alguien del equipo y está esperando. Toma el control para poder escribirle.',
  ya_tomada:'Otra persona del equipo tomó el control de esta conversación.',
  nada_que_tomar:'Aquí no hay ningún control que tomar: la está atendiendo Vai.',
  velai_no_atiende_clientes:'Esta conversación es de un cliente y la atiende su equipo, no Velai. La ves para dar soporte, pero no puedes escribir en ella.',
@@ -183,7 +183,7 @@ function composer(win,c){const box=$('#composer');
   // En 'esperando' el cajón cerrado no basta: hay alguien esperando y hay que poder entrar.
   // Con la cuenta atrás a la vista, porque pasada esa marca Vai retoma.
   const puede=c&&c.state==='esperando';
-  const quedan=puede&&c.state_at?Math.max(0,GRACE_MIN-Math.floor((Date.now()-new Date(c.state_at))/60000)):null;
+  const quedan=puede&&c.state_at?Math.max(0,QUEUE_MIN-Math.floor((Date.now()-new Date(c.state_at))/60000)):null;
   box.innerHTML='<textarea disabled placeholder="Cajón cerrado"></textarea><div class="crow">'
    +(puede?'<button class="btn" id="takeover" type="button">Tomo el control</button>':'')
    +'<span class="cwin shut">'+esc(why)+(quedan!==null?' Vai retoma en '+quedan+' min si nadie entra.':'')+'</span></div>';
@@ -237,7 +237,7 @@ function renderThread(t){
  // final mientras alguien lee hacia arriba es insoportable.
  if(atBottom)log.scrollTop=log.scrollHeight;
  composer(t.window,c)}
-let GRACE_MIN=5;
+let GRACE_MIN=5,QUEUE_MIN=15;
 async function control(accion){if(!convOpen)return;
  try{await api('/api/admin/conversations/'+convOpen+'/'+accion,{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'});
   toast(accion==='takeover'?'Control tomado ✓ — ya puedes escribirle':'Devuelta a Vai ✓');await loadInbox(true)}
@@ -268,14 +268,27 @@ $('#availToggle').onclick=async()=>{$('#availToggle').disabled=true;
 async function loadInbox(quiet=false){
  try{const p=convParams();if(convOpen)p.set('conversation',convOpen);
   const d=await api('/api/admin/inbox?'+p);
+  if(d.queueMin)QUEUE_MIN=d.queueMin;
+  if(d.pingMin)GRACE_MIN=d.pingMin;
   chTabs(d.counts||[]);
+  // Cuántas esperan a que alguien las tome. Es lo único que hace que las multisesiones
+  // funcionen de verdad: se puede atender a varias a la vez, pero no si no se ven.
+  const enCola=(d.counts||[]).reduce((a,c)=>a+(c.waiting||0),0);
+  $('#waitPill').hidden=!enCola;
+  $('#waitPill').textContent=enCola?(enCola===1?'1 esperando asesor':enCola+' esperando asesor'):'';
   const rows=d.conversations||[];
   $('#convRows').innerHTML=rows.length?rows.map(c=>{
    const who=whoOf(c);
    const prev=prevPrefix(c.preview_role)+String(c.preview||'');
-   return '<div class="cvrow'+(c.id===convOpen?' is-on':'')+'" data-id="'+esc(c.id)+'">'
+   // Los minutos que lleva esperando, no la hora del último mensaje: con varias en cola es
+   // el único dato con el que se decide a quién atender primero.
+   const espera=c.state==='esperando'?Math.max(0,Math.floor((Date.now()-new Date(c.state_at))/60000)):null;
+   const marca=espera!==null
+    ?'<span class="cvwait">'+espera+"' esperando</span>"
+    :(c.state==='humano'?'<span class="cvwhen">'+esc(c.agent_email?c.agent_email.split('@')[0]:'en curso')+'</span>':'<span class="cvwhen">'+esc(fmtShort(c.last_at))+'</span>');
+   return '<div class="cvrow'+(c.id===convOpen?' is-on':'')+(c.state==='esperando'?' is-wait':'')+'" data-id="'+esc(c.id)+'">'
     +'<span class="cvav" data-c="'+tenantColor(c.external_id)+'">'+esc(initials(who))+'</span>'
-    +'<span class="cvmain"><span class="cvtop"><span class="cvwho">'+esc(who)+'</span><span class="cvwhen">'+esc(fmtShort(c.last_at))+'</span></span>'
+    +'<span class="cvmain"><span class="cvtop"><span class="cvwho">'+esc(who)+'</span>'+marca+'</span>'
     +'<span class="cvprev">'+esc(prev)+'</span></span>'
     +(c.unread?'<i class="cvdot"></i>':'')+'</div>'}).join('')
    :'<div class="cvrow"><span class="cvmain muted">No hay conversaciones con estos filtros. Solo se guardan desde el 26 de agosto de 2026.</span></div>';
