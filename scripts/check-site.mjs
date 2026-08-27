@@ -45,6 +45,28 @@ for (const file of htmlFiles) {
     }
   }
 }
+// El widget se sirve con `Cache-Control: immutable` durante un año, así que el `?v=N` de la
+// URL ES la clave de caché: cambiar el archivo SIN subir la versión significa que el archivo
+// nuevo no llega a nadie — el CDN y los navegadores siguen dando el viejo. Pasó el
+// 2026-08-26: se arregló la burbuja del equipo, se desplegó, y producción seguía sirviendo
+// la anterior porque el ?v=9 ya estaba cacheado.
+// Este check no puede saber si el archivo cambió, pero sí que la versión de su cabecera y la
+// que piden los HTML coinciden: obliga a tocar las dos y deja el despiste a la vista.
+{
+  const widget = await readFile(path.join(root, 'assets/vai-widget.js'), 'utf8');
+  const header = widget.match(/· v(\d+)/);
+  if (!header) failures.push('assets/vai-widget.js: la cabecera no declara versión (· vN)');
+  const usadas = new Set();
+  for (const rel of htmlFiles) {
+    const html = await readFile(rel, 'utf8');
+    for (const m of html.matchAll(/vai-widget\.js\?v=(\d+)/g)) usadas.add(m[1]);
+  }
+  if (usadas.size > 1) failures.push(`los HTML piden versiones distintas del widget: ${[...usadas].join(', ')}`);
+  if (header && usadas.size === 1 && !usadas.has(header[1])) {
+    failures.push(`el widget declara v${header[1]} y los HTML piden v${[...usadas][0]} — con caché immutable, el archivo nuevo no llegaría a nadie`);
+  }
+}
+
 if (htmlFiles.length < 26) failures.push(`se esperaban al menos 26 HTML y hay ${htmlFiles.length}`);
 if (failures.length) { console.error(failures.join('\n')); process.exit(1); }
 console.log(`Sitio válido: ${htmlFiles.length} páginas, JSON-LD y recursos internos comprobados.`);

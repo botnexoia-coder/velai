@@ -1,12 +1,19 @@
 /* ══════════════════════════════════════════════════════════════════════════
-   VAI CHAT WIDGET — autocontenido (CSS + markup + lógica) · v9
+   VAI CHAT WIDGET — autocontenido (CSS + markup + lógica) · v10
    ──────────────────────────────────────────────────────────────────────────
+   OJO CON LA VERSIÓN: este archivo se sirve con Cache-Control immutable durante un
+   año (_headers, /*.js), así que el `?v=N` de la URL ES la clave de caché. Cambiar el
+   archivo SIN subir N significa que el archivo nuevo NO LLEGA A NADIE: el CDN y los
+   navegadores siguen dando el viejo. Pasó el 2026-08-26 con la burbuja del equipo.
+   Toda modificación de este archivo sube N aquí Y en los HTML; `npm run check:site`
+   falla si las dos no coinciden.
+
    Se carga en TODAS las páginas con una sola línea:
-     <script src="/assets/vai-widget.js?v=9" defer></script>
+     <script src="/assets/vai-widget.js?v=10" defer></script>
 
    En la web de un CLIENTE van dos líneas (la primera declara el tenant):
      <script>window.VELAI_TENANT='zoe';</script>
-     <script src="https://hirevai.com/assets/vai-widget.js?v=9" defer></script>
+     <script src="https://hirevai.com/assets/vai-widget.js?v=10" defer></script>
 
    Autocontenido a propósito: solo index.html carga /assets/styles.css, el
    resto de páginas llevan CSS inline. Por eso este archivo inyecta su propio
