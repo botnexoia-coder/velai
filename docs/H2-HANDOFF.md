@@ -52,8 +52,13 @@ sin pausa ni escalación. Esta spec es de WhatsApp y Messenger.
   con los minutos de espera y un contador «N esperando asesor» en la cabecera.
 - **`humano`** — alguien tomó el control. El bot sigue callado y **solo entonces se habilita
   el cajón de escritura**, con la ventana de 24 h de Meta como hasta ahora.
-- Vuelta a **`bot`** por dos caminos: el asesor suelta el control, o pasan 5 minutos sin que
-  nadie lo tome.
+- Vuelta a **`bot`** por dos caminos: el asesor suelta el control, o se agota la cola.
+  **En los dos casos se le dice al visitante.** Al principio el «Devolver a Vai» no mandaba
+  nada, razonando que un «te devuelvo al bot» sobraba; estaba mal (Juan, 2026-08-26): el
+  visitante estaba hablando con una persona y de golpe vuelve el bot sin aviso, así que se
+  queda esperando a alguien que ya no está. Ahora se le avisa con el nombre del asistente de
+  ese cliente («Faby vuelve a atenderte a partir de aquí…»), el aviso queda en el hilo, y si
+  el envío falla la conversación se devuelve igual — quedarse en `humano` sin nadie es peor.
 
 **Si no hay nadie disponible, NO se escala.** Se captura el lead y la IA sigue. Es el cambio
 que pide Juan y el que quita el silencio de 4 h.

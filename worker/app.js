@@ -3266,7 +3266,7 @@ async function adminRouter(request, env, ctx, path, url, config, scope) {
   if (ctrlMatch && request.method === 'POST') {
     if (!UUID_RE.test(ctrlMatch[1])) throw new HttpError(404, 'not_found');
     const scc = scopeClause(scope, 'c');
-    const conv = await env.DB.prepare(`SELECT c.id, c.state, c.agent_email, c.channel, c.tenant_id, c.external_id FROM conversations c WHERE c.id=?${scc.sql}`)
+    const conv = await env.DB.prepare(`SELECT c.id, c.state, c.agent_email, c.channel, c.tenant_id, c.external_id, c.inbox_address, c.demo, c.msgs FROM conversations c WHERE c.id=?${scc.sql}`)
       .bind(ctrlMatch[1], ...scc.args).first();
     if (!conv) throw new HttpError(404, 'not_found');
     // 403 y no 404 a propósito: Velai SÍ ve esta conversación, así que fingir que no existe
@@ -3285,13 +3285,33 @@ async function adminRouter(request, env, ctx, path, url, config, scope) {
       console.log(JSON.stringify({ level: 'info', code: 'takeover', channel: conv.channel, actor_role: scope.role }));
       return json({ ok: true, state: 'humano', agent_email: who }, 200, NO_STORE);
     }
-    // Devolver: la IA retoma a partir del siguiente mensaje. No se manda nada al cliente
-    // final — la persona acaba de hablar con él y un «te devuelvo al bot» sobra.
+    // Devolver el control. Al principio no mandaba nada al cliente final, razonando que un
+    // «te devuelvo al bot» sobraba. Estaba mal (Juan, 2026-08-26): el visitante estaba
+    // hablando con una PERSONA y de golpe vuelve el bot sin que nadie se lo diga — se queda
+    // esperando a alguien que ya no está. Se le avisa, con el nombre del asistente.
     await env.DB.prepare("UPDATE conversations SET state='bot', agent_email=NULL, state_at=? WHERE id=?").bind(now, conv.id).run();
     // La clave de pausa se borra con el tenant y el destinatario REALES de la conversación,
     // no con el scope: para un admin de Velai scope.tenantId es null y la clave saldría
     // malformada, dejando al bot callado para siempre.
     if (env.KV) { try { await env.KV.delete(`pause:${conv.tenant_id}:${conv.external_id}`); } catch (_) {} }
+    // El aviso va DESPUÉS de liberar y nunca bloquea: si Twilio falla, la conversación ya
+    // está devuelta y el bot vuelve a atender — quedarse en 'humano' sin nadie sería peor.
+    const tRow = await env.DB.prepare('SELECT * FROM tenants WHERE id=?').bind(conv.tenant_id).first();
+    if (tRow) {
+      const quien = clean(tRow.bot_name, 40) || 'El asistente';
+      const aviso = `${quien} vuelve a atenderte a partir de aquí. Si necesitas otra vez a alguien del equipo, solo tienes que pedírmelo.`;
+      let entregado = conv.channel === 'web';   // en web no hay proveedor: lo recoge el sondeo
+      if (!entregado && conv.inbox_address) {
+        const out = await sendTwilioText(env, tRow, conv.inbox_address, conv.external_id, aviso);
+        entregado = Boolean(out.ok);
+        if (!out.ok) console.log(JSON.stringify({ level: 'error', code: 'release_notice_failed', tenant: tRow.slug, error: clean(out.error || 'skipped', 40) }));
+      }
+      if (entregado) {
+        await convAppend(env, { id: conv.id, tenant: conv.tenant_id, channel: conv.channel, externalId: conv.external_id,
+          inbox: conv.inbox_address, demo: conv.demo || '', msgs: conv.msgs, isNew: false },
+        [{ role: 'assistant', content: aviso }]);
+      }
+    }
     console.log(JSON.stringify({ level: 'info', code: 'control_released', channel: conv.channel, actor_role: scope.role }));
     return json({ ok: true, state: 'bot' }, 200, NO_STORE);
   }

@@ -239,9 +239,17 @@ function renderThread(t){
  composer(t.window,c)}
 let GRACE_MIN=5,QUEUE_MIN=15;
 async function control(accion){if(!convOpen)return;
+ // El botón se apaga mientras va: sin eso, un clic en una red lenta parecía «no hace nada»
+ // y se pulsaba dos veces.
+ const b=$(accion==='takeover'?'#takeover':'#release');
+ if(b)b.disabled=true;
  try{await api('/api/admin/conversations/'+convOpen+'/'+accion,{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'});
-  toast(accion==='takeover'?'Control tomado ✓ — ya puedes escribirle':'Devuelta a Vai ✓');await loadInbox(true)}
- catch(e){toast('No se pudo: '+(WIN_WHY[e.message]||TERRS[e.message]||e.message),false);await loadInbox(true)}}
+  toast(accion==='takeover'
+   ?'Control tomado ✓ — ya puedes escribirle'
+   :'Devuelta a Vai ✓ — se le ha avisado de que vuelve a atenderle el asistente');
+  await loadInbox(true)}
+ catch(e){toast('No se pudo: '+(WIN_WHY[e.message]||TERRS[e.message]||e.message),false);await loadInbox(true)}
+ finally{const c=$(accion==='takeover'?'#takeover':'#release');if(c)c.disabled=false}}
 // Disponibilidad: el interruptor es de esta persona, el horario es del cliente y lo cierra
 // por fuera. Se dice cuál de los dos manda, para que nadie crea que está cubriendo y no.
 async function loadAvailability(){if(!ME)return;

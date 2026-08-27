@@ -4366,3 +4366,48 @@ test('los avisos de cola se guardan como assistant, que es lo que el widget tien
   assert.equal(typeof testing.NO_ADVISOR_TEXT, 'string');
   assert.ok(testing.QUEUE_WAIT_TEXT.length > 40 && testing.NO_ADVISOR_TEXT.length > 40);
 });
+
+test('devolver el control avisa al visitante: si no, se queda esperando a alguien que ya no está', async () => {
+  const CID = '00000000-0000-4000-8000-000000000d01';
+  const conv = { id: CID, tenant_id: 't-mio', channel: 'whatsapp', external_id: 'whatsapp:+34600000000',
+    state: 'humano', agent_email: 'ana@cliente.com', inbox_address: 'whatsapp:+15550000002', demo: '', msgs: 6 };
+  const tenant = { id: 't-mio', slug: 'mio', name: 'Mío', bot_name: 'Faby', twilio_from: 'whatsapp:+15550000002' };
+  const batches = []; const enviados = [];
+  const env = { KV: mapKV(), TWILIO_ACCOUNT_SID: 'AC' + 'p'.repeat(32), TWILIO_AUTH_TOKEN: 'tok',
+    DB: {
+      prepare(sql) {
+        return { sql, bind: (...args) => ({
+          sql, args,
+          first: async () => {
+            if (/FROM tenants WHERE slug = \?/.test(sql)) return { id: 't-velai' };
+            if (/FROM tenants WHERE id=\?/.test(sql)) return tenant;
+            if (/FROM conversations c WHERE c\.id=\?/.test(sql)) return { ...conv };
+            return null;
+          },
+          all: async () => ({ results: [] }),
+          run: async () => ({ meta: { changes: 1 } }),
+        }) };
+      },
+      batch: async (stmts) => { batches.push(stmts.map((st) => ({ sql: st.sql, args: st.args }))); return stmts.map(() => ({})); },
+    } };
+  const ctx = { waitUntil() {} };
+  const OWN = { role: 'cliente', tenantId: 't-mio', email: 'ana@cliente.com' };
+  const p = `/api/admin/conversations/${CID}/release`;
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = async (url, init) => {
+    if (String(url).includes('api.twilio.com')) { enviados.push(new URLSearchParams(String(init.body))); return new Response('{}', { status: 201 }); }
+    return new Response('{}', { status: 200 });
+  };
+  try {
+    const d = await (await testing.adminRouter(adminReq(p, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }), env, ctx, p, new URL('https://x' + p), {}, OWN)).json();
+    assert.equal(d.state, 'bot');
+    // Se le avisa, y con el nombre del asistente DE ESE cliente, no un genérico.
+    assert.equal(enviados.length, 1);
+    assert.match(enviados[0].get('Body'), /^Faby vuelve a atenderte/);
+    assert.match(enviados[0].get('Body'), /si necesitas otra vez a alguien del equipo/i);
+    // Y queda en el hilo: si no, el panel enseñaría un salto sin explicación.
+    const guardado = batches.flat().find((st) => /INSERT INTO conv_messages/.test(st.sql));
+    assert.equal(guardado.args[1], 'assistant');
+    assert.match(guardado.args[3], /^Faby vuelve a atenderte/);
+  } finally { globalThis.fetch = realFetch; }
+});
