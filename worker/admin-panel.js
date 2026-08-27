@@ -165,7 +165,20 @@ function chTabs(counts){const cur=$('#convChannel').value;
  const tabs=[{k:'',label:'Todos',n:total,u:unread}].concat(counts.filter(c=>c.n).map(c=>({k:c.channel,label:CH_LABEL[c.channel]||c.channel,n:c.n,u:c.unread||0})));
  $('#chTabs').innerHTML=tabs.map(t=>'<button type="button" class="chtab'+(t.k===cur?' is-on':'')+'" data-ch="'+esc(t.k)+'">'+esc(t.label)+' <b>'+esc(t.n)+'</b>'+(t.u?' <i class="cvdot"></i>':'')+'</button>').join('')}
 $('#chTabs').onclick=e=>{const b=e.target.closest('[data-ch]');if(!b)return;$('#convChannel').value=b.dataset.ch;loadInbox()};
+// El sondeo llama a esto cada 15 s. Repintar el cajón a ciegas BORRA lo que la persona
+// está escribiendo (lo sufrió Juan: «se borran los caracteres y toca volver a escribir»).
+// Dos defensas: no repintar si nada relevante cambió, y si hay que repintar, conservar el
+// texto, el foco y la posición del cursor.
+function composerKey(win,c){return [win&&win.open?1:0,(win&&win.reason)||'',
+ (win&&win.web)?(win.away?'away':'here'):'',(c&&c.state)||'',(c&&c.agent_email)||''].join('|')}
 function composer(win,c){const box=$('#composer');
+ const key=composerKey(win,c);
+ if(box.dataset.ckey===key)return;
+ const prev=$('#cmsg');
+ const keep=prev?{v:prev.value,s:prev.selectionStart,e:prev.selectionEnd,f:document.activeElement===prev}:null;
+ box.dataset.ckey=key;
+ const restore=()=>{const t=$('#cmsg');if(!keep||!t)return;t.value=keep.v;
+  if(keep.f){t.focus();try{t.setSelectionRange(keep.s,keep.e)}catch(e){}}};
  if(!win||!win.open){const why=WIN_WHY[win&&win.reason]||'No se puede responder a esta conversación ahora mismo.';
   // En 'esperando' el cajón cerrado no basta: hay alguien esperando y hay que poder entrar.
   // Con la cuenta atrás a la vista, porque pasada esa marca Vai retoma.
@@ -175,6 +188,7 @@ function composer(win,c){const box=$('#composer');
    +(puede?'<button class="btn" id="takeover" type="button">Tomo el control</button>':'')
    +'<span class="cwin shut">'+esc(why)+(quedan!==null?' Vai retoma en '+quedan+' min si nadie entra.':'')+'</span></div>';
   if(puede)$('#takeover').onclick=()=>control('takeover');
+  restore();
   return}
  // En WhatsApp lo que importa es cuánto queda de la ventana de Meta; en web, si el
  // visitante sigue delante. Son la misma pregunta —«¿esto va a llegar?»— con distinta
@@ -190,6 +204,7 @@ function composer(win,c){const box=$('#composer');
   +'<span class="cwin">Tienes el control'+(c&&c.agent_email?' ('+esc(c.agent_email)+')':'')+'.</span>'+estado+'</div>';
  $('#csend').onclick=sendReply;
  $('#release').onclick=()=>control('release');
+ restore();
  $('#cmsg').onkeydown=ev=>{if(ev.key==='Enter'&&!ev.shiftKey){ev.preventDefault();sendReply()}}}
 async function sendReply(){const el=$('#cmsg');const text=(el.value||'').trim();if(!text||!convOpen)return;
  $('#csend').disabled=true;el.disabled=true;

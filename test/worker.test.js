@@ -4038,7 +4038,11 @@ test('la espera de toma de control vence: la IA retoma y avisa de que no hay ase
     assert.equal(enviados.length, 1);
     assert.equal(enviados[0].get('From'), 'whatsapp:+15550000001');
     assert.equal(enviados[0].get('To'), 'whatsapp:+34600000000');
-    assert.match(enviados[0].get('Body'), /no tengo a nadie del equipo disponible/);
+    // Y aquí SÍ se pide el teléfono: es el momento en que se sabe que nadie entró. Cuando
+    // el asesor está disponible NO se pide (lo pilló Juan: el bot pedía el WhatsApp justo
+    // cuando una persona iba a entrar en ese mismo chat).
+    assert.match(enviados[0].get('Body'), /no ha podido entrar nadie del equipo/);
+    assert.match(enviados[0].get('Body'), /déjame tu teléfono/);
     // 3) y queda en el historial: si no, el panel enseñaría un salto del silencio a la nada.
     const guardado = batches.flat().find((st) => /INSERT INTO conv_messages/.test(st.sql));
     assert.equal(guardado.args[1], 'assistant');
@@ -4171,4 +4175,18 @@ test('tomar el control de una conversación de cliente: 403 explicado, no 404', 
   conv.tenant_id = 't-velai';
   const ok = await testing.adminRouter(adminReq(p, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }), env, ctx, p, new URL('https://x' + p), {}, VELAI_SCOPE);
   assert.equal((await ok.json()).state, 'humano');
+});
+
+test('con asesor disponible el bot NO pide el teléfono: la persona entra en ese mismo chat', () => {
+  // El fallo que vio Juan: «¿Me das tu WhatsApp y te contactan enseguida?» justo cuando
+  // alguien iba a entrar en la conversación. El prompt del tenant y las GUARDRAILS empujan
+  // a conseguir el contacto, así que el bloque volátil tiene que decir que aquí NO toca —
+  // y que manda sobre ellas.
+  assert.match(testing.HANDOFF_ON, /EN ESTA MISMA CONVERSACIÓN/);
+  assert.match(testing.HANDOFF_ON, /NO le pidas el teléfono ni el WhatsApp/);
+  assert.match(testing.HANDOFF_ON, /PRIORIDAD sobre cualquier instrucción de conseguir su contacto/);
+  assert.match(testing.HANDOFF_ON, /\[\[HUMANO\]\]/, 'sigue pidiendo el marcador');
+  // Y sin asesor sí se pide, que es donde tiene sentido.
+  assert.match(testing.HANDOFF_OFF, /pídele su nombre y su teléfono/);
+  assert.match(testing.NO_ADVISOR_TEXT, /déjame tu teléfono/);
 });

@@ -1962,7 +1962,7 @@ async function advisorAvailable(env, tenant) {
 // «Fuera de horario NO se ofrece interacción humana» (Juan). La forma limpia de que el bot
 // no prometa lo que no puede dar es DECÍRSELO, no censurar su respuesta después. Va en un
 // bloque volátil, sin cache_control: el bloque estable del system sigue cacheando igual.
-const HANDOFF_ON = 'AHORA MISMO hay alguien del equipo disponible. Si la persona pide hablar con una persona, confírmalo con naturalidad y termina tu mensaje con el marcador [[HUMANO]].';
+const HANDOFF_ON = 'AHORA MISMO hay alguien del equipo disponible y puede entrar EN ESTA MISMA CONVERSACIÓN. Si la persona pide hablar con alguien: dile que avisas a un compañero y que se une aquí en un momento, y termina tu mensaje con el marcador [[HUMANO]]. NO le pidas el teléfono ni el WhatsApp para eso: no hace falta ningún dato, porque la persona del equipo escribe en este mismo chat, y pedírselo da a entender que le van a llamar en otro momento. Esta regla tiene PRIORIDAD sobre cualquier instrucción de conseguir su contacto.';
 const HANDOFF_OFF = 'AHORA MISMO no hay nadie del equipo disponible (fuera del horario de atención, o sin nadie conectado). NO ofrezcas pasar la conversación a una persona ni digas que alguien va a entrar ahora. Si la persona lo pide, dile con naturalidad que en este momento no hay nadie del equipo, pídele su nombre y su teléfono si no los tienes, y dile que el equipo le escribe en cuanto pueda. Sigue ayudándole tú con lo que puedas. NO uses el marcador [[HUMANO]].';
 
 function systemWithHandoff(config, tenant, available) {
@@ -4570,7 +4570,7 @@ async function sendWeeklyReports(env, now) {
 // queda CALLADO; si vuelve a escribir, handleTwilio lo resuelve en ese mismo mensaje sin
 // esperar al cron. El cron corre cada 5 min, así que el plazo real está entre 5 y 10: no se
 // disimula, se compensa con el otro camino.
-const NO_ADVISOR_TEXT = 'Ahora mismo no tengo a nadie del equipo disponible para entrar en la conversación. Sigo yo y te ayudo con lo que pueda, y les paso tu caso para que te escriban en cuanto puedan.';
+const NO_ADVISOR_TEXT = 'Perdona la espera: al final no ha podido entrar nadie del equipo ahora mismo. Sigo yo y te ayudo con lo que pueda. Si quieres, déjame tu teléfono y les paso tu caso para que te escriban en cuanto puedan.';
 
 async function expireTakeovers(env) {
   const cutoff = new Date(Date.now() - TAKEOVER_GRACE_MIN * 60000).toISOString();
