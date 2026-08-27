@@ -545,3 +545,57 @@ principal) — y con la página de WhatsApp senders ya sabemos que el menú de l
 ofrecerla. Meta decide de verdad, pero con Self Sign-up la WABA vive en el Business Manager DEL
 CLIENTE, así que Velai normalmente no la ve: Twilio es la ventana práctica, y el botón del panel evita
 depender de ella.
+## Conversaciones a pantalla completa (2026-08-27, del canvas «Conversaciones · Panel Velai»)
+
+La bandeja vivía en una caja de `min(72vh,760px)` con la cabecera, la nota de disponibilidad y seis
+filtros encima: en un portátil el hilo se quedaba en un tercio de la pantalla. Ahora la vista **ocupa
+el viewport** y son los paneles los que scrollean, nunca la página. Lo sostiene una sola clase,
+`body.wide`, que pone el conmutador de vistas: fija el alto y le quita a `main` su padding. Con el
+recordatorio de siempre: `min-height:0` en toda la cadena y `#viewConversaciones[hidden]{display:none}`,
+porque una clase que fija `display` gana al atributo `hidden` (es el bug que ya se desplegó dos veces).
+
+Lo que cambia, y por qué:
+
+- **Los seis filtros se pliegan** en un buscador dentro de la lista más un botón «Filtros» con el resto
+  (cliente, fechas, lead, sin respuesta) en un panel anclado. Todo sigue en el mismo `<form
+  id="convFilters">`, así que `convParams()` no cambia y el CSV exporta con los mismos filtros.
+- **El buscador filtra de verdad**: `q` nuevo en `convFilters()` del worker, por nombre del lead y por
+  identificador. El número se compara también sin espacios ni signos, porque en D1 se guarda
+  `whatsapp:+34622418807` y en el panel se lee con espacios; los comodines `%` `_` del usuario se
+  escapan con `ESCAPE '\'`. NO busca dentro de los mensajes: eso obligaría a recorrer `conv_messages`
+  en cada tecla. El export comparte `convFilters`, así que necesitó su `LEFT JOIN leads`.
+- **Chips de canal con su logo** (WhatsApp, Web, Messenger; Instagram ya tiene glifo en `CH_ICON`) y su
+  contador. Con logo no hacen falta las palabras: el nombre va en `title`/`aria-label`, y así caben
+  cinco canales en 340 px. Si no caben, la barra **se desplaza en horizontal** — nunca una segunda
+  fila — con la barra de scroll oculta y una sombra de borde vía `background-attachment:local`, que solo
+  aparece cuando de verdad queda algo por ver. Un canal que aún no existe NO se pinta: aparece solo el
+  día que llegue una conversación suya (los contadores mandan).
+- **La cola y la disponibilidad suben a la barra.** La píldora de «esperando asesor» ahora es roja de
+  verdad: el `class="flag bad"` de antes no existía como estilo y salía ámbar. La disponibilidad es un
+  botón con su punto y un panel con el porqué (cuántas personas hay, horario, a quién cubres) en vez de
+  una línea de prosa permanente; el interruptor vive dentro (`#availSw`) y `#availToggle` solo abre.
+- **Filas de dos líneas** sin separadores: lo seleccionado es una superficie con raíl (sombra interior,
+  que sigue el radio), lo que espera sigue en rojo, y el canal se ve como insignia en el avatar. El
+  cliente va en la misma línea que la vista previa: con 340 px no caben tres líneas, y Velai —que ve
+  conversaciones de todos— necesita saber de quién es.
+- **El hilo se lee como un chat**: divisorias de día («Hoy», «Ayer»), hora suelta en la burbuja, hilos
+  cortos apoyados abajo con un espaciador elástico (no `justify-content:flex-end`, que en Chrome deja
+  inalcanzable el principio del scroll), y al abrir un hilo se baja al último mensaje una sola vez —
+  después manda el `atBottom`, para no dar saltos mientras alguien lee hacia arriba.
+- **El cajón dice por qué**: abierto, campo que crece con lo escrito y botón de enviar redondo; en
+  espera, una franja con los minutos, la cuenta atrás de los 15 min y «Tomo el control» (sin campo: lo
+  que toca es entrar, no escribir); cerrado, campo punteado con el motivo de `WIN_WHY`.
+- **Móvil**: la lista y el hilo se turnan (`.inbox.is-thread`) y el hilo trae su botón de volver; la
+  cola baja a su propia línea a lo ancho; todo lo que se pulsa llega a 44 px. Dos arreglos que salieron
+  al medirlo: la fila de navegación apilaba sus tres últimos botones en columna (185 px de alto) y ahora
+  va en fila con scroll propio — con el alto fijado ya no se iba con el scroll de la página.
+
+**Verificado mirándolo**, no razonándolo: `scripts/render-panel.mjs` (que ya acepta el módulo suelto,
+`node scripts/render-panel.mjs worker/admin-page.js /tmp/p.png conversaciones`) en claro, en oscuro y a
+390 px, midiendo alturas y blancos de toque por CDP. Ahí salió el fallo de nombre: `.cvtop` era ya la
+primera línea de cada fila y la barra nueva le metía 56 px de `min-height` — la barra pasó a `.cvhead`.
+El markup inyectado por el harness se actualizó al DOM nuevo. Suite **168/168**.
+
+**Lo que NO entra:** buscar dentro del texto de los mensajes; el chip de Instagram (no existe el canal);
+y la nav del móvil sigue siendo la barra lateral aplanada — la hoja «Más» del canvas queda para cuando
+se rediseñe la navegación.

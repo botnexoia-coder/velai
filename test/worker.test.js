@@ -3851,7 +3851,9 @@ test('el panel no pierde manejadores por el camino: inventario congelado', async
     'loadAiUsage', 'loadInfra', 'loadSaldo', 'loadInbox', 'renderThread', 'composer', 'sendReply',
     'loadConexiones', 'cxMenu', 'loadChannels', 'loadTenantList', 'loadAdmins', 'loadConfig',
     'loadAvailability', 'control', 'beep', 'notify', 'checkAlerts', 'setAlerts', 'hoursToForm', 'hoursFromForm', 'hoursCopyMon', 'shSummary',
-    'calMenu', 'loadEscalations', 'whoOf', 'prevPrefix', 'chTabs', 'convParams', 'api', 'toast', 'paint'];
+    'calMenu', 'loadEscalations', 'whoOf', 'prevPrefix', 'chTabs', 'convParams', 'api', 'toast', 'paint',
+    // Bandeja a pantalla completa (rediseño 2026-08-27)
+    'chIcon', 'fmtDia', 'fmtHora', 'dayLabel', 'cgrow', 'popFiltros', 'popAvail'];
   const sinFuncion = FUNCIONES.filter((f) => !fns.has(f));
   assert.deepEqual(sinFuncion, [], 'funciones del panel desaparecidas');
 
@@ -3863,6 +3865,7 @@ test('el panel no pierde manejadores por el camino: inventario congelado', async
     'wizBack', 'wizNext', 'tDupSel', 'ttabs', 'tLogoUp', 'tVersions', 'tSyncDomains',
     'uAdd', 'tUsersList', 'aAdd', 'adminsList', 'cfgTokenSave', 'cfgTokenClear',
     'cxTenantSel', 'cxLogoUp', 'cxLogoApply', 'nfSave', 'wrToggle', 'wrTest', 'availToggle', 'convTenant', 'alertBtn', 'shSave', 'shCopy', 'calCopy',
+    'availSw', 'convMore', 'convClear', 'convQ', 'threadHead',
     'tgLink', 'tgUnlink', 'tgWlToggle', 'tgBotSave', 'tgBotDel', 'tgSetup', 'tgTopicAdd', 'tgTopics',
     'calTenantSel', 'calGrid', 'calToday', 'calPrev', 'calNext', 'calBack',
     'calConnect', 'calReconnect', 'calDisconnect', 'calSave', 'calDayClose',
@@ -4430,4 +4433,23 @@ test('el aviso se guarda ANTES de cambiar el estado: si no, el widget deja de es
   // Red de seguridad en el widget: un último sondeo al volver a bot.
   const w = await readFile(new URL('../assets/vai-widget.js', import.meta.url), 'utf8');
   assert.match(w, /setTimeout\(pollOnce, 2500\)/);
+});
+
+// ── Buscador de la bandeja (rediseño 2026-08-27) ─────────────────────────────
+// El diseño pone un buscador en la cabecera de la lista; si no filtrara de verdad sería
+// justo la clase de mentira que este panel no se permite. Busca por PERSONA y por NÚMERO.
+test('el buscador de la bandeja: persona, número normalizado y comodines escapados', () => {
+  const f = (qs) => testing.convFilters(new URL('https://x/api/admin/inbox?' + qs));
+  assert.ok(!f('').sql.includes('LIKE'), 'sin q no se añade ningún LIKE');
+
+  const num = f('q=' + encodeURIComponent('+34 622 41 88 07'));
+  assert.ok(num.sql.includes('l.name LIKE') && num.sql.includes('c.external_id LIKE'));
+  // En D1 el identificador se guarda sin espacios («whatsapp:+34622418807») y en el panel
+  // se lee CON ellos: sin normalizar, buscar el número que se ve en pantalla no encuentra nada.
+  assert.deepEqual(num.values, ['%+34 622 41 88 07%', '%34622418807%']);
+
+  const comodin = f('q=' + encodeURIComponent('%'));
+  assert.deepEqual(comodin.values, ['%\\%%'], 'el % del usuario se escapa, no busca «cualquier cosa»');
+  assert.ok(!comodin.sql.includes('c.external_id LIKE'), 'sin letras ni dígitos no hay número que buscar');
+  assert.ok(comodin.sql.includes("ESCAPE '\\'"), 'y el LIKE declara su carácter de escape');
 });

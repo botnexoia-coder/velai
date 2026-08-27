@@ -129,7 +129,19 @@ async function loadTenants(){try{const d=await api('/api/admin/tenants');for(con
 // llamada (/api/admin/inbox) porque esto hace polling — dos llamadas cada 5 s con seis
 // paneles abiertos serían un tercio del plan gratuito de Workers en refrescar una pantalla.
 let convOpen=null,inboxPoll=null,convCount=0;
-const CH_LABEL={web:'Web',whatsapp:'WhatsApp',messenger:'Messenger'};
+const CH_LABEL={web:'Web',whatsapp:'WhatsApp',messenger:'Messenger',instagram:'Instagram'};
+// Logos de canal (rediseño 2026-08-27): mismo trazo y misma rejilla de 24 que el resto de
+// iconos del panel, y el color lo pone la clase — la paleta del panel, no la de la marca.
+const CH_ICON={
+ whatsapp:'<path d="M12 3.2a8.8 8.8 0 0 0-7.5 13.4L3.2 20.8l4.4-1.3A8.8 8.8 0 1 0 12 3.2z"></path><path d="M9.3 9.1l1 1.8-.9.9a6.2 6.2 0 0 0 2.8 2.8l.9-.9 1.8 1"></path>',
+ web:'<circle cx="12" cy="12" r="8.6"></circle><path d="M3.4 12h17.2"></path><path d="M12 3.4c3.2 3.7 3.2 13.5 0 17.2c-3.2-3.7-3.2-13.5 0-17.2"></path>',
+ messenger:'<path d="M12 3.2c-4.85 0-8.8 3.63-8.8 8.13 0 2.55 1.28 4.82 3.28 6.32v3.15l3.02-1.65c.79.21 1.63.33 2.5.33 4.85 0 8.8-3.63 8.8-8.15S16.85 3.2 12 3.2z"></path><path d="M7.5 14.4l2.7-4.3 2.4 1.9 2.4-3.2"></path>',
+ instagram:'<rect x="3.6" y="3.6" width="16.8" height="16.8" rx="5"></rect><circle cx="12" cy="12" r="4"></circle><circle cx="16.9" cy="7.1" r="1.15" fill="currentColor" stroke="none"></circle>'};
+const CH_CLS={whatsapp:'ch-wa',web:'ch-web',messenger:'ch-ms',instagram:'ch-ig'};
+function chIcon(ch){const d=CH_ICON[ch];if(!d)return '';
+ return '<svg class="'+CH_CLS[ch]+'" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'+d+'</svg>'}
+const ICO_SEND='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h13"></path><path d="m12.5 5.5 6.5 6.5-6.5 6.5"></path></svg>';
+const ICO_BACK='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m14.5 6-6 6 6 6"></path></svg>';
 // Por qué NO se puede responder, en palabras del dueño. El cajón se cierra ANTES de que
 // alguien escriba: el 63016 de Twilio llega cuando el mensaje ya se dio por enviado.
 const WIN_WHY={
@@ -146,6 +158,12 @@ function fmtShort(v){if(!v)return '';const d=new Date(v),now=new Date();
  return (d.toDateString()===now.toDateString())
   ?new Intl.DateTimeFormat('es-ES',{hour:'2-digit',minute:'2-digit'}).format(d)
   :new Intl.DateTimeFormat('es-ES',{day:'2-digit',month:'short'}).format(d)}
+function fmtDia(v){return v?new Intl.DateTimeFormat('es-ES',{day:'2-digit',month:'short'}).format(new Date(v)):'—'}
+function fmtHora(v){return v?new Intl.DateTimeFormat('es-ES',{hour:'2-digit',minute:'2-digit'}).format(new Date(v)):''}
+// Etiqueta de la divisoria de día: «Hoy» y «Ayer» se leen mucho mejor que una fecha.
+function dayLabel(v){if(!v)return '';const d=new Date(v),hoy=new Date();
+ const ayer=new Date(hoy.getTime()-86400000),mismo=(a,b)=>a.toDateString()===b.toDateString();
+ return mismo(d,hoy)?'Hoy':mismo(d,ayer)?'Ayer':new Intl.DateTimeFormat('es-ES',{day:'2-digit',month:'long'}).format(d)}
 function convParams(){const p=new URLSearchParams(new FormData($('#convFilters')));for(const[k,v]of[...p])if(!v)p.delete(k);return p}
 function initials(v){const t=String(v||'').replace(/^(whatsapp:|messenger:)/,'').replace(/[^A-Za-z0-9]/g,'');return (t.slice(0,2)||'··').toUpperCase()}
 // Quién es la persona del otro lado. En web el external_id es el id de conversación que
@@ -157,13 +175,22 @@ function whoOf(c){
  return String(c.external_id||'').replace(/^(whatsapp:|messenger:)/,'')||'sin identificar'}
 // Quién escribió el último mensaje. 'tú' es la PERSONA del equipo, no el bot: ahora que
 // existe role='agent' confundirlos sería justo lo que la migración 0023 vino a evitar.
-function prevPrefix(role){return role==='user'?'':role==='agent'?'tú: ':'bot: '}
+function prevPrefix(role){return role==='user'?'':role==='agent'?'tú: ':'Vai: '}
+// Los canales que el worker sabe recibir HOY, en el orden en que se miran. Un canal que
+// aún no existe NO se pinta aunque tenga logo (Instagram): un chip a 0 de algo que no
+// puede llegar es exactamente la clase de mentira que este panel no se permite — el día
+// que llegue una conversación suya, aparece solo por venir en los contadores.
+const CH_ORDER=['whatsapp','web','messenger'];
 function chTabs(counts){const cur=$('#convChannel').value;
- const total=counts.reduce((a,c)=>a+c.n,0),unread=counts.reduce((a,c)=>a+(c.unread||0),0);
- // Instagram NO se pinta: no hay canal desplegado, y un filtro que no filtra nada es
- // exactamente la clase de mentira que este panel no se permite. Aparece cuando exista.
- const tabs=[{k:'',label:'Todos',n:total,u:unread}].concat(counts.filter(c=>c.n).map(c=>({k:c.channel,label:CH_LABEL[c.channel]||c.channel,n:c.n,u:c.unread||0})));
- $('#chTabs').innerHTML=tabs.map(t=>'<button type="button" class="chtab'+(t.k===cur?' is-on':'')+'" data-ch="'+esc(t.k)+'">'+esc(t.label)+' <b>'+esc(t.n)+'</b>'+(t.u?' <i class="cvdot"></i>':'')+'</button>').join('')}
+ const by={};for(const c of counts||[])if(c&&c.channel)by[c.channel]={n:c.n||0,u:c.unread||0};
+ const canales=CH_ORDER.concat(Object.keys(by)).filter((k,i,a)=>a.indexOf(k)===i);
+ const suma=campo=>Object.keys(by).reduce((a,k)=>a+by[k][campo],0);
+ const tabs=[{k:'',label:'Todos',n:suma('n'),u:suma('u')}]
+  .concat(canales.map(k=>({k:k,label:CH_LABEL[k]||k,n:(by[k]||{}).n||0,u:(by[k]||{}).u||0})));
+ $('#chTabs').innerHTML=tabs.map(t=>'<button type="button" class="chtab'+(t.k===cur?' is-on':'')+(t.n?'':' is-zero')
+  +'" data-ch="'+esc(t.k)+'" title="'+esc(t.label)+'" aria-label="'+esc(t.label)+'">'
+  +(t.k?chIcon(t.k):'<span>'+esc(t.label)+'</span>')+' <b>'+esc(t.n)+'</b>'
+  +(t.u?'<i></i>':'')+'</button>').join('')}
 $('#chTabs').onclick=e=>{const b=e.target.closest('[data-ch]');if(!b)return;$('#convChannel').value=b.dataset.ch;loadInbox()};
 // El sondeo llama a esto cada 15 s. Repintar el cajón a ciegas BORRA lo que la persona
 // está escribiendo (lo sufrió Juan: «se borran los caracteres y toca volver a escribir»).
@@ -181,13 +208,22 @@ function composer(win,c){const box=$('#composer');
   if(keep.f){t.focus();try{t.setSelectionRange(keep.s,keep.e)}catch(e){}}};
  if(!win||!win.open){const why=WIN_WHY[win&&win.reason]||'No se puede responder a esta conversación ahora mismo.';
   // En 'esperando' el cajón cerrado no basta: hay alguien esperando y hay que poder entrar.
-  // Con la cuenta atrás a la vista, porque pasada esa marca Vai retoma.
+  // Con los minutos que lleva y la cuenta atrás a la vista, porque pasada esa marca Vai
+  // retoma. Aquí NO se pinta campo de texto: lo que toca es entrar, no escribir.
   const puede=c&&c.state==='esperando';
+  const mins=c&&c.state_at?Math.max(0,Math.floor((Date.now()-new Date(c.state_at))/60000)):null;
   const quedan=puede&&c.state_at?Math.max(0,QUEUE_MIN-Math.floor((Date.now()-new Date(c.state_at))/60000)):null;
-  box.innerHTML='<textarea disabled placeholder="Cajón cerrado"></textarea><div class="crow">'
-   +(puede?'<button class="btn" id="takeover" type="button">Tomo el control</button>':'')
-   +'<span class="cwin shut">'+esc(why)+(quedan!==null?' Vai retoma en '+quedan+' min si nadie entra.':'')+'</span></div>';
-  if(puede)$('#takeover').onclick=()=>control('takeover');
+  if(puede){
+   box.innerHTML='<div class="cvstrip"><span class="grow">'
+    +'<b>'+(mins!==null?mins+String.fromCharCode(8242)+' esperando · ':'')+'Pidió hablar con una persona del equipo</b>'
+    +(quedan!==null?'<small>Vai retoma en '+quedan+' min si nadie entra.</small>':'')+'</span>'
+    +'<button class="btn" id="takeover" type="button">Tomo el control</button></div>';
+   $('#takeover').onclick=()=>control('takeover');
+   restore();
+   return}
+  box.innerHTML='<div class="cvfield shut"><textarea rows="1" disabled placeholder="Cajón cerrado"></textarea>'
+   +'<button class="cvsend" type="button" disabled tabindex="-1" aria-hidden="true">'+ICO_SEND+'</button></div>'
+   +'<div class="crow"><span class="cwin shut">'+esc(why)+'</span></div>';
   restore();
   return}
  // En WhatsApp lo que importa es cuánto queda de la ventana de Meta; en web, si el
@@ -198,46 +234,62 @@ function composer(win,c){const box=$('#composer');
     ?'<span class="cwin shut">El visitante no está en la página ahora mismo. Tu mensaje se guarda y lo verá si vuelve durante su visita.</span>'
     :'<span class="cwin">El visitante está en la página.</span>')
   :'<span class="cwin">Quedan <b>'+Math.max(0,Math.round((new Date(win.closesAt)-new Date())/3600000))+' h</b> de la ventana de WhatsApp.</span>';
- box.innerHTML='<textarea id="cmsg" rows="2" placeholder="Escribe tu respuesta…"></textarea>'
-  +'<div class="crow"><button class="btn" id="csend" type="button">Enviar</button>'
-  +'<button class="btn alt" id="release" type="button">Devolver a Vai</button>'
-  +'<span class="cwin">Tienes el control'+(c&&c.agent_email?' ('+esc(c.agent_email)+')':'')+'.</span>'+estado+'</div>';
+ box.innerHTML='<div class="cvfield"><textarea id="cmsg" rows="1" placeholder="Escribe tu respuesta…"></textarea>'
+  +'<button class="cvsend" id="csend" type="button" title="Enviar" aria-label="Enviar">'+ICO_SEND+'</button></div>'
+  +'<div class="crow"><span class="cwin"><b>Tienes el control</b>'+(c&&c.agent_email?' · '+esc(c.agent_email):'')+'</span>'
+  +'<span class="sp"></span>'+estado
+  +'<span class="sp"></span><button class="btn alt btnsm" id="release" type="button">Devolver a Vai</button></div>';
  $('#csend').onclick=sendReply;
  $('#release').onclick=()=>control('release');
  restore();
+ // El campo crece con lo escrito (una línea de base, tope en 112 px y luego scroll): con
+ // rows fijo, una respuesta larga se leía por una rendija.
+ $('#cmsg').oninput=cgrow;cgrow();
  $('#cmsg').onkeydown=ev=>{if(ev.key==='Enter'&&!ev.shiftKey){ev.preventDefault();sendReply()}}}
+// La altura se toca por CSSOM, no con style="": la CSP del panel bloquea los inline.
+function cgrow(){const t=$('#cmsg');if(!t)return;t.style.height='auto';t.style.height=Math.min(112,t.scrollHeight)+'px'}
 async function sendReply(){const el=$('#cmsg');const text=(el.value||'').trim();if(!text||!convOpen)return;
  $('#csend').disabled=true;el.disabled=true;
  try{await api('/api/admin/conversations/'+convOpen+'/reply',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text})});
-  el.value='';toast('Enviado ✓');await loadInbox(true)}
+  el.value='';cgrow();toast('Enviado ✓');await loadInbox(true)}
  catch(e){toast('NO se envió: '+(WIN_WHY[e.message]||TERRS[e.message]||e.message),false);
   // Si falló por la ventana, el estado de la pantalla estaba viejo: se refresca para que
   // el cajón se cierre y no se vuelva a intentar a ciegas.
   if(WIN_WHY[e.message])await loadInbox(true)}
  finally{$('#csend')&&($('#csend').disabled=false);el.disabled=false;el.focus()}}
 function renderThread(t){
- if(!t){$('#thread').hidden=true;$('#threadEmpty').hidden=false;return}
+ if(!t){$('#thread').hidden=true;$('#threadEmpty').hidden=false;threadSeen=null;return}
  $('#threadEmpty').hidden=true;$('#thread').hidden=false;
  const c=t.conversation;
  const quien=whoOf(c);
- $('#threadHead').innerHTML='<span class="cvav" data-c="'+tenantColor(c.external_id)+'">'+esc(initials(quien))+'</span>'
-  +'<span><b>'+esc(quien)+'</b>'
-  +'<div class="muted">'+esc(CH_LABEL[c.channel]||c.channel)+(c.tenant_name?' · '+esc(c.tenant_name):'')
-  +' · <span class="mono">'+esc(String(c.external_id||'').replace(/^(whatsapp:|messenger:)/,'').slice(0,8))+'</span></div></span>'
-  +'<span class="grow"></span>'
-  +(c.unanswered>0?'<span class="chip">'+esc(c.unanswered)+' sin respuesta</span>':'')
-  +'<span class="chip">se borra el '+fmt(c.expires_at)+'</span>';
+ $('#threadHead').innerHTML='<button class="cvback" id="convBack" type="button" title="Volver a la lista" aria-label="Volver a la lista">'+ICO_BACK+'</button>'
+  +'<span class="cvav" data-c="'+tenantColor(c.external_id)+'">'+esc(initials(quien))+'<span class="cvch">'+chIcon(c.channel)+'</span></span>'
+  +'<span class="grow"><span class="thwho">'+esc(quien)+'</span>'
+  +'<span class="thmeta"><b>'+esc(CH_LABEL[c.channel]||c.channel)+'</b>'
+  +(c.tenant_name?'·<b>'+esc(c.tenant_name)+'</b>':'')
+  +'·<span class="mono">'+esc(String(c.external_id||'').replace(/^(whatsapp:|messenger:)/,'').slice(0,8))+'</span></span></span>'
+  +(c.unanswered>0?'<span class="chip warn">'+esc(c.unanswered)+' sin respuesta</span>':'')
+  +'<span class="chip">se borra el '+esc(fmtDia(c.expires_at))+'</span>';
  const log=$('#threadLog');const atBottom=log.scrollHeight-log.scrollTop-log.clientHeight<60;
- log.innerHTML=t.messages.map(m=>{const kind=m.role==='user'?'user':(m.role==='agent'?'agent':'bot');
-  return '<div class="bub '+kind+'">'+(m.role==='agent'?'<span class="who">'+esc(m.agent_email||'equipo')+'</span>':'')
-   +esc(m.text)+'<time>'+fmt(m.created_at)+'</time></div>'}).join('')
-  ||'<p class="muted">Sin mensajes guardados.</p>';
+ // Divisoria de día: sin ella, con la hora suelta en cada burbuja no se sabe si el «11:52»
+ // es de hoy o de la semana pasada. El espaciador elástico apoya el hilo corto abajo.
+ let dia='';
+ log.innerHTML='<i class="cvfill"></i>'+(t.messages.map(m=>{
+  const kind=m.role==='user'?'user':(m.role==='agent'?'agent':'bot');
+  const clave=m.created_at?new Date(m.created_at).toDateString():'';
+  const sep=(clave&&clave!==dia)?'<div class="cvday"><span>'+esc(dayLabel(m.created_at))+'</span></div>':'';
+  if(clave)dia=clave;
+  return sep+'<div class="bub '+kind+'">'+(m.role==='agent'?'<span class="who">'+esc(m.agent_email||'equipo')+'</span>':'')
+   +'<span class="txt">'+esc(m.text)+'</span><time>'+esc(fmtHora(m.created_at))+'</time></div>'}).join('')
+  ||'<p class="muted">Sin mensajes guardados.</p>');
  paint($('#threadHead'));
+ // Al ABRIR un hilo se baja al último mensaje; después manda el atBottom de abajo.
+ if(convOpen!==threadSeen){threadSeen=convOpen;log.scrollTop=log.scrollHeight}
  // Solo se baja el scroll si el lector YA estaba abajo: en un polling cada 15 s, saltar al
  // final mientras alguien lee hacia arriba es insoportable.
  if(atBottom)log.scrollTop=log.scrollHeight;
  composer(t.window,c)}
-let GRACE_MIN=5,QUEUE_MIN=15;
+let GRACE_MIN=5,QUEUE_MIN=15,threadSeen=null;
 async function control(accion){if(!convOpen)return;
  // El botón se apaga mientras va: sin eso, un clic en una red lenta parecía «no hace nada»
  // y se pulsaba dos veces.
@@ -259,20 +311,24 @@ async function loadAvailability(){if(!ME)return;
  try{const d=await api('/api/admin/availability');
   GRACE_MIN=d.graceMin||5;
   $('#availState').textContent=d.offering?'Asesor disponible':(d.available?'Fuera de horario':'No disponible');
-  $('#availState').className='flag '+(d.offering?'ok':'off');
-  $('#availToggle').textContent=d.available?'Marcarme no disponible':'Marcarme disponible';
+  $('#availToggle').classList.toggle('off',!d.offering);
+  $('#availSw').classList.toggle('on',!!d.available);
+  $('#availSw').setAttribute('aria-checked',d.available?'true':'false');
+  $('#availHours').textContent=(d.withinHours?'Dentro del horario de atención':'Fuera del horario de atención')+' · '+d.tz;
   const para=(ME.role==='velai'&&d.forTenant)?' Solo cubres las conversaciones de '+esc(d.forTenant)+': las de los clientes las atienden ellos.':'';
   $('#availNote').textContent=(d.available&&!d.withinHours
    ?'Estás marcado como disponible, pero fuera del horario de atención ('+esc(d.tz)+') no se ofrecen asesores: Vai atiende y captura el lead.'
    :(d.offering?(d.advisors===1?'Vai puede pasar una conversación a una persona.':d.advisors+' personas disponibles.')
      :'Vai atiende todo y captura leads. Nadie va a recibir conversaciones.'))+para}
  catch(e){$('#availState').textContent='—';$('#availNote').textContent=''}}
-$('#availToggle').onclick=async()=>{$('#availToggle').disabled=true;
- try{const cur=$('#availToggle').textContent.includes('no disponible');
+// El botón de la barra ABRE el panel; el interruptor de dentro es el que cambia el estado.
+$('#availToggle').onclick=()=>popAvail($('#availPop').hidden);
+$('#availSw').onclick=async()=>{$('#availSw').disabled=true;
+ try{const cur=$('#availSw').classList.contains('on');
   await api('/api/admin/availability',{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({available:!cur})});
   await loadAvailability()}
  catch(e){toast('No se pudo cambiar la disponibilidad: '+(TERRS[e.message]||e.message),false)}
- finally{$('#availToggle').disabled=false}};
+ finally{$('#availSw').disabled=false}};
 async function loadInbox(quiet=false){
  try{const p=convParams();if(convOpen)p.set('conversation',convOpen);
   const d=await api('/api/admin/inbox?'+p);
@@ -283,23 +339,26 @@ async function loadInbox(quiet=false){
   // funcionen de verdad: se puede atender a varias a la vez, pero no si no se ven.
   const enCola=(d.counts||[]).reduce((a,c)=>a+(c.waiting||0),0);
   $('#waitPill').hidden=!enCola;
-  $('#waitPill').textContent=enCola?(enCola===1?'1 esperando asesor':enCola+' esperando asesor'):'';
+  $('#waitPillTxt').textContent=enCola?(enCola===1?'1 esperando asesor':enCola+' esperando asesor'):'';
   const rows=d.conversations||[];
   $('#convRows').innerHTML=rows.length?rows.map(c=>{
    const who=whoOf(c);
-   const prev=prevPrefix(c.preview_role)+String(c.preview||'');
    // Los minutos que lleva esperando, no la hora del último mensaje: con varias en cola es
    // el único dato con el que se decide a quién atender primero.
    const espera=c.state==='esperando'?Math.max(0,Math.floor((Date.now()-new Date(c.state_at))/60000)):null;
    const marca=espera!==null
     ?'<span class="cvwait">'+espera+"' esperando</span>"
     :(c.state==='humano'?'<span class="cvwhen">'+esc(c.agent_email?c.agent_email.split('@')[0]:'en curso')+'</span>':'<span class="cvwhen">'+esc(fmtShort(c.last_at))+'</span>');
-   return '<div class="cvrow'+(c.id===convOpen?' is-on':'')+(c.state==='esperando'?' is-wait':'')+'" data-id="'+esc(c.id)+'">'
-    +'<span class="cvav" data-c="'+tenantColor(c.external_id)+'">'+esc(initials(who))+'</span>'
+   // El cliente va en la MISMA línea que la vista previa: con la columna a 340 px no caben
+   // tres líneas por fila, y para Velai —que ve conversaciones de todos— saber de quién es
+   // no es opcional. Para un cliente, tenant_name no viaja y la etiqueta no se pinta.
+   const ten=c.tenant_name?'<span class="cvten"><i data-c="'+tenantColor(c.tenant_id||c.tenant_name)+'"></i><span>'+esc(c.tenant_name)+'</span></span>':'';
+   return '<button type="button" class="cvrow'+(c.id===convOpen?' is-on':'')+(c.state==='esperando'?' is-wait':'')+'" data-id="'+esc(c.id)+'">'
+    +'<span class="cvav" data-c="'+tenantColor(c.external_id)+'">'+esc(initials(who))+'<span class="cvch">'+chIcon(c.channel)+'</span></span>'
     +'<span class="cvmain"><span class="cvtop"><span class="cvwho">'+esc(who)+'</span>'+marca+'</span>'
-    +'<span class="cvprev">'+esc(prev)+'</span></span>'
-    +(c.unread?'<i class="cvdot"></i>':'')+'</div>'}).join('')
-   :'<div class="cvrow"><span class="cvmain muted">No hay conversaciones con estos filtros. Solo se guardan desde el 26 de agosto de 2026.</span></div>';
+    +'<span class="cvbot"><span class="cvprev"><i>'+esc(prevPrefix(c.preview_role))+'</i>'+esc(String(c.preview||''))+'</span>'+ten+'</span></span>'
+    +(c.unread?'<i class="cvdot"></i>':'')+'</button>'}).join('')
+   :'<p class="cvempty">No hay conversaciones con estos filtros. Solo se guardan desde el 26 de agosto de 2026.</p>';
   paint($('#convRows'));
   convCount=rows.length;
   // Un tope que no se dice se lee como «esto es todo». La bandeja trae las 40 más
@@ -313,10 +372,33 @@ async function loadInbox(quiet=false){
   inboxPolling(true,vivo?15000:60000);
   $('#convMessage').textContent=''}
  catch(e){if(!quiet)$('#convMessage').innerHTML='<p class="error">'+esc(TERRS[e.message]||e.message)+'</p>'}}
-$('#convRows').onclick=e=>{const r=e.target.closest('[data-id]');if(r){convOpen=r.dataset.id;loadInbox()}};
-$('#convFilters').onsubmit=e=>{e.preventDefault();loadInbox();loadAvailability()};
+$('#convRows').onclick=e=>{const r=e.target.closest('[data-id]');if(r){convOpen=r.dataset.id;$('#inbox').classList.add('is-thread');loadInbox()}};
+// En móvil los dos paneles no caben: la lista y el hilo se turnan, y el hilo trae su botón
+// de volver. Delegado en la cabecera porque el hilo se repinta en cada sondeo.
+$('#threadHead').onclick=e=>{if(!e.target.closest('#convBack'))return;
+ convOpen=null;$('#inbox').classList.remove('is-thread');renderThread(null);loadInbox()};
+$('#convFilters').onsubmit=e=>{e.preventDefault();popFiltros(false);convOpen=null;loadInbox();loadAvailability()};
 $('#convTenant').onchange=()=>{convOpen=null;loadInbox();loadAvailability()};
 $('#convExport').onclick=()=>{location.href='/api/admin/conversations/export.csv?'+convParams()};
+// Buscador: se espera a que se deje de teclear. Sin esto, cada tecla es una consulta a D1.
+let convQT=null;
+$('#convQ').oninput=()=>{clearTimeout(convQT);convQT=setTimeout(()=>{convOpen=null;loadInbox()},350)};
+// Filtros y disponibilidad son cajones anclados: uno abierto a la vez, y se cierran al
+// pulsar fuera o con Escape. No son diálogos — no bloquean la bandeja detrás.
+function popFiltros(on){$('#convPop').hidden=!on;$('#convMore').classList.toggle('is-on',!!on);
+ $('#convMore').setAttribute('aria-expanded',on?'true':'false');if(on)$('#availPop').hidden=true}
+function popAvail(on){$('#availPop').hidden=!on;$('#availToggle').setAttribute('aria-expanded',on?'true':'false');
+ if(on)popFiltros(false)}
+$('#convMore').onclick=()=>popFiltros($('#convPop').hidden);
+$('#convClear').onclick=()=>{const f=$('#convFilters');
+ f.querySelectorAll('input[type=date],input[name=q]').forEach(i=>{i.value=''});
+ f.querySelectorAll('input[type=checkbox]').forEach(i=>{i.checked=false});
+ $('#convTenant').value='';
+ convOpen=null;popFiltros(false);loadInbox();loadAvailability()};
+document.addEventListener('click',e=>{
+ if(!e.target.closest('#convPop,#convMore'))popFiltros(false);
+ if(!e.target.closest('#availPop,#availToggle'))popAvail(false)});
+document.addEventListener('keydown',e=>{if(e.key==='Escape'){popFiltros(false);popAvail(false)}});
 // Polling solo con la pestaña visible Y la vista abierta: 15 s en vez de 5 baja el gasto
 // de ~35.000 peticiones/día a ~11.500 con seis paneles abiertos.
 let inboxEvery=0;
@@ -442,6 +524,10 @@ let tenantList=[],editing=null;
 const VIEWS={dashboard:'#viewDashboard',leads:'#viewLeads',conversaciones:'#viewConversaciones',tenants:'#viewTenants',config:'#viewConfig',calendario:'#viewCalendario',conexiones:'#viewConexiones',canales:'#viewCanales'};
 document.querySelectorAll('.tab[data-view]').forEach(b=>b.onclick=()=>{document.querySelectorAll('.tab[data-view]').forEach(x=>{x.classList.toggle('is-on',x===b);x.setAttribute('aria-selected',x===b?'true':'false')});const v=b.dataset.view;
  Object.entries(VIEWS).forEach(([k,sel])=>{$(sel).hidden=k!==v});
+ // Conversaciones es la única vista a pantalla completa: la clase quita el padding de
+ // main y fija el alto para que scrollen los paneles y no la página.
+ document.body.classList.toggle('wide',v==='conversaciones');
+ if(v==='conversaciones')$('#inbox').classList.remove('is-thread');
  inboxPolling(v==='conversaciones');
  if(v==='dashboard'){loadStats();loadAiUsage();loadInfra();loadSaldo()}else if(v==='leads'){load();loadEscalations()}else if(v==='conversaciones'){loadInbox();loadAvailability()}else if(v==='tenants')loadTenantList();else if(v==='config'){loadAdmins();loadConfig()}else if(v==='calendario'){calMenu()}else if(v==='conexiones'){cxMenu()}else if(v==='canales'){loadChannels()}});
 // ── Conexiones (SPEC-CONEXIONES PR1): Telegram de avisos en autoservicio ──

@@ -294,6 +294,7 @@ dialog::backdrop{background:rgba(5,3,6,.78);backdrop-filter:blur(3px)}
 .cfg-name{display:block;font-size:14px;font-weight:700}
 .cfg-desc{display:block;font-size:12px;color:var(--muted2);margin-top:2px;max-width:640px}
 .chip{display:inline-flex;align-items:center;background:rgba(var(--ink),.05);border:1px solid rgba(var(--ink),.10);color:rgba(var(--ink),.70);border-radius:999px;padding:4px 12px;font-size:11.5px;font-weight:500;white-space:nowrap}
+.chip.warn{background:rgba(255,170,0,.10);border-color:rgba(255,170,0,.24);color:var(--amber-t);font-weight:600}
 .cfg-rot{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-top:16px;padding-top:16px;border-top:1px solid var(--line)}
 .cfg-rot input{flex:1;max-width:420px}
 .tico{width:30px;height:30px;border-radius:8px;display:flex;align-items:center;justify-content:center;flex-shrink:0}
@@ -316,62 +317,218 @@ dialog::backdrop{background:rgba(5,3,6,.78);backdrop-filter:blur(3px)}
 .note{display:flex;gap:8px}
 .lead-meta{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
 .note textarea{flex:1}
-/* Bandeja de dos paneles: lista a la izquierda, hilo a la derecha. Altura ACOTADA a
-   propósito — el hilo tiene que scrollar dentro de su panel, no empujar la página. */
-.inbox{display:grid;grid-template-columns:320px minmax(0,1fr);border:1px solid var(--border2);border-radius:var(--r);overflow:hidden;height:min(72vh,760px);background:var(--bg2)}
-/* min-height:0 en TODA la cadena, no solo min-width. Un hijo de grid/flex tiene
-   min-height:auto por defecto y NO puede encogerse por debajo de su contenido: sin esto el
-   log nunca activa su scroll, crece entero y empuja el cajón de escritura fuera de la caja,
-   donde el overflow:hidden de .inbox lo recorta. Era justo lo que se veía. */
-.inbox-l{border-right:1px solid var(--border2);display:flex;flex-direction:column;min-width:0;min-height:0}
-.inbox-list{overflow-y:auto;flex:1;min-height:0}
-.chtabs{display:flex;gap:6px;padding:10px;border-bottom:1px solid var(--border2);flex-wrap:wrap}
-.chtab{border:1px solid var(--border2);background:none;color:var(--muted);border-radius:999px;padding:5px 11px;font-size:12px;font-weight:600;cursor:pointer;display:inline-flex;gap:6px;align-items:center}
-.chtab.is-on{border-color:var(--orange);color:var(--orange)}
-.chtab b{font-weight:800}
-.cvrow{display:flex;gap:10px;padding:11px 12px;border-bottom:1px solid var(--line);cursor:pointer;align-items:flex-start}
+/* ── Bandeja a pantalla completa (canvas «Conversaciones · Panel Velai», 2026-08-27) ──
+   La vista OCUPA el viewport en vez de vivir en una caja de 72vh con 200 px de cabecera
+   encima: barra de la vista, lista y hilo, y cada panel scrollea POR DENTRO. El marco no
+   scrollea nunca — de eso se encarga body.wide, que fija el alto y le quita a main su
+   padding; la clase la pone el conmutador de vistas, en un solo sitio. */
+body.wide{height:100vh;overflow:hidden}
+body.wide main{display:flex;flex-direction:column;min-height:0;padding:0 0 30px;overflow:hidden}
+body.wide main::before{display:none}
+body.wide #viewConversaciones{display:flex;flex-direction:column;flex:1;min-height:0}
+/* Una clase que fija display GANA al atributo [hidden] — ya pasó con .tgstep y con
+   .thread. Sin esto la vista seguiría dibujada al cambiar de pestaña. */
+body.wide #viewConversaciones[hidden]{display:none}
+/* Barra de la vista: título, cuántas hay, la cola y la disponibilidad. Lo que antes eran
+   una cabecera, una línea de prosa y seis filtros ahora son 56 px. */
+.cvhead{flex:none;display:flex;align-items:center;gap:13px;min-height:56px;padding:8px 14px 8px 22px;background:var(--bg2);border-bottom:1px solid var(--line);flex-wrap:wrap}
+.cvhead h1{margin:0;font-family:var(--font-d);font-weight:900;font-size:17.5px;letter-spacing:-.02em}
+.cvsep{width:1px;height:16px;flex:none;background:var(--line)}
+#convCount{font-size:12.5px;color:var(--muted2);white-space:nowrap;font-variant-numeric:tabular-nums}
+#convMessage:not(:empty){padding:10px 22px;border-bottom:1px solid var(--line);background:var(--bg2)}
+#convMessage p{margin:0}
+/* La cola en rojo y latiendo: con varias esperando, esto es lo único que hace que las
+   multisesiones funcionen. (El .flag bad de antes no existía como estilo: salía ámbar.) */
+.pill-wait{display:inline-flex;align-items:center;gap:7px;border-radius:999px;padding:5px 12px 5px 10px;font-size:12px;font-weight:700;color:var(--bad);background:rgba(230,103,103,.10);border:1px solid rgba(230,103,103,.28);white-space:nowrap}
+.pill-wait i{width:7px;height:7px;border-radius:50%;background:var(--bad);flex:none;animation:beat 2s ease-in-out infinite}
+@keyframes beat{0%,100%{opacity:1}50%{opacity:.3}}
+@media(prefers-reduced-motion:reduce){.pill-wait i{animation:none}}
+/* Disponibilidad: un botón con su punto, y el porqué (cuántos hay, horario, a quién
+   cubres) dentro del panel — no una línea de prosa permanente bajo la cabecera. */
+.availbtn{display:inline-flex;align-items:center;gap:8px;border:1px solid var(--border2);background:var(--bg2);color:var(--white);border-radius:999px;padding:6px 11px 6px 12px;font-size:12.5px;font-weight:600;cursor:pointer;white-space:nowrap}
+.availbtn:hover{border-color:var(--orange)}
+.availbtn i{width:8px;height:8px;border-radius:50%;flex:none;background:var(--ok)}
+.availbtn.off i{background:rgba(var(--ink),.28)}
+.availbtn svg{width:11px;height:11px;opacity:.55}
+.iconbtn{width:34px;height:34px;flex:none;display:grid;place-items:center;border:1px solid var(--border2);background:var(--bg2);border-radius:var(--r-sm);color:var(--muted);cursor:pointer}
+.iconbtn:hover{border-color:var(--orange);color:var(--orange)}
+.iconbtn svg{width:16px;height:16px}
+.rel{position:relative;display:inline-flex}
+.pop{position:absolute;top:calc(100% + 9px);right:0;z-index:40;width:296px;padding:14px 15px;background:var(--bg2);border:1px solid var(--border2);border-radius:14px;box-shadow:0 18px 44px rgba(0,0,0,.18)}
+body.dark .pop{box-shadow:0 20px 50px rgba(0,0,0,.55)}
+.pop[hidden]{display:none}
+.pop h3{margin:0 0 4px;font-family:var(--font-d);font-weight:900;font-size:13px}
+.pop .swrow{display:flex;align-items:center;gap:10px;padding:9px 0 11px;border-bottom:1px solid var(--line)}
+.pop .swrow b{flex:1;font-size:13px;font-weight:600}
+.pop p{margin:11px 0 0;font-size:12px;line-height:1.5;color:var(--muted)}
+.pop .pophint{font-size:11.5px;color:var(--muted2)}
+.pop label{display:block;margin-top:11px}
+.pop label span{display:block;margin-bottom:5px;font-size:11px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--muted2)}
+.pop select,.pop input[type=date]{width:100%;background:var(--bg3);color:var(--white);border:1px solid rgba(var(--ink),.10);border-radius:var(--r-sm);padding:8px 11px;font-size:12.5px}
+.pop .popdos{display:flex;gap:9px}
+.pop .fchk{display:flex;align-items:center;gap:8px;margin-top:11px;font-size:12.5px;cursor:pointer}
+.pop .fchk input{width:15px;height:15px;margin:0;accent-color:var(--orange)}
+.pop .popfoot{display:flex;gap:8px;margin-top:14px}
+.sw::after{content:'';position:absolute;top:-11px;bottom:-11px;left:-6px;right:-6px}
+.sw{width:40px;height:23px;flex:none;position:relative;padding:0;border:0;border-radius:999px;background:rgba(var(--ink),.16);cursor:pointer;transition:background .16s ease}
+.sw i{position:absolute;top:2.5px;left:2.5px;width:18px;height:18px;border-radius:50%;background:#fff;box-shadow:0 1px 3px rgba(0,0,0,.3);transition:transform .16s ease}
+.sw.on{background:var(--ok)}
+.sw.on i{transform:translateX(17px)}
+/* Dos paneles: lista a la izquierda, hilo a la derecha. min-height:0 en TODA la cadena,
+   no solo min-width: un hijo de grid/flex tiene min-height:auto y NO puede encogerse por
+   debajo de su contenido — sin esto el log no activa su scroll, crece entero y empuja el
+   cajón de escritura fuera de la caja. Es el bug que se desplegó dos veces. */
+.inbox{display:grid;grid-template-columns:340px minmax(0,1fr);flex:1;min-height:0;height:min(72vh,760px);background:var(--bg)}
+body.wide .inbox{height:auto}
+.inbox-l{display:flex;flex-direction:column;min-width:0;min-height:0;background:var(--bg2);border-right:1px solid var(--line)}
+.inbox-list{flex:1;min-height:0;overflow-y:auto;padding:6px}
+/* Buscador de la lista, con «Filtros» al lado: el resto de campos vive en su panel. */
+.cvfilters{display:flex;flex-direction:column;flex:none;min-width:0}
+.lsearch{position:relative;display:flex;align-items:center;gap:9px;height:52px;flex:none;padding:0 10px 0 16px;border-bottom:1px solid var(--line)}
+.lsearch>svg{width:15px;height:15px;flex:none;color:rgba(var(--ink),.38)}
+.lsearch input{flex:1;min-width:0;padding:0;background:none;border:0;font-size:13px}
+.lsearch input::placeholder{color:rgba(var(--ink),.40)}
+.lsearch input:focus-visible{outline:none}
+.fbtn{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--border2);background:none;color:var(--muted);border-radius:999px;padding:5px 11px;font-size:12px;font-weight:600;cursor:pointer;white-space:nowrap}
+.fbtn:hover{border-color:var(--orange);color:var(--orange)}
+.fbtn.is-on{border-color:var(--orange);color:var(--orange);background:rgba(255,107,26,.07)}
+.fbtn svg{width:13px;height:13px}
+.lbar{display:flex;align-items:center;flex:none;padding:5px 12px;border-bottom:1px solid var(--line)}
+/* Canales: un chip por canal con SU logo y su contador. Si no caben, la propia barra se
+   desplaza en horizontal — nunca una segunda fila. La barra de scroll se oculta y su
+   sitio lo ocupa una sombra en el borde: con background-attachment:local solo aparece
+   cuando de verdad queda algo por ver. */
+.chtabs{display:flex;flex-wrap:nowrap;gap:2px;min-width:0;max-width:100%;overflow-x:auto;overscroll-behavior-x:contain;-webkit-overflow-scrolling:touch;scrollbar-width:none;-ms-overflow-style:none;padding:2px;border-radius:999px;background-color:var(--bg3);background-image:linear-gradient(90deg,var(--bg3) 40%,rgba(0,0,0,0)),linear-gradient(90deg,rgba(0,0,0,0),var(--bg3) 60%),radial-gradient(farthest-side at 0 50%,rgba(var(--ink),.20),rgba(0,0,0,0)),radial-gradient(farthest-side at 100% 50%,rgba(var(--ink),.20),rgba(0,0,0,0));background-repeat:no-repeat;background-size:26px 100%,26px 100%,11px 100%,11px 100%;background-position:left center,right center,left center,right center;background-attachment:local,local,scroll,scroll}
+.chtabs::-webkit-scrollbar{display:none}
+.chtab{display:inline-flex;flex:none;align-items:center;gap:5px;border:0;background:none;color:var(--muted);border-radius:999px;padding:5px 10px;font-size:12px;font-weight:600;cursor:pointer}
+.chtab svg{width:13px;height:13px;flex:none}
+.chtab b{font-weight:700;opacity:.5;font-variant-numeric:tabular-nums}
+.chtab:hover{color:var(--white)}
+.chtab.is-on{background:var(--bg2);color:var(--white);box-shadow:0 1px 3px rgba(0,0,0,.12)}
+.chtab.is-on b{color:var(--orange);opacity:1}
+.chtab.is-zero{opacity:.55}
+.chtab i{width:6px;height:6px;border-radius:50%;background:var(--orange);flex:none}
+/* Logos de canal: mismo trazo y misma rejilla de 24 que el resto de iconos del panel; el
+   color sale de la paleta, no de la marca, para que no chille dentro de la vista. */
+.ch-wa{color:var(--ok)}
+.ch-web{color:var(--stt-new)}
+.ch-ms{color:var(--stt-qualified)}
+.ch-ig{color:#b95aa2}
+body.dark .ch-ig{color:#e0a6d0}
+/* Filas: sin separadores. Lo seleccionado es una superficie con raíl, no una línea. */
+.cvrow{position:relative;display:flex;gap:11px;align-items:flex-start;width:100%;padding:11px 12px;border:1px solid transparent;border-radius:12px;background:none;color:inherit;text-align:left;cursor:pointer}
+.cvrow+.cvrow{margin-top:2px}
 .cvrow:hover{background:var(--bg3)}
-.cvrow.is-on{background:var(--surface)}
-.cvav{width:34px;height:34px;border-radius:50%;flex:0 0 34px;display:grid;place-items:center;font-size:12px;font-weight:800;color:#fff}
-.cvmain{min-width:0;flex:1}
-.cvtop{display:flex;gap:8px;align-items:baseline}
-.cvwho{font-weight:700;font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1}
-.cvwhen{font-size:11px;color:var(--muted2);white-space:nowrap}
-.cvprev{display:block;font-size:12px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-top:2px}
-.cvdot{width:8px;height:8px;border-radius:50%;background:var(--orange);flex:0 0 8px;margin-top:6px}
+.cvrow.is-on{background:var(--surface);border-color:var(--border2);box-shadow:inset 2px 0 0 var(--orange)}
 /* Una conversación esperando a que alguien la tome no puede parecerse a las demás: con
    varias en cola, un asesor tiene que verlas de un golpe de vista. */
-.cvrow.is-wait{background:rgba(230,103,103,.10);border-left:3px solid var(--bad)}
-.cvwait{font-size:11px;font-weight:700;color:var(--bad);white-space:nowrap}
+.cvrow.is-wait{background:rgba(230,103,103,.07);box-shadow:inset 2px 0 0 var(--bad)}
+.cvrow.is-wait:hover{background:rgba(230,103,103,.11)}
+.cvempty{margin:0;padding:20px 14px;font-size:12.5px;line-height:1.55;color:var(--muted2)}
+.cvav{position:relative;width:34px;height:34px;flex:0 0 34px;border-radius:50%;display:grid;place-items:center;font-size:11.5px;font-weight:800;letter-spacing:.02em;color:#fff}
+/* El canal, en la esquina del avatar: se ve de qué canal es sin leer nada. */
+.cvch{position:absolute;right:-3px;bottom:-3px;width:16px;height:16px;border-radius:50%;display:grid;place-items:center;background:var(--bg2);border:1px solid var(--line)}
+.cvch svg{width:9.5px;height:9.5px}
+.cvmain{min-width:0;flex:1}
+.cvtop{display:flex;gap:8px;align-items:baseline}
+.cvwho{display:block;flex:1;min-width:0;font-weight:700;font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.cvwhen{font-size:11px;color:var(--muted2);white-space:nowrap;font-variant-numeric:tabular-nums}
+.cvwait{font-size:11px;font-weight:700;color:var(--bad);white-space:nowrap;font-variant-numeric:tabular-nums}
+.cvbot{display:flex;gap:9px;align-items:baseline;margin-top:2px}
+.cvprev{display:block;flex:1;min-width:0;font-size:12px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.cvprev i{font-style:normal;opacity:.7}
+.cvten{display:inline-flex;align-items:center;gap:5px;flex:none;max-width:42%;font-size:11px;color:var(--muted2);white-space:nowrap;overflow:hidden}
+.cvten i{width:5px;height:5px;border-radius:50%;flex:none}
+.cvten span{display:block;overflow:hidden;text-overflow:ellipsis}
+.cvdot{width:7px;height:7px;border-radius:50%;background:var(--orange);flex:0 0 7px;margin-top:12px}
 .inbox-r{display:flex;flex-direction:column;min-width:0;min-height:0}
 .thread-empty{flex:1;display:grid;place-items:center;color:var(--muted2);padding:20px;text-align:center}
+.thread-empty svg{width:34px;height:34px;opacity:.35;margin-bottom:12px}
+.thread-empty b{display:block;font-family:var(--font-d);font-weight:900;font-size:15px;color:var(--white);margin-bottom:5px}
+.thread-empty p{margin:0;max-width:280px;font-size:12.5px;line-height:1.5}
 .thread{display:flex;flex-direction:column;min-height:0;flex:1}
-/* Misma trampa que .tgstep de arriba: una clase que fija display GANA al atributo
-   [hidden], así que sin esto los dos paneles se dibujaban a la vez, el hilo empujaba al
-   cajón de escritura fuera de la caja y el log se quedaba sin scroll propio. */
+/* Misma trampa que arriba: una clase que fija display GANA al atributo [hidden], así que
+   sin esto los dos paneles se dibujaban a la vez y el log se quedaba sin scroll propio. */
 .thread-empty[hidden],.thread[hidden]{display:none}
-.mono{font-family:ui-monospace,monospace;font-size:11px;opacity:.75}
-.thread-h{padding:12px 14px;border-bottom:1px solid var(--border2);display:flex;gap:10px;align-items:center;flex-wrap:wrap}
-.thread-log{flex:1;overflow-y:auto;padding:14px;min-height:0}
-.composer{border-top:1px solid var(--border2);padding:10px 12px}
-.composer textarea{width:100%;resize:vertical;min-height:52px;background:var(--bg2);color:var(--white);border:1px solid var(--border2);border-radius:var(--r-sm);padding:10px 12px;font:inherit;font-size:13px}
-.composer textarea:disabled{opacity:.55;cursor:not-allowed}
-.composer .crow{display:flex;gap:8px;align-items:center;margin-top:7px}
-.cwin{font-size:12px;color:var(--muted)}
+.mono{font-family:ui-monospace,monospace;font-size:10.5px;opacity:.7;letter-spacing:.02em}
+.thread-h{display:flex;gap:11px;align-items:center;flex:none;min-height:60px;padding:8px 16px 8px 20px;background:var(--bg2);border-bottom:1px solid var(--line);flex-wrap:wrap}
+.thread-h .cvav{width:32px;height:32px;flex:0 0 32px;font-size:11px}
+.thread-h .cvch{width:15px;height:15px}
+.thwho{display:block;font-size:14px;font-weight:700;letter-spacing:-.01em}
+.thmeta{display:flex;align-items:center;gap:7px;margin-top:1px;font-size:11.5px;color:var(--muted2)}
+.thmeta b{font-weight:500;color:var(--muted)}
+.cvback{display:none;width:44px;height:44px;flex:none;place-items:center;border:0;background:none;color:var(--muted);border-radius:12px;cursor:pointer}
+.cvback:hover{color:var(--orange)}
+.cvback svg{width:20px;height:20px}
+.thread-log{flex:1;min-height:0;overflow-y:auto;padding:16px 22px 20px}
+/* Divisoria de día: leer el hilo tiene que parecerse a leer el chat, no una lista. */
+.cvday{display:flex;align-items:center;gap:12px;margin:6px 0 3px}
+.cvday::before,.cvday::after{content:'';flex:1;height:1px;background:var(--line)}
+.cvday span{font-size:10px;font-weight:600;letter-spacing:.12em;text-transform:uppercase;color:var(--muted2)}
+/* Las conversaciones cortas se leen desde abajo. Espaciador elástico en vez de
+   justify-content:flex-end, que deja inalcanzable el principio del scroll al desbordar. */
+.cvfill{flex:1 1 0;min-height:0}
+.composer{flex:none;padding:12px 22px 15px;background:var(--bg2);border-top:1px solid var(--line)}
+/* Con alguien esperando, el cajón cerrado no basta: hay que poder entrar, y con la cuenta
+   atrás a la vista, porque pasada esa marca Vai retoma. */
+.cvstrip{display:flex;align-items:center;gap:12px;margin-bottom:10px;padding:10px 12px 10px 14px;border-radius:12px;background:rgba(230,103,103,.09);border:1px solid rgba(230,103,103,.26);flex-wrap:wrap}
+.cvstrip .grow{min-width:0}
+.cvstrip b{display:block;font-size:12.5px;font-weight:700;color:var(--bad)}
+.cvstrip small{display:block;margin-top:2px;font-size:11.5px;color:var(--muted)}
+.cvfield{display:flex;align-items:flex-end;gap:9px;padding:8px 8px 8px 14px;background:var(--bg2);border:1px solid var(--border2);border-radius:14px}
+.cvfield:focus-within{border-color:var(--orange);box-shadow:0 0 0 3px rgba(255,107,26,.13)}
+.cvfield textarea{flex:1;min-width:0;min-height:22px;max-height:112px;padding:6px 0;resize:none;background:none;border:0;font:inherit;font-size:13px;line-height:1.5}
+.cvfield textarea:focus-visible{outline:none}
+.cvfield textarea::placeholder{color:rgba(var(--ink),.40)}
+.cvfield.shut{background:var(--bg3);border-style:dashed;border-color:rgba(var(--ink),.18)}
+.cvfield.shut textarea{cursor:not-allowed}
+.cvsend{width:34px;height:34px;flex:none;display:grid;place-items:center;border:0;border-radius:50%;background:var(--orange);color:#fff;cursor:pointer;box-shadow:0 4px 14px rgba(255,107,26,.28)}
+.cvsend:hover{background:var(--orange2)}
+.cvsend svg{width:15px;height:15px}
+.cvsend:disabled{background:rgba(var(--ink),.12);color:rgba(var(--ink),.38);box-shadow:none;cursor:not-allowed}
+.crow{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:8px}
+.crow .sp{width:1px;height:11px;background:var(--line)}
+.cwin{font-size:11.5px;color:var(--muted)}
+.cwin b{font-weight:700}
 .cwin.shut{color:var(--bad)}
-@media(max-width:900px){.inbox{grid-template-columns:1fr;height:auto}.inbox-l{border-right:0;border-bottom:1px solid var(--border2)}.inbox-list{max-height:44vh}.thread-log{max-height:52vh}}
+/* En móvil no caben los dos paneles: la lista y el hilo se turnan, y el hilo trae su
+   propio botón de volver (en escritorio no se pinta). Los blancos de toque suben a 44. */
+@media(max-width:900px){
+.inbox{grid-template-columns:1fr;height:auto}
+.inbox-l{border-right:0}
+.inbox.is-thread .inbox-l{display:none}
+.inbox:not(.is-thread) .inbox-r{display:none}
+.cvback{display:grid}
+.cvhead{gap:9px;padding:8px 12px}
+.cvhead h1{font-size:16px}
+.cvsep,#convCount{display:none}
+#availState{display:none}
+.availbtn{min-height:44px;padding:8px 12px}
+.iconbtn{width:44px;height:44px}
+.pill-wait{order:9;flex:1 0 100%;justify-content:center}
+.chtab{padding:13px 12px}
+.lsearch .fbtn{width:44px;height:44px;padding:0;justify-content:center}
+.lsearch .fbtn span{display:none}
+.cvrow{padding:12px}
+.cvsend{width:44px;height:44px}
+.cvsend svg{width:17px;height:17px}
+.cvfield{padding:6px 6px 6px 14px}
+.thread-log{padding:14px 14px 16px}
+}
 
 /* Transcripción: burbujas de chat. El visitante a la izquierda y Vai a la derecha —
    leerlo tiene que parecerse a leer el chat, no a leer una tabla de filas. */
-.chatlog{display:flex;flex-direction:column;gap:8px;margin-top:12px}
-.bub{max-width:76%;padding:8px 12px;border-radius:14px;line-height:1.45;white-space:pre-wrap;overflow-wrap:anywhere}
-.bub.user{align-self:flex-start;background:var(--card2);border:1px solid var(--line);border-bottom-left-radius:4px}
-.bub.bot{align-self:flex-end;background:rgba(255,107,26,.10);border:1px solid rgba(255,107,26,.30);border-bottom-right-radius:4px}
+.chatlog{display:flex;flex-direction:column;gap:9px;margin-top:12px}
+.thread-log.chatlog{margin-top:0}
+.bub{max-width:62%;padding:9px 13px 6px;border-radius:15px;font-size:13px;line-height:1.48}
+.bub .txt{display:block;white-space:pre-wrap;overflow-wrap:anywhere}
+.bub.user{align-self:flex-start;background:var(--bg2);border:1px solid var(--line);border-bottom-left-radius:5px}
+.bub.bot{align-self:flex-end;background:rgba(255,107,26,.10);border:1px solid rgba(255,107,26,.30);border-bottom-right-radius:5px}
 /* La respuesta HUMANA no se disfraza de bot: si no se distinguen, nadie sabe si el
    cliente habló con Vai o con una persona, y la tasa de resolución miente. */
-.bub.agent{align-self:flex-end;background:rgba(25,158,112,.12);border:1px solid rgba(25,158,112,.35);border-bottom-right-radius:4px}
-.bub time{display:block;margin-top:4px;font-size:11px;opacity:.6}
-.bub .who{display:block;font-size:11px;font-weight:700;opacity:.75;margin-bottom:2px}
+.bub.agent{align-self:flex-end;background:rgba(25,158,112,.12);border:1px solid rgba(25,158,112,.35);border-bottom-right-radius:5px}
+.bub time{display:block;text-align:right;margin-top:3px;font-size:10.5px;opacity:.55;font-variant-numeric:tabular-nums}
+.bub .who{display:block;font-size:10.5px;font-weight:700;opacity:.8;margin-bottom:3px}
 .timeline{margin-top:20px}
 .timeline h3{font-family:var(--font-d);font-weight:900;letter-spacing:-.01em}
 .timeline article{border-left:2px solid rgba(255,107,26,.25);padding:0 0 14px 14px}
@@ -406,7 +563,7 @@ dialog::backdrop{background:rgba(5,3,6,.78);backdrop-filter:blur(3px)}
 #tVersions article{margin-bottom:10px}
 #tVersions pre{white-space:pre-wrap;background:var(--bg3);border:1px solid var(--border);border-radius:8px;padding:8px;font-size:11.5px;max-height:220px;overflow:auto}
 @media(max-width:1100px){.grid{grid-template-columns:1fr 1fr}}
-@media(max-width:900px){body{flex-direction:column}.side{position:static;height:auto;width:auto;flex-direction:row;align-items:center;gap:6px;padding:10px 16px;border-right:0;border-bottom:1px solid var(--border)}.sep,.navlabel{display:none}.tabs{flex-direction:row}.sidefoot{border:0;padding:0;margin-left:auto}.brand small{display:none}}
+@media(max-width:900px){body{flex-direction:column}.side{position:static;height:auto;width:auto;flex-direction:row;align-items:center;gap:6px;padding:10px 16px;border-right:0;border-bottom:1px solid var(--border);overflow-x:auto;flex:none}.sep,.navlabel{display:none}.tabs{flex-direction:row}.sidefoot{display:flex;flex-direction:row;border:0;padding:0;margin-left:auto}.brand small{display:none}}
 @media(max-width:700px){.grid{grid-template-columns:1fr}#tNote{display:none}}
 /* Vista Calendario (SPEC-CALENDARIO), estilo Google Calendar: rejilla continua
    (gap 1px sobre fondo = líneas finas), número del día en círculo (hoy relleno),
@@ -542,21 +699,27 @@ body.cliente .cliente-only{display:flex}
 <div class="legend"><span><i class="d-new"></i>nuevo</span><span><i class="d-contacted"></i>contactado</span><span><i class="d-qualified"></i>cualificado</span><span><i class="d-won"></i>ganado</span><span><i class="d-lost"></i>perdido</span></div>
 <div class="pager"><button class="btn alt" id="more" hidden>Cargar más</button></div></div>
 <div id="viewConversaciones" hidden>
-<div class="vhead"><div><h1>Conversaciones</h1><p>Lo que se dijo — y responder sin salir del panel</p></div><div class="actions actions0"><span id="waitPill" class="flag bad" hidden>—</span><span id="availState" class="flag off">—</span><button class="btn alt btnsm" id="availToggle" type="button">—</button><button class="btn alt" id="convExport" type="button">Exportar CSV</button></div></div>
-<small class="muted" id="availNote"></small>
-<form class="filters" id="convFilters">
+<div class="cvhead"><h1>Conversaciones</h1><span class="cvsep"></span><span id="convCount"></span><span class="spacer"></span><span id="waitPill" class="pill-wait" hidden><i></i><span id="waitPillTxt">&mdash;</span></span><span class="rel"><button class="availbtn" id="availToggle" type="button" aria-expanded="false" title="Tu disponibilidad para atender conversaciones"><i></i><span id="availState">&mdash;</span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"></path></svg></button>
+<div class="pop" id="availPop" hidden><h3>Tu disponibilidad</h3><div class="swrow"><b>Recibir conversaciones</b><button class="sw" id="availSw" type="button" role="switch" aria-checked="false" aria-label="Recibir conversaciones"><i></i></button></div><p id="availNote"></p><p class="pophint" id="availHours"></p></div></span><button class="iconbtn" id="convExport" type="button" title="Exportar CSV" aria-label="Exportar CSV"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12"></path><path d="m7 11 5 5 5-5"></path><path d="M4 20h16"></path></svg></button></div>
+<div id="convMessage"></div>
+<div class="inbox" id="inbox">
+<div class="inbox-l">
+<form class="cvfilters" id="convFilters">
 <input type="hidden" name="channel" id="convChannel">
-<span class="sel velai-only"><select name="tenant" id="convTenant"><option value="">Todos los clientes</option></select></span>
-<input name="from" type="date" title="Desde"><input name="to" type="date" title="Hasta">
+<div class="lsearch"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"></circle><path d="m21 21-4.3-4.3"></path></svg><input name="q" id="convQ" placeholder="Buscar persona o n&uacute;mero&hellip;" autocomplete="off" maxlength="60"><span class="rel"><button class="fbtn" id="convMore" type="button" aria-expanded="false" title="Filtros"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="4" y1="7" x2="20" y2="7"></line><circle cx="9" cy="7" r="2.4"></circle><line x1="4" y1="17" x2="20" y2="17"></line><circle cx="15" cy="17" r="2.4"></circle></svg><span>Filtros</span></button>
+<div class="pop" id="convPop" hidden><h3>Filtrar la bandeja</h3>
+<label class="velai-only"><span>Cliente</span><select name="tenant" id="convTenant"><option value="">Todos los clientes</option></select></label>
+<div class="popdos"><label><span>Desde</span><input name="from" type="date"></label><label><span>Hasta</span><input name="to" type="date"></label></div>
 <label class="fchk"><input type="checkbox" name="lead" value="si">Solo las que dieron lead</label>
 <label class="fchk"><input type="checkbox" name="sinResolver" value="1">Solo con preguntas sin respuesta</label>
-<button class="btn">Filtrar</button><span id="convCount"></span>
+<div class="popfoot"><button class="btn" type="submit">Aplicar</button><button class="btn alt" id="convClear" type="button">Limpiar</button></div>
+</div></span></div>
+<div class="lbar"><div class="chtabs" id="chTabs"></div></div>
 </form>
-<div id="convMessage"></div>
-<div class="inbox">
-<div class="inbox-l"><div class="chtabs" id="chTabs"></div><div class="inbox-list" id="convRows"></div></div>
+<div class="inbox-list" id="convRows"></div>
+</div>
 <div class="inbox-r">
-<div class="thread-empty" id="threadEmpty">Elige una conversación de la izquierda.</div>
+<div class="thread-empty" id="threadEmpty"><div><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"></path></svg><b>Elige una conversaci&oacute;n</b><p>Se guardan desde el 26 de agosto de 2026 y se borran solas a los 90 d&iacute;as.</p></div></div>
 <div class="thread" id="thread" hidden>
 <div class="thread-h" id="threadHead"></div>
 <div class="chatlog thread-log" id="threadLog"></div>

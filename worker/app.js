@@ -2457,6 +2457,18 @@ function convFilters(url) {
   const to = clean(url.searchParams.get('to'), 30);
   // Una fecha suelta (input type=date) debe incluir el día completo frente al ISO almacenado.
   if (to) { clauses.push('c.last_at <= ?'); values.push(/^\d{4}-\d{2}-\d{2}$/.test(to) ? `${to}T23:59:59.999Z` : to); }
+  // Buscador de la bandeja (rediseño 2026-08-27): por PERSONA (nombre del lead) o por
+  // número/identificador. NO entra en el texto de los mensajes: eso obligaría a recorrer
+  // conv_messages en cada tecla. El número se compara en crudo porque en D1 se guarda sin
+  // espacios («whatsapp:+34622418807») y en el panel se lee con ellos.
+  const q = clean(url.searchParams.get('q'), 60);
+  if (q) {
+    const like = (v) => `%${v.replace(/[\\%_]/g, (m) => `\\${m}`)}%`;
+    const bare = q.replace(/[^0-9a-zA-Z]/g, '');
+    clauses.push(`(l.name LIKE ? ESCAPE '\\'${bare ? ` OR c.external_id LIKE ? ESCAPE '\\'` : ''})`);
+    values.push(like(q));
+    if (bare) values.push(like(bare));
+  }
   const lead = clean(url.searchParams.get('lead'), 4);
   if (lead === 'si') clauses.push('c.lead_id IS NOT NULL');
   if (lead === 'no') clauses.push('c.lead_id IS NULL');
@@ -3138,6 +3150,7 @@ async function adminRouter(request, env, ctx, path, url, config, scope) {
     const rows = (await env.DB.prepare(`
       SELECT c.id AS conversacion, c.channel AS canal, m.created_at AS fecha, m.role AS quien, m.text AS mensaje
       FROM conversations c JOIN conv_messages m ON m.conversation_id = c.id
+      LEFT JOIN leads l ON l.id = c.lead_id
       WHERE ${f.sql}${scc.sql} ORDER BY c.last_at DESC, c.id DESC, m.id ASC LIMIT 20000`)
       .bind(...f.values, ...scc.args).all()).results;
     const keys = ['conversacion', 'canal', 'fecha', 'quien', 'mensaje'];
