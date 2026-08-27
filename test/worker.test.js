@@ -4411,3 +4411,23 @@ test('devolver el control avisa al visitante: si no, se queda esperando a alguie
     assert.match(guardado.args[3], /^Faby vuelve a atenderte/);
   } finally { globalThis.fetch = realFetch; }
 });
+
+test('el aviso se guarda ANTES de cambiar el estado: si no, el widget deja de escuchar', async () => {
+  // El fallo que vio Juan: el aviso de los 10 min llegó al widget y el de los 15 no. El
+  // widget deja de preguntar en cuanto ve state='bot', y el servidor cambiaba el estado
+  // ANTES de guardar el mensaje — con una consulta a tenants de por medio. Su sondeo caía en
+  // ese hueco y el aviso se escribía sin nadie escuchando.
+  const src = await readFile(new URL('../worker/app.js', import.meta.url), 'utf8');
+  const inicio = src.indexOf('async function expireTakeovers');
+  const cuerpo = src.slice(inicio, src.indexOf('async function scheduled', inicio));
+  const guarda = cuerpo.indexOf('convAppend');
+  const cambia = cuerpo.indexOf("state='bot'");
+  assert.ok(guarda > 0 && cambia > 0, 'ambos pasos siguen en la función');
+  assert.ok(guarda < cambia, 'el guardado va ANTES del cambio de estado');
+  // Y en «Devolver a Vai», el mismo orden.
+  const rel = src.slice(src.indexOf('MISMO orden que en la cola'));
+  assert.ok(rel.indexOf('convAppend') < rel.indexOf("state='bot'"), 'igual al devolver el control');
+  // Red de seguridad en el widget: un último sondeo al volver a bot.
+  const w = await readFile(new URL('../assets/vai-widget.js', import.meta.url), 'utf8');
+  assert.match(w, /setTimeout\(pollOnce, 2500\)/);
+});

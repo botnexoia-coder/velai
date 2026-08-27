@@ -44,7 +44,7 @@ En la web del cliente, antes de `</body>`:
 
 ```html
 <script>window.VELAI_TENANT='<slug>';</script>
-<script src="https://hirevai.com/assets/vai-widget.js?v=13" defer></script>
+<script src="https://hirevai.com/assets/vai-widget.js?v=14" defer></script>
 ```
 
 Su dominio (apex y www) en `web_origins` de su ficha + botón «Sincronizar Turnstile». Sin deploy.

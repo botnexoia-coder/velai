@@ -3289,28 +3289,25 @@ async function adminRouter(request, env, ctx, path, url, config, scope) {
     // «te devuelvo al bot» sobraba. Estaba mal (Juan, 2026-08-26): el visitante estaba
     // hablando con una PERSONA y de golpe vuelve el bot sin que nadie se lo diga — se queda
     // esperando a alguien que ya no está. Se le avisa, con el nombre del asistente.
+    // MISMO orden que en la cola: guardar el aviso, luego cambiar el estado, y Twilio al
+    // final. El widget deja de preguntar al ver 'bot', así que invertirlo abre el hueco en el
+    // que el aviso se escribe sin nadie escuchando.
+    const tRow = await env.DB.prepare('SELECT * FROM tenants WHERE id=?').bind(conv.tenant_id).first();
+    const quien = clean(tRow && tRow.bot_name, 40) || 'El asistente';
+    const aviso = `${quien} vuelve a atenderte a partir de aquí. Si necesitas otra vez a alguien del equipo, solo tienes que pedírmelo.`;
+    await convAppend(env, { id: conv.id, tenant: conv.tenant_id, channel: conv.channel, externalId: conv.external_id,
+      inbox: conv.inbox_address, demo: conv.demo || '', msgs: conv.msgs, isNew: false },
+    [{ role: 'assistant', content: aviso }]);
     await env.DB.prepare("UPDATE conversations SET state='bot', agent_email=NULL, state_at=? WHERE id=?").bind(now, conv.id).run();
     // La clave de pausa se borra con el tenant y el destinatario REALES de la conversación,
     // no con el scope: para un admin de Velai scope.tenantId es null y la clave saldría
     // malformada, dejando al bot callado para siempre.
     if (env.KV) { try { await env.KV.delete(`pause:${conv.tenant_id}:${conv.external_id}`); } catch (_) {} }
-    // El aviso va DESPUÉS de liberar y nunca bloquea: si Twilio falla, la conversación ya
-    // está devuelta y el bot vuelve a atender — quedarse en 'humano' sin nadie sería peor.
-    const tRow = await env.DB.prepare('SELECT * FROM tenants WHERE id=?').bind(conv.tenant_id).first();
-    if (tRow) {
-      const quien = clean(tRow.bot_name, 40) || 'El asistente';
-      const aviso = `${quien} vuelve a atenderte a partir de aquí. Si necesitas otra vez a alguien del equipo, solo tienes que pedírmelo.`;
-      let entregado = conv.channel === 'web';   // en web no hay proveedor: lo recoge el sondeo
-      if (!entregado && conv.inbox_address) {
-        const out = await sendTwilioText(env, tRow, conv.inbox_address, conv.external_id, aviso);
-        entregado = Boolean(out.ok);
-        if (!out.ok) console.log(JSON.stringify({ level: 'error', code: 'release_notice_failed', tenant: tRow.slug, error: clean(out.error || 'skipped', 40) }));
-      }
-      if (entregado) {
-        await convAppend(env, { id: conv.id, tenant: conv.tenant_id, channel: conv.channel, externalId: conv.external_id,
-          inbox: conv.inbox_address, demo: conv.demo || '', msgs: conv.msgs, isNew: false },
-        [{ role: 'assistant', content: aviso }]);
-      }
+    // Twilio al final y sin bloquear: si falla, la conversación ya está devuelta y el bot
+    // vuelve a atender. Quedarse en 'humano' sin nadie delante sería peor.
+    if (tRow && conv.channel !== 'web' && conv.inbox_address) {
+      const out = await sendTwilioText(env, tRow, conv.inbox_address, conv.external_id, aviso);
+      if (!out.ok) console.log(JSON.stringify({ level: 'error', code: 'release_notice_failed', tenant: tRow.slug, error: clean(out.error || 'skipped', 40) }));
     }
     console.log(JSON.stringify({ level: 'info', code: 'control_released', channel: conv.channel, actor_role: scope.role }));
     return json({ ok: true, state: 'bot' }, 200, NO_STORE);
@@ -4670,9 +4667,17 @@ async function expireTakeovers(env) {
     // mensaje cada 5 minutos hasta agotar la espera.
     if (!seRinde && Number(c.queue_pings) > 0) continue;
     const texto = seRinde ? NO_ADVISOR_TEXT : QUEUE_WAIT_TEXT;
+    // ORDEN CRÍTICO: el mensaje se GUARDA antes de cambiar el estado. El widget del canal web
+    // deja de preguntar en cuanto ve 'bot', así que al revés —como estaba— su sondeo podía
+    // caer en el hueco entre el UPDATE y el guardado y el aviso de los 15 minutos se
+    // escribía cuando ya no había nadie escuchando. Es exactamente lo que vio Juan: el de
+    // los 10 llegó y el de los 15 no.
+    await convAppend(env, { id: c.id, tenant: c.tenant_id, channel: c.channel, externalId: c.external_id,
+      inbox: c.inbox_address, demo: c.demo || '', msgs: c.msgs, isNew: false },
+    [{ role: 'assistant', content: texto }]);
     if (seRinde) {
-      // Se libera SIEMPRE, aunque el aviso no pueda salir: dejarla en 'esperando' la
-      // congelaría y el bot no volvería a contestarle nunca.
+      // Se libera SIEMPRE, aunque el envío por Twilio falle después: dejarla en 'esperando'
+      // la congelaría y el bot no volvería a contestarle nunca.
       await env.DB.prepare("UPDATE conversations SET state='bot', state_at=? WHERE id=? AND state='esperando'")
         .bind(new Date().toISOString(), c.id).run();
       if (env.KV) { try { await env.KV.delete(`pause:${c.tenant_id}:${c.external_id}`); } catch (_) {} }
@@ -4681,22 +4686,15 @@ async function expireTakeovers(env) {
       await env.DB.prepare('UPDATE conversations SET queue_pings=queue_pings+1 WHERE id=?').bind(c.id).run();
       console.log(JSON.stringify({ level: 'info', code: 'queue_ping', channel: c.channel, waited: Math.round(esperados) }));
     }
+    // En web el guardado YA es la entrega: el widget lo recoge en su sondeo. Solo los canales
+    // de Twilio necesitan salida, y su fallo no puede deshacer nada de lo anterior.
+    if (c.channel === 'web' || !c.inbox_address) continue;
     const tenant = await env.DB.prepare('SELECT * FROM tenants WHERE id=?').bind(c.tenant_id).first();
     if (!tenant) continue;
-    // El canal web no tiene proveedor de salida: el mensaje se guarda y el widget lo recoge.
-    if (c.channel !== 'web') {
-      if (!c.inbox_address) continue;   // conversación anterior a la 0023: sin por dónde avisar
-      const sent = await sendTwilioText(env, tenant, c.inbox_address, c.external_id, texto);
-      if (!sent.ok) {
-        console.log(JSON.stringify({ level: 'error', code: 'queue_notice_failed', tenant: tenant.slug, error: clean(sent.error || 'skipped', 40) }));
-        continue;
-      }
+    const sent = await sendTwilioText(env, tenant, c.inbox_address, c.external_id, texto);
+    if (!sent.ok) {
+      console.log(JSON.stringify({ level: 'error', code: 'queue_notice_failed', tenant: tenant.slug, error: clean(sent.error || 'skipped', 40) }));
     }
-    // Queda en el historial: si no, el panel enseñaría una conversación que salta del
-    // silencio a la nada y nadie sabría que se avisó.
-    await convAppend(env, { id: c.id, tenant: c.tenant_id, channel: c.channel, externalId: c.external_id,
-      inbox: c.inbox_address, demo: c.demo || '', msgs: c.msgs, isNew: false },
-    [{ role: 'assistant', content: texto }]);
   }
 }
 

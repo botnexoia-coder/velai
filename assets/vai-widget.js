@@ -1,5 +1,5 @@
 /* ══════════════════════════════════════════════════════════════════════════
-   VAI CHAT WIDGET — autocontenido (CSS + markup + lógica) · v13
+   VAI CHAT WIDGET — autocontenido (CSS + markup + lógica) · v14
    ──────────────────────────────────────────────────────────────────────────
    OJO CON LA VERSIÓN: este archivo se sirve con Cache-Control immutable durante un
    año (_headers, /*.js), así que el `?v=N` de la URL ES la clave de caché. Cambiar el
@@ -9,11 +9,11 @@
    falla si las dos no coinciden.
 
    Se carga en TODAS las páginas con una sola línea:
-     <script src="/assets/vai-widget.js?v=13" defer></script>
+     <script src="/assets/vai-widget.js?v=14" defer></script>
 
    En la web de un CLIENTE van dos líneas (la primera declara el tenant):
      <script>window.VELAI_TENANT='zoe';</script>
-     <script src="https://hirevai.com/assets/vai-widget.js?v=13" defer></script>
+     <script src="https://hirevai.com/assets/vai-widget.js?v=14" defer></script>
 
    Autocontenido a propósito: solo index.html carga /assets/styles.css, el
    resto de páginas llevan CSS inline. Por eso este archivo inyecta su propio
@@ -586,9 +586,16 @@
     el.msgs.scrollTop = el.msgs.scrollHeight;
   }
   function applyLive(state) {
+    var antes = liveState;
     liveState = state || 'bot';
     liveNote(liveState === 'esperando' ? T.liveWaiting : (liveState === 'humano' ? T.liveHuman : ''));
-    if (liveState === 'bot') stopLive(); else startLive();
+    if (liveState === 'bot') {
+      stopLive();
+      // Un último sondeo al volver a 'bot': el servidor ya guarda el mensaje ANTES de cambiar
+      // el estado, pero dejar de preguntar en el mismo instante en que algo cambia es
+      // precisamente cómo se perdió el aviso de los 15 minutos. Cuesta una petición.
+      if (antes && antes !== 'bot') setTimeout(pollOnce, 2500);
+    } else { startLive(); }
     saveState();
   }
   async function pollOnce() {
