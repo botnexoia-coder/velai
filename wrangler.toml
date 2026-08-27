@@ -103,7 +103,14 @@ enabled = true
 head_sampling_rate = 1
 
 [triggers]
-crons = ["*/5 * * * *"]
+# DOS relojes a propósito:
+#  - cada MINUTO: solo los tiempos de la cola de espera (docs/H2-HANDOFF.md). Con */5, «5
+#    minutos» eran en realidad 5-10 y «15» eran 15-20.
+#  - cada 5 MINUTOS: todo lo demás. No se puede subir a un minuto porque drainQueuedLeads
+#    hace un LISTADO de KV por tick y el plan gratuito da 1.000 listados/día: a 1.440 ticks
+#    se pasaría, y los listados son el segundo cuello real del sistema (ver
+#    docs/VOLUMEN-Y-ALMACENAMIENTO.md). Además multiplicaría por 5 los reintentos a Twilio.
+crons = ["* * * * *", "*/5 * * * *"]
 
 # Medios (logos de marca → widget + foto de perfil de WhatsApp). Hoy viven en KV con
 # prefijo `media:`; R2 es el sitio natural pero exige activarlo UNA VEZ en el dashboard

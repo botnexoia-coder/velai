@@ -299,6 +299,10 @@ async function loadInbox(quiet=false){
   $('#convCount').textContent=convCount+' conversaci'+(convCount===1?'ón':'ones')
    +(convCount>=40?' — las más recientes; filtra por fecha o canal para ver más atrás':'');
   renderThread(d.thread);
+  // 15 s solo cuando hay algo vivo (alguien esperando o una conversación tomada); si no, un
+  // minuto. Con 15 clientes eso baja el gasto de ~28.800 peticiones/día a ~11.500.
+  const vivo=enCola>0||rows.some(c=>c.state==='humano');
+  inboxPolling(true,vivo?15000:60000);
   $('#convMessage').textContent=''}
  catch(e){if(!quiet)$('#convMessage').innerHTML='<p class="error">'+esc(TERRS[e.message]||e.message)+'</p>'}}
 $('#convRows').onclick=e=>{const r=e.target.closest('[data-id]');if(r){convOpen=r.dataset.id;loadInbox()}};
@@ -307,8 +311,12 @@ $('#convTenant').onchange=()=>{convOpen=null;loadInbox();loadAvailability()};
 $('#convExport').onclick=()=>{location.href='/api/admin/conversations/export.csv?'+convParams()};
 // Polling solo con la pestaña visible Y la vista abierta: 15 s en vez de 5 baja el gasto
 // de ~35.000 peticiones/día a ~11.500 con seis paneles abiertos.
-function inboxPolling(on){if(inboxPoll){clearInterval(inboxPoll);inboxPoll=null}
- if(on)inboxPoll=setInterval(()=>{if(document.visibilityState==='visible')loadInbox(true)},15000)}
+let inboxEvery=0;
+function inboxPolling(on,ms){const want=on?(ms||60000):0;
+ if(want===inboxEvery)return;
+ inboxEvery=want;
+ if(inboxPoll){clearInterval(inboxPoll);inboxPoll=null}
+ if(want)inboxPoll=setInterval(()=>{if(document.visibilityState==='visible')loadInbox(true)},want)}
 
 // Cerrar sesión = logout de Cloudflare Access (borra la cookie CF_Authorization de
 // esta app y redirige al login). La ruta la atiende Access, nunca llega al worker.
@@ -719,7 +727,7 @@ $('#tenantModal').addEventListener('cancel',e=>{if(!confirmDiscard())e.preventDe
 // channel_address NO está aquí a propósito: dejó de ser un campo que se teclea. El alta
 // lo deriva del slug en el worker y se promueve a web:<slug> al marcar Activo; los canales
 // de mensajería se dan de alta en Conexiones. La ficha solo los MUESTRA (renderChannels).
-const TF={name:'#tName',slug:'#tSlug',twilio_from:'#tFrom',team_whatsapp:'#tTeam',telegram_chat_id:'#tChat',lead_template_sid:'#tTpl',twilio_subaccount_sid:'#tSub',waba_id:'#tWaba',meta_partner_status:'#tPartner',system_prompt:'#tPrompt',bot_name:'#tBotName',brand_name:'#tBrandName',logo_url:'#tLogo',brand_color:'#tColor1',brand_color_2:'#tColor2',greeting:'#tGreeting',greeting_en:'#tGreetingEn',placeholder:'#tPlaceholder',wa_number:'#tWa',theme:'#tTheme',ai_monthly_tokens:'#tAiMonth',ai_daily_limit:'#tAiDay'};
+const TF={name:'#tName',slug:'#tSlug',twilio_from:'#tFrom',team_whatsapp:'#tTeam',telegram_chat_id:'#tChat',lead_template_sid:'#tTpl',twilio_subaccount_sid:'#tSub',waba_id:'#tWaba',meta_partner_status:'#tPartner',system_prompt:'#tPrompt',bot_name:'#tBotName',brand_name:'#tBrandName',logo_url:'#tLogo',brand_color:'#tColor1',brand_color_2:'#tColor2',agent_color:'#tAgentColor',greeting:'#tGreeting',greeting_en:'#tGreetingEn',placeholder:'#tPlaceholder',wa_number:'#tWa',theme:'#tTheme',ai_monthly_tokens:'#tAiMonth',ai_daily_limit:'#tAiDay'};
 // chips_json y web_origins van aparte: en el form son una línea por valor; al worker
 // viajan como array (el servidor valida y guarda JSON).
 function jsonToLines(json){try{const a=JSON.parse(json||'[]');return Array.isArray(a)?a.join('\n'):''}catch(e){return ''}}

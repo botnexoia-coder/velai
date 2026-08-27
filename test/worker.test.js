@@ -4265,3 +4265,29 @@ test('cola de espera en el canal web: se guarda sin tocar Twilio (el widget lo r
     assert.equal(guardado.args[3], testing.QUEUE_WAIT_TEXT);
   } finally { globalThis.fetch = realFetch; }
 });
+
+test('el reloj de cada minuto SOLO atiende la cola: lo demás sigue cada 5', async () => {
+  // Por qué importa: drainQueuedLeads hace un LISTADO de KV por tick y el plan gratuito da
+  // 1.000/día. A 1.440 ticks se pasaría, y los listados son el segundo cuello del sistema.
+  const tocado = { list: 0, esperando: 0, notificaciones: 0 };
+  const env = {
+    KV: { async list() { tocado.list++; return { keys: [] }; }, async get() { return null; }, async put() {}, async delete() {} },
+    DB: {
+      prepare(sql) {
+        if (/FROM conversations WHERE state='esperando'/.test(sql)) tocado.esperando++;
+        if (/FROM lead_notifications/.test(sql)) tocado.notificaciones++;
+        return { bind: () => ({ first: async () => null, all: async () => ({ results: [] }), run: async () => ({ meta: { changes: 0 } }) }) };
+      },
+      batch: async () => [],
+    },
+  };
+  await testing.scheduled(env, testing.MINUTE_CRON);
+  assert.equal(tocado.esperando, 1, 'la cola sí se atiende cada minuto');
+  assert.equal(tocado.list, 0, 'y NO se gasta un listado de KV: es el recurso que se agotaría');
+  assert.equal(tocado.notificaciones, 0, 'ni se multiplican por 5 los reintentos a Twilio');
+
+  // El de 5 minutos hace todo, incluida la cola como red por si el otro trigger falla.
+  await testing.scheduled(env, '*/5 * * * *');
+  assert.equal(tocado.list, 1, 'ahí sí se drena la cola de leads');
+  assert.equal(tocado.esperando, 2, 'y la cola se revisa igual (idempotente)');
+});

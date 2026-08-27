@@ -1,6 +1,6 @@
 # Sebas — widget de Vai en las webs de los 4 clientes (v3)
 
-> **v4 (2026-08-26).** La versión buena ahora es **`?v=11`**. Añade una cosa nueva: cuando
+> **v4 (2026-08-26).** La versión buena ahora es **`?v=12`**. Añade una cosa nueva: cuando
 > alguien pide hablar con una persona y hay alguien del equipo disponible en el panel, el
 > chat de la web pasa a ser **conversación en vivo** — lo que escribe el equipo desde el
 > panel le llega al visitante en la propia web.
@@ -19,14 +19,14 @@
 
 ---
 
-## 1. El snippet (igual que siempre, con `v=11`)
+## 1. El snippet (igual que siempre, con `v=12`)
 
 Dos líneas, **en este orden**, justo **antes de `</body>`**, en TODAS las páginas de cada web
 (si hay footer/layout compartido, ese es el sitio):
 
 ```html
 <script>window.VELAI_TENANT='<SLUG>';</script>
-<script src="https://hirevai.com/assets/vai-widget.js?v=11" defer></script>
+<script src="https://hirevai.com/assets/vai-widget.js?v=12" defer></script>
 ```
 
 El `<SLUG>` es distinto en cada web. **No los mezcles**: si te equivocas, el bot de un cliente

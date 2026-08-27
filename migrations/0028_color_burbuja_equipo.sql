@@ -1,0 +1,12 @@
+-- Color de la burbuja del EQUIPO en el widget, por cliente (Juan, 2026-08-26: «no puede
+-- salirle violeta a todo el mundo, seguro no va con los colores corporativos de otras
+-- marcas»).
+--
+-- Es el ACENTO, no el fondo: el fondo lo calcula el CSS mezclando este color al 16% con el
+-- de la burbuja del bot, que ya tiene el contraste correcto con el texto en tema claro y
+-- oscuro. Así ningún color de marca puede dejar el mensaje ilegible — que es exactamente lo
+-- que pasó con el verde fijo (#e8f5e9 sobre texto claro).
+--
+-- NULL = el color de marca del propio cliente (brand_color). Solo si tampoco tiene marca
+-- se usa el violeta por defecto.
+ALTER TABLE tenants ADD COLUMN agent_color TEXT;

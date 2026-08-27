@@ -600,6 +600,12 @@ function validateTenant(body, { partial = false } = {}) {
     // https obligatorio: un logo por http rompería las webs de los clientes (mixed content).
     if (out.logo_url && !/^https:\/\/[^\s]+$/i.test(out.logo_url)) bad('logo_url');
   }
+  if (has('agent_color')) {
+    const raw = clean(body.agent_color, 10);
+    if (!raw) out.agent_color = null;
+    else if (!HEX_COLOR_RE.test(raw)) bad('agent_color');
+    else out.agent_color = raw;
+  }
   if (has('brand_color')) {
     out.brand_color = clean(body.brand_color, 10) || null;
     if (out.brand_color && !HEX_COLOR_RE.test(out.brand_color)) bad('brand_color');
@@ -733,6 +739,9 @@ async function handleWidgetBoot(request, env, url) {
     brand_name: tenant.brand_name || null,
     logo_url: tenant.logo_url || null,
     brand_color: tenant.brand_color || null,
+    // Acento de la burbuja del equipo. Vacío = el color de marca del cliente (nunca el
+    // violeta por defecto para todos).
+    agent_color: tenant.agent_color || null,
     brand_color_2: tenant.brand_color_2 || null,
     greeting: tenant.greeting || null,
     greeting_en: tenant.greeting_en || null,
@@ -3353,15 +3362,15 @@ async function adminRouter(request, env, ctx, path, url, config, scope) {
     try {
       await env.DB.prepare(`INSERT INTO tenants
         (id,slug,name,channel_address,team_whatsapp,telegram_chat_id,lead_template_sid,twilio_from,twilio_subaccount_sid,waba_id,twilio_auth_token_enc,meta_partner_status,system_prompt,
-         bot_name,brand_name,logo_url,brand_color,brand_color_2,greeting,greeting_en,chips_json,placeholder,wa_number,theme,web_origins,
+         bot_name,brand_name,logo_url,brand_color,brand_color_2,agent_color,greeting,greeting_en,chips_json,placeholder,wa_number,theme,web_origins,
          active,created_at,updated_at)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
         .bind(tenantId, fields.slug, fields.name, fields.channel_address, fields.team_whatsapp ?? null,
           fields.telegram_chat_id ?? null, fields.lead_template_sid ?? null, fields.twilio_from ?? null,
           fields.twilio_subaccount_sid ?? null, fields.waba_id ?? null, tokenColumn,
           fields.meta_partner_status ?? 'pendiente', fields.system_prompt,
           fields.bot_name ?? null, fields.brand_name ?? null, fields.logo_url ?? null,
-          fields.brand_color ?? null, fields.brand_color_2 ?? null, fields.greeting ?? null,
+          fields.brand_color ?? null, fields.brand_color_2 ?? null, fields.agent_color ?? null, fields.greeting ?? null,
           fields.greeting_en ?? null, fields.chips_json ?? null, fields.placeholder ?? null,
           fields.wa_number ?? null, fields.theme ?? null, fields.web_origins ?? null,
           fields.active ?? 1, now, now).run();
@@ -4167,7 +4176,7 @@ async function adminRouter(request, env, ctx, path, url, config, scope) {
       // Columnas explícitas, NUNCA SELECT *: twilio_auth_token_enc no sale del worker.
       const tenant = await env.DB.prepare(`SELECT id, slug, name, channel_address, team_whatsapp, telegram_chat_id,
         lead_template_sid, twilio_from, twilio_subaccount_sid, waba_id, meta_partner_status, system_prompt,
-        bot_name, brand_name, logo_url, brand_color, brand_color_2, greeting, greeting_en, chips_json,
+        bot_name, brand_name, logo_url, brand_color, brand_color_2, agent_color, greeting, greeting_en, chips_json,
         placeholder, wa_number, theme, web_origins, sender_sid, sender_status, telegram_chat_title,
         ai_monthly_tokens, ai_daily_limit, support_hours, support_tz,
         active, created_at, updated_at, twilio_auth_token_enc IS NOT NULL AS has_twilio_token
@@ -4640,15 +4649,27 @@ async function expireTakeovers(env) {
   }
 }
 
-async function scheduled(env) {
+const MINUTE_CRON = '* * * * *';
+
+async function scheduled(env, cron) {
   if (!env.DB) return;
   const now = new Date().toISOString();
+  // El reloj de CADA MINUTO solo atiende la cola de espera: es lo único que necesita
+  // precisión de minuto. Lo demás no puede correr cada minuto porque drainQueuedLeads hace
+  // un LISTADO de KV por tick (1.000/día en el plan gratuito) y porque multiplicaría por
+  // cinco los reintentos a Twilio y a Telegram.
+  if (cron === MINUTE_CRON) {
+    try { await expireTakeovers(env); } catch (error) {
+      console.log(JSON.stringify({ level: 'error', code: 'takeover_expiry_failed', error: clean(String(error.message || error), 80) }));
+    }
+    return;
+  }
   await drainQueuedLeads(env);
   try { await pollProvisioning(env); } catch (_) {}
   // Dos consultas con ORDER BY: lo entregable (pending/failed) tiene prioridad y las
   // filas 'skipped' perpetuas no pueden acaparar la ventana del cron (inanición).
-  // La espera de toma de control vence aquí para el cliente que se quedó callado. Nunca
-  // lanza: no puede impedir que se entreguen los avisos de leads.
+  // Red por si el reloj de cada minuto no llegara a dispararse: es idempotente, así que
+  // repetirlo no cuesta nada y sin esto un fallo del otro trigger congelaría la cola.
   try { await expireTakeovers(env); } catch (error) {
     console.log(JSON.stringify({ level: 'error', code: 'takeover_expiry_failed', error: clean(String(error.message || error), 80) }));
   }
@@ -4767,8 +4788,8 @@ export function createWorker(config) {
         return json({ ok: false, error: code }, status, (await publicCors(request, env).catch(() => null)) || {});
       }
     },
-    async scheduled(_event, env, ctx) { ctx.waitUntil(scheduled(env)); },
+    async scheduled(event, env, ctx) { ctx.waitUntil(scheduled(env, event && event.cron)); },
   };
 }
 
-export const testing = { waitedMin, QUEUE_MAX_MIN, QUEUE_WAIT_TEXT, canAttend, velaiTenantId, handleChatPoll, VISITOR_AWAY_MS, expireTakeovers, NO_ADVISOR_TEXT, graceExpired, systemWithHandoff, HANDOFF_ON, HANDOFF_OFF, supportWindows, withinSupportHours, advisorAvailable, CONV_STATES, TAKEOVER_GRACE_MIN, settleReply, TRUNCATED_CLOSING, trimToSentence, waBody, replyWindow, reportPeriod, reportMetric, weeklyReportText, weeklyStats, sendWeeklyReports, convLoad, convAppend, convLinkLead, convFilters, convRetentionDays, UNANSWERED_RE, CONV_WINDOW, cloudflareUsage, CF_FREE_LIMITS, recordConversation, aiCost, recordAiUsage, rateLimited, memLimited, applySenderProfile, pushSenderProfile, clean, persistLead, leadAlertStatus, captureWhatsAppLead, leadFromSummary, leadCaptureDone, errorResponseParts, tenantByAddress, syncPrimaryChannel, assertChannelFree, normalizePhone, extractPhone, safeUtm, publicCors, validTwilioSignature, callAnthropic, callAnthropicRaw, runToolLoop, calendarExecutor, calendarSystem, tenantCalendar, validCalendarDate, availableSlots, handleCalendarCallback, calendarCallbackFor, sendTwilioText, timingSafeEqual, telegramBotUsername, handleTelegramWebhook, sendTelegramText, tenantTelegramToken, telegramThreadFor, registerTelegramTopic, csvCell, expiryDate, leadFilters, isDemoKey, templateVar, leadTemplateVariables, readJson, deliver, drainQueuedLeads, verifyTurnstile, systemFor, validateTenant, invalidateTenantCache, tenantWriteError, assertNotActivePending, tenantChannelSummary, channelsForScope, handleProvision, pollProvisioning, fillSeries, resolveScope, scopeClause, clienteAllowed, adminRouter, recordAuthFailure, handleAdmin, handleWidgetBoot, allowedOrigins, envOrigins, syncPanelGate, envAdmins, syncAdminGate, getSetting, setSetting, withCfToken };
+export const testing = { scheduled, MINUTE_CRON, waitedMin, QUEUE_MAX_MIN, QUEUE_WAIT_TEXT, canAttend, velaiTenantId, handleChatPoll, VISITOR_AWAY_MS, expireTakeovers, NO_ADVISOR_TEXT, graceExpired, systemWithHandoff, HANDOFF_ON, HANDOFF_OFF, supportWindows, withinSupportHours, advisorAvailable, CONV_STATES, TAKEOVER_GRACE_MIN, settleReply, TRUNCATED_CLOSING, trimToSentence, waBody, replyWindow, reportPeriod, reportMetric, weeklyReportText, weeklyStats, sendWeeklyReports, convLoad, convAppend, convLinkLead, convFilters, convRetentionDays, UNANSWERED_RE, CONV_WINDOW, cloudflareUsage, CF_FREE_LIMITS, recordConversation, aiCost, recordAiUsage, rateLimited, memLimited, applySenderProfile, pushSenderProfile, clean, persistLead, leadAlertStatus, captureWhatsAppLead, leadFromSummary, leadCaptureDone, errorResponseParts, tenantByAddress, syncPrimaryChannel, assertChannelFree, normalizePhone, extractPhone, safeUtm, publicCors, validTwilioSignature, callAnthropic, callAnthropicRaw, runToolLoop, calendarExecutor, calendarSystem, tenantCalendar, validCalendarDate, availableSlots, handleCalendarCallback, calendarCallbackFor, sendTwilioText, timingSafeEqual, telegramBotUsername, handleTelegramWebhook, sendTelegramText, tenantTelegramToken, telegramThreadFor, registerTelegramTopic, csvCell, expiryDate, leadFilters, isDemoKey, templateVar, leadTemplateVariables, readJson, deliver, drainQueuedLeads, verifyTurnstile, systemFor, validateTenant, invalidateTenantCache, tenantWriteError, assertNotActivePending, tenantChannelSummary, channelsForScope, handleProvision, pollProvisioning, fillSeries, resolveScope, scopeClause, clienteAllowed, adminRouter, recordAuthFailure, handleAdmin, handleWidgetBoot, allowedOrigins, envOrigins, syncPanelGate, envAdmins, syncAdminGate, getSetting, setSetting, withCfToken };

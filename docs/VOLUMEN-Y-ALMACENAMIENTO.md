@@ -122,6 +122,64 @@ ahorrar en la capa más barata del sistema es optimizar la esquina equivocada.
 6. **Revisar este doc cuando la base pase de 100 MB** o cuando el dashboard enseñe las
    escrituras de KV por encima del 50% del cupo un día cualquiera.
 
+## ¿WebSockets en vez de sondeo? — preguntado el 2026-08-26
+
+Juan: *«lo otro con los tiempos, ¿podemos agregar websockets?»* y, al responderle que no
+teníamos un problema de latencia: *«no lo tenemos porque estamos probando con 1 cliente;
+cuando tengamos 10-15 clientes con sesiones activas y chateando todos al tiempo, ¿qué?»*.
+La segunda pregunta es la buena, y la respuesta necesita números.
+
+### Primero: los WebSockets NO arreglan los tiempos de la cola
+
+Los avisos de la cola de espera (5 y 15 min) no llegaban tarde por el sondeo: llegaban tarde
+por el **cron**, que corría cada 5 minutos, así que «5 minutos» eran 5-10 y «15» eran 15-20.
+Un WebSocket no toca eso en absoluto.
+
+Lo que sí lo arregla, y ya está hecho: **dos relojes**. Uno cada minuto que SOLO atiende la
+cola, y el de 5 minutos para el resto. No se puede subir todo a un minuto porque
+`drainQueuedLeads` hace un **listado de KV por tick** y el plan gratuito da 1.000
+listados/día: a 1.440 ticks se pasaría. Y multiplicaría por cinco los reintentos a Twilio.
+
+### Segundo: el coste del sondeo con 15 clientes
+
+Peticiones al Worker por día, contra el tope gratuito de **100.000**:
+
+| | Como estaba | Con freno adaptativo |
+| --- | --- | --- |
+| Panel (bandeja abierta 8 h) | 28.800 (29%) | 11.520 (12%) |
+| Widget (conversaciones vivas) | 15.000 (15%) | 13.500 (14%) |
+| **Total** | **43.800 (44%)** | **25.020 (25%)** |
+
+Y eso **antes** del tráfico real: cada mensaje del visitante, cada `/widget/boot` de cada
+página vista en las webs de los clientes, cada lead, cada imagen.
+
+O sea: Juan tiene razón en que a 15 clientes el sondeo deja de ser gratis. Por eso ya está el
+**freno adaptativo**: el panel sondea cada 15 s solo si hay alguien esperando o una
+conversación tomada, y cada 60 s si no; el widget cada 5 s con una persona al otro lado y
+cada 10 s mientras solo espera en cola.
+
+### Tercero: cuándo sí valen los WebSockets
+
+Con hibernación, un WebSocket abierto no consume duración y cada mensaje cuenta como una
+petición: el widget pasaría de ~1.000 peticiones/día/cliente a ~200. Es una mejora real —
+pero se paga:
+
+- **Exige un Durable Object.** En el plan gratuito solo existen los DO con backend SQLite, y
+  traen su propio presupuesto (100.000 peticiones/día, 13.000 GB-s/día). No se quita un
+  techo: se cambia de techo.
+- Hay que implementar la hibernación bien o la duración se dispara, más reconexión con
+  reintentos en el widget y en el panel.
+- Es un primitivo nuevo en un sistema que hoy solo usa Worker + D1 + KV.
+
+**Decisión: no ahora, y con un disparador medible.** El dashboard ya vigila el consumo de
+Cloudflare contra `CF_FREE_LIMITS`, así que el criterio es objetivo: **cuando las peticiones
+al Worker pasen del 60% del tope diario de forma sostenida**, toca decidir entre pasar a
+Workers Paid (5 $/mes, que quita el techo de peticiones) o montar los WebSockets.
+
+Y ojo al orden de magnitud: a 15 clientes el gasto de **tokens de Anthropic** es de cientos
+de dólares al mes. Discutir 5 $ de Workers Paid antes que eso es, otra vez, optimizar la
+esquina equivocada.
+
 ## Lo que NO se hace
 
 - Cambiar de base de datos por volumen. El volumen no está donde parecía.
