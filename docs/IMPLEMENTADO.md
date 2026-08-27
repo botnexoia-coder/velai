@@ -599,3 +599,43 @@ El markup inyectado por el harness se actualizó al DOM nuevo. Suite **168/168**
 **Lo que NO entra:** buscar dentro del texto de los mensajes; el chip de Instagram (no existe el canal);
 y la nav del móvil sigue siendo la barra lateral aplanada — la hoja «Más» del canvas queda para cuando
 se rediseñe la navegación.
+
+## Conexiones a dos columnas (2026-08-27, del canvas «Conexiones · Panel Velai»)
+
+Nueve tarjetas apiladas a todo lo ancho con una o dos líneas de texto dentro, y el asistente de Telegram
+como una caja vacía de 250 px: en un portátil sobraba media pantalla. Ahora la vista tiene **una tira de
+estado arriba y dos columnas debajo** — a la izquierda el trabajo (asistente y horario), a la derecha el
+estado y los ajustes cortos. Cada columna fluye por su cuenta (`.cxcol` es un flex propio, no celdas de
+una rejilla), así ninguna arrastra a la otra: medidas, quedan a 1067 y 1035 px.
+
+- **Tira de estado con los cinco canales.** Y aquí una decisión de Juan: los canales que **aún no
+  existen se pintan igual**, apagados, en trazo discontinuo y con «Sin activar» — esconderlos dejaba la
+  duda de si el canal existe, y pintarlos como si funcionaran sería peor. El catálogo vive en `CX_CAT` y
+  `CX_SOON` del panel, no en el worker: `tenantChannelSummary` no se toca, así que la vista de Canales
+  no empieza a contar Instagram como «canal que requiere atención». Mismos logos de canal que
+  Conversaciones (`CH_ICON`, ahora con Telegram) — el panel habla un solo idioma.
+- **Dos tarjetas que decían lo mismo se hacen una**: «¿Dónde llegan tus leads?» y «Números de aviso por
+  WhatsApp» son la misma pregunta —quién recibe el aviso— y estaban separadas por media pantalla.
+- **El horario deja de ser una rejilla muda**: cabecera Tramo 1 / Tramo 2 y un interruptor por día. El
+  interruptor no es un dato nuevo (un día cerrado es un día sin tramos): lee la rejilla, al apagarlo
+  borra sus horas y al encenderlo pone 9:00–19:00 para que quede válido de entrada, porque
+  `hoursFromForm` exige `a<b` para guardar el tramo. El día cerrado dice qué pasa entonces: «Vai atiende
+  y captura el lead». Los estilos van SOLO bajo `.cxsh` — `.shrow` y compañía las comparte el Calendario.
+- **Los temas pasan a filas** con su descripción a la vista y editar/quitar como botones de icono (antes
+  eran dos enlaces `✕` y `editar` dentro de un flag). El manejador ahora sube con `closest()`: con un
+  SVG dentro del botón, `e.target` es el `<svg>` y el `data-*` no estaba.
+- **El webhook** baja al pie, a lo ancho y en discontinuo: es fontanería de Velai, no un ajuste del
+  negocio. **El informe semanal** pasa a interruptor. El visto del riel del asistente ya es un SVG y no
+  un dingbat de fuente.
+- **Instagram entra también en los chips de Conversaciones**, a 0 y apagado. Para que no sea mentira,
+  `convFilters` acepta ahora `channel=instagram`: antes el parámetro se ignoraba en silencio y filtrar
+  por un canal desconocido devolvía **todas** las conversaciones.
+- **Móvil**: una columna, tira de estado en vertical y todo lo pulsable a 44 px dentro de la vista (los
+  botones del panel son de escritorio: `btnsm` mide 28).
+
+**Verificado mirándolo** con `scripts/render-panel.mjs` (que ahora inyecta el DOM nuevo de la vista:
+fichas, riel con el paso abierto, temas y horas) en claro, oscuro y 390 px, midiendo alturas y blancos
+de toque por CDP. Suite **168/168**.
+
+**Lo que NO entra:** unificar `.card` en todo el panel — esta vista usa su propia caja (`.cxbox`) y el
+resto de vistas siguen con la de antes; y la nav del móvil sigue siendo la barra lateral aplanada.

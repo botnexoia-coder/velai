@@ -38,6 +38,14 @@ for (;;) { const a = html.indexOf('<script'); if (a < 0) break; html = html.slic
 // Estado de la vista pedida, con contenido representativo (LARGO a propósito: los bugs de
 // layout solo aparecen cuando el contenido desborda).
 const ICO = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">';
+const chSvg = (cls, d) => `<svg class="${cls}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${d}</svg>`;
+const CH = {
+  wa: chSvg('ch-wa', '<path d="M12 3.2a8.8 8.8 0 0 0-7.5 13.4L3.2 20.8l4.4-1.3A8.8 8.8 0 1 0 12 3.2z"></path><path d="M9.3 9.1l1 1.8-.9.9a6.2 6.2 0 0 0 2.8 2.8l.9-.9 1.8 1"></path>'),
+  web: chSvg('ch-web', '<circle cx="12" cy="12" r="8.6"></circle><path d="M3.4 12h17.2"></path><path d="M12 3.4c3.2 3.7 3.2 13.5 0 17.2c-3.2-3.7-3.2-13.5 0-17.2"></path>'),
+  ms: chSvg('ch-ms', '<path d="M12 3.2c-4.85 0-8.8 3.63-8.8 8.13 0 2.55 1.28 4.82 3.28 6.32v3.15l3.02-1.65c.79.21 1.63.33 2.5.33 4.85 0 8.8-3.63 8.8-8.15S16.85 3.2 12 3.2z"></path><path d="M7.5 14.4l2.7-4.3 2.4 1.9 2.4-3.2"></path>'),
+  ig: chSvg('ch-ig', '<rect x="3.6" y="3.6" width="16.8" height="16.8" rx="5"></rect><circle cx="12" cy="12" r="4"></circle><circle cx="16.9" cy="7.1" r="1.15" fill="currentColor" stroke="none"></circle>'),
+  tg: chSvg('ch-tg', '<path d="M21.3 4.4 2.9 11.2c-.9.3-.9 1.6.1 1.8l4.4 1.1 1.6 4.7c.3.9 1.5.9 2 .2l2.1-3.1 4 3c.7.5 1.7.2 1.9-.7l2.9-12.5c.2-.9-.7-1.6-1.6-1.3z"></path><path d="M8.6 14.3 18 7.4"></path>'),
+};
 const VISTAS = {
   conversaciones: (h) => {
     // Rediseño 2026-08-27: la vista ocupa el viewport (body.wide y los colores de avatar se
@@ -92,9 +100,54 @@ const VISTAS = {
         + '<span class="cwin">Quedan <b>23 h</b> de la ventana de WhatsApp.</span><span class="sp"></span>'
         + '<button class="btn alt btnsm">Devolver a Vai</button></div></div>');
   },
-  // Conexiones no necesita inyectar nada: la rejilla de horario es markup estático, y es
-  // justo lo que hay que MIRAR (un cliente tiene que entenderla sin explicación).
-  conexiones: (h) => h,
+  // Conexiones (rediseño 2026-08-27): tira de estado, dos columnas y el asistente con un
+  // paso ABIERTO. Sin inyectar nada se veía la mitad de la vista vacía, que es justo lo
+  // que este render tiene que cazar.
+  conexiones: (h) => {
+    const tile = (k, name, addr, cls, st) => `<div class="cxtile${cls === 'on' ? '' : ' is-off'}">`
+      + `<span class="cxti">${CH[k]}</span><span class="cxtm"><span class="cxtn">${name}</span>`
+      + `<span class="cxta">${addr}</span><span class="cxts ${cls}"><i></i>${st}</span></span></div>`;
+    const tiles = tile('web', 'Tu web', 'clinicasanz.es', 'on', 'Activo')
+      + tile('wa', 'WhatsApp', '+34 910 55 44 21', 'on', 'Activo')
+      + tile('tg', 'Telegram', 'Cl&iacute;nica Sanz &middot; Leads', 'on', 'Activo')
+      + tile('ms', 'Messenger', 'Sin configurar', '', 'Sin conectar')
+      + tile('ig', 'Instagram', 'Canal todav&iacute;a no disponible', '', 'Sin activar');
+    const arow = (k, n, cls, st) => `<div class="cxarow"><span class="cxti">${CH[k]}</span>`
+      + `<span class="cxan">${n}</span><span class="${cls}">${st}</span></div>`;
+    const topic = (n, d) => `<div class="cxtrow"><span class="cxtn2">${n}</span><span class="cxtd">${d}</span>`
+      + `<button class="cxibtn" type="button">${ICO}<path d="M4 20h4l10.5-10.5a2.1 2.1 0 0 0-3-3L5 17v3z"></path><path d="m14.5 5.5 3 3"></path></svg></button>`
+      + `<button class="cxibtn del" type="button">${ICO}<path d="M18 6 6 18"></path><path d="m6 6 12 12"></path></svg></button></div>`;
+    // Horas de muestra en la rejilla: sin valores no se ve si los tramos caben.
+    const HOR = { mon: 1, tue: 1, wed: 1, thu: 1, fri: 1, sat: 2, sun: 0 };
+    for (const [d, modo] of Object.entries(HOR)) {
+      const v = modo === 1 ? ['09:00', '14:00', '16:00', '19:00'] : modo === 2 ? ['10:00', '13:00', '', ''] : ['', '', '', ''];
+      ['1a', '1b', '2a', '2b'].forEach((f, i) => {
+        h = h.replace(`<input type="time" id="sh_${d}_${f}">`, `<input type="time" id="sh_${d}_${f}" value="${v[i]}">`);
+      });
+      if (!modo) h = h.replace(`<div class="shrow" id="shrow_${d}">`, `<div class="shrow off" id="shrow_${d}">`)
+        .replace(`<span class="cxclosed" id="shoff_${d}" hidden>`, `<span class="cxclosed" id="shoff_${d}">`);
+      else h = h.replace(`<button class="sw" type="button" role="switch" aria-checked="true" id="shsw_${d}"`,
+        `<button class="sw on" type="button" role="switch" aria-checked="true" id="shsw_${d}"`);
+    }
+    return h
+      .replace('<div class="cxtiles" id="cxChannels"></div>', `<div class="cxtiles" id="cxChannels">${tiles}</div>`)
+      .replace('<div class="cxarows" id="cxAlerts"></div>', `<div class="cxarows" id="cxAlerts">`
+        + arow('tg', 'Telegram', 'flag ok', 'recibe avisos') + arow('wa', 'WhatsApp', 'flag', 'WhatsApp est&aacute; aprobando la plantilla') + '</div>')
+      .replace('<span class="tgchip" id="tgProgress">&mdash;</span>', '<span class="tgchip" id="tgProgress">Completado</span>')
+      .replace('<span id="tgWlState" class="flag off">desactivada</span>', '<span id="tgWlState" class="flag ok">activada</span>')
+      .replace('<div id="waState" class="cxrow muted">&mdash;</div>',
+        '<div id="waState" class="cxrow muted"><span class="flag ok">Activo</span> <span class="muted">+34 910 55 44 21</span></div>')
+      .replace('<span id="wrState" class="flag off">&mdash;</span>', '<span id="wrState" class="flag ok">activado</span>')
+      .replace('<button class="sw" id="wrToggle"', '<button class="sw on" id="wrToggle"')
+      .replace('<div id="tgTopics" class="muted mt6">\u2014</div>',
+        `<div id="tgTopics"><div class="cxtopics">${topic('Presupuestos', 'clientes que piden precio o cotizaci&oacute;n')}${topic('Urgencias', 'dolor, flem&oacute;n o algo que no puede esperar')}</div></div>`)
+      // El paso 5 abierto y el riel con lo hecho en verde: es el estado normal de la vista.
+      .replace('<div class="tgstep" id="tgs5b" hidden>', '<div class="tgstep" id="tgs5b">')
+      .replace(/<button class="tgnode" id="tgn([1-4])" type="button" data-tgo="tgs\1"><span class="tgnum">\1<\/span>/g,
+        (m, n) => `<button class="tgnode done" id="tgn${n}" type="button" data-tgo="tgs${n}"><span class="tgnum">${ICO}<polyline points="20 6 9 17 4 12"></polyline></svg></span>`)
+      .replace('<button class="tgnode" id="tgn5" type="button" data-tgo="tgs5">', '<button class="tgnode cur done" id="tgn5" type="button" data-tgo="tgs5">')
+      .replace(/<i class="tgbar" id="tgbar([1-4])"><\/i>/g, (m, n) => `<i class="tgbar done" id="tgbar${n}"></i>`);
+  },
   // El calendario esconde su configuración hasta que hay conexión: aquí se destapa para
   // poder mirar la rejilla del horario laboral sin montar un OAuth.
   calendario: (h) => h.replace('<div id="calViewWrap" hidden>', '<div id="calViewWrap">'),

@@ -3853,7 +3853,9 @@ test('el panel no pierde manejadores por el camino: inventario congelado', async
     'loadAvailability', 'control', 'beep', 'notify', 'checkAlerts', 'setAlerts', 'hoursToForm', 'hoursFromForm', 'hoursCopyMon', 'shSummary',
     'calMenu', 'loadEscalations', 'whoOf', 'prevPrefix', 'chTabs', 'convParams', 'api', 'toast', 'paint',
     // Bandeja a pantalla completa (rediseño 2026-08-27)
-    'chIcon', 'fmtDia', 'fmtHora', 'dayLabel', 'cgrow', 'popFiltros', 'popAvail'];
+    'chIcon', 'fmtDia', 'fmtHora', 'dayLabel', 'cgrow', 'popFiltros', 'popAvail',
+    // Conexiones a dos columnas (rediseño 2026-08-27)
+    'cxTiles', 'shSyncRows', 'shSetDay'];
   const sinFuncion = FUNCIONES.filter((f) => !fns.has(f));
   assert.deepEqual(sinFuncion, [], 'funciones del panel desaparecidas');
 
@@ -3865,7 +3867,7 @@ test('el panel no pierde manejadores por el camino: inventario congelado', async
     'wizBack', 'wizNext', 'tDupSel', 'ttabs', 'tLogoUp', 'tVersions', 'tSyncDomains',
     'uAdd', 'tUsersList', 'aAdd', 'adminsList', 'cfgTokenSave', 'cfgTokenClear',
     'cxTenantSel', 'cxLogoUp', 'cxLogoApply', 'nfSave', 'wrToggle', 'wrTest', 'availToggle', 'convTenant', 'alertBtn', 'shSave', 'shCopy', 'calCopy',
-    'availSw', 'convMore', 'convClear', 'convQ', 'threadHead',
+    'availSw', 'convMore', 'convClear', 'convQ', 'threadHead', 'shGrid',
     'tgLink', 'tgUnlink', 'tgWlToggle', 'tgBotSave', 'tgBotDel', 'tgSetup', 'tgTopicAdd', 'tgTopics',
     'calTenantSel', 'calGrid', 'calToday', 'calPrev', 'calNext', 'calBack',
     'calConnect', 'calReconnect', 'calDisconnect', 'calSave', 'calDayClose',
@@ -4447,6 +4449,10 @@ test('el buscador de la bandeja: persona, número normalizado y comodines escapa
   // En D1 el identificador se guarda sin espacios («whatsapp:+34622418807») y en el panel
   // se lee CON ellos: sin normalizar, buscar el número que se ve en pantalla no encuentra nada.
   assert.deepEqual(num.values, ['%+34 622 41 88 07%', '%34622418807%']);
+
+  const insta = f('channel=instagram');
+  assert.ok(insta.sql.includes('c.channel = ?') && insta.values.includes('instagram'),
+    'el chip de un canal sin conversaciones filtra a vacío, no a «todas»');
 
   const comodin = f('q=' + encodeURIComponent('%'));
   assert.deepEqual(comodin.values, ['%\\%%'], 'el % del usuario se escapa, no busca «cualquier cosa»');

@@ -136,8 +136,12 @@ const CH_ICON={
  whatsapp:'<path d="M12 3.2a8.8 8.8 0 0 0-7.5 13.4L3.2 20.8l4.4-1.3A8.8 8.8 0 1 0 12 3.2z"></path><path d="M9.3 9.1l1 1.8-.9.9a6.2 6.2 0 0 0 2.8 2.8l.9-.9 1.8 1"></path>',
  web:'<circle cx="12" cy="12" r="8.6"></circle><path d="M3.4 12h17.2"></path><path d="M12 3.4c3.2 3.7 3.2 13.5 0 17.2c-3.2-3.7-3.2-13.5 0-17.2"></path>',
  messenger:'<path d="M12 3.2c-4.85 0-8.8 3.63-8.8 8.13 0 2.55 1.28 4.82 3.28 6.32v3.15l3.02-1.65c.79.21 1.63.33 2.5.33 4.85 0 8.8-3.63 8.8-8.15S16.85 3.2 12 3.2z"></path><path d="M7.5 14.4l2.7-4.3 2.4 1.9 2.4-3.2"></path>',
- instagram:'<rect x="3.6" y="3.6" width="16.8" height="16.8" rx="5"></rect><circle cx="12" cy="12" r="4"></circle><circle cx="16.9" cy="7.1" r="1.15" fill="currentColor" stroke="none"></circle>'};
-const CH_CLS={whatsapp:'ch-wa',web:'ch-web',messenger:'ch-ms',instagram:'ch-ig'};
+ instagram:'<rect x="3.6" y="3.6" width="16.8" height="16.8" rx="5"></rect><circle cx="12" cy="12" r="4"></circle><circle cx="16.9" cy="7.1" r="1.15" fill="currentColor" stroke="none"></circle>',
+ telegram:'<path d="M21.3 4.4 2.9 11.2c-.9.3-.9 1.6.1 1.8l4.4 1.1 1.6 4.7c.3.9 1.5.9 2 .2l2.1-3.1 4 3c.7.5 1.7.2 1.9-.7l2.9-12.5c.2-.9-.7-1.6-1.6-1.3z"></path><path d="M8.6 14.3 18 7.4"></path>'};
+const CH_CLS={whatsapp:'ch-wa',web:'ch-web',messenger:'ch-ms',instagram:'ch-ig',telegram:'ch-tg'};
+const ICO_PEN='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 20h4l10.5-10.5a2.1 2.1 0 0 0-3-3L5 17v3z"></path><path d="m14.5 5.5 3 3"></path></svg>';
+const ICO_X='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6 6 18"></path><path d="m6 6 12 12"></path></svg>';
+const ICO_TICK='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"></polyline></svg>';
 function chIcon(ch){const d=CH_ICON[ch];if(!d)return '';
  return '<svg class="'+CH_CLS[ch]+'" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'+d+'</svg>'}
 const ICO_SEND='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h13"></path><path d="m12.5 5.5 6.5 6.5-6.5 6.5"></path></svg>';
@@ -176,11 +180,10 @@ function whoOf(c){
 // Quién escribió el último mensaje. 'tú' es la PERSONA del equipo, no el bot: ahora que
 // existe role='agent' confundirlos sería justo lo que la migración 0023 vino a evitar.
 function prevPrefix(role){return role==='user'?'':role==='agent'?'tú: ':'Vai: '}
-// Los canales que el worker sabe recibir HOY, en el orden en que se miran. Un canal que
-// aún no existe NO se pinta aunque tenga logo (Instagram): un chip a 0 de algo que no
-// puede llegar es exactamente la clase de mentira que este panel no se permite — el día
-// que llegue una conversación suya, aparece solo por venir en los contadores.
-const CH_ORDER=['whatsapp','web','messenger'];
+// Todos los canales del producto, en el orden en que se miran. Los que aún no reciben
+// nada TAMBIÉN se pintan, a 0 y apagados (.is-zero): esconderlos dejaba la duda de si el
+// canal existe, y el filtro por ese canal devuelve vacío de verdad, no «todo».
+const CH_ORDER=['whatsapp','web','messenger','instagram'];
 function chTabs(counts){const cur=$('#convChannel').value;
  const by={};for(const c of counts||[])if(c&&c.channel)by[c.channel]={n:c.n||0,u:c.unread||0};
  const canales=CH_ORDER.concat(Object.keys(by)).filter((k,i,a)=>a.indexOf(k)===i);
@@ -561,13 +564,14 @@ async function loadConexiones(){$('#tgLinkBox').hidden=true;
   cxWeekly=t.weeklyReport!==false;
   $('#wrState').textContent=cxWeekly?'activado':'desactivado';
   $('#wrState').className='flag '+(cxWeekly?'ok':'off');
-  $('#wrToggle').textContent=cxWeekly?'Desactivar':'Activar';
+  $('#wrToggle').className='sw'+(cxWeekly?' on':'');
+  $('#wrToggle').setAttribute('aria-checked',cxWeekly?'true':'false');
   $('#wrNote').textContent=t.linked?'':'Vincula primero el grupo de Telegram: es por donde llega el informe.';
   $('#wrTest').hidden=!t.linked;
   // El horario se lee de /availability, que ya devuelve el que está en vigor (con el
   // default aplicado) y la zona horaria.
   try{const av=await api('/api/admin/availability'+(ME&&ME.tenantId?'':'?tenant='+encodeURIComponent(cxTenant)));
-   hoursToForm('sh',av.hours);$('#shTz').value=av.tz||'Europe/Madrid';$('#shOut').textContent=shSummary(av.hours)}
+   hoursToForm('sh',av.hours);shSyncRows();$('#shTz').value=av.tz||'Europe/Madrid';$('#shOut').textContent=shSummary(av.hours)}
   catch(e){$('#shOut').textContent=''}
   // «¿Salió el informe?» se responde aquí y no abriendo Telegram. Un skipped o un failed
   // deja de ser invisible.
@@ -576,24 +580,27 @@ async function loadConexiones(){$('#tgLinkBox').hidden=true;
    ?('Último informe (semana del '+esc(t.lastReport.period_start)+'): '+(WR_ST[t.lastReport.status]||t.lastReport.status)+(t.lastReport.detail?' — '+esc(t.lastReport.detail):''))
    :(t.linked?'Todavía no se ha enviado ninguno: el primero sale el lunes por la mañana.':'');
   $('#tgTopics').innerHTML=(t.topics&&t.topics.length)
-   ?t.topics.map(tp=>'<div class="mb6"><span class="flag off">'+esc(tp.name)+' <a href="#" data-tdel="'+esc(String(tp.thread_id))+'" title="Quitar del enrutado">✕</a></span> <span class="muted">'+(tp.description?esc(tp.description):'sin descripción')+' · <a href="#" data-tdesc="'+esc(String(tp.thread_id))+'">editar</a></span></div>').join('')
-   :'Aún no hay temas: crea el primero arriba.';
+   ?'<div class="cxtopics">'+t.topics.map(tp=>'<div class="cxtrow"><span class="cxtn2">'+esc(tp.name)+'</span>'
+     +'<span class="cxtd">'+(tp.description?esc(tp.description):'sin descripción')+'</span>'
+     +'<button class="cxibtn" type="button" data-tdesc="'+esc(String(tp.thread_id))+'" title="Editar la descripción" aria-label="Editar la descripción">'+ICO_PEN+'</button>'
+     +'<button class="cxibtn del" type="button" data-tdel="'+esc(String(tp.thread_id))+'" title="Quitar del enrutado" aria-label="Quitar del enrutado">'+ICO_X+'</button></div>').join('')+'</div>'
+   :'<p class="muted">Aún no hay temas: crea el primero arriba.</p>';
   tgRenderWiz(t)}
  catch(e){$('#tgState').textContent=e.message}
  // Tus canales: el worker ya colapsó los estados según el rol; aquí solo se les pone
  // palabras. Dos vocabularios a propósito — el cliente nunca lee un diagnóstico.
  try{const ch=(await api('/api/admin/tenants/'+cxTenant+'/channels')).channels;
-  $('#cxChannels').innerHTML=ch.map(c=>{const s=CXCH[c.state]||CXCH.off;
-   return '<div class="chrow"><i class="'+s[0]+'"></i><span class="chk">'+esc(CXCH.k[c.kind]||c.kind)+'</span>'
-    +'<span class="chaddr">'+(c.address?esc(String(c.address).replace(/^whatsapp:/,'')):'—')+'</span>'+s[1]+'</div>'}).join('')}
- catch(e){$('#cxChannels').innerHTML='<div class="chrow"><i></i><span class="chaddr">'+esc(e.message)+'</span></div>'}
+  $('#cxChannels').innerHTML=cxTiles(ch)}
+ catch(e){$('#cxChannels').innerHTML='<div class="cxtile is-off"><span class="cxtm"><span class="cxta">'+esc(e.message)+'</span></span></div>'}
  // Tarjeta de WhatsApp (PR2): estado en lenguaje de negocio, nunca jerga de Twilio.
  try{const wr=await api('/api/admin/tenants/'+cxTenant+'/whatsapp');const w=wr.whatsapp,al=wr.alerts;
-  const AL={on:['on','<span class="flag ok">recibe avisos</span>'],
-   pending_template:['bad','<span class="flag">WhatsApp está aprobando la plantilla</span>'],
-   off:['','<span class="muted">sin configurar</span>']};
+  const AL={on:['flag ok','recibe avisos'],
+   pending_template:['flag','WhatsApp está aprobando la plantilla'],
+   off:['flag off','sin configurar']};
   $('#cxAlerts').innerHTML=al?['telegram','whatsapp'].map(k=>{const s=AL[al[k]]||AL.off;
-    return '<div class="chrow"><i class="'+s[0]+'"></i><span class="chk">'+(k==='telegram'?'Telegram':'WhatsApp')+'</span><span class="chaddr"></span>'+s[1]+'</div>'}).join('')
+    return '<div class="cxarow"><span class="cxti">'+chIcon(k)+'</span>'
+     +'<span class="cxan">'+(k==='telegram'?'Telegram':'WhatsApp')+'</span>'
+     +'<span class="'+s[0]+'">'+esc(s[1])+'</span></div>'}).join('')
    +(al.any?'':'<p class="as-ctx mt6">Ahora mismo <b>nadie recibe un aviso</b> cuando entra un lead: se guardan aquí en el panel, pero hay que entrar a mirarlos. Conecta tu Telegram arriba y los tendrás al momento — es lo único que no depende de que WhatsApp apruebe nada.</p>'):'';
   const st=w.sender_status;
   let msg;
@@ -651,7 +658,7 @@ function tgRenderWiz(t){
   if(!s.visible){$('#'+s.id+'b').hidden=true;continue}
   num++;
   node.className='tgnode'+(s.done?' done':'')+(s.id===open?' cur':'');
-  node.querySelector('.tgnum').textContent=s.done?'✓':String(num);
+  node.querySelector('.tgnum').innerHTML=s.done?ICO_TICK:esc(String(num));
   if(i<4)$('#tgbar'+(i+1)).className='tgbar'+(s.done?' done':'');
   $('#'+s.id+'b').hidden=s.id!==open}
  $('#tgsFinb').hidden=open!=='tgsFin';
@@ -674,7 +681,8 @@ $('#tgTopicAdd').onclick=async()=>{const name=$('#tgTopicName').value.trim();con
  try{await api('/api/admin/tenants/'+cxTenant+'/telegram/topics',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name,description})});
   $('#tgTopicName').value='';$('#tgTopicDesc').value='';toast('Tema creado en el grupo de Telegram ✓');tgWizOpen='tgs5';loadConexiones()}
  catch(e){toast('No se pudo crear el tema: '+(TERRS[e.message]||e.message),false)}};
-$('#tgTopics').onclick=async e=>{const t=e.target;if(!t||!t.dataset)return;
+$('#tgTopics').onclick=async e=>{const t=e.target&&e.target.closest?e.target.closest('[data-tdesc],[data-tdel]'):null;
+ if(!t||!t.dataset)return;
  if(t.dataset.tdesc){e.preventDefault();
   const description=prompt('Descripción del tema (lo que Vai usará para clasificar):')||'';
   try{await api('/api/admin/tenants/'+cxTenant+'/telegram/topics/'+t.dataset.tdesc,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({description:description.trim()})});
@@ -725,7 +733,23 @@ function hoursCopyMon(pfx){for(const i of [1,2]){const a=$('#'+pfx+'_mon_'+i+'a'
 function shSummary(h){const abiertos=SUP_DAYS.filter(d=>h&&h[d]&&h[d].length);
  if(!abiertos.length)return 'Ahora mismo NUNCA se ofrece asesor: Vai atiende siempre y te deja el lead.';
  return 'En vigor: '+abiertos.length+(abiertos.length===1?' día':' días')+' con atención humana.'}
-$('#shCopy').onclick=()=>{hoursCopyMon('sh');$('#shOut').textContent='Copiado — recuerda Guardar.'};
+// Un día «cerrado» no es un dato nuevo: es un día sin tramos. El interruptor lee la
+// rejilla y al apagarlo borra sus horas; al encenderlo pone un tramo por defecto para que
+// quede válido de entrada (hoursFromForm exige a<b para guardar el tramo).
+function shSyncRows(){for(const d of SUP_DAYS){
+ const lleno=['1a','1b','2a','2b'].some(f=>$('#sh_'+d+'_'+f).value);
+ $('#shsw_'+d).classList.toggle('on',lleno);
+ $('#shsw_'+d).setAttribute('aria-checked',lleno?'true':'false');
+ $('#shrow_'+d).classList.toggle('off',!lleno);
+ $('#shoff_'+d).hidden=lleno}}
+function shSetDay(d,on){
+ if(!on){for(const f of ['1a','1b','2a','2b'])$('#sh_'+d+'_'+f).value=''}
+ else{$('#sh_'+d+'_1a').value='09:00';$('#sh_'+d+'_1b').value='19:00'}
+ shSyncRows()}
+$('#shGrid').onclick=e=>{const b=e.target.closest&&e.target.closest('[data-shd]');if(!b)return;
+ shSetDay(b.dataset.shd,!b.classList.contains('on'))};
+$('#shGrid').oninput=shSyncRows;
+$('#shCopy').onclick=()=>{hoursCopyMon('sh');shSyncRows();$('#shOut').textContent='Copiado — recuerda Guardar.'};
 $('#calCopy').onclick=()=>{hoursCopyMon('cal');$('#calHoursOut').textContent='Copiado — recuerda Guardar calendario.'};
 $('#shSave').onclick=async()=>{$('#shSave').disabled=true;
  try{const hours=hoursFromForm('sh');
@@ -943,15 +967,27 @@ $('#wizNext').onclick=async()=>{
 const CHK={web:'web',whatsapp:'whatsapp',telegram:'telegram',messenger:'messenger'};
 // Vocabulario del CLIENTE: nada que no pueda accionar. «preparing» es su WhatsApp de alta
 // pero sin enrutar — trabajo pendiente NUESTRO, así que se dice así y no «sin enrutar».
-const CXCH={k:{web:'Tu web',whatsapp:'WhatsApp',telegram:'Telegram',messenger:'Messenger'},
- on:['on','<span class="flag ok">activo</span>'],
- preparing:['bad','<span class="flag">lo estamos dejando listo</span>'],
- paused:['','<span class="flag off">en pausa</span>'],
- off:['','<span class="muted">sin conectar</span>'],
- // Velai ve la misma tarjeta con el estado crudo: ahí el diagnóstico sí sirve.
- live:['on','<span class="flag ok">atendido</span>'],
- unrouted:['bad','<span class="flag off">sin enrutar</span>'],
- inactive:['','<span class="flag off">cliente inactivo</span>']};
+// Todos los canales del producto, en el orden en que se miran. Los que AÚN NO EXISTEN se
+// pintan igual, apagados y con «sin activar»: esconderlos dejaba la duda de si el canal
+// existe, y pintarlos como si funcionaran sería peor (decisión de Juan, 2026-08-27).
+const CX_CAT=[['web','Tu web'],['whatsapp','WhatsApp'],['telegram','Telegram'],
+ ['messenger','Messenger'],['instagram','Instagram']];
+const CX_SOON={instagram:1};
+// Estado → [clase del punto, palabras]. Dos vocabularios a propósito: el cliente nunca
+// lee un diagnóstico; Velai sí, porque a él le sirve.
+const CXST={on:['on','Activo'],live:['on','Atendido'],
+ preparing:['wait','Lo estamos dejando listo'],unrouted:['bad','Sin enrutar'],
+ paused:['','En pausa'],inactive:['','Cliente inactivo'],
+ off:['','Sin conectar'],soon:['','Sin activar']};
+function cxTiles(channels){const by={};for(const c of channels||[])if(c&&c.kind)by[c.kind]=c;
+ return CX_CAT.map(function(par){const k=par[0];
+  const c=by[k]||{kind:k,state:CX_SOON[k]?'soon':'off',address:null};
+  const st=CXST[c.state]||CXST.off;
+  const dir=c.address?String(c.address).replace(/^(whatsapp:|messenger:)/,'')
+   :(CX_SOON[k]?'Canal todav\u00eda no disponible':'Sin configurar');
+  return '<div class="cxtile'+(st[0]?'':' is-off')+'"><span class="cxti">'+chIcon(k)+'</span>'
+   +'<span class="cxtm"><span class="cxtn">'+esc(par[1])+'</span><span class="cxta">'+esc(dir)+'</span>'
+   +'<span class="cxts '+st[0]+'"><i></i>'+esc(st[1])+'</span></span></div>'}).join('')}
 const CHSTATE={live:['on','<span class="flag ok">atendido</span>'],inactive:['','<span class="flag">cliente inactivo</span>'],
  unrouted:['bad','<span class="flag off">sin enrutar</span>'],off:['','<span class="muted">sin conectar</span>']};
 function renderChannels(list){$('#tChannels').innerHTML=(list||[]).map(c=>{const st=CHSTATE[c.state]||CHSTATE.off;

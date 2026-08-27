@@ -2449,7 +2449,10 @@ function leadFilters(url) {
 function convFilters(url) {
   const clauses = ['1=1']; const values = [];
   const channel = clean(url.searchParams.get('channel'), 20);
-  if (['web', 'whatsapp', 'messenger'].includes(channel)) { clauses.push('c.channel = ?'); values.push(channel); }
+  // Instagram entra en la lista aunque el canal no exista aún: el panel pinta su chip a 0
+  // y filtrar por él tiene que devolver VACÍO, no «todas» — que es lo que pasaba cuando el
+  // parámetro se ignoraba en silencio.
+  if (['web', 'whatsapp', 'messenger', 'instagram'].includes(channel)) { clauses.push('c.channel = ?'); values.push(channel); }
   const tenant = clean(url.searchParams.get('tenant'), 40);
   if (tenant && UUID_RE.test(tenant)) { clauses.push('c.tenant_id = ?'); values.push(tenant); }
   const from = clean(url.searchParams.get('from'), 30);

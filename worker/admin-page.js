@@ -609,18 +609,19 @@ body.cliente .cliente-only{display:flex}
 .tgh2{font-family:var(--font-d);font-weight:700;font-size:16px;letter-spacing:-.01em}
 .tgsub{margin:4px 0 0;color:var(--muted);font-size:13px}
 .tgchip{font-size:12px;color:var(--muted);background:var(--bg);border:1px solid var(--border2);border-radius:999px;padding:5px 12px;white-space:nowrap}
-.tgrail{display:flex;align-items:flex-start;margin:20px 0 4px}
-.tgnode{display:flex;flex-direction:column;align-items:center;gap:7px;width:86px;flex-shrink:0;border:0;background:none;cursor:pointer;padding:0;font-family:inherit}
-.tgnum{display:inline-flex;align-items:center;justify-content:center;width:32px;height:32px;border-radius:50%;font-weight:700;font-size:13.5px;background:rgba(var(--ink),.08);color:var(--muted)}
+.tgrail{display:flex;align-items:flex-start;margin:15px 0 2px}
+.tgnode{display:flex;flex-direction:column;align-items:center;gap:7px;width:84px;flex-shrink:0;border:0;background:none;cursor:pointer;padding:0;font-family:inherit}
+.tgnum{display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;border-radius:50%;font-weight:700;font-size:12.5px;background:rgba(var(--ink),.08);color:var(--muted)}
+.tgnum svg{width:14px;height:14px}
 .tgnode.cur .tgnum{background:var(--orange);color:#fff;box-shadow:0 0 0 4px rgba(255,107,26,.18)}
 .tgnode.done .tgnum{background:var(--ok);color:#fff}
 .tgnlbl{font-size:11.5px;font-weight:500;color:var(--muted);text-align:center;max-width:100%;overflow-wrap:anywhere}
 .tgnode:hover .tgnlbl{color:var(--white)}
 .tgnode.cur .tgnlbl{color:var(--chip-t);font-weight:700}
 .tgnode.done .tgnlbl{color:var(--white)}
-.tgbar{flex:1;height:3px;border-radius:2px;margin-top:15px;background:rgba(var(--ink),.12)}
+.tgbar{flex:1;height:2px;border-radius:2px;margin-top:13px;background:rgba(var(--ink),.12)}
 .tgbar.done{background:var(--ok)}
-.tgpanel{background:var(--bg);border:1px solid var(--line);border-radius:12px;padding:20px 22px;margin-top:14px;min-height:250px;display:flex;flex-direction:column}
+.tgpanel{background:var(--bg);border:1px solid var(--line);border-radius:13px;padding:16px 18px;margin-top:14px;display:flex;flex-direction:column}
 .tgstep{flex:1;display:flex;flex-direction:column}
 .tgstep[hidden]{display:none}
 .tgbody{flex:1}
@@ -634,6 +635,91 @@ body.cliente .cliente-only{display:flex}
 .tgfinico{display:inline-flex;align-items:center;justify-content:center;width:54px;height:54px;border-radius:50%;background:rgba(25,158,112,.12);color:var(--ok)}
 .tgfinico svg{width:26px;height:26px}
 @media(max-width:900px){.tgcards,.tgcards.two{grid-template-columns:1fr}.tgnlbl{display:none}.tgnode{width:44px}}
+/* ── Conexiones: tira de estado y dos columnas (canvas «Conexiones · Panel Velai»,
+   2026-08-27). Antes eran nueve tarjetas a todo lo ancho con una o dos líneas de texto
+   dentro: el asistente quedaba como una caja vacía de 250 px y media pantalla en blanco.
+   Cada columna fluye por su cuenta, así ninguna arrastra a la otra. */
+.cxtiles{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:14px;margin-bottom:16px}
+.cxtile{display:flex;gap:11px;align-items:flex-start;min-width:0;padding:13px 14px;background:var(--bg2);border:1px solid var(--line);border-radius:14px}
+/* Un canal que aún no existe se ve, pero se ve APAGADO: se dice que está sin activar en
+   vez de esconderlo (así nadie pregunta si Instagram existe y nadie cree que ya funciona). */
+.cxtile.is-off{background:none;border-style:dashed;border-color:var(--border2)}
+.cxti{width:32px;height:32px;flex:none;display:grid;place-items:center;border-radius:9px;background:var(--bg3)}
+.cxti svg{width:17px;height:17px}
+.cxtm{flex:1;min-width:0}
+.cxtn{display:block;font-size:12.5px;font-weight:700;letter-spacing:-.01em}
+.cxta{display:block;margin-top:2px;font-size:11.5px;color:var(--muted);overflow-wrap:anywhere}
+.cxts{display:inline-flex;align-items:center;gap:5px;margin-top:7px;font-size:11px;font-weight:600;color:var(--muted2)}
+.cxts i{width:6px;height:6px;border-radius:50%;flex:none;background:rgba(var(--ink),.22)}
+.cxts.on{color:var(--stt-won)}
+.cxts.on i{background:var(--ok)}
+.cxts.wait{color:var(--amber-t)}
+.cxts.wait i{background:var(--amber)}
+.cxts.bad{color:var(--bad)}
+.cxts.bad i{background:var(--bad)}
+.cxcols{display:grid;grid-template-columns:minmax(0,7fr) minmax(0,5fr);gap:16px;align-items:start}
+.cxcol{display:flex;flex-direction:column;gap:16px;min-width:0}
+.cxbox{background:var(--bg2);border:1px solid var(--line);border-radius:16px;padding:18px 20px;min-width:0}
+.cxbox.quiet{background:none;border-style:dashed;border-color:var(--border2)}
+.cxbh{display:flex;align-items:flex-start;gap:12px}
+.cxbh .grow{flex:1;min-width:0}
+.cxtitle{display:block;font-family:var(--font-d);font-weight:900;font-size:15.5px;letter-spacing:-.02em;color:var(--white)}
+.cxsub{margin:4px 0 0;font-size:12.5px;line-height:1.5;color:var(--muted)}
+.cxsub b{font-weight:700;color:var(--white)}
+.cxmicro{display:block;margin-bottom:6px;font-size:10.5px;font-weight:600;letter-spacing:.09em;text-transform:uppercase;color:var(--muted2)}
+.cxhr{height:1px;background:var(--line);margin:16px 0}
+.cxrow{display:flex;gap:9px;align-items:center;flex-wrap:wrap;margin-top:12px}
+.cxrow .grow{flex:1;min-width:0}
+.cxarows{display:flex;flex-direction:column;gap:8px;margin-top:13px}
+.cxarow{display:flex;align-items:center;gap:10px;min-width:0;padding:10px 12px;background:var(--bg3);border-radius:11px}
+.cxarow .cxti{width:26px;height:26px;border-radius:8px;background:var(--bg2)}
+.cxarow .cxti svg{width:15px;height:15px}
+.cxan{flex:1;min-width:0;font-size:12.5px;font-weight:600}
+.cxan small{display:block;margin-top:1px;font-size:11px;font-weight:400;color:var(--muted)}
+.cxlogos{display:flex;gap:11px;margin-top:13px}
+.cxlogot{flex:1;display:flex;flex-direction:column;align-items:center;gap:8px;padding:13px 10px;background:var(--bg3);border-radius:12px}
+.cxlogot .cxlogo{width:54px;height:54px;border-radius:14px}
+.cxlogot .lb{font-size:11px;color:var(--muted)}
+/* El horario va SOLO con .cxsh: .shrow y compañía las comparte el Calendario. */
+.cxshh{display:flex;gap:12px;align-items:center;margin-top:14px;padding-bottom:7px;border-bottom:1px solid var(--line)}
+.cxshh .hd{width:132px;flex:none}
+.cxshh .ht{flex:1}
+.cxsh{gap:0;margin-top:0}
+.cxsh .shrow{gap:12px;padding:7px 0;flex-wrap:nowrap}
+.cxsh .shrow+.shrow{border-top:1px solid var(--line)}
+.cxsh .shday{width:132px;min-width:132px;display:flex;align-items:center;gap:10px;font-size:12.5px}
+.cxsh .shpair{flex:1;min-width:0}
+.cxsh .shpair input[type=time]{width:100%;min-width:0;font-variant-numeric:tabular-nums}
+/* Día cerrado: los tramos se apagan y se dice qué pasa entonces. */
+.cxsh .shrow.off .shpair{opacity:.3;pointer-events:none}
+.cxclosed{flex:1;font-size:11.5px;color:var(--muted2)}
+.cxtopics{display:flex;flex-direction:column;gap:7px;margin-top:12px}
+.cxtrow{display:flex;align-items:center;gap:10px;min-width:0;padding:9px 11px;background:var(--bg2);border:1px solid rgba(var(--ink),.09);border-radius:10px}
+.cxtn2{flex:none;font-size:12.5px;font-weight:700}
+.cxtd{flex:1;min-width:0;font-size:12px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.cxibtn{width:28px;height:28px;flex:none;display:grid;place-items:center;border:0;border-radius:8px;background:none;color:var(--muted2);cursor:pointer}
+.cxibtn:hover{color:var(--orange);background:rgba(255,107,26,.09)}
+.cxibtn.del:hover{color:var(--bad);background:rgba(230,103,103,.10)}
+.cxibtn svg{width:14px;height:14px}
+@media(max-width:900px){
+.cxtiles{grid-template-columns:1fr;gap:10px}
+.cxcols{grid-template-columns:1fr}
+.cxsh .shrow{flex-wrap:wrap}
+.cxsh .shday{width:100%;min-width:0}
+.cxshh{display:none}
+.cxibtn{width:44px;height:44px}
+/* En el móvil todo lo que se pulsa llega a 44: los botones del panel son de escritorio
+   (btnsm mide 28) y esta vista se usa con el teléfono en la mano. */
+.cxbox .btn{padding:13px 16px}
+.cxbox .btn.btnsm{padding:13px 14px}
+.cxbox .inpill{padding:15px 12px}
+.vhead .inpill{padding:14px 12px}
+.cxbox .sel select{padding:13px 32px 13px 13px}
+.cxbox .chk2{min-height:44px}
+.cxsh .shpair input[type=time]{padding:11px 9px}
+.cxbox .tgnum{width:44px;height:44px;font-size:14px}
+.cxbox .tgnum svg{width:18px;height:18px}
+}
 .caldaylist>div{padding:9px 0;border-bottom:1px solid var(--line)}
 .caldaylist>div:last-child{border-bottom:0}
 </style></head><body>
@@ -753,15 +839,12 @@ body.cliente .cliente-only{display:flex}
 </div>
 </div>
 <div id="viewConexiones" hidden>
-<div class="vhead"><div><h1>Conexiones</h1><p>Canales de aviso y estado de WhatsApp del negocio</p></div><div class="actions actions0"><select id="cxTenantSel" class="inpill velai-only"></select></div></div>
-<div class="card"><b class="tgh tgh-sm">Tus canales</b>
-<p class="tgsub">Por d&oacute;nde te llegan conversaciones ahora mismo. Cada uno se configura en su apartado de abajo.</p>
-<div class="chlist" id="cxChannels"></div></div>
-<div class="card mt12">
-<div class="tgw-top"><div class="grow"><b class="tgh">Recibe tus leads en Telegram</b>
-<p class="tgsub">Una sola vez, 5–10 minutos. El asistente detecta lo que ya está hecho y guarda tu avance.</p></div>
-<span class="velai-only" id="tgWlRow"><span id="tgWlState" class="flag off">desactivada</span> <button class="btn alt btnsm" id="tgWlToggle" type="button">Activar</button></span> <span class="tgchip" id="tgProgress">—</span></div>
-
+<div class="vhead"><div><h1>Conexiones</h1><p>Por d&oacute;nde llegan tus conversaciones y qui&eacute;n recibe cada aviso</p></div><div class="actions actions0"><select id="cxTenantSel" class="inpill velai-only"></select></div></div>
+<div class="cxtiles" id="cxChannels"></div>
+<div class="cxcols">
+<div class="cxcol">
+<div class="cxbox">
+<div class="cxbh"><span class="grow"><span class="cxtitle">Recibe tus leads en Telegram</span><p class="cxsub">Una sola vez, 5&ndash;10 minutos. El asistente detecta lo que ya est&aacute; hecho y guarda tu avance.</p></span><span class="row velai-only" id="tgWlRow"><span id="tgWlState" class="flag off">desactivada</span> <button class="btn alt btnsm" id="tgWlToggle" type="button">Activar</button></span><span class="tgchip" id="tgProgress">&mdash;</span></div>
 <div class="tgrail">
 <button class="tgnode" id="tgn1" type="button" data-tgo="tgs1"><span class="tgnum">1</span><span class="tgnlbl">Tu bot</span></button><i class="tgbar" id="tgbar1"></i>
 <button class="tgnode" id="tgn2" type="button" data-tgo="tgs2"><span class="tgnum">2</span><span class="tgnlbl">El grupo</span></button><i class="tgbar" id="tgbar2"></i>
@@ -769,7 +852,6 @@ body.cliente .cliente-only{display:flex}
 <button class="tgnode" id="tgn4" type="button" data-tgo="tgs4"><span class="tgnum">4</span><span class="tgnlbl">Permisos</span></button><i class="tgbar" id="tgbar4"></i>
 <button class="tgnode" id="tgn5" type="button" data-tgo="tgs5"><span class="tgnum">5</span><span class="tgnlbl">Temas</span></button>
 </div>
-
 <div class="tgpanel">
 <div class="tgstep" id="tgs1b" hidden><div class="tgbody">
 <div class="tgh2">Crea el bot de tu negocio</div>
@@ -828,44 +910,41 @@ body.cliente .cliente-only{display:flex}
 <div class="actions actions0"><button class="btn alt btnsm" id="tgMoreTopics" type="button">Añadir o editar temas</button></div>
 </div></div>
 </div></div>
-<div class="card mt12"><b class="tgh tgh-sm">WhatsApp del negocio</b>
-<p class="tgsub">El estado de tu número de WhatsApp con Vai. La conexión inicial la hacemos juntos en una sesión corta — te avisaremos.</p>
-<div id="waState" class="mt6 muted">—</div>
-<div class="actions actions0 velai-only"><button class="btn alt" id="waSync" type="button">Sincronizar desde Twilio</button><button class="btn alt" id="waProfile" type="button">Aplicar marca al perfil</button><span id="waSyncOut" class="muted"></span></div>
-<small class="muted velai-only">«Aplicar marca al perfil» manda el logo, la descripción y la web de la ficha a WhatsApp: es la foto que ve el cliente final. El nombre visible NO se toca (cambiarlo exige revisión de Meta).</small></div>
-<div class="card mt12"><b class="tgh tgh-sm">¿Dónde llegan tus leads?</b>
-<p class="tgsub">Un lead siempre se guarda en el panel. Esto es quién recibe además un aviso al momento.</p>
-<div class="chlist" id="cxAlerts"></div></div>
-<div class="card mt12"><b class="tgh tgh-sm">Tu logo</b>
-<p class="tgsub">La imagen de tu negocio. Elige a qué canales aplica: WhatsApp la recorta en círculo y pide 640×640, así que a veces conviene una distinta de la del chat web. Máximo 2 MB (PNG, JPG o WebP).</p>
-<div class="actions actions0"><label class="chk2"><input type="checkbox" id="cxChWeb" checked> Chat de mi web</label><label class="chk2"><input type="checkbox" id="cxChWa" checked> Mi WhatsApp</label></div>
-<div class="actions actions0"><span id="cxLogoPrev" class="cxlogo" title="Imagen del chat web">—</span><span id="cxLogoPrevWa" class="cxlogo" title="Imagen de WhatsApp">—</span><input type="file" id="cxLogoFile" accept="image/png,image/jpeg,image/webp" class="filein"><label class="btn alt" for="cxLogoFile">Elegir imagen</label><span id="cxLogoName" class="fname muted">ninguna elegida</span><button class="btn" id="cxLogoUp" type="button">Guardar logo</button><button class="btn alt" id="cxLogoApply" type="button" hidden>Aplicar a mi WhatsApp</button></div>
-<small class="muted" id="cxLogoOut"></small></div>
-<div class="card mt12"><b class="tgh tgh-sm">Números de aviso por WhatsApp</b>
-<p class="tgsub">A qué WhatsApp del equipo llega el aviso de cada lead (además de Telegram). Varios números separados por coma, formato whatsapp:+34…</p>
-<div class="actions actions0"><input id="nfTeam" placeholder="whatsapp:+34600111222,whatsapp:+34600333444" class="grow inpill"><input id="nfWa" placeholder="nº de errores (solo dígitos)" class="inpill"><button class="btn alt" id="nfSave" type="button">Guardar</button></div>
+<div class="cxbox">
+<div class="cxbh"><span class="grow"><span class="cxtitle">Horario de atenci&oacute;n humana</span><p class="cxsub">Vai atiende <b>24 horas al d&iacute;a, todos los d&iacute;as</b>. Esto solo decide cu&aacute;ndo puede pasar una conversaci&oacute;n a una persona de tu equipo.</p></span><span class="sel"><select id="shTz"><option value="Europe/Madrid">Espa&ntilde;a peninsular (Europe/Madrid)</option><option value="Atlantic/Canary">Canarias (Atlantic/Canary)</option><option value="America/Bogota">Colombia (America/Bogota)</option><option value="America/Mexico_City">M&eacute;xico (America/Mexico_City)</option><option value="America/Argentina/Buenos_Aires">Argentina (America/Argentina/Buenos_Aires)</option><option value="America/Santiago">Chile (America/Santiago)</option></select></span></div>
+<div class="cxshh"><span class="hd cxmicro">D&iacute;a</span><span class="ht cxmicro">Tramo 1</span><span class="ht cxmicro">Tramo 2</span></div>
+<div class="shgrid cxsh" id="shGrid"><div class="shrow" id="shrow_mon"><span class="shday"><button class="sw" type="button" role="switch" aria-checked="true" id="shsw_mon" data-shd="mon" aria-label="Lunes"><i></i></button>Lunes</span><span class="shpair"><input type="time" id="sh_mon_1a"><span class="shsep">a</span><input type="time" id="sh_mon_1b"></span><span class="shpair"><input type="time" id="sh_mon_2a"><span class="shsep">a</span><input type="time" id="sh_mon_2b"></span><span class="cxclosed" id="shoff_mon" hidden>Cerrado &mdash; Vai atiende y captura el lead</span></div><div class="shrow" id="shrow_tue"><span class="shday"><button class="sw" type="button" role="switch" aria-checked="true" id="shsw_tue" data-shd="tue" aria-label="Martes"><i></i></button>Martes</span><span class="shpair"><input type="time" id="sh_tue_1a"><span class="shsep">a</span><input type="time" id="sh_tue_1b"></span><span class="shpair"><input type="time" id="sh_tue_2a"><span class="shsep">a</span><input type="time" id="sh_tue_2b"></span><span class="cxclosed" id="shoff_tue" hidden>Cerrado &mdash; Vai atiende y captura el lead</span></div><div class="shrow" id="shrow_wed"><span class="shday"><button class="sw" type="button" role="switch" aria-checked="true" id="shsw_wed" data-shd="wed" aria-label="Mi&eacute;rcoles"><i></i></button>Mi&eacute;rcoles</span><span class="shpair"><input type="time" id="sh_wed_1a"><span class="shsep">a</span><input type="time" id="sh_wed_1b"></span><span class="shpair"><input type="time" id="sh_wed_2a"><span class="shsep">a</span><input type="time" id="sh_wed_2b"></span><span class="cxclosed" id="shoff_wed" hidden>Cerrado &mdash; Vai atiende y captura el lead</span></div><div class="shrow" id="shrow_thu"><span class="shday"><button class="sw" type="button" role="switch" aria-checked="true" id="shsw_thu" data-shd="thu" aria-label="Jueves"><i></i></button>Jueves</span><span class="shpair"><input type="time" id="sh_thu_1a"><span class="shsep">a</span><input type="time" id="sh_thu_1b"></span><span class="shpair"><input type="time" id="sh_thu_2a"><span class="shsep">a</span><input type="time" id="sh_thu_2b"></span><span class="cxclosed" id="shoff_thu" hidden>Cerrado &mdash; Vai atiende y captura el lead</span></div><div class="shrow" id="shrow_fri"><span class="shday"><button class="sw" type="button" role="switch" aria-checked="true" id="shsw_fri" data-shd="fri" aria-label="Viernes"><i></i></button>Viernes</span><span class="shpair"><input type="time" id="sh_fri_1a"><span class="shsep">a</span><input type="time" id="sh_fri_1b"></span><span class="shpair"><input type="time" id="sh_fri_2a"><span class="shsep">a</span><input type="time" id="sh_fri_2b"></span><span class="cxclosed" id="shoff_fri" hidden>Cerrado &mdash; Vai atiende y captura el lead</span></div><div class="shrow" id="shrow_sat"><span class="shday"><button class="sw" type="button" role="switch" aria-checked="true" id="shsw_sat" data-shd="sat" aria-label="S&aacute;bado"><i></i></button>S&aacute;bado</span><span class="shpair"><input type="time" id="sh_sat_1a"><span class="shsep">a</span><input type="time" id="sh_sat_1b"></span><span class="shpair"><input type="time" id="sh_sat_2a"><span class="shsep">a</span><input type="time" id="sh_sat_2b"></span><span class="cxclosed" id="shoff_sat" hidden>Cerrado &mdash; Vai atiende y captura el lead</span></div><div class="shrow" id="shrow_sun"><span class="shday"><button class="sw" type="button" role="switch" aria-checked="true" id="shsw_sun" data-shd="sun" aria-label="Domingo"><i></i></button>Domingo</span><span class="shpair"><input type="time" id="sh_sun_1a"><span class="shsep">a</span><input type="time" id="sh_sun_1b"></span><span class="shpair"><input type="time" id="sh_sun_2a"><span class="shsep">a</span><input type="time" id="sh_sun_2b"></span><span class="cxclosed" id="shoff_sun" hidden>Cerrado &mdash; Vai atiende y captura el lead</span></div></div>
+<div class="cxrow"><button class="btn" id="shSave" type="button">Guardar horario</button><button class="btn alt btnsm" id="shCopy" type="button">Copiar el lunes a L-V</button><span class="muted" id="shOut"></span></div></div>
+</div>
+<div class="cxcol">
+<div class="cxbox">
+<span class="cxtitle">&iquest;Qui&eacute;n recibe los avisos?</span><p class="cxsub">Un lead siempre se guarda en el panel. Esto es qui&eacute;n recibe adem&aacute;s un aviso al momento.</p>
+<div class="cxarows" id="cxAlerts"></div>
+<div class="cxhr"></div>
+<span class="cxmicro">N&uacute;meros de aviso por WhatsApp</span><p class="cxsub">Varios separados por coma, en formato <code>whatsapp:+34&hellip;</code></p>
+<div class="cxrow"><input id="nfTeam" class="inpill grow" placeholder="whatsapp:+34600111222,whatsapp:+34600333444"><input id="nfWa" class="inpill w150 velai-only" placeholder="n&ordm; de errores"><button class="btn alt btnsm" id="nfSave" type="button">Guardar</button></div>
 <small class="muted field-err" data-f="team_whatsapp"></small></div>
-<div class="card mt12"><b class="tgh tgh-sm">Horario de atención humana</b>
-<p class="tgsub">Vai atiende <b>24 horas al día, todos los días</b>. Esto solo decide <b>cuándo puede pasar una conversación a una persona</b> de tu equipo. Fuera de este horario no ofrece asesor: atiende él y te deja el lead.</p>
-<div class="actions actions0"><label class="muted">Zona horaria <span class="sel"><select id="shTz">
-<option value="Europe/Madrid">España peninsular (Europe/Madrid)</option>
-<option value="Atlantic/Canary">Canarias (Atlantic/Canary)</option>
-<option value="America/Bogota">Colombia (America/Bogota)</option>
-<option value="America/Mexico_City">México (America/Mexico_City)</option>
-<option value="America/Argentina/Buenos_Aires">Argentina (America/Argentina/Buenos_Aires)</option>
-<option value="America/Santiago">Chile (America/Santiago)</option>
-</select></span></label></div>
-<div class="shgrid"><div class="shrow"><span class="shday">Lunes</span><span class="shpair"><input type="time" id="sh_mon_1a"><span class="shsep">a</span><input type="time" id="sh_mon_1b"></span><span class="shpair"><input type="time" id="sh_mon_2a"><span class="shsep">a</span><input type="time" id="sh_mon_2b"></span></div><div class="shrow"><span class="shday">Martes</span><span class="shpair"><input type="time" id="sh_tue_1a"><span class="shsep">a</span><input type="time" id="sh_tue_1b"></span><span class="shpair"><input type="time" id="sh_tue_2a"><span class="shsep">a</span><input type="time" id="sh_tue_2b"></span></div><div class="shrow"><span class="shday">Miércoles</span><span class="shpair"><input type="time" id="sh_wed_1a"><span class="shsep">a</span><input type="time" id="sh_wed_1b"></span><span class="shpair"><input type="time" id="sh_wed_2a"><span class="shsep">a</span><input type="time" id="sh_wed_2b"></span></div><div class="shrow"><span class="shday">Jueves</span><span class="shpair"><input type="time" id="sh_thu_1a"><span class="shsep">a</span><input type="time" id="sh_thu_1b"></span><span class="shpair"><input type="time" id="sh_thu_2a"><span class="shsep">a</span><input type="time" id="sh_thu_2b"></span></div><div class="shrow"><span class="shday">Viernes</span><span class="shpair"><input type="time" id="sh_fri_1a"><span class="shsep">a</span><input type="time" id="sh_fri_1b"></span><span class="shpair"><input type="time" id="sh_fri_2a"><span class="shsep">a</span><input type="time" id="sh_fri_2b"></span></div><div class="shrow"><span class="shday">Sábado</span><span class="shpair"><input type="time" id="sh_sat_1a"><span class="shsep">a</span><input type="time" id="sh_sat_1b"></span><span class="shpair"><input type="time" id="sh_sat_2a"><span class="shsep">a</span><input type="time" id="sh_sat_2b"></span></div><div class="shrow"><span class="shday">Domingo</span><span class="shpair"><input type="time" id="sh_sun_1a"><span class="shsep">a</span><input type="time" id="sh_sun_1b"></span><span class="shpair"><input type="time" id="sh_sun_2a"><span class="shsep">a</span><input type="time" id="sh_sun_2b"></span></div></div>
-<p class="muted">Deja las horas en blanco para los días que no atendéis. El segundo tramo es para las jornadas partidas.</p>
-<div class="actions actions0"><button class="btn" id="shSave" type="button">Guardar horario</button><button class="btn alt btnsm" id="shCopy" type="button">Copiar el lunes a L-V</button><span class="muted" id="shOut"></span></div></div>
-<div class="card mt12"><b class="tgh tgh-sm">Informe semanal</b>
-<p class="tgsub">Cada lunes por la mañana, un resumen de la semana en tu grupo de Telegram: conversaciones, leads, citas y las preguntas que Vai no supo contestar. Llega sin entrar al panel — y se apaga cuando quieras.</p>
-<div class="actions actions0"><span id="wrState" class="flag off">—</span><button class="btn alt btnsm" id="wrToggle" type="button">—</button><button class="btn alt btnsm" id="wrTest" type="button">Enviar una prueba ahora</button></div>
+<div class="cxbox">
+<div class="cxbh"><span class="grow"><span class="cxtitle">Informe semanal</span><p class="cxsub">Cada lunes por la ma&ntilde;ana, un resumen de la semana en tu grupo de Telegram: conversaciones, leads, citas y las preguntas que Vai no supo contestar.</p></span><button class="sw" id="wrToggle" type="button" role="switch" aria-checked="false" aria-label="Informe semanal"><i></i></button></div>
+<div class="cxrow"><span id="wrState" class="flag off">&mdash;</span><button class="btn alt btnsm" id="wrTest" type="button">Enviar una prueba ahora</button></div>
 <small class="muted" id="wrNote"></small>
 <small class="muted" id="wrLast"></small></div>
-<div class="card mt12 velai-only"><b>Webhook del bot (solo Velai, una vez)</b>
-<p class="muted mt6">Registra el webhook de Telegram apuntando al worker. OJO: con el webhook activo, getUpdates deja de funcionar para ese bot.</p>
-<div class="actions actions0"><button class="btn alt" id="tgSetup" type="button">Registrar webhook</button><span id="tgSetupOut" class="muted"></span></div></div>
+<div class="cxbox">
+<span class="cxtitle">Tu logo</span><p class="cxsub">WhatsApp la recorta en c&iacute;rculo y pide 640&times;640, as&iacute; que a veces conviene una distinta de la del chat web. M&aacute;ximo 2 MB (PNG, JPG o WebP).</p>
+<div class="cxlogos"><div class="cxlogot"><span id="cxLogoPrev" class="cxlogo" title="Imagen del chat web">&mdash;</span><span class="lb">Chat de tu web</span></div><div class="cxlogot"><span id="cxLogoPrevWa" class="cxlogo" title="Imagen de WhatsApp">&mdash;</span><span class="lb">Tu WhatsApp</span></div></div>
+<div class="cxrow"><label class="chk2"><input type="checkbox" id="cxChWeb" checked> Chat de mi web</label><label class="chk2"><input type="checkbox" id="cxChWa" checked> Mi WhatsApp</label></div>
+<div class="cxrow"><input type="file" id="cxLogoFile" accept="image/png,image/jpeg,image/webp" class="filein"><label class="btn alt btnsm" for="cxLogoFile">Elegir imagen</label><span id="cxLogoName" class="fname muted">ninguna elegida</span><button class="btn btnsm" id="cxLogoUp" type="button">Guardar logo</button><button class="btn alt btnsm" id="cxLogoApply" type="button" hidden>Aplicar a mi WhatsApp</button></div>
+<small class="muted" id="cxLogoOut"></small></div>
+<div class="cxbox">
+<span class="cxtitle">WhatsApp del negocio</span><p class="cxsub">La conexi&oacute;n inicial la hacemos juntos en una sesi&oacute;n corta &mdash; te avisaremos.</p>
+<div id="waState" class="cxrow muted">&mdash;</div>
+<div class="cxrow velai-only"><button class="btn alt btnsm" id="waSync" type="button">Sincronizar desde Twilio</button><button class="btn alt btnsm" id="waProfile" type="button">Aplicar marca al perfil</button><span id="waSyncOut" class="muted"></span></div>
+<small class="muted velai-only">&laquo;Aplicar marca al perfil&raquo; manda el logo, la descripci&oacute;n y la web de la ficha a WhatsApp: es la foto que ve el cliente final. El nombre visible NO se toca (cambiarlo exige revisi&oacute;n de Meta).</small></div>
+</div>
+</div>
+<div class="cxbox quiet mt12 velai-only">
+<div class="cxbh"><span class="grow"><span class="cxtitle">Webhook del bot</span><p class="cxsub">Solo Velai, y una sola vez por bot. Con el webhook activo, getUpdates deja de funcionar para ese bot.</p></span><button class="btn alt btnsm" id="tgSetup" type="button">Registrar webhook</button></div>
+<small class="muted" id="tgSetupOut"></small></div>
 </div>
 <div id="viewCanales" hidden>
 <div class="vhead"><div><h1>Canales</h1><p>Las direcciones que el worker atiende de verdad</p></div><span class="stpill ok" id="chOverall" hidden><i></i></span></div>
