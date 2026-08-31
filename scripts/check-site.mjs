@@ -3,9 +3,14 @@ import path from 'node:path';
 import vm from 'node:vm';
 
 const root = process.cwd();
+// Carpetas que NO son el sitio publicado: el panel v2 (app de Vite con su node_modules
+// y su dist), los worktrees de agentes bajo .claude/, y artefactos. Sin esto, el check
+// valida el index.html de Vite como si fuera una landing y falla por cosas que no aplican.
+const EXCLUIR = new Set(['node_modules', 'panel', '.claude', '.git', '.wrangler', 'dist']);
 async function walk(dir) {
   const out = [];
   for (const name of await readdir(dir)) {
+    if (EXCLUIR.has(name)) continue;
     if (['.git', '.wrangler', 'node_modules'].includes(name)) continue;
     const full = path.join(dir, name); const info = await stat(full);
     if (info.isDirectory()) out.push(...await walk(full)); else out.push(full);

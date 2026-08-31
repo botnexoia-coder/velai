@@ -12,6 +12,16 @@ keep_vars = true
 # `routes` desactiva esa URL y rompe chat y formularios.
 workers_dev = true
 
+# Panel v2 (React): la SPA compilada viaja con el worker como estáticos. run_worker_first
+# es la pieza clave: sin él, Cloudflare serviría estos ficheros ANTES de ejecutar el worker
+# en CUALQUIER hostname (incluido api.hirevai.com); con él, todo entra al worker y es
+# worker/routes/publico.js quien decide (solo hostname del panel + bandera PANEL_V2).
+# El deploy exige que panel/dist exista: los workflows compilan el panel antes.
+[assets]
+directory = "panel/dist"
+binding = "ASSETS"
+run_worker_first = true
+
 # Dominio del panel admin (Cloudflare Access delante; el Worker valida el JWT).
 routes = [
   { pattern = "admin.hirevai.com", custom_domain = true },
@@ -51,6 +61,10 @@ AI_TENANT_DAILY_LIMIT = "1500"
 # tenants.ai_monthly_tokens lo pisa por fila). NO corta nada: es un contador.
 # ~32.000 tokens por conversación medidos en producción → 5M son ~155 conversaciones/mes.
 AI_TENANT_MONTHLY_TOKENS = "5000000"
+# Panel v2: APAGADO en producción hasta validarlo en staging. "1" = el worker sirve la
+# SPA de panel/dist en el hostname del panel; vacío = panel v1 serializado, como siempre.
+# El rollback es poner esto en vacío y desplegar (panel/INTEGRACION.md §6).
+PANEL_V2 = ""
 # Tenant del canal web cuando el payload no trae `tenant` (el widget de hirevai.com).
 DEFAULT_TENANT_SLUG = "velai"
 # Admins de Velai en el panel (rol completo). Fuera de D1 a propósito: una fila
@@ -192,6 +206,8 @@ CONV_RETENTION_DAYS = "90"
 AI_DAILY_LIMIT = "100"
 AI_TENANT_DAILY_LIMIT = "50"
 AI_TENANT_MONTHLY_TOKENS = "5000000"
+# Panel v2 ENCENDIDO: staging es donde se valida antes del cutover de producción.
+PANEL_V2 = "1"
 DEFAULT_TENANT_SLUG = "velai"
 ADMIN_EMAILS = "botnexo.ia@gmail.com"
 CF_ACCOUNT_ID = "6a5877b5637ec5fa28d05af46e894542"
@@ -207,6 +223,11 @@ GOOGLE_OAUTH_CLIENT_ID = ""
 # syncAdminGate devuelven 'manual' y no llaman a la API de Access (worker/app.js:2540).
 CF_ACCESS_GROUP_ID = ""
 CF_ADMIN_GROUP_ID = ""
+
+[env.staging.assets]
+directory = "panel/dist"
+binding = "ASSETS"
+run_worker_first = true
 
 [[env.staging.kv_namespaces]]
 binding = "KV"

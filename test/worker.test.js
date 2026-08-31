@@ -4768,3 +4768,55 @@ test('el gasto de IA trae las llamadas POR CLIENTE de cada día', async () => {
   // El Map interno no puede colarse en el JSON.
   assert.ok(!('porCliente' in dia), 'el Map interno no viaja al panel');
 });
+
+// ── Panel v2: servido por el worker con bandera, sin tocar el v1 ──
+import { testingPanelV2 } from '../worker/routes/publico.js';
+
+test('panel v2: mecánica de servir — fallback de SPA, CSP estricta y caché por tipo', async () => {
+  const pedidas = [];
+  const ASSETS = { async fetch(req) { const u = new URL(req.url); pedidas.push(u.pathname);
+    if (u.pathname === '/index.html' || u.pathname === '/') return new Response('<html>v2</html>', { status: 200, headers: { 'Content-Type': 'text/html' } });
+    if (u.pathname.startsWith('/assets/')) return new Response('js', { status: 200, headers: { 'Content-Type': 'text/javascript' } });
+    return new Response('no', { status: 404 });
+  } };
+  const env = { ASSETS };
+  // Un fichero real: se sirve tal cual, con caché immutable (lleva hash en el nombre).
+  const js = await testingPanelV2.panelV2Assets(new Request('https://admin.hirevai.com/assets/index-abc.js'), env, new URL('https://admin.hirevai.com/assets/index-abc.js'));
+  assert.equal(js.status, 200);
+  assert.match(js.headers.get('Cache-Control'), /immutable/);
+  // Una ruta de vista (react-router): índice de la SPA, sin caché — un deploy o el
+  // rollback deben verse al momento.
+  const vista = await testingPanelV2.panelV2Assets(new Request('https://admin.hirevai.com/conversaciones'), env, new URL('https://admin.hirevai.com/conversaciones'));
+  assert.equal(vista.status, 200);
+  assert.equal(vista.headers.get('Cache-Control'), 'no-store');
+  assert.ok(pedidas.includes('/index.html'), 'el 404 de assets cae al index (SPA)');
+  // La CSP del v2 es MÁS estricta que la del v1: sin inline, sin nonce.
+  const csp = vista.headers.get('Content-Security-Policy');
+  assert.match(csp, /default-src 'none'/);
+  assert.ok(!csp.includes('unsafe-inline') && !csp.includes('nonce'));
+  assert.equal(vista.headers.get('X-Robots-Tag'), 'noindex, nofollow');
+});
+
+test('panel v2: la bandera y el hostname mandan — y sin JWT no se sirve ni un byte', async () => {
+  const { panelV2Activo } = testingPanelV2;
+  const ASSETS = { async fetch() { return new Response('v2', { status: 200, headers: { 'Content-Type': 'text/html' } }); } };
+  const base = { ASSETS, ADMIN_ORIGIN: 'https://admin.hirevai.com' };
+  const adminUrl = new URL('https://admin.hirevai.com/leads');
+  // Apagada (produción hoy), sin binding, u otro hostname: el v2 no existe.
+  assert.equal(panelV2Activo({ ...base, PANEL_V2: '' }, adminUrl), false);
+  assert.equal(panelV2Activo({ ...base, PANEL_V2: '1', ASSETS: undefined }, adminUrl), false);
+  assert.equal(panelV2Activo({ ...base, PANEL_V2: '1' }, new URL('https://api.hirevai.com/leads')), false);
+  assert.equal(panelV2Activo({ ...base, PANEL_V2: '1' }, adminUrl), true);
+
+  // A través del worker entero: con la bandera puesta, una ruta de la SPA sin el JWT de
+  // Access responde 401 — la identidad va ANTES que los estáticos, igual que en el v1.
+  const worker = createWorker({});
+  const env = { ...base, PANEL_V2: '1', TEAM_DOMAIN: 'https://team.cloudflareaccess.com', POLICY_AUD: 'aud' };
+  const ctx = { waitUntil() {} };
+  const sinJwt = await worker.fetch(new Request('https://admin.hirevai.com/conversaciones'), env, ctx);
+  assert.equal(sinJwt.status, 401);
+  // Y en el hostname público la misma ruta sigue siendo el 404 de toda la vida:
+  // el worker público no cambia ni un byte de conducta por la bandera.
+  const publico = await worker.fetch(new Request('https://api.hirevai.com/conversaciones'), env, ctx);
+  assert.equal(publico.status, 404);
+});

@@ -34,6 +34,7 @@ on:
       - 'wrangler.toml'
       - 'test/**'
       - 'scripts/**'
+      - 'panel/**'
       - 'seed/**'
       - 'package.json'
       - '.github/workflows/deploy-worker.yml'
@@ -67,6 +68,13 @@ jobs:
       # El panel viaja serializado con toString() y los tests sin bundlear no ven
       # los artefactos de esbuild (incidente __name, 2026-08-20): se valida el
       # arranque del panel CONTRA EL BUNDLE REAL antes de tocar producción.
+      # El panel v2 se compila ANTES de cualquier wrangler: con [assets] declarado,
+      # el deploy (y el dry-run) exigen que panel/dist exista.
+      - name: panel v2 · build
+        working-directory: panel
+        run: |
+          npm ci
+          npm run build
       - run: npx wrangler@4 deploy --dry-run --outdir /tmp/dist && node scripts/check-bundle.mjs /tmp/dist/vai-worker.js
 
       # ── ENSAYO EN STAGING ───────────────────────────────────────────────────

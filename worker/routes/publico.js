@@ -16,6 +16,43 @@ import {
 
 export const publico = new Hono();
 
+// ── Panel v2 (React, servido como estáticos por el worker) ───────────────────
+// La SPA compilada (panel/dist) llega por el binding ASSETS (wrangler.toml [assets] con
+// run_worker_first: TODO entra al worker y es él quien decide). Solo en el hostname del
+// panel y solo con la bandera PANEL_V2 — sin ella el v1 serializado sigue tal cual, así
+// que el rollback es quitar la bandera y desplegar. Detalles: panel/INTEGRACION.md.
+const PANEL_V2_CSP = "default-src 'none'; script-src 'self'; style-src 'self'; "
+  + 'font-src https://hirevai.com; img-src \'self\' https: data:; connect-src \'self\'; '
+  + "base-uri 'none'; frame-ancestors 'none'";
+function panelV2Activo(env, url) {
+  return env.PANEL_V2 === '1' && Boolean(env.ASSETS) && url.hostname === adminHost(env);
+}
+// Separado de la identidad a propósito: así se puede probar la mecánica de servir
+// (fallback de SPA, cabeceras, caché) sin fabricar un JWT de Access en los tests.
+async function panelV2Assets(request, env, url) {
+  let res = await env.ASSETS.fetch(request);
+  // SPA con react-router: cualquier ruta de vista (/leads, /conversaciones…) es index.html.
+  if (res.status === 404) res = await env.ASSETS.fetch(new Request(new URL('/index.html', url), request));
+  const out = new Response(res.body, res);
+  // CSP SIN nonce ni inline: el v2 son ficheros externos del mismo origen y React aplica
+  // estilos por CSSOM. Más estricta que la del v1, no menos.
+  out.headers.set('Content-Security-Policy', PANEL_V2_CSP);
+  out.headers.set('X-Robots-Tag', 'noindex, nofollow');
+  out.headers.set('X-Frame-Options', 'DENY');
+  out.headers.set('Referrer-Policy', 'no-referrer');
+  // El HTML no se cachea (un deploy o el rollback deben verse al momento); los assets
+  // llevan hash en el nombre y pueden ser immutable, como los del sitio público.
+  const esHtml = (out.headers.get('Content-Type') || '').includes('text/html');
+  out.headers.set('Cache-Control', esHtml ? 'no-store' : 'public, max-age=31536000, immutable');
+  return out;
+}
+async function panelV2Response(request, env, url) {
+  // La misma puerta que el v1: el JWT de Access se valida ANTES de servir un byte.
+  // Los datos viajan por /api/admin/* (que valida igual), pero el HTML tampoco se regala.
+  await adminIdentity(request, env);
+  return panelV2Assets(request, env, url);
+}
+
 // La raíz atiende a TRES clientes distintos y el orden importa:
 // 1) GET en el hostname del panel = la página del admin (tras validar el JWT);
 // 2) POST x-www-form-urlencoded = webhook de Twilio (WhatsApp/Messenger);
@@ -25,6 +62,7 @@ publico.all('/', async (c) => {
   const request = c.req.raw; const env = c.env;
   const url = new URL(c.req.url);
   if (url.hostname === adminHost(env) && request.method === 'GET') {
+    if (panelV2Activo(env, url)) return panelV2Response(request, env, url);
     await adminIdentity(request, env);
     return adminPageResponse();
   }
@@ -108,3 +146,15 @@ publico.get('/oauth/calendar/callback', async (c) => {
   if (!host || new URL(c.req.url).hostname !== host) throw new HttpError(404, 'not_found');
   return handleCalendarCallback(c.req.raw, c.env, c.executionCtx, new URL(c.req.url));
 });
+
+// Rutas de la SPA del v2 (/leads, /conversaciones, /assets/index-*.js…). Registrado el
+// ÚLTIMO: toda ruta real del worker gana antes de llegar aquí (y /api/admin/* ni entra a
+// este router). Sin bandera o fuera del hostname del panel, este comodín no existe: 404
+// idéntico al de siempre — el worker público no cambia ni un byte de conducta.
+publico.get('*', async (c) => {
+  const url = new URL(c.req.url);
+  if (panelV2Activo(c.env, url)) return panelV2Response(c.req.raw, c.env, url);
+  throw new HttpError(404, 'not_found');
+});
+
+export const testingPanelV2 = { panelV2Activo, panelV2Assets };

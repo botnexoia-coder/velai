@@ -16,3 +16,11 @@ jobs:
       # instalar, los tests fallan en el primer `import 'hono'`.
       - run: npm ci
       - run: npm run check
+      # Panel v2: sus tests y su build (incluye tsc --noEmit). Proyecto npm aparte
+      # dentro de panel/ — un error de tipos del panel pone CI en rojo, a propósito.
+      - name: panel v2 · tests y build
+        working-directory: panel
+        run: |
+          npm ci
+          npm test -- --run
+          npm run build

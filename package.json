@@ -9,7 +9,8 @@
     "check:site": "node scripts/check-site.mjs",
     "check:aislamiento": "node scripts/check-aislamiento.mjs",
     "check:entornos": "node scripts/check-entornos.mjs",
-    "test": "node --test"
+    "test": "node --test \"test/**/*.test.js\"",
+    "test:panel": "cd panel && npm test -- --run"
   },
   "dependencies": {
     "hono": "^4.13.5"
