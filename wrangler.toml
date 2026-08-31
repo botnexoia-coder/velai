@@ -129,3 +129,90 @@ id = "14fbc395a218428bb677f61243c9e3f6"
 binding = "DB"
 database_name = "vai-leads"
 database_id = "4b3056eb-6dee-44a4-8d17-5a80af740ca5"
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# ENTORNO DE STAGING — el ensayo que faltaba
+# ═══════════════════════════════════════════════════════════════════════════════
+# Antes de esto, la PRIMERA ejecución real de cada cambio era en producción, con los
+# clientes dentro: los tests corren contra mocks y `d1 migrations apply --remote` iba
+# directo a la base con sus leads y conversaciones. Los tres incidentes que costaron
+# check-bundle.mjs, render-panel.mjs y el try/catch de resolveScope son el mismo agujero.
+#
+# Copia completa e independiente: worker propio, D1 propia, KV propio, cero clientes.
+#
+#   Desplegar a mano:  npx wrangler@4 deploy --env staging
+#   Migraciones:       npx wrangler@4 d1 migrations apply vai-leads-staging --remote --env staging
+#   URL:               https://vai-worker-staging.botnexo-ia.workers.dev
+#
+# ⚠️ CUIDADO CON LO QUE SE HEREDA. En wrangler, un [env.X] hereda `routes` y `triggers`
+# del bloque raíz pero NO hereda `vars`, `kv_namespaces` ni `d1_databases`. Es decir:
+# lo peligroso se hereda solo y lo inofensivo hay que repetirlo. Sin el `routes` de
+# abajo, un `deploy --env staging` RECLAMARÍA admin.hirevai.com y api.hirevai.com y
+# dejaría a los clientes servidos por el worker de staging. De ahí que esté explícito.
+[env.staging]
+name = "vai-worker-staging"
+workers_dev = true
+
+# El único dominio de staging. Vacío no vale: sin la lista, hereda la de producción.
+# admin-staging.hirevai.com FALLA CERRADO mientras no tenga Cloudflare Access delante:
+# adminIdentity() exige la cabecera Cf-Access-Jwt-Assertion y sin ella todo /api/admin/*
+# responde 401. No hay ventana de panel abierto (ver docs/OPERATIONS.md §Staging).
+routes = [
+  { pattern = "admin-staging.hirevai.com", custom_domain = true }
+]
+
+# Sin cron en staging, a propósito. drainQueuedLeads hace un LISTADO de KV por tick y el
+# plan gratuito da 1.000 al día para toda la cuenta: producción ya gasta ~288 y duplicarlo
+# se come la mitad del margen que docs/VOLUMEN-Y-ALMACENAMIENTO.md señala como cuello real.
+# Para probar el cron: `npx wrangler@4 dev --env staging --test-scheduled` y llamar a
+# /__scheduled?cron=*+*+*+*+*, que no gasta cuota de producción.
+[env.staging.triggers]
+crons = []
+
+[env.staging.observability]
+enabled = true
+head_sampling_rate = 1
+
+[env.staging.vars]
+# Las de abajo son las MISMAS claves que [vars] de producción con valores de staging.
+# scripts/check-entornos.mjs falla si una clave existe en un lado y no en el otro: la
+# duplicación es inevitable (wrangler no hereda vars), que se desincronice en silencio no.
+# example.com está aquí por una razón concreta y NO es un descuido: la clave de PRUEBA de
+# Turnstile emite sus tokens con hostname "example.com", y verifyTurnstile rechaza todo
+# token cuyo hostname no esté en esta lista (worker/app.js:168). Sin esta entrada, POST
+# /chat en staging responde 403 human_verification_failed SIEMPRE y el entorno no puede
+# probar el chat — que es la mitad del producto. En producción no aparece ni debe aparecer.
+ALLOWED_WEB_ORIGINS = "http://localhost:8080,http://127.0.0.1:8080,https://velai-dey.pages.dev,https://example.com"
+ADMIN_ORIGIN = "https://admin-staging.hirevai.com"
+LEAD_RETENTION_MONTHS = "24"
+CONV_RETENTION_DAYS = "90"
+# Topes de gasto MUY por debajo de producción: staging usa una clave real de Anthropic y
+# un bucle mal escrito aquí gasta dinero de verdad. 100 llamadas/día son ~0,60 $ en el
+# peor caso — suficiente para probar y demasiado poco para hacer daño.
+AI_DAILY_LIMIT = "100"
+AI_TENANT_DAILY_LIMIT = "50"
+AI_TENANT_MONTHLY_TOKENS = "5000000"
+DEFAULT_TENANT_SLUG = "velai"
+ADMIN_EMAILS = "botnexo.ia@gmail.com"
+CF_ACCOUNT_ID = "6a5877b5637ec5fa28d05af46e894542"
+# Sitekey de PRUEBA de Turnstile (siempre válida). Su secreto va en el .dev.vars y como
+# secret de staging: 1x0000000000000000000000000000000AA.
+TURNSTILE_SITEKEY = "1x00000000000000000000AA"
+# Calendario APAGADO en staging: sin client id, los endpoints responden 503 y el chat
+# funciona igual. Rellenar solo para probar el flujo OAuth, con el proyecto de pruebas.
+GOOGLE_OAUTH_CLIENT_ID = ""
+# ⚠️ VACÍOS A PROPÓSITO, Y NO SE RELLENAN. Son los ids de los grupos de Cloudflare Access
+# de PRODUCCIÓN. Con ellos puestos, gestionar usuarios desde el panel de staging
+# reescribiría quién entra en el panel de los clientes reales. Vacíos, syncPanelGate y
+# syncAdminGate devuelven 'manual' y no llaman a la API de Access (worker/app.js:2540).
+CF_ACCESS_GROUP_ID = ""
+CF_ADMIN_GROUP_ID = ""
+
+[[env.staging.kv_namespaces]]
+binding = "KV"
+id = "d522cc2ef3f54e1f91a35dc90d0df1bc"
+
+[[env.staging.d1_databases]]
+binding = "DB"
+database_name = "vai-leads-staging"
+database_id = "4fe5d8b0-17d8-4ac1-a3f7-216c5e085a75"

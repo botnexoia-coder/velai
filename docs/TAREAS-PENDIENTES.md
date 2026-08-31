@@ -40,6 +40,23 @@ Sin esto, las campañas gastarían presupuesto a ciegas (sin medir conversiones)
 - [ ] Login de prueba en `admin.hirevai.com` con tu email + PIN, y verificar que ves el lead de prueba.
 - [ ] Restos de FASE0 (ver `IMPLEMENTADO.md` §FASE0): status callback del sender (para ver `Undelivered` sin entrar a la consola), perfil de negocio del sender, webhook de voz, bundle +34.
 
+### 2f. Staging — para que su panel sea usable (2026-08-31)
+
+El entorno está montado y con Cloudflare Access delante (app `admin staging`, política
+`Staging Velai`). Queda **una** cosa, y es la única que no puede hacerse sin ti:
+
+- [ ] **`ANTHROPIC_API_KEY` del worker de staging** — una clave propia, NO la de producción:
+      `npx wrangler@4 secret put ANTHROPIC_API_KEY --env staging`.
+      Sin ella el camino del chat funciona entero y muere en el último paso con
+      `503 ai_not_configured`. Tope de staging: 100 llamadas/día (~0,60 $ en el peor caso).
+- [ ] Confirmar en el primer push a `main` que el `CLOUDFLARE_API_TOKEN` de GitHub Actions
+      despliega staging (sus scopes documentados son de cuenta y de zona, así que deberían
+      valer sin tocarlo — pero hasta que no corra, no está probado).
+- [ ] Entrar una vez a `admin-staging.hirevai.com` con `botnexo.ia+cliente@gmail.com` para
+      ver el panel con **rol cliente**, que es el que casi nunca se mira.
+- Twilio y Telegram se quedan SIN credenciales en staging a propósito — que una prueba no
+  pueda mandarle un WhatsApp a un cliente real. No rellenar «por comodidad».
+
 ### 2c. Alta de los 4 clientes + 1 prospecto (plan de alta aplicado — ver `IMPLEMENTADO.md`)
 
 - [x] **Alta en el panel** de `hiredatavision`, `gogestion`, `zoe`, `dialogos` — verificado el 2026-08-18: los 4 slugs responden 200 en `/widget/boot` (filas activas).

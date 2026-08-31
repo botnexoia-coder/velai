@@ -81,6 +81,101 @@ python3 -m http.server 8080      # sitio estático
 
 La test key de Turnstile del example siempre valida. `ALLOWED_WEB_ORIGINS` del `.dev.vars` debe incluir el origen del servidor estático.
 
+## Staging — el ensayo antes de producción (2026-08-31)
+
+Copia completa e independiente del backend: **su propio worker, su propia D1, su propio
+KV y ningún cliente detrás**. Existe porque hasta ahora la primera ejecución real de
+cualquier cambio era en producción — los tests corren contra mocks y
+`d1 migrations apply --remote` iba directo a la base con los leads y las conversaciones
+de los clientes. Los tres parches que costó ese agujero (`check-bundle.mjs`,
+`render-panel.mjs` y el `try/catch` de `resolveScope`) son el mismo problema visto tres veces.
+
+| | Producción | Staging |
+|---|---|---|
+| Worker | `vai-worker` | `vai-worker-staging` |
+| URL | `api.hirevai.com` | `vai-worker-staging.botnexo-ia.workers.dev` |
+| Panel | `admin.hirevai.com` | `admin-staging.hirevai.com` |
+| D1 | `vai-leads` | `vai-leads-staging` |
+| KV | `14fbc395…` | `d522cc2e…` |
+| Cron | cada 1 y 5 min | **ninguno** (cuota de listados de KV) |
+| Tope IA | 2.000/día | 100/día |
+| App de Access | `admin` · aud `d5ea5814…` | `admin staging` · aud `29b2c9b0…` |
+
+**Se despliega solo.** `deploy-worker.yml` en cada push a `main` hace:
+migraciones y deploy en staging → prueba de humo → migraciones y deploy en producción.
+Si algo de staging falla, producción ni se roza. A mano:
+
+```bash
+npx wrangler@4 d1 migrations apply vai-leads-staging --remote --env staging
+npx wrangler@4 deploy --env staging
+npx wrangler@4 d1 execute vai-leads-staging --remote --env staging --file seed/seed-staging.sql
+```
+
+### Tres reglas que no se rompen
+
+1. **En staging no entran datos reales de clientes.** Ni una copia «solo para probar»: un
+   entorno con menos protecciones y las mismas fichas de contacto es un problema de RGPD.
+   `seed/seed-staging.sql` siembra tenants inventados y borra hasta los teléfonos del
+   equipo que trae la migración 0002.
+2. **`CF_ACCESS_GROUP_ID` y `CF_ADMIN_GROUP_ID` se quedan VACÍOS en staging.** Con valor,
+   gestionar usuarios desde el panel de staging reescribiría quién entra en el panel de los
+   clientes reales. Vacíos, `syncPanelGate`/`syncAdminGate` devuelven `'manual'` y no
+   llaman a la API de Access (`worker/app.js:2540`).
+3. **`[env.staging]` declara sus `routes` explícitamente.** Wrangler HEREDA `routes` del
+   bloque raíz: sin esa línea, un `deploy --env staging` reclamaría `admin.hirevai.com` y
+   `api.hirevai.com` y serviría a los clientes desde staging.
+
+`npm run check:entornos` verifica las tres en cada `npm run check`, y además que las
+variables de los dos entornos no se desincronicen (wrangler no hereda `vars`: hay que
+repetirlas, y lo que se repite a mano se pudre solo).
+
+### Acceso al panel de staging (configurado el 2026-08-31)
+
+App de Access **propia**, separada de la de producción: si alguien toca la de staging, la
+de los clientes no se entera.
+
+| | |
+|---|---|
+| App | `admin staging` · uid `62210de3-95e9-43f1-b5d2-e8db13251fe5` |
+| Dominio | `admin-staging.hirevai.com` · sesión 24 h · self-hosted |
+| `POLICY_AUD` | `29b2c9b0f5d8f686c9b48a87b0ffa511a39abb2b9f4475953e71e354cac260ed` |
+| `TEAM_DOMAIN` | `https://silent-pond-acd1.cloudflareaccess.com` |
+| Política | `Staging Velai` (allow, **no reutilizable**): `botnexo.ia@gmail.com` y `botnexo.ia+cliente@gmail.com` |
+
+El alias `+cliente` llega al mismo buzón (así recibes su OTP) pero es una cadena distinta
+de `ADMIN_EMAILS`, así que `resolveScope` lo resuelve como **rol cliente** del tenant
+`demo-staging`. Es la forma de ver el panel como lo ve un cliente, sin inventar buzones.
+
+Ninguna de las políticas de staging usa los **grupos** de Access de producción, y sus ids
+siguen vacíos en `[env.staging.vars]` — ver regla 2 arriba.
+
+**Secrets ya puestos** en el worker de staging: `TEAM_DOMAIN`, `POLICY_AUD`,
+`TURNSTILE_SECRET_KEY` (la de prueba) y `SECRETS_KEK` (generada aparte, distinta de la de
+producción). Twilio y Telegram se quedan SIN credenciales a propósito: así una prueba en
+staging no puede mandarle un WhatsApp de verdad a un cliente de verdad. El código ya
+degrada solo cuando faltan (`deliver` devuelve `skipped`).
+
+- [ ] **Falta `ANTHROPIC_API_KEY`** — sin ella `POST /chat` responde `503 ai_not_configured`
+      (todo lo anterior del camino sí funciona). Poner una clave propia, no la de producción:
+      ```bash
+      npx wrangler@4 secret put ANTHROPIC_API_KEY --env staging
+      ```
+      El tope de staging son 100 llamadas/día (`AI_DAILY_LIMIT`), ~0,60 $ en el peor caso.
+
+### Dos trampas de staging que cuestan una tarde
+
+1. **Turnstile y `example.com`.** La clave de PRUEBA emite tokens con
+   `hostname: "example.com"`, y `verifyTurnstile` rechaza todo token cuyo hostname no esté
+   en `ALLOWED_WEB_ORIGINS` (`worker/app.js:168`). Por eso staging lleva `example.com` en su
+   lista y producción no. Sin esa entrada, `POST /chat` da `403 human_verification_failed`
+   siempre y parece un fallo del chat cuando es de la configuración.
+2. **La lista de orígenes se cachea en KV 5 minutos** (`origins:all`). Tras cambiar
+   `ALLOWED_WEB_ORIGINS` el worker sigue con la lista vieja hasta que expira. Para no
+   esperar:
+   ```bash
+   npx wrangler@4 kv key delete --namespace-id d522cc2ef3f54e1f91a35dc90d0df1bc "origins:all" --remote
+   ```
+
 ## Validación y rollback
 
 Ejecutar `npm run check` antes de desplegar (sintaxis JS, validación de las 26 páginas, marcadores sin sustituir y tests del Worker). Después, enviar un lead de prueba y verificar D1, Telegram, WhatsApp y el panel; comprobar que la respuesta fue `stored: "d1"` sin `degraded`. Para rollback, conservar D1 y volver a la versión anterior del Worker/Pages; la migración es aditiva y no debe revertirse destruyendo datos.

@@ -4,10 +4,11 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "check": "npm run check:js && npm run check:site && npm run check:aislamiento && npm test",
-    "check:js": "node --check vai-worker.js && node --check worker/app.js && node --check worker/admin-page.js && node --check worker/admin-panel.js && node --check assets/funnel.js && node --check assets/leadform.js && node --check assets/vai-widget.js && node --check scripts/check-aislamiento.mjs",
+    "check": "npm run check:js && npm run check:site && npm run check:aislamiento && npm run check:entornos && npm test",
+    "check:js": "node --check vai-worker.js && node --check worker/app.js && node --check worker/admin-page.js && node --check worker/admin-panel.js && node --check assets/funnel.js && node --check assets/leadform.js && node --check assets/vai-widget.js && node --check scripts/check-aislamiento.mjs && node --check scripts/check-entornos.mjs",
     "check:site": "node scripts/check-site.mjs",
     "check:aislamiento": "node scripts/check-aislamiento.mjs",
+    "check:entornos": "node scripts/check-entornos.mjs",
     "test": "node --test"
   }
 }

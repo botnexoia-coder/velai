@@ -12,6 +12,53 @@
 
 ---
 
+## Aislamiento multi-tenant estructural + entorno de staging (2026-08-31)
+
+Dos piezas de la revisión de arquitectura previa al crecimiento en clientes. El
+diagnóstico: `worker/app.js` pasó de 606 a 4.860 líneas entre el 17 y el 27 de agosto, y
+lo que peor escala no es el tamaño sino que **el aislamiento entre clientes se escribía a
+mano en cada endpoint** (44 consultas del panel cuya única defensa era que quien escribió
+el handler se acordara de la puerta) y que **la primera ejecución real de cada cambio era
+producción**.
+
+**A — el aislamiento deja de depender de la memoria.** Se auditaron las 100 consultas del
+panel sobre tablas con dueño: **ninguna filtraba datos**, así que esto no arregla un
+agujero, cierra la puerta por la que iba a entrar el número 45. Tres piezas:
+
+- `assertOwnTenant(scope, tenantId)` — la puerta de los recursos con `:id` en la ruta,
+  que estaba copiada literal en nueve sitios, ahora tiene nombre.
+- `scripts/check-aislamiento.mjs` — en `npm run check`: toda consulta del panel alcanzable
+  por un cliente debe estar filtrada, tener puerta, sacar el id del scope o llevar un
+  `// scope-ok:` explícito. Chequeo estático y no proxy en runtime a propósito: un
+  guardián que lanza en producción puede tumbar el panel de un cliente por un falso
+  positivo; este, como mucho, pone el build en rojo.
+- `test/aislamiento.test.js` — recorre las **31 rutas** que `clienteAllowed` abre al rol
+  cliente contra un mock de D1 **adversario** (si una consulta no filtra, el mock devuelve
+  la fila del otro cliente, y la fuga se ve en la respuesta). Y exige que cada ruta nueva
+  tenga su caso: abrir una al rol cliente sin probarla pone CI en rojo.
+
+Ambos guardianes se validaron por mutación —quitar una puerta, quitar un filtro, añadir un
+endpoint de cliente sin filtrar— y los tres casos salen en rojo. La suite pasa de 168 a
+**173 tests**. Regla y patrones en `GUIA-WORKERS.md` §4b.
+
+**B — staging.** `[env.staging]` con worker, D1 (`vai-leads-staging`), KV y dominio propios
+y ningún cliente detrás; `deploy-worker.yml` ensaya ahí en cada push a `main` y solo
+después toca producción. Las 29 migraciones se aplicaron de cero sin un fallo — la primera
+vez que se prueba esa cadena completa. `scripts/check-entornos.mjs` vigila que los dos
+entornos no compartan recursos, dominios ni grupos de Access, y que sus variables no se
+desincronicen (wrangler no hereda `vars` pero **sí hereda `routes`**: sin declararlas en
+staging, un deploy reclamaría `admin.hirevai.com`). Detalle y reglas en `OPERATIONS.md`
+§Staging.
+
+El propio entorno se ganó el sueldo el primer día: al probar el chat en staging apareció que
+la clave de PRUEBA de Turnstile emite tokens con `hostname: example.com` y `verifyTurnstile`
+los rechaza, de modo que `POST /chat` daba 403 siempre. Arreglado en la lista de orígenes de
+staging (y solo ahí). Es exactamente el tipo de fallo que antes se descubría en producción.
+
+**Sobrevive como pendiente** (TAREAS-PENDIENTES §2f): la `ANTHROPIC_API_KEY` del worker de
+staging. Todo lo demás —app de Access `admin staging`, política propia, `TEAM_DOMAIN`,
+`POLICY_AUD`, `SECRETS_KEK` y Turnstile— quedó configurado el 2026-08-31.
+
 ## FASE0 — Aviso de lead por plantilla de Twilio (`FASE0-TWILIO-PLANTILLA.md`)
 
 El aviso de lead por WhatsApp salió del texto libre y pasó a la Content API de Twilio:

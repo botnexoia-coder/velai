@@ -1,11 +1,18 @@
-# CD del worker: en push a main aplica migraciones D1 y despliega vai-worker.
+# CD del worker: en push a main ENSAYA en staging y luego despliega producción.
 # Antes el deploy era manual (npx wrangler deploy) y main podía quedar verde con
 # un worker viejo o una migración sin aplicar en producción (ya pasó: resolveScope
 # lleva un try/catch por código desplegado antes de su migración).
 #
+# El ensayo en staging (2026-08-31) cierra el agujero que quedaba: hasta ahora la PRIMERA
+# ejecución real de cualquier cambio era en producción, con los clientes dentro — los tests
+# corren contra mocks y `migrations apply --remote` iba directo a la base con sus leads.
+# Ahora todo pasa antes por vai-worker-staging, que tiene su propia D1 y su propio KV y
+# ningún cliente detrás. Lo que rompa, rompe ahí.
+#
 # Semántica de fallo a mitad:
-#  - falla `npm run check`      → no se toca nada, main queda rojo.
-#  - falla `migrations apply`   → el worker no se despliega; producción intacta. Relanzar.
+#  - falla `npm run check`        → no se toca nada, main queda rojo.
+#  - falla cualquier paso de STAGING → producción NI SE ROZA. Es el punto del ensayo.
+#  - falla `migrations apply` de prod → el worker no se despliega; producción intacta.
 #  - migraciones OK, falla deploy → worker viejo + esquema nuevo ADITIVO = estado seguro
 #    (regla de OPERATIONS.md: migración primero, deploy después). Relanzar el job:
 #    `migrations apply` es idempotente (tabla d1_migrations) y el deploy se reintenta.
@@ -26,6 +33,8 @@ on:
       - 'migrations/**'
       - 'wrangler.toml'
       - 'test/**'
+      - 'scripts/**'
+      - 'seed/**'
       - 'package.json'
       - '.github/workflows/deploy-worker.yml'
 permissions:
@@ -56,8 +65,36 @@ jobs:
       # los artefactos de esbuild (incidente __name, 2026-08-20): se valida el
       # arranque del panel CONTRA EL BUNDLE REAL antes de tocar producción.
       - run: npx wrangler@4 deploy --dry-run --outdir /tmp/dist && node scripts/check-bundle.mjs /tmp/dist/vai-worker.js
-      - run: npx wrangler@4 d1 migrations apply vai-leads --remote
-      - run: npx wrangler@4 deploy
+
+      # ── ENSAYO EN STAGING ───────────────────────────────────────────────────
+      # Mismo código, otra D1, otro KV, ningún cliente. Si la migración está mal o el
+      # worker no arranca, se ve aquí y producción no llega a enterarse.
+      - name: staging · migraciones
+        run: npx wrangler@4 d1 migrations apply vai-leads-staging --remote --env staging
+      - name: staging · deploy
+        run: npx wrangler@4 deploy --env staging
+      - name: staging · humo
+        run: |
+          base=https://vai-worker-staging.botnexo-ia.workers.dev
+          # 1. el worker arranca y responde CORS
+          pre=$(curl -s -o /dev/null -w '%{http_code}' -X OPTIONS \
+            -H 'Origin: http://localhost:8080' -H 'Access-Control-Request-Method: POST' $base/chat)
+          # 2. el binding de D1 vive: un tenant sembrado responde
+          boot=$(curl -s -o /dev/null -w '%{http_code}' "$base/widget/boot?tenant=demo-staging")
+          # 3. el panel NUNCA responde 200 sin autenticar. Dos cierres válidos:
+          #    302 = Cloudflare Access delante (lo normal desde 2026-08-31)
+          #    401 = el worker rechazando por su cuenta si Access no estuviera
+          #    Lo que jamás puede salir de aquí es un 2xx.
+          panel=$(curl -s -o /dev/null -w '%{http_code}' https://admin-staging.hirevai.com/api/admin/leads)
+          echo "staging → preflight $pre · boot $boot · panel $panel"
+          test "$pre" = "204" && test "$boot" = "200" \
+            && { test "$panel" = "302" || test "$panel" = "401"; }
+
+      # ── PRODUCCIÓN ──────────────────────────────────────────────────────────
+      - name: producción · migraciones
+        run: npx wrangler@4 d1 migrations apply vai-leads --remote
+      - name: producción · deploy
+        run: npx wrangler@4 deploy
       # Humo: el worker vivo responde el preflight CORS de /chat para un origen permitido.
       - run: |
           code=$(curl -s -o /dev/null -w '%{http_code}' -X OPTIONS \

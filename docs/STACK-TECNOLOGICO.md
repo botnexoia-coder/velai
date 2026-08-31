@@ -130,9 +130,16 @@ panel) y `LEAD_RETENTION_MONTHS` (purga RGPD).
   `X-Frame-Options`, `Referrer-Policy`, `Permissions-Policy`, HSTS con preload,
   COOP y CSP base con `frame-ancestors`).
 - **Git** — control de versiones (rama `main`).
+- **Entornos** — `producción` (`vai-worker`, D1 `vai-leads`) y `staging`
+  (`vai-worker-staging`, D1 `vai-leads-staging`, sin clientes). Cada push a `main`
+  ensaya en staging y solo después toca producción. Detalle y reglas:
+  `docs/OPERATIONS.md` §Staging.
 - **Tooling** — `package.json` sin dependencias: `npm run check` = `node --check`
-  de los JS + `scripts/check-site.mjs` (valida las 26 páginas, JSON-LD, recursos
-  internos y marcadores sin sustituir) + `node --test` (`test/worker.test.js`).
+  de los JS + `scripts/check-site.mjs` (valida las 27 páginas, JSON-LD, recursos
+  internos y marcadores sin sustituir) + `scripts/check-aislamiento.mjs` (ninguna
+  consulta del panel sin filtro de tenant ni puerta) + `scripts/check-entornos.mjs`
+  (staging y producción no comparten recursos ni se desincronizan) + `node --test`
+  (`test/worker.test.js` y `test/aislamiento.test.js`).
   CI en `.github/workflows/ci.yml` ejecuta `npm run check` en cada push.
 - **Migraciones D1** — `migrations/` (aplicar con `wrangler d1 migrations apply`).
 - El runbook operativo completo (puesta en marcha, deploy, rollback) vive en
