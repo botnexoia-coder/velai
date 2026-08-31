@@ -583,6 +583,13 @@ html.busy::before{content:'';position:fixed;top:0;left:0;right:0;height:3px;z-in
    marcha» sin movimiento, que es lo que pide prefers-reduced-motion. */
 @media (prefers-reduced-motion:reduce){
  html.busy::before{animation:none;background-image:linear-gradient(90deg,var(--orange),var(--orange2));background-size:100% 100%;opacity:.75}}
+.cfgwh{margin-top:12px;padding:12px 14px;border:1px solid var(--line);border-radius:var(--r-sm);background:rgba(var(--ink),.02)}
+.cfgwh .cfg-h{display:flex;align-items:center;justify-content:space-between;gap:12px}
+.whrow{display:flex;gap:8px;align-items:baseline;padding:3px 0;font-size:13px}
+.whrow b{min-width:120px;color:var(--muted);font-weight:500}
+.whrow span{word-break:break-all}
+.whbad{color:var(--bad)}
+.whok{color:var(--ok)}
 #toasts{position:fixed;top:14px;right:14px;left:auto;bottom:auto;margin:0;border:0;padding:0;background:transparent;overflow:visible;flex-direction:column;align-items:flex-end;gap:8px}
 #toasts:popover-open{display:flex}
 .toast{background:var(--bg2);border:1px solid var(--ok);color:var(--white);border-radius:var(--r-sm);padding:10px 14px;box-shadow:0 8px 30px rgba(0,0,0,.45);font-size:13px;max-width:360px;opacity:0;transform:translateY(-6px);transition:opacity .2s ease,transform .2s ease}
@@ -996,6 +1003,12 @@ body.cliente .cliente-only{display:flex}
 <div class="cfg-rot"><input id="cfgToken" type="password" autocomplete="new-password" placeholder="nuevo token de API de Cloudflare" class="inpill"><button class="btn alt" id="cfgTokenSave" type="button">Validar y guardar</button><button class="btn alt" id="cfgTokenClear" type="button">Volver al secret del worker</button></div>
 </div>
 <div class="cfgtiles" id="configState"></div>
+<div class="cfgwh">
+<div class="cfg-h"><b>Webhook de Telegram</b><button class="btn alt btnsm" id="whCheck" type="button">Comprobar</button></div>
+<p class="muted mt6">Solo lectura: pregunta a Telegram c&oacute;mo tiene registrado el webhook del bot de Velai y qu&eacute; fall&oacute; en la &uacute;ltima entrega. No cambia nada.
+Es la forma de mirar sin romper: <code>getUpdates</code> NO se puede usar con un webhook activo (Telegram responde 409), y desactivarlo dejar&iacute;a a todos los clientes sin poder vincular.</p>
+<div id="whOut" class="mt6 muted">&mdash;</div>
+</div>
 <div class="cfglegend"><span><i class="lg-ok"></i>operativo</span><span><i class="lg-warn"></i>requiere atención</span><span><i class="lg-bad"></i>error</span></div>
 </div></div></main>
 <div class="foot" id="foot">Panel de <b>Velai</b> · <span id="footYear"></span> · Todos los derechos reservados</div>

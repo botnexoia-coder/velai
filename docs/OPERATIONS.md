@@ -305,6 +305,22 @@ La web identifica por ahora únicamente el nombre comercial Velai. **No activar 
   a `<worker>/telegram/webhook`. **Con el webhook activo, `getUpdates` DEJA de funcionar**
   para ese bot: los chat ids ya no se leen a mano — cada cliente se vincula con su enlace
   de un solo uso desde su pestaña Conexiones.
+- **El secreto solo admite `A-Z a-z 0-9 _ -`** (1-256). Un `openssl rand -base64 32` mete
+  `+`, `/` y `=` y Telegram rechaza el `setWebhook` ENTERO con un 400 genérico — tuvo la
+  vinculación de todos los clientes muerta del 21 al 31 de agosto. Generarlo siempre con
+  `openssl rand -hex 32`. `telegramSetWebhook` ya lo comprueba antes de gastar la llamada.
+- **Para mirar sin romper: Configuración → «Webhook de Telegram» → Comprobar** (solo admins
+  raíz). Llama a `getWebhookInfo`, que es de solo lectura, y enseña cuatro cosas:
+  - la **URL registrada** y si coincide con la del worker — un webhook apuntando a otro
+    sitio está «activo» y no entrega nada, y desde fuera se ve igual que uno sano;
+  - **cuántas actualizaciones hay en cola** (si suben, Telegram no consigue entregarlas);
+  - **`last_error_message`**: qué falló en el último intento. Es el campo que habría
+    resuelto el incidente de agosto en dos minutos;
+  - la IP desde la que entrega Telegram.
+
+  Existe porque la alternativa era `getUpdates`, y esa exige `deleteWebhook` — o sea dejar
+  a TODOS los clientes sin poder vincular para depurar a uno. `getWebhookInfo` no toca nada
+  y no devuelve el `secret_token`.
 - Avisos de lead por Telegram: entrega DUAL — al chat del cliente (sin chat propio =
   `skipped: telegram_not_configured`, visible en el ledger) y SIEMPRE una copia operativa
   al `TELEGRAM_CHAT_ID` de Velai, deduplicada por lead (`opsping:` en KV, 30 días). El

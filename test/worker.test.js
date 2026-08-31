@@ -4619,3 +4619,70 @@ test('stats devuelve las fuentes existentes, y a un cliente solo las suyas', asy
   const todas = await (await testing.adminRouter(req, env, ctx, '/api/admin/stats', url, {}, velai)).json();
   assert.ok(todas.fuentes.includes('landing-ajena'));
 });
+
+// ── Diagnóstico del webhook de Telegram (Configuración) ──
+// Existe porque getUpdates NO se puede usar con un webhook activo (409) y desactivarlo
+// dejaría a todos los clientes sin poder vincular. getWebhookInfo no toca nada.
+test('getWebhookInfo: detecta el webhook apuntando a OTRO sitio, que desde fuera parece sano', async () => {
+  const realFetch = globalThis.fetch;
+  const env = { TELEGRAM_TOKEN: '123:abc' };
+  const responder = (result) => { globalThis.fetch = async () => new Response(JSON.stringify({ ok: true, result }), { status: 200 }); };
+  try {
+    responder({ url: 'https://otro-sitio.example/telegram/webhook', pending_update_count: 12 });
+    const mal = await testing.telegramWebhookInfo(env);
+    assert.equal(mal.coincide, false);
+    assert.match(mal.esperada, /vai-worker\.botnexo-ia\.workers\.dev\/telegram\/webhook$/);
+    assert.equal(mal.pendientes, 12);
+
+    responder({ url: 'https://vai-worker.botnexo-ia.workers.dev/telegram/webhook', pending_update_count: 0 });
+    const bien = await testing.telegramWebhookInfo(env);
+    assert.equal(bien.coincide, true);
+    assert.equal(bien.ultimoError, null);
+
+    // El campo por el que existe todo esto: qué falló en la última entrega.
+    responder({
+      url: 'https://vai-worker.botnexo-ia.workers.dev/telegram/webhook',
+      pending_update_count: 3,
+      last_error_message: 'Wrong response from the webhook: 401 Unauthorized',
+      last_error_date: 1756400000,
+    });
+    const conError = await testing.telegramWebhookInfo(env);
+    assert.match(conError.ultimoError.mensaje, /401 Unauthorized/);
+    assert.ok(conError.ultimoError.cuando.startsWith('2025-'), 'la fecha llega en ISO');
+
+    // Sin token no se inventa nada ni se llama a Telegram.
+    let llamadas = 0;
+    globalThis.fetch = async () => { llamadas++; return new Response('{}'); };
+    assert.deepEqual(await testing.telegramWebhookInfo({}), { configured: false });
+    assert.equal(llamadas, 0);
+
+    // Telegram caído: se dice, no se finge que todo va bien.
+    globalThis.fetch = async () => { throw new Error('timeout'); };
+    assert.match((await testing.telegramWebhookInfo(env)).error, /timeout/);
+  } finally { globalThis.fetch = realFetch; }
+});
+
+test('el diagnóstico del webhook es solo para admins RAÍZ, como el resto de Configuración', async () => {
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = async () => new Response(JSON.stringify({ ok: true, result: { url: 'x' } }), { status: 200 });
+  const env = {
+    TELEGRAM_TOKEN: '123:abc', ADMIN_EMAILS: 'raiz@velai.ai',
+    DB: { prepare: () => ({ bind: () => ({ first: async () => null, all: async () => ({ results: [] }), run: async () => ({ meta: { changes: 0 } }) }) }) },
+    KV: { async get() { return null; }, async put() {} },
+  };
+  const path = '/api/admin/config/telegram-webhook';
+  const url = new URL('https://admin.hirevai.com' + path);
+  const req = new Request(url.toString());
+  const ctx = { waitUntil() {} };
+  try {
+    // Admin de D1 (no raíz): 403 root_only, igual que el token de Cloudflare.
+    await assert.rejects(
+      testing.adminRouter(req, env, ctx, path, url, {}, { role: 'velai', tenantId: null, email: 'admin-de-d1@x.com' }),
+      (e) => e.status === 403 && e.code === 'root_only');
+    // Raíz: pasa.
+    const res = await testing.adminRouter(req, env, ctx, path, url, {}, { role: 'velai', tenantId: null, email: 'raiz@velai.ai' });
+    assert.equal(res.status, 200);
+    const body = await res.text();
+    assert.ok(!body.includes('123:abc'), 'el token del bot no sale nunca en la respuesta');
+  } finally { globalThis.fetch = realFetch; }
+});

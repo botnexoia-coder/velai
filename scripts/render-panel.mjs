@@ -172,6 +172,22 @@ const VISTAS = {
         + fila('30/08/26 19:15', 'GOgesti&oacute;n', 'won', 'Carmen', '+34 602 608 940', 'reserva confirmada', 'calculadora-roi')
         + '</tbody>');
   },
+  // Configuración: la tarjeta de integraciones solo se destapa para admins raíz (lo hace
+  // loadConfig), así que aquí se destapa a mano. Lo que hay que MIRAR es el diagnóstico
+  // del webhook con un fallo de verdad: es el estado que importa y el que no se ve nunca.
+  config: (h) => {
+    const fila = (k, v, cls) => `<div class="whrow"><b>${k}</b><span${cls ? ` class="${cls}"` : ''}>${v}</span></div>`;
+    return h
+      .replace('<div class="panelcard mt12" id="configCard" hidden>', '<div class="panelcard mt12" id="configCard">')
+      .replace('<div id="adminsList" class="mt6 muted">&mdash;</div>',
+        '<div id="adminsList" class="mt6"><div class="whrow"><b>botnexo.ia@gmail.com</b><span class="muted">ra&iacute;z</span></div></div>')
+      .replace('<div id="whOut" class="mt6 muted">&mdash;</div>', '<div id="whOut" class="mt6">'
+        + fila('URL', 'https://vai-worker.botnexo-ia.workers.dev/telegram/webhook', 'whok')
+        + fila('En cola', '3 &mdash; se est&aacute;n acumulando', 'whbad')
+        + fila('&Uacute;ltimo error', 'Wrong response from the webhook: 401 Unauthorized (31/08/26 12:14)', 'whbad')
+        + fila('IP de Telegram', '91.108.6.51')
+        + '</div>');
+  },
   // El calendario esconde su configuración hasta que hay conexión: aquí se destapa para
   // poder mirar la rejilla del horario laboral sin montar un OAuth.
   calendario: (h) => h.replace('<div id="calViewWrap" hidden>', '<div id="calViewWrap">'),

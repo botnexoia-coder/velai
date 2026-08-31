@@ -951,6 +951,39 @@ async function telegramSetWebhook(env, botToken) {
   return { ok: false, code, why };
 }
 
+// Diagnóstico del webhook, de SOLO LECTURA. Existe porque la alternativa para saber por
+// qué no llegan los /start era `getUpdates`, y eso NO se puede usar con un webhook activo:
+// Telegram responde 409 «can't use getUpdates method while webhook is active» — las dos
+// vías de entrega son excluyentes para que un mensaje no se entregue dos veces. Volver a
+// getUpdates exigiría un deleteWebhook, que deja a TODOS los clientes sin poder vincular.
+// getWebhookInfo no toca nada y trae lo único que hacía falta: last_error_message, o sea
+// qué falló en el último intento de entrega. No devuelve el secret_token.
+async function telegramWebhookInfo(env) {
+  if (!env.TELEGRAM_TOKEN) return { configured: false };
+  let data;
+  try {
+    const response = await fetch(`https://api.telegram.org/bot${env.TELEGRAM_TOKEN}/getWebhookInfo`, { signal: AbortSignal.timeout(8000) });
+    data = await response.json();
+  } catch (error) { return { configured: true, error: `red: ${String(error.message || error).slice(0, 80)}` }; }
+  if (!data || !data.ok) return { configured: true, error: clean(data && data.description, 200) || 'telegram_error' };
+  const r = data.result || {};
+  const esperada = `${WORKER_PUBLIC_URL}/telegram/webhook`;
+  return {
+    configured: true,
+    url: clean(r.url, 200) || null,
+    esperada,
+    // La comprobación que de verdad importa: un webhook apuntando a otro sitio es un
+    // webhook «activo» que no nos entrega nada, y desde fuera se ve idéntico a uno sano.
+    coincide: r.url === esperada,
+    pendientes: Number(r.pending_update_count) || 0,
+    ultimoError: r.last_error_message
+      ? { mensaje: clean(r.last_error_message, 200), cuando: r.last_error_date ? new Date(r.last_error_date * 1000).toISOString() : null }
+      : null,
+    maxConexiones: Number(r.max_connections) || null,
+    ip: clean(r.ip_address, 60) || null,
+  };
+}
+
 // Usuario del bot (para construir los enlaces t.me): se descubre con getMe y se
 // cachea en KV — sin variable nueva que pueda quedar desincronizada del token.
 async function telegramBotUsername(env) {
@@ -3555,7 +3588,7 @@ async function adminRouter(request, env, ctx, path, url, config, scope) {
   // ── Configuración (SOLO admins raíz): estado de integraciones y rotación del
   // token de API de Cloudflare. Raíz = envAdmins (los del toml): ni siquiera un admin
   // dado de alta en el panel puede tocar tokens — dos factores reales en vez de un PIN.
-  if (path === '/api/admin/config' || path === '/api/admin/config/cf-token') {
+  if (path === '/api/admin/config' || path === '/api/admin/config/cf-token' || path === '/api/admin/config/telegram-webhook') {
     if (!envAdmins(env).includes(String(actor).toLowerCase())) throw new HttpError(403, 'root_only');
   }
   if (path === '/api/admin/config' && request.method === 'GET') {
@@ -3570,6 +3603,11 @@ async function adminRouter(request, env, ctx, path, url, config, scope) {
       groups: { clientes: Boolean(env.CF_ACCESS_GROUP_ID), admins: Boolean(env.CF_ADMIN_GROUP_ID) },
       d1: Boolean(env.DB), kv: Boolean(env.KV),
     }, 200, NO_STORE);
+  }
+  // Bajo demanda y no dentro de /config: llamar a Telegram en cada carga de la vista
+  // sería una llamada externa por visita para un dato que casi nunca cambia.
+  if (path === '/api/admin/config/telegram-webhook' && request.method === 'GET') {
+    return json(await telegramWebhookInfo(env), 200, NO_STORE);
   }
   if (path === '/api/admin/config/cf-token' && request.method === 'POST') {
     const body = await readJson(request, 2000);
@@ -4926,4 +4964,4 @@ export function createWorker(config) {
   };
 }
 
-export const testing = { scheduled, MINUTE_CRON, waitedMin, QUEUE_MAX_MIN, QUEUE_WAIT_TEXT, canAttend, velaiTenantId, handleChatPoll, VISITOR_AWAY_MS, expireTakeovers, NO_ADVISOR_TEXT, graceExpired, systemWithHandoff, HANDOFF_ON, HANDOFF_OFF, supportWindows, withinSupportHours, advisorAvailable, CONV_STATES, TAKEOVER_GRACE_MIN, settleReply, TRUNCATED_CLOSING, trimToSentence, waBody, replyWindow, reportPeriod, reportMetric, weeklyReportText, weeklyStats, sendWeeklyReports, convLoad, convAppend, convLinkLead, convFilters, convRetentionDays, UNANSWERED_RE, CONV_WINDOW, cloudflareUsage, CF_FREE_LIMITS, recordConversation, aiCost, recordAiUsage, rateLimited, memLimited, applySenderProfile, pushSenderProfile, clean, persistLead, leadAlertStatus, captureWhatsAppLead, leadFromSummary, leadCaptureDone, errorResponseParts, tenantByAddress, syncPrimaryChannel, assertChannelFree, normalizePhone, extractPhone, safeUtm, publicCors, validTwilioSignature, callAnthropic, callAnthropicRaw, runToolLoop, calendarExecutor, calendarSystem, tenantCalendar, validCalendarDate, availableSlots, handleCalendarCallback, calendarCallbackFor, sendTwilioText, timingSafeEqual, telegramBotUsername, telegramSetWebhook, handleTelegramWebhook, sendTelegramText, tenantTelegramToken, telegramThreadFor, registerTelegramTopic, csvCell, expiryDate, leadFilters, isDemoKey, templateVar, leadTemplateVariables, readJson, deliver, drainQueuedLeads, verifyTurnstile, systemFor, validateTenant, invalidateTenantCache, tenantWriteError, assertNotActivePending, tenantChannelSummary, channelsForScope, handleProvision, pollProvisioning, fillSeries, resolveScope, scopeClause, assertOwnTenant, clienteAllowed, adminRouter, recordAuthFailure, handleAdmin, handleWidgetBoot, allowedOrigins, envOrigins, syncPanelGate, envAdmins, syncAdminGate, getSetting, setSetting, withCfToken };
+export const testing = { scheduled, MINUTE_CRON, waitedMin, QUEUE_MAX_MIN, QUEUE_WAIT_TEXT, canAttend, velaiTenantId, handleChatPoll, VISITOR_AWAY_MS, expireTakeovers, NO_ADVISOR_TEXT, graceExpired, systemWithHandoff, HANDOFF_ON, HANDOFF_OFF, supportWindows, withinSupportHours, advisorAvailable, CONV_STATES, TAKEOVER_GRACE_MIN, settleReply, TRUNCATED_CLOSING, trimToSentence, waBody, replyWindow, reportPeriod, reportMetric, weeklyReportText, weeklyStats, sendWeeklyReports, convLoad, convAppend, convLinkLead, convFilters, convRetentionDays, UNANSWERED_RE, CONV_WINDOW, cloudflareUsage, CF_FREE_LIMITS, recordConversation, aiCost, recordAiUsage, rateLimited, memLimited, applySenderProfile, pushSenderProfile, clean, persistLead, leadAlertStatus, captureWhatsAppLead, leadFromSummary, leadCaptureDone, errorResponseParts, tenantByAddress, syncPrimaryChannel, assertChannelFree, normalizePhone, extractPhone, safeUtm, publicCors, validTwilioSignature, callAnthropic, callAnthropicRaw, runToolLoop, calendarExecutor, calendarSystem, tenantCalendar, validCalendarDate, availableSlots, handleCalendarCallback, calendarCallbackFor, sendTwilioText, timingSafeEqual, telegramBotUsername, telegramSetWebhook, telegramWebhookInfo, handleTelegramWebhook, sendTelegramText, tenantTelegramToken, telegramThreadFor, registerTelegramTopic, csvCell, expiryDate, leadFilters, isDemoKey, templateVar, leadTemplateVariables, readJson, deliver, drainQueuedLeads, verifyTurnstile, systemFor, validateTenant, invalidateTenantCache, tenantWriteError, assertNotActivePending, tenantChannelSummary, channelsForScope, handleProvision, pollProvisioning, fillSeries, resolveScope, scopeClause, assertOwnTenant, clienteAllowed, adminRouter, recordAuthFailure, handleAdmin, handleWidgetBoot, allowedOrigins, envOrigins, syncPanelGate, envAdmins, syncAdminGate, getSetting, setSetting, withCfToken };

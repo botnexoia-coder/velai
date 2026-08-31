@@ -852,6 +852,26 @@ $('#cfgTokenSave').onclick=async()=>{const token=$('#cfgToken').value.trim();if(
 $('#cfgTokenClear').onclick=async()=>{if(!confirm('¿Retirar el token del panel y volver al secret del worker?'))return;
  try{const r=await api('/api/admin/config/cf-token',{method:'DELETE'});toast('Hecho ✓ — origen: '+(r.source==='worker'?'secret del worker':'SIN token: las sincronizaciones quedan en manual'),r.source==='worker');loadConfig()}
  catch(e){toast('No se pudo: '+(TERRS[e.message]||e.message),false)}};
+// Diagnóstico del webhook de Telegram (solo lectura). Bajo demanda y no al abrir la
+// vista: es una llamada a un tercero para un dato que casi nunca cambia.
+$('#whCheck').onclick=async()=>{const out=$('#whOut');out.className='mt6 muted';out.textContent='preguntando a Telegram…';
+ try{const w=await api('/api/admin/config/telegram-webhook');
+  if(!w.configured){out.innerHTML='<span class="whbad">El worker no tiene TELEGRAM_TOKEN: no hay bot que consultar.</span>';return}
+  if(w.error){out.innerHTML='<span class="whbad">Telegram no respondió: '+esc(w.error)+'</span>';return}
+  const fila=(k,v,cls)=>'<div class="whrow"><b>'+k+'</b><span'+(cls?' class="'+cls+'"':'')+'>'+v+'</span></div>';
+  let h='';
+  // Un webhook apuntando a otro sitio es un webhook «activo» que no nos entrega nada, y
+  // desde fuera se ve igual que uno sano: por eso se compara, no solo se enseña.
+  h+=w.url?fila('URL',esc(w.url),w.coincide?'whok':'whbad'):fila('URL','sin registrar','whbad');
+  if(w.url&&!w.coincide)h+=fila('Debería ser',esc(w.esperada),'whbad');
+  h+=fila('En cola',String(w.pendientes)+(w.pendientes>0?' — se están acumulando':''),w.pendientes>0?'whbad':'whok');
+  h+=w.ultimoError
+   ?fila('Último error',esc(w.ultimoError.mensaje)+(w.ultimoError.cuando?' ('+fmt(w.ultimoError.cuando)+')':''),'whbad')
+   :fila('Último error','ninguno','whok');
+  if(w.ip)h+=fila('IP de Telegram',esc(w.ip));
+  out.className='mt6';out.innerHTML=h}
+ catch(e){out.className='mt6';out.innerHTML='<span class="whbad">No se pudo comprobar: '+esc(TERRS[e.message]||e.message)+'</span>'}};
+
 // ── Admins de Velai: alta/baja desde el panel, con la puerta de Access incluida ──
 async function loadAdmins(){try{const d=await api('/api/admin/admins');
  $('#adminsList').innerHTML=d.admins.map(a=>'<span class="flag '+(a.root?'ok':'off')+'">'+esc(a.email)+(a.root?' · raíz':' <a href="#" data-adel="'+esc(a.email)+'" title="Quitar admin">✕</a>')+'</span>').join(' ');
