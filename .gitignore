@@ -5,3 +5,19 @@
 .dev.vars
 
 node_modules/
+
+# Salidas de bundle de wrangler (deploy --dry-run --outdir …). El workflow usa
+# /tmp/dist; si bundleas en local, hazlo aquí. distB/ entró commiteado por
+# accidente el 26-08 y quedó servido en hirevai.com — que no se repita.
+dist/
+distB/
+
+# Logs sueltos (wrangler tail, npm, scripts)
+*.log
+
+# Estado de agentes/worktrees de Claude Code (no es código del proyecto)
+.claude/
+
+# Metadatos de editores y SO
+.DS_Store
+Thumbs.db
