@@ -57,6 +57,19 @@ El entorno está montado y con Cloudflare Access delante (app `admin staging`, p
 - Twilio y Telegram se quedan SIN credenciales en staging a propósito — que una prueba no
   pueda mandarle un WhatsApp a un cliente real. No rellenar «por comodidad».
 
+### 2g. Vincular el Telegram de los clientes (desbloqueado el 2026-08-31)
+
+El webhook ya registra (era el charset de `TELEGRAM_WEBHOOK_SECRET`, ver `IMPLEMENTADO.md`).
+Ahora cada cliente puede completar SU vinculación, cosa que nunca fue posible:
+
+- [ ] **gogestion** — tiene marca blanca activada: pega su bot de @BotFather en Conexiones
+      y vincula el grupo. Era el caso que destapó el fallo.
+- [ ] **dialogos** — igual (marca blanca activada, sin bot).
+- [ ] **zoe** y **hiredatavision** — sin marca blanca: les basta el enlace de un solo uso
+      con el bot de Velai (@Velaivai_bot).
+- [ ] Comprobar en D1 que `telegram_chat_id` deja de ser NULL en cada uno:
+      `npx wrangler@4 d1 execute vai-leads --remote --command "SELECT slug, telegram_chat_id FROM tenants"`
+
 ### 2c. Alta de los 4 clientes + 1 prospecto (plan de alta aplicado — ver `IMPLEMENTADO.md`)
 
 - [x] **Alta en el panel** de `hiredatavision`, `gogestion`, `zoe`, `dialogos` — verificado el 2026-08-18: los 4 slugs responden 200 en `/widget/boot` (filas activas).

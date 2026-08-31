@@ -12,6 +12,36 @@
 
 ---
 
+## El webhook de Telegram llevaba 10 días roto por el charset del secreto (2026-08-31)
+
+**Síntoma:** «Telegram rechazó el registro del webhook: reintenta», 502 en
+`/api/admin/telegram/setup`. Reintentar no arreglaba nada, y la pista falsa era que
+parecía un problema del token que pegaba el cliente.
+
+**Alcance real, visto en D1:** desde que se lanzó el autoservicio el 2026-08-21, NINGÚN
+cliente había conseguido vincular su Telegram. Solo `velai` tenía chat, del día del
+lanzamiento. gogestion, dialogos, zoe y hiredatavision: cero. No era un caso raro de un
+cliente, era la función entera muerta — y no se notó porque los avisos de lead SALEN por
+`sendMessage` y esos seguían funcionando: lo único que usa el webhook es la vinculación.
+
+**Causa:** `TELEGRAM_WEBHOOK_SECRET` estaba generado con caracteres fuera de lo que
+Telegram admite en `secret_token` (solo `A-Z a-z 0-9 _ -`; un `openssl rand -base64 32`
+mete `+`, `/` y `=`). Telegram rechaza el `setWebhook` entero con un 400 genérico.
+Confirmado: rotado a `openssl rand -hex 32`, el registro pasó a la primera.
+
+**Por qué costó 10 días diagnosticarlo, que es lo que de verdad había que arreglar:**
+`telegramSetWebhook` devolvía un booleano y tiraba el `description` de Telegram. El
+cliente veía «reintenta» y el log no guardaba NADA — no había forma de distinguir un
+token malo de nuestro secreto. Ahora devuelve `{ ok, code, why }`, traduce el motivo a
+códigos accionables (`invalid_bot_token`, `webhook_secret_invalid`, `telegram_rate_limited`,
+`webhook_url_invalid`), comprueba el charset del secreto ANTES de gastar la llamada, y
+`HttpError` acepta un `why` que viaja al cuerpo de la respuesta y al log. El panel ya
+sabía leerlo (`e.why`); el worker no lo mandaba nunca.
+
+**Lección que vale más que el arreglo:** un tercero que falla sin que se registre el
+motivo es un fallo que no se puede diagnosticar, y aquí costó diez días y la función
+entera. Todo `fetch` a un tercero que decida un flujo debe conservar su mensaje.
+
 ## Aislamiento multi-tenant estructural + entorno de staging (2026-08-31)
 
 Dos piezas de la revisión de arquitectura previa al crecimiento en clientes. El
