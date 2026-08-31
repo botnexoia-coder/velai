@@ -1,4 +1,11 @@
+import { Hono } from 'hono';
 import { ADMIN_HEADERS, ADMIN_HTML } from './admin-page.js';
+import {
+  adminOrigin, adminHost, adminCorsGuard, adminIdentity, envAdmins, resolveScope,
+  recordAuthFailure, scopeClause, assertOwnTenant, clienteAllowed,
+  mwAdminHost, mwAdminCors, mwAdminIdentity, mwResolveScope,
+} from './middleware.js';
+import { publico } from './routes/publico.js';
 import { encryptSecret, decryptSecret } from './crypto.js';
 import { cloudflareConfigured, syncTurnstileDomains, syncAccessGroup, syncAdminGroup, verifyCfToken } from './cloudflare.js';
 import { createSubaccount, fetchSubaccount, findSubaccountByName, createLeadTemplate, submitTemplateApproval, fetchApprovalStatus, createWhatsAppSender, verifySender, fetchSenderStatus, listWhatsAppSenders, updateSenderWebhook, updateSenderProfile, fetchSender } from './twilio.js';
@@ -15,11 +22,11 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-
 const STATUSES = new Set(['new', 'contacted', 'qualified', 'won', 'lost', 'spam']);
 const UTM_KEYS = ['utm_source', 'utm_medium', 'utm_campaign', 'utm_content', 'utm_term', 'gclid', 'fbclid'];
 
-function json(data, status = 200, headers = {}) {
+export function json(data, status = 200, headers = {}) {
   return new Response(JSON.stringify(data), { status, headers: { ...JSON_HEADERS, ...headers } });
 }
 
-function adminPageResponse() {
+export function adminPageResponse() {
   const nonce = btoa(String.fromCharCode(...crypto.getRandomValues(new Uint8Array(18))));
   const headers = {
     ...ADMIN_HEADERS,
@@ -30,7 +37,7 @@ function adminPageResponse() {
   return new Response(ADMIN_HTML.replaceAll('__NONCE__', nonce), { headers });
 }
 
-function clean(value, max = 200) {
+export function clean(value, max = 200) {
   return typeof value === 'string' ? value.trim().slice(0, max) : '';
 }
 
@@ -86,7 +93,7 @@ async function allowedOrigins(env) {
   return list;
 }
 
-async function publicCors(request, env) {
+export async function publicCors(request, env) {
   const origin = request.headers.get('Origin') || '';
   if (!origin || !(await allowedOrigins(env)).includes(origin)) return null;
   return {
@@ -114,7 +121,7 @@ async function readJson(request, maxBytes = 16000) {
   return parsed;
 }
 
-class HttpError extends Error {
+export class HttpError extends Error {
   // `why` = el detalle CRUDO del tercero que falló (el "description" de Telegram, el
   // "message" de Twilio). Va aparte del código a propósito: el código es contrato con el
   // panel y es traducible; el why es diagnóstico y puede cambiar sin romper a nadie.
@@ -137,7 +144,7 @@ function memLimited(key, limit, windowMs = 60000) {
   return hit.n > limit;
 }
 
-async function rateLimited(env, ip, bucket, limit) {
+export async function rateLimited(env, ip, bucket, limit) {
   // El panel (identidad verificada por Access) no gasta cuota de KV.
   if (bucket === 'admin') return memLimited(`${bucket}:${ip}`, limit);
   if (!env.KV || !ip) return false;
@@ -708,7 +715,7 @@ function validateTenant(body, { partial = false } = {}) {
 // vez en el dashboard (error 10042 si no): mientras no esté, los logos viven en KV, que
 // admite valores de hasta 25 MB y ya está enlazado. En cuanto exista el binding MEDIA,
 // las subidas NUEVAS van a R2 y las viejas se siguen sirviendo desde KV.
-const MEDIA_KEY_RE = /^[a-z0-9][a-z0-9/_.-]{0,120}$/i;
+export const MEDIA_KEY_RE = /^[a-z0-9][a-z0-9/_.-]{0,120}$/i;
 
 async function mediaPut(env, key, bytes, contentType) {
   if (env.MEDIA) { await env.MEDIA.put(key, bytes, { httpMetadata: { contentType } }); return 'r2'; }
@@ -717,7 +724,7 @@ async function mediaPut(env, key, bytes, contentType) {
   return 'kv';
 }
 
-async function mediaGet(env, key) {
+export async function mediaGet(env, key) {
   if (env.MEDIA) {
     const obj = await env.MEDIA.get(key);
     if (obj) return { body: obj.body, contentType: (obj.httpMetadata && obj.httpMetadata.contentType) || 'application/octet-stream', etag: obj.httpEtag };
@@ -728,7 +735,7 @@ async function mediaGet(env, key) {
   return { body: hit.value, contentType: (hit.metadata && hit.metadata.contentType) || 'application/octet-stream', etag: null };
 }
 
-async function handleWidgetBoot(request, env, url) {
+export async function handleWidgetBoot(request, env, url) {
   const origin = request.headers.get('Origin') || '';
   // GET simple: el navegador no hace preflight, pero el Allow-Origin es obligatorio.
   const cors = origin && (await allowedOrigins(env)).includes(origin)
@@ -886,7 +893,7 @@ async function invalidateTenantCache(env, tenants) {
 
 // Comparación en tiempo constante para el secreto del webhook (mismo principio que
 // la firma de Twilio): longitudes desiguales salen rápido, el resto no filtra bytes.
-function timingSafeEqual(a, b) {
+export function timingSafeEqual(a, b) {
   const x = String(a); const y = String(b);
   if (x.length !== y.length) return false;
   let diff = 0;
@@ -1072,7 +1079,7 @@ async function telegramThreadFor(env, tenant, lead) {
   } catch (_) { return null; }
 }
 
-async function handleTelegramWebhook(request, env, ctx) {
+export async function handleTelegramWebhook(request, env, ctx) {
   const update = await readJson(request, 16000).catch(() => null);
   const message = update && update.message;
   const text = clean(message && message.text, 200);
@@ -1239,7 +1246,7 @@ async function persistLead(env, input) {
   }
 }
 
-function escapeHtml(value) {
+export function escapeHtml(value) {
   return String(value ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
@@ -1265,7 +1272,7 @@ function notificationText(lead, tenant) {
 // acaba en el Telegram de Velai diciendo ok:true (SPEC-CONEXIONES §1.2).
 // botToken: bot PROPIO del tenant (marca blanca) — sin él, el bot de Velai.
 // threadId: Tema del grupo (message_thread_id) al que va el mensaje.
-async function sendTelegramText(env, text, chatId, { allowFallback = true, botToken = null, threadId = null } = {}) {
+export async function sendTelegramText(env, text, chatId, { allowFallback = true, botToken = null, threadId = null } = {}) {
   const bot = botToken || env.TELEGRAM_TOKEN;
   const target = chatId || (allowFallback ? env.TELEGRAM_CHAT_ID : null);
   if (!bot || !target) return { skipped: true, error: 'not_configured' };
@@ -1486,7 +1493,7 @@ async function storeLead(env, ctx, input) {
   }
 }
 
-async function handleLead(request, env, cors, ctx) {
+export async function handleLead(request, env, cors, ctx) {
   const body = await readJson(request);
   if (!UUID_RE.test(body.requestId || '')) throw new HttpError(400, 'invalid_request_id');
   await verifyTurnstile(env, body.turnstileToken, request, 'lead');
@@ -1765,7 +1772,7 @@ function calendarExecutor(env, tenant, cal, meta) {
 // La vuelta del canal web (migración 0026). El widget pregunta por lo nuevo SOLO cuando la
 // conversación no la lleva el bot: con la IA atendiendo —el 99% del tráfico— no hay ni una
 // petición extra, y eso es lo que hace que esto no se coma el plan gratuito de Workers.
-async function handleChatPoll(request, env, cors, url) {
+export async function handleChatPoll(request, env, cors, url) {
   if (!env.DB) throw new HttpError(503, 'conversation_storage_not_configured');
   const cid = clean(url.searchParams.get('conversationId'), 40);
   if (!UUID_RE.test(cid)) throw new HttpError(400, 'invalid_conversation_id');
@@ -1792,7 +1799,7 @@ async function handleChatPoll(request, env, cors, url) {
   }, 200, cors);
 }
 
-async function handleChat(request, env, cors, ctx, config) {
+export async function handleChat(request, env, cors, ctx, config) {
   const body = await readJson(request, 8000);
   if (!UUID_RE.test(body.conversationId || '')) throw new HttpError(400, 'invalid_conversation_id');
   const message = clean(body.message, 2000);
@@ -2282,7 +2289,7 @@ async function sendTwilioText(env, tenant, fromAddress, toAddress, body) {
   return response.ok ? { ok: true } : { error: `twilio_${response.status}` };
 }
 
-async function handleTwilio(request, env, ctx, config) {
+export async function handleTwilio(request, env, ctx, config) {
   const raw = await request.text();
   const params = new URLSearchParams(raw);
   const object = {}; params.forEach((value, key) => { object[key] = value; });
@@ -2420,71 +2427,9 @@ async function handleTwilio(request, env, ctx, config) {
   return new Response(EMPTY_TWIML, { headers: { 'Content-Type': 'text/xml; charset=utf-8' } });
 }
 
-function decodeBase64Url(value) {
+export function decodeBase64Url(value) {
   const normalized = value.replace(/-/g, '+').replace(/_/g, '/').padEnd(Math.ceil(value.length / 4) * 4, '=');
   return Uint8Array.from(atob(normalized), (char) => char.charCodeAt(0));
-}
-
-// Caché del JWKS de Access en memoria del isolate (10 min): evita un fetch externo
-// por cada petición del panel. Ante un kid desconocido (rotación) se refresca una vez.
-let jwksCache = { keys: null, fetchedAt: 0 };
-async function accessKeys(issuer, forceRefresh = false) {
-  if (forceRefresh || !jwksCache.keys || Date.now() - jwksCache.fetchedAt > 600000) {
-    const jwks = await (await fetch(`${issuer}/cdn-cgi/access/certs`, { signal: AbortSignal.timeout(5000) })).json();
-    jwksCache = { keys: jwks.keys || [], fetchedAt: Date.now() };
-  }
-  return jwksCache.keys;
-}
-
-let jwksLastForcedRefresh = 0;
-
-async function adminIdentity(request, env) {
-  const token = request.headers.get('Cf-Access-Jwt-Assertion');
-  if (!token || !env.TEAM_DOMAIN || !env.POLICY_AUD) throw new HttpError(401, 'admin_unauthorized');
-  const parts = token.split('.');
-  if (parts.length !== 3) throw new HttpError(401, 'admin_unauthorized');
-  // Datos del atacante: base64/JSON inválidos son 401, no un 500 del catch genérico.
-  let header, payload;
-  try {
-    header = JSON.parse(new TextDecoder().decode(decodeBase64Url(parts[0])));
-    payload = JSON.parse(new TextDecoder().decode(decodeBase64Url(parts[1])));
-  } catch (_) { throw new HttpError(401, 'admin_unauthorized'); }
-  if (header.alg !== 'RS256') throw new HttpError(401, 'admin_unauthorized');
-  const issuer = env.TEAM_DOMAIN.replace(/\/$/, '');
-  const aud = Array.isArray(payload.aud) ? payload.aud : [payload.aud];
-  // exp ausente o no numérico debe rechazar: NaN <= Date.now() es false y colaría.
-  if (payload.iss !== issuer || !aud.includes(env.POLICY_AUD) || !Number.isFinite(payload.exp) || payload.exp * 1000 <= Date.now()) throw new HttpError(401, 'admin_unauthorized');
-  let jwk = (await accessKeys(issuer)).find((item) => item.kid === header.kid);
-  if (!jwk && Date.now() - jwksLastForcedRefresh > 30000) {
-    // Antirebote: un kid inventado no puede forzar un fetch al JWKS por petición.
-    jwksLastForcedRefresh = Date.now();
-    jwk = (await accessKeys(issuer, true)).find((item) => item.kid === header.kid);
-  }
-  if (!jwk) throw new HttpError(401, 'admin_unauthorized');
-  const key = await crypto.subtle.importKey('jwk', jwk, { name: 'RSASSA-PKCS1-v1_5', hash: 'SHA-256' }, false, ['verify']);
-  const valid = await crypto.subtle.verify('RSASSA-PKCS1-v1_5', key, decodeBase64Url(parts[2]), new TextEncoder().encode(`${parts[0]}.${parts[1]}`));
-  if (!valid) throw new HttpError(401, 'admin_unauthorized');
-  return clean(payload.email, 200) || 'admin';
-}
-
-// Sin fallback silencioso: si ADMIN_ORIGIN falta o es inválida, las rutas de admin
-// fallan con 503 explícito — pero las rutas públicas del router no deben verse afectadas,
-// por eso estas funciones devuelven null en vez de lanzar.
-function adminOrigin(env) {
-  try { return new URL(env.ADMIN_ORIGIN).origin; } catch (_) { return null; }
-}
-
-function adminHost(env) {
-  const origin = adminOrigin(env);
-  return origin ? new URL(origin).hostname : null;
-}
-
-function adminCorsGuard(request, env) {
-  const expected = adminOrigin(env);
-  if (!expected) throw new HttpError(503, 'admin_misconfigured');
-  const origin = request.headers.get('Origin');
-  // Comparar orígenes normalizados: una barra final en la variable no debe romper las escrituras.
-  if (origin && origin !== expected) throw new HttpError(403, 'invalid_admin_origin');
 }
 
 function leadFilters(url) {
@@ -2558,7 +2503,7 @@ function csvCell(value) {
 }
 
 // Datos administrativos: nunca cacheables (ni en el navegador ni en proxies).
-const NO_STORE = { 'Cache-Control': 'no-store' };
+export const NO_STORE = { 'Cache-Control': 'no-store' };
 
 // La serie del gráfico rellena los días vacíos con 0 EN EL SERVIDOR: si no, el
 // gráfico comprime el eje y miente sobre la distribución.
@@ -2992,124 +2937,9 @@ async function runProvisionStep(request, env, ctx, tenant, tenantId, step, actor
   throw new HttpError(404, 'not_found');
 }
 
-// ── Identidad → alcance (SPEC-HANDOFF §B) ────────────────────────────────────
-// Access dice QUIÉN eres; esto dice QUÉ puedes ver. Sin coincidencia no se entra:
-// que Access te deje pasar no te autoriza a ver leads de nadie. Los admins van en
-// ADMIN_EMAILS (var), nunca en la tabla: una fila borrada no deja a Velai fuera.
-// Admins raíz: los del entorno, indestructibles (ninguna operación del panel los toca).
-function envAdmins(env) {
-  return clean(env.ADMIN_EMAILS, 500).split(',').map((x) => x.trim().toLowerCase()).filter(Boolean);
-}
-
-async function resolveScope(env, email) {
-  const who = String(email).toLowerCase();
-  if (envAdmins(env).includes(who)) return { role: 'velai', tenantId: null, email };
-  // Admins gestionados desde el panel (admin_users, migración 0009). En try/catch:
-  // si la tabla aún no existe, el panel no se cae — simplemente no hay admins de D1.
-  try {
-    const admin = await env.DB.prepare('SELECT email FROM admin_users WHERE lower(email) = ?').bind(who).first();
-    if (admin) return { role: 'velai', tenantId: null, email };
-  } catch (_) {}
-  const row = await env.DB.prepare('SELECT tenant_id, role FROM tenant_users WHERE lower(email) = ?')
-    .bind(who).first();
-  if (!row) throw new HttpError(403, 'not_authorized');
-  return { role: 'cliente', tenantId: row.tenant_id, email };
-}
-
-// Único punto de paso del aislamiento (NO NEGOCIABLE): con tenantId la condición
-// filtra; con null (Velai) se anula. Ningún endpoint construye SQL de leads —ni de
-// conversaciones— sin esto. El alias es parámetro para que las tablas nuevas usen ESTA
-// función en vez de escribirse su propio filtro: un segundo punto de paso es un agujero.
-function scopeClause(scope, alias = 'l') {
-  return scope.tenantId
-    ? { sql: ` AND ${alias}.tenant_id = ?`, args: [scope.tenantId] }
-    : { sql: '', args: [] };
-}
-
-// La OTRA mitad del aislamiento. scopeClause filtra listados; esto cierra los recursos
-// direccionados por su id en la ruta (/tenants/:id/...), donde no hay listado que filtrar
-// y la única defensa es comprobar que ese id es el tuyo ANTES de leer la fila.
-// Ajeno = 404 y nunca 403: un 403 confirmaría que el tenant existe.
-// Estaba escrita a mano en nueve sitios; ahora tiene nombre para que check-aislamiento.mjs
-// pueda exigirla y para que la puerta número diez no se escriba distinta.
-function assertOwnTenant(scope, tenantId) {
-  if (scope.role !== 'velai' && scope.tenantId !== tenantId) throw new HttpError(404, 'not_found');
-  return tenantId;
-}
-
-// Rutas que el rol cliente SÍ puede usar. Todo lo demás — tenants, provisioning,
-// preview, versiones, retry, borrado RGPD — es 403 ANTES de tocar datos.
-function clienteAllowed(path, method) {
-  if (path === '/api/admin/leads' && method === 'GET') return true;
-  if (path === '/api/admin/leads/export.csv' && method === 'GET') return true;
-  if (path === '/api/admin/appointments' && method === 'GET') return true;
-  // Calendario en autoservicio: el cliente conecta y gestiona SU calendario. El
-  // handler exige que el :id sea el suyo (ajeno = 404, nunca 403).
-  if (/^\/api\/admin\/tenants\/[0-9a-f-]+\/calendar$/i.test(path) && ['GET', 'PATCH', 'DELETE'].includes(method)) return true;
-  if (/^\/api\/admin\/tenants\/[0-9a-f-]+\/calendar\/connect$/i.test(path) && method === 'POST') return true;
-  // Telegram en autoservicio (SPEC-CONEXIONES PR1): mismo molde que el calendario.
-  if (/^\/api\/admin\/tenants\/[0-9a-f-]+\/telegram$/i.test(path) && ['GET', 'DELETE'].includes(method)) return true;
-  if (/^\/api\/admin\/tenants\/[0-9a-f-]+\/telegram\/link$/i.test(path) && method === 'POST') return true;
-  if (/^\/api\/admin\/tenants\/[0-9a-f-]+\/telegram\/bot$/i.test(path) && ['POST', 'DELETE'].includes(method)) return true;
-  if (/^\/api\/admin\/tenants\/[0-9a-f-]+\/whatsapp$/i.test(path) && method === 'GET') return true;
-  // Sus canales, en su espacio. El handler colapsa los estados de diagnóstico y exige que
-  // el :id sea el suyo. La vista GLOBAL de canales sigue siendo solo de Velai: lleva
-  // números y nombres de otros clientes.
-  if (/^\/api\/admin\/tenants\/[0-9a-f-]+\/channels$/i.test(path) && method === 'GET') return true;
-  if (/^\/api\/admin\/tenants\/[0-9a-f-]+\/notify$/i.test(path) && method === 'PATCH') return true;
-  // Probar SU informe semanal en SU grupo: el handler exige que el :id sea el suyo.
-  if (/^\/api\/admin\/tenants\/[0-9a-f-]+\/report\/test$/i.test(path) && method === 'POST') return true;
-  // Su logo es SU marca: el cliente lo sube desde Conexiones (el handler exige que el
-  // :id sea el suyo — ajeno = 404) y de paso se aplica a su foto de WhatsApp.
-  if (/^\/api\/admin\/tenants\/[0-9a-f-]+\/logo$/i.test(path) && method === 'POST') return true;
-  // Aplicar a WhatsApp el logo que YA está guardado: volver a subir la misma imagen no
-  // tiene sentido (Juan, 2026-08-24). Idempotente y con guarda own-only en el handler.
-  if (/^\/api\/admin\/tenants\/[0-9a-f-]+\/logo\/apply$/i.test(path) && method === 'POST') return true;
-  if (/^\/api\/admin\/tenants\/[0-9a-f-]+\/telegram\/topics$/i.test(path) && method === 'POST') return true;
-  if (/^\/api\/admin\/tenants\/[0-9a-f-]+\/telegram\/topics\/\d+$/i.test(path) && ['PATCH', 'DELETE'].includes(method)) return true;
-  if (path === '/api/admin/stats' && method === 'GET') return true;
-  // Su saldo de IA: el handler lo fuerza a su propio tenant y no devuelve coste.
-  if (path === '/api/admin/ai-balance' && method === 'GET') return true;
-  if (path === '/api/admin/me' && method === 'GET') return true;
-  if (path === '/api/admin/escalations' && method === 'GET') return true;
-  // Sus conversaciones, en su espacio: el scope las filtra por tenant y el detalle exige
-  // que la conversación sea suya (ajena = 404, nunca 403).
-  if (path === '/api/admin/conversations' && method === 'GET') return true;
-  if (path === '/api/admin/conversations/export.csv' && method === 'GET') return true;
-  if (/^\/api\/admin\/conversations\/[0-9a-f-]+$/i.test(path) && method === 'GET') return true;
-  // Su bandeja y sus respuestas: el scope filtra y el handler exige que la conversación
-  // sea suya (ajena = 404).
-  if (path === '/api/admin/inbox' && method === 'GET') return true;
-  if (path === '/api/admin/alerts' && method === 'GET') return true;
-  // Su disponibilidad y el control de SUS conversaciones (el handler exige que sean suyas).
-  if (path === '/api/admin/availability' && ['GET', 'PATCH'].includes(method)) return true;
-  if (/^\/api\/admin\/conversations\/[0-9a-f-]+\/(takeover|release)$/i.test(path) && method === 'POST') return true;
-  if (/^\/api\/admin\/conversations\/[0-9a-f-]+\/reply$/i.test(path) && method === 'POST') return true;
-  if (path === '/api/admin/escalations/resume' && method === 'POST') return true;
-  if (/^\/api\/admin\/leads\/[0-9a-f-]+$/i.test(path) && (method === 'GET' || method === 'PATCH')) return true;
-  if (/^\/api\/admin\/leads\/[0-9a-f-]+\/notes$/i.test(path) && method === 'POST') return true;
-  return false;
-}
-
-// Con la política de Access en OTP-para-cualquier-correo (SPEC-USUARIOS §B.1), el 403
-// de resolveScope pasa a ser la única cerradura. Tres compensaciones: registrar cada
-// intento CON el correo (excepción deliberada a la regla de no-PII en logs — sin el
-// correo no hay forense), alertar a la 3ª en una hora, y rate limit por correo.
-async function recordAuthFailure(env, email) {
-  const who = String(email || '').toLowerCase().slice(0, 200);
-  console.log(JSON.stringify({ level: 'warn', code: 'not_authorized', email: who }));
-  if (!env.KV) return;
-  try {
-    const key = `authfail:${who}`;
-    const attempts = Number(await env.KV.get(key) || 0) + 1;
-    await env.KV.put(key, String(attempts), { expirationTtl: 3600 });
-    // Solo en el tercer intento: ni al primero (ruido de altas a medias) ni en cada
-    // uno posterior (el contador sigue subiendo pero la alerta ya salió esta hora).
-    if (attempts === 3) {
-      await sendTelegramText(env, `🔐 <b>Velai</b>: el correo <code>${escapeHtml(who)}</code> pasó Access pero acumula ${attempts} intentos sin autorización en la última hora.`);
-    }
-  } catch (_) {}
-}
+// ── Identidad → alcance: adminIdentity/resolveScope/scopeClause/assertOwnTenant y
+// la lista blanca clienteAllowed viven en worker/middleware.js desde la migración a
+// Hono — son la cadena de middlewares de /api/admin/*, no helpers de un handler.
 
 async function handleAdmin(request, env, ctx, path, url, config) {
   adminCorsGuard(request, env);
@@ -4523,7 +4353,7 @@ async function adminRouter(request, env, ctx, path, url, config, scope) {
 // Vive SOLO en el hostname del panel: Access delante (el admin llega con su cookie)
 // y el worker valida el JWT igual que el resto del panel. El state en KV es de un
 // solo uso (leer-y-borrar) y va atado al tenant y al actor que inició la conexión.
-async function handleCalendarCallback(request, env, ctx, url) {
+export async function handleCalendarCallback(request, env, ctx, url) {
   const actor = await adminIdentity(request, env);
   const scope = await resolveScope(env, actor);
   return calendarCallbackFor(env, ctx, url, actor, scope);
@@ -4900,92 +4730,49 @@ async function scheduled(env, cron) {
   }
 }
 
+// ── Ensamblaje del worker (Hono 4) ───────────────────────────────────────────
+// El router if/else de antes es ahora una app de Hono: las rutas públicas viven en
+// worker/routes/publico.js y todo /api/admin/* pasa OBLIGATORIAMENTE por la cadena
+// de middlewares de worker/middleware.js (host → CORS → identidad → scope). La
+// conducta —orden de guardas, códigos, cuerpos— es la misma; los tests la fijan.
+
+// El catch central de siempre, como onError de Hono: todos los errores salen como
+// {ok:false, error:"<código>"} (+ why si el tercero dio un motivo), se loguean con
+// código/status/cf-ray — nunca con PII — y llevan CORS público si el Origin está
+// en la allowlist (si no, el navegador ni deja leer el cuerpo del error).
+async function errorAlCuerpo(error, c) {
+  const { status, code, detail, why } = errorResponseParts(error);
+  console.log(JSON.stringify({ level: status >= 500 ? 'error' : 'warn', code, status, path: c.req.path, ...detail, requestId: c.req.raw.headers.get('cf-ray') || crypto.randomUUID() }));
+  return json({ ok: false, error: code, ...(why ? { why } : {}) }, status, (await publicCors(c.req.raw, c.env).catch(() => null)) || {});
+}
+
+function buildApp(config) {
+  const app = new Hono();
+  // La config (prompts SYSTEM/DEMOS/GUARDRAILS del entrypoint) viaja en el contexto:
+  // los handlers la leen con c.get('config') igual que antes la recibían por parámetro.
+  app.use('*', async (c, next) => { c.set('config', config); await next(); });
+  // Perímetro admin: la cadena entera se aplica a TODO /api/admin/* — un endpoint
+  // nuevo no puede registrarse fuera de ella (esa es la mejora de fondo).
+  app.use('/api/admin/*', mwAdminHost, mwAdminCors, mwAdminIdentity, mwResolveScope);
+  app.all('/api/admin/*', (c) => adminRouter(c.req.raw, c.env, c.executionCtx, c.req.path, new URL(c.req.url), c.get('config'), c.get('scope')));
+  app.route('/', publico);
+  // El 404 se LANZA (no se responde) para que pase por errorAlCuerpo como cualquier
+  // otro error: mismo cuerpo, mismo log, mismo CORS.
+  app.all('*', () => { throw new HttpError(404, 'not_found'); });
+  app.onError(errorAlCuerpo);
+  return app;
+}
+
 export function createWorker(config) {
+  const app = buildApp(config);
   return {
     async fetch(request, env, ctx) {
-      const url = new URL(request.url); const path = url.pathname.replace(/\/$/, '') || '/';
-      try {
-        if (url.hostname === adminHost(env) && path === '/' && request.method === 'GET') {
-          await adminIdentity(request, env);
-          return adminPageResponse();
-        }
-        if (path.startsWith('/api/admin/')) {
-          // El panel y su API solo existen en el hostname de Access; en workers.dev el
-          // JWT seguiría siendo el guardián, pero no hay motivo para exponer la ruta.
-          const host = adminHost(env);
-          if (!host) throw new HttpError(503, 'admin_misconfigured');
-          if (url.hostname !== host) throw new HttpError(404, 'not_found');
-          return await handleAdmin(request, env, ctx, path, url, config);
-        }
-        if (path === '/oauth/calendar/callback' && request.method === 'GET') {
-          // Mismo perímetro que el panel: solo en el hostname de Access (en el
-          // público es un 404 idéntico al de cualquier ruta inexistente).
-          const host = adminHost(env);
-          if (!host || url.hostname !== host) throw new HttpError(404, 'not_found');
-          return await handleCalendarCallback(request, env, ctx, url);
-        }
-        const contentType = request.headers.get('Content-Type') || '';
-        if (path === '/' && request.method === 'POST' && contentType.includes('application/x-www-form-urlencoded')) {
-          // Con el reorden tenant→firma, una petición sin firma ya toca D1: rate limit por IP.
-          const twilioIp = request.headers.get('CF-Connecting-IP') || 'unknown';
-          if (await rateLimited(env, twilioIp, 'twilio', 120)) throw new HttpError(429, 'rate_limited');
-          return await handleTwilio(request, env, ctx, config);
-        }
-        if (path === '/telegram/webhook' && request.method === 'POST') {
-          // Público (lo llama Telegram, fuera de Access): primero el secreto, y 200
-          // SIEMPRE — un 403 confirma el endpoint a un escáner y pone a Telegram a
-          // reintentar en bucle. Sin secreto configurado, el endpoint no existe.
-          if (!env.TELEGRAM_WEBHOOK_SECRET || !timingSafeEqual(request.headers.get('X-Telegram-Bot-Api-Secret-Token') || '', env.TELEGRAM_WEBHOOK_SECRET)) {
-            return json({ ok: true }, 200, NO_STORE);
-          }
-          const tgIp = request.headers.get('CF-Connecting-IP') || 'unknown';
-          if (await rateLimited(env, tgIp, 'tgwh', 120)) return json({ ok: true }, 200, NO_STORE);
-          return await handleTelegramWebhook(request, env, ctx);
-        }
-        if (path === '/widget/boot' && request.method === 'GET') {
-          return await handleWidgetBoot(request, env, url);
-        }
-        if (path.startsWith('/media/') && request.method === 'GET') {
-          const key = path.slice('/media/'.length);
-          if (!MEDIA_KEY_RE.test(key) || key.includes('..')) throw new HttpError(404, 'not_found');
-          // Caché del edge: la URL va versionada, así que un logo se lee del almacén una
-          // vez por centro de datos en lugar de una vez por visitante del widget.
-          const cache = caches.default;
-          const cached = await cache.match(request);
-          if (cached) return cached;
-          const obj = await mediaGet(env, key);
-          if (!obj) throw new HttpError(404, 'not_found');
-          // La URL va versionada (?v=): cachear un año es seguro y la foto la lee
-          // también Meta al aplicar el perfil de WhatsApp — tiene que ser pública.
-          const headers = { 'Content-Type': obj.contentType, 'Cache-Control': 'public, max-age=31536000, immutable', 'Access-Control-Allow-Origin': '*' };
-          if (obj.etag) headers.ETag = obj.etag;
-          const media = new Response(obj.body, { headers });
-          ctx.waitUntil(cache.put(request, media.clone()).catch(() => {}));
-          return media;
-        }
-        if (path === '/chat/poll') {
-          const cors = await publicCors(request, env);
-          if (!cors) throw new HttpError(403, 'origin_not_allowed');
-          if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers: cors });
-          if (request.method !== 'GET') throw new HttpError(405, 'method_not_allowed');
-          return await handleChatPoll(request, env, cors, url);
-        }
-        if (path === '/lead' || path === '/chat') {
-          const cors = await publicCors(request, env);
-          if (!cors) throw new HttpError(403, 'origin_not_allowed');
-          if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers: cors });
-          if (request.method !== 'POST') throw new HttpError(405, 'method_not_allowed');
-          const ip = request.headers.get('CF-Connecting-IP') || '';
-          if (await rateLimited(env, ip, path.slice(1), path === '/lead' ? 5 : 20)) throw new HttpError(429, 'rate_limited');
-          return path === '/lead' ? await handleLead(request, env, cors, ctx) : await handleChat(request, env, cors, ctx, config);
-        }
-        if (path === '/' && request.method === 'POST' && contentType.includes('application/json')) throw new HttpError(410, 'legacy_chat_retired');
-        throw new HttpError(404, 'not_found');
-      } catch (error) {
-        const { status, code, detail, why } = errorResponseParts(error);
-        console.log(JSON.stringify({ level: status >= 500 ? 'error' : 'warn', code, status, path, ...detail, requestId: request.headers.get('cf-ray') || crypto.randomUUID() }));
-        return json({ ok: false, error: code, ...(why ? { why } : {}) }, status, (await publicCors(request, env).catch(() => null)) || {});
-      }
+      // La barra final se normaliza ANTES de enrutar (Hono distingue /chat de /chat/
+      // y el router viejo no): /chat/ sigue siendo /chat, como siempre.
+      const url = new URL(request.url);
+      const path = url.pathname.replace(/\/$/, '') || '/';
+      if (path !== url.pathname) { url.pathname = path; request = new Request(url, request); }
+      return app.fetch(request, env, ctx);
     },
     async scheduled(event, env, ctx) { ctx.waitUntil(scheduled(env, event && event.cron)); },
   };
