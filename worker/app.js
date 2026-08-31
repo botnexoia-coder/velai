@@ -8,6 +8,8 @@ import {
 import { publico } from './routes/publico.js';
 import { leads as rutasLeads } from './routes/leads.js';
 import { conversaciones as rutasConversaciones } from './routes/conversaciones.js';
+import { tenants as rutasTenants } from './routes/tenants.js';
+import { configuracion as rutasConfig } from './routes/config.js';
 import { encryptSecret, decryptSecret } from './crypto.js';
 import { cloudflareConfigured, syncTurnstileDomains, syncAccessGroup, syncAdminGroup, verifyCfToken } from './cloudflare.js';
 import { createSubaccount, fetchSubaccount, findSubaccountByName, createLeadTemplate, submitTemplateApproval, fetchApprovalStatus, createWhatsAppSender, verifySender, fetchSenderStatus, listWhatsAppSenders, updateSenderWebhook, updateSenderProfile, fetchSender } from './twilio.js';
@@ -18,7 +20,7 @@ const JSON_HEADERS = { 'Content-Type': 'application/json; charset=utf-8' };
 const WORKER_PUBLIC_URL = 'https://vai-worker.botnexo-ia.workers.dev';
 // Desde cuándo se cuentan conversaciones (migración 0020): antes de esta fecha no hay
 // denominador y la tasa de captura no se puede calcular sin engañar.
-const CONV_TRACKING_SINCE = '2026-08-25';
+export const CONV_TRACKING_SINCE = '2026-08-25';
 const PUBLIC_MEDIA_BASE = 'https://api.hirevai.com'; // dominio propio: no lo cortan los adblock
 export const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 export const STATUSES = new Set(['new', 'contacted', 'qualified', 'won', 'lost', 'spam']);
@@ -269,9 +271,9 @@ const WEB_MAX_TOKENS = 700;
 // caracteres y rechaza de largo (21617). ~400 tokens de español son ~1.500 caracteres:
 // subir más cambiaría un truncado por un envío fallido, que es peor porque el cliente
 // final no recibe nada.
-const WA_MAX_TOKENS = 400;
+export const WA_MAX_TOKENS = 400;
 const WA_TOOL_MAX_TOKENS = 500;   // el JSON de tool_use consume output aparte del texto
-const WA_BODY_LIMIT = 1500;       // margen sobre los 1.600 de WhatsApp
+export const WA_BODY_LIMIT = 1500;       // margen sobre los 1.600 de WhatsApp
 
 // Cuerpo apto para WhatsApp: recorta a la última frase completa dentro del límite del
 // canal, en vez de partir una palabra o dejar que Twilio rechace el mensaje entero.
@@ -281,7 +283,7 @@ function waBody(text) {
 }
 
 
-function aiCost(row) {
+export function aiCost(row) {
   const p = AI_PRICES[row.model] || AI_PRICE_FALLBACK;
   const m = 1e6;
   return (row.in_tokens * p.in + row.out_tokens * p.out
@@ -384,7 +386,7 @@ function settleReply(data, options, raw) {
   return trimToSentence(String(raw).slice(0, Math.max(0, budget))) + closing;
 }
 
-async function callAnthropic(env, payload, options = {}) {
+export async function callAnthropic(env, payload, options = {}) {
   const data = await callAnthropicRaw(env, payload, options);
   const reply = data.content?.[0]?.text;
   if (!reply) throw new HttpError(502, 'ai_invalid_response');
@@ -471,7 +473,7 @@ async function tenantByAddress(env, address) {
 
 // El canal es la llave que enruta TODOS los mensajes entrantes del cliente: antes de
 // escribirlo hay que saber que no desviaría las conversaciones de otro.
-async function assertChannelFree(env, address, tenantId) {
+export async function assertChannelFree(env, address, tenantId) {
   if (!/^(whatsapp|messenger):/.test(String(address || ''))) return;
   const row = await env.DB.prepare('SELECT tenant_id FROM tenant_channels WHERE address=?').bind(address).first();
   if (row && row.tenant_id !== tenantId) throw new HttpError(409, 'address_taken');
@@ -480,7 +482,7 @@ async function assertChannelFree(env, address, tenantId) {
 // Mantiene tenant_channels como espejo del canal primario (tenants.channel_address).
 // Secuencial y tolerante: si el INSERT fallara a mitad, el enrutado sigue vivo por el
 // fallback a channel_address — la tabla nunca es un punto único de fallo.
-async function syncPrimaryChannel(env, tenantId, previousAddress, newAddress) {
+export async function syncPrimaryChannel(env, tenantId, previousAddress, newAddress) {
   const kindOf = (a) => { const m = /^(whatsapp|messenger):/.exec(String(a || '')); return m ? m[1] : null; };
   const oldKind = kindOf(previousAddress);
   const newKind = kindOf(newAddress);
@@ -529,7 +531,7 @@ async function alertUnknownTenant(env, address) {
 const ADDRESS_RE = /^(whatsapp:\+[1-9]\d{6,14}|messenger:\d{5,25})$/;
 // Dirección reservada para clientes en negociación (prospectos): NO es enrutable
 // (Twilio nunca manda un To con este prefijo) y ocupa el UNIQUE sin pisar la real.
-const PENDING_RE = /^pending:[a-z0-9][a-z0-9-]{1,39}$/;
+export const PENDING_RE = /^pending:[a-z0-9][a-z0-9-]{1,39}$/;
 // Cliente solo-web: atiende por `body.tenant` (resuelto por slug), nunca por webhook de
 // Twilio. Es una dirección legal y ACTIVABLE — al revés que `pending:`, que fuerza inactivo.
 const WEB_RE = /^web:[a-z0-9][a-z0-9-]{1,39}$/;
@@ -541,7 +543,7 @@ const WA_RE = /^whatsapp:\+[1-9]\d{6,14}$/;
 // incluye el número del bot, TODOS los avisos de ese cliente caen en silencio
 // (5 reintentos → failed, sin error legible). El agujero es de la FILA, no de un
 // formulario: la guarda corre en el PATCH general Y en el endpoint de autoservicio.
-function assertTeamNotFrom(fields, previous) {
+export function assertTeamNotFrom(fields, previous) {
   const from = String(fields.twilio_from ?? previous.twilio_from ?? '');
   const list = String(fields.team_whatsapp ?? previous.team_whatsapp ?? '').split(',').map((x) => x.trim()).filter(Boolean);
   if (from && list.includes(from)) throw new HttpError(400, 'team_whatsapp_equals_from');
@@ -552,7 +554,7 @@ const CHAT_ID_RE = /^-?\d{5,20}$/;
 const HHMM_RE = /^\d{2}:\d{2}$/;
 // El mínimo de 50 evita que un guardado accidental con el campo casi vacío deje
 // al bot de un cliente sin contexto contestando cualquier cosa.
-const PROMPT_MIN = 50, PROMPT_MAX = 20000;
+export const PROMPT_MIN = 50, PROMPT_MAX = 20000;
 // Marca del widget (migración 0007): el chat en la web de un cliente lleva SU marca.
 const HEX_COLOR_RE = /^#[0-9a-f]{6}$/i;
 // Orígenes web del tenant (migración 0008): https, sin path ni barra final.
@@ -560,7 +562,7 @@ const ORIGIN_RE = /^https:\/\/[a-z0-9-]+(\.[a-z0-9-]+)+$/;
 const WA_DIGITS_RE = /^[1-9]\d{5,14}$/;
 const THEMES = new Set(['auto', 'light', 'dark']);
 
-function validateTenant(body, { partial = false } = {}) {
+export function validateTenant(body, { partial = false } = {}) {
   const out = {}; const bad = (f) => { throw new HttpError(400, `invalid_${f}`); };
   const has = (k) => body[k] !== undefined;
   if (has('slug') || !partial) {
@@ -771,7 +773,7 @@ export async function handleWidgetBoot(request, env, url) {
 // Hoy solo 'cf_api_token': el token de API de Cloudflare rotable desde el panel
 // (solo admins raíz). El valor del panel tiene PRIORIDAD sobre el secret del worker
 // (withCfToken); el secret queda como respaldo raíz.
-async function getSetting(env, key) {
+export async function getSetting(env, key) {
   try {
     const row = await env.DB.prepare('SELECT value_enc FROM settings WHERE key=?').bind(key).first();
     if (!row) return null;
@@ -780,7 +782,7 @@ async function getSetting(env, key) {
   } catch (_) { return null; }
 }
 
-async function setSetting(env, key, value, actor) {
+export async function setSetting(env, key, value, actor) {
   const enc = await encryptSecret(env, `setting:${key}`, value);
   await env.DB.prepare(`INSERT INTO settings (key, value_enc, updated_by, updated_at) VALUES (?,?,?,?)
     ON CONFLICT(key) DO UPDATE SET value_enc=excluded.value_enc, updated_by=excluded.updated_by, updated_at=excluded.updated_at`)
@@ -795,7 +797,7 @@ async function withCfToken(env) {
 // Write-only: el auth token de la subcuenta entra en claro, se guarda cifrado y
 // nunca vuelve a salir del worker. No pasa por validateTenant (cifrar es asíncrono)
 // y NUNCA entra en el versionado de tenant_versions.
-async function tenantTokenColumn(env, tenantId, body) {
+export async function tenantTokenColumn(env, tenantId, body) {
   if (body.twilio_auth_token === undefined || body.twilio_auth_token === '') return null;
   const token = clean(body.twilio_auth_token, 64);
   if (!/^[0-9a-f]{32}$/i.test(token)) throw new HttpError(400, 'invalid_twilio_auth_token');
@@ -820,7 +822,7 @@ function channelsForScope(scope, channels) {
   return channels.map((c) => ({ ...c, state: CLIENT_STATE[c.state] || 'off' }));
 }
 
-async function tenantChannelSummary(env, tenant) {
+export async function tenantChannelSummary(env, tenant) {
   const rows = (await env.DB.prepare('SELECT address, kind FROM tenant_channels WHERE tenant_id=?').bind(tenant.id).all()).results || [];
   const byKind = {};
   for (const r of rows) byKind[r.kind] = r.address;
@@ -843,7 +845,7 @@ async function tenantChannelSummary(env, tenant) {
   return channels;
 }
 
-function assertNotActivePending(finalAddress, finalActive) {
+export function assertNotActivePending(finalAddress, finalActive) {
   if (Number(finalActive) === 1 && PENDING_RE.test(String(finalAddress))) {
     throw new HttpError(400, 'pending_tenant_cannot_be_active');
   }
@@ -851,7 +853,7 @@ function assertNotActivePending(finalAddress, finalActive) {
 
 // Los choques de unicidad se traducen, no revientan en 500. address_taken es EL error
 // que desviaría las conversaciones de un cliente al prompt de otro: mensaje claro.
-function tenantWriteError(error) {
+export function tenantWriteError(error) {
   const msg = String(error);
   if (/UNIQUE.*slug/i.test(msg)) return new HttpError(409, 'slug_taken');
   if (/UNIQUE.*channel_address/i.test(msg)) return new HttpError(409, 'address_taken');
@@ -863,7 +865,7 @@ function tenantWriteError(error) {
 // La caché KV guarda la fila COMPLETA del tenant: CUALQUIER edición (también el
 // prompt) debe invalidar, y al cambiar dirección o slug hay que borrar las claves
 // viejas Y las nuevas. También tras un alta: los fallos de lookup se cachean.
-async function invalidateTenantCache(env, tenants) {
+export async function invalidateTenantCache(env, tenants) {
   if (!env.KV) return;
   // 'origins:all' cae con CUALQUIER edición: activar/desactivar un tenant o tocar sus
   // web_origins cambia la allowlist de CORS y no puede esperar 5 minutos.
@@ -967,7 +969,7 @@ async function telegramSetWebhook(env, botToken) {
 // getUpdates exigiría un deleteWebhook, que deja a TODOS los clientes sin poder vincular.
 // getWebhookInfo no toca nada y trae lo único que hacía falta: last_error_message, o sea
 // qué falló en el último intento de entrega. No devuelve el secret_token.
-async function telegramWebhookInfo(env) {
+export async function telegramWebhookInfo(env) {
   if (!env.TELEGRAM_TOKEN) return { configured: false };
   let data;
   try {
@@ -2165,7 +2167,7 @@ const CF_FREE_LIMITS = {
 // estimado por nosotros). Requiere que el token tenga «Account Analytics: Read»; si no
 // lo tiene, se devuelve el motivo y el panel explica qué añadir en vez de mentir con
 // ceros.
-async function cloudflareUsage(env) {
+export async function cloudflareUsage(env) {
   const cfEnv = await withCfToken(env);
   const token = cfEnv.CF_API_TOKEN; const account = cfEnv.CF_ACCOUNT_ID;
   if (!token || !account) return { error: 'cloudflare_api_not_configured', limits: CF_FREE_LIMITS };
@@ -2509,7 +2511,7 @@ export const NO_STORE = { 'Cache-Control': 'no-store' };
 
 // La serie del gráfico rellena los días vacíos con 0 EN EL SERVIDOR: si no, el
 // gráfico comprime el eje y miente sobre la distribución.
-function fillSeries(rows, days) {
+export function fillSeries(rows, days) {
   const byDay = new Map(rows.map((r) => [r.d, r.n]));
   const out = [];
   const today = new Date();
@@ -2533,7 +2535,7 @@ async function provisionLock(env, tenantId, step) {
   return true;
 }
 
-const PANEL_EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+export const PANEL_EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 // Cada alta y baja de usuario deja rastro con actor Y rol (SPEC-USUARIOS §B.2): un
 // cliente tocando su acceso tiene que poder distinguirse de Velai haciéndolo.
@@ -2548,7 +2550,7 @@ const PANEL_EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 // reconstruye desde env (raíz, SIEMPRE presentes — redundancia sobre la política
 // «Equipo Velai» del dashboard, que el worker no toca) + admin_users. Un PUT fallido
 // no pierde la fila: gate 'pendiente' + log + alerta.
-async function syncAdminGate(env, ctx) {
+export async function syncAdminGate(env, ctx) {
   const cfEnv = await withCfToken(env);
   if (!cloudflareConfigured(cfEnv) || !cfEnv.CF_ADMIN_GROUP_ID) return 'manual';
   try {
@@ -2563,7 +2565,7 @@ async function syncAdminGate(env, ctx) {
   }
 }
 
-async function syncPanelGate(env, ctx) {
+export async function syncPanelGate(env, ctx) {
   const cfEnv = await withCfToken(env);
   if (!cloudflareConfigured(cfEnv) || !cfEnv.CF_ACCESS_GROUP_ID) return 'manual';
   try {
@@ -2577,7 +2579,7 @@ async function syncPanelGate(env, ctx) {
   }
 }
 
-async function panelUserAudit(env, ctx, tenantId, actor, role, note) {
+export async function panelUserAudit(env, ctx, tenantId, actor, role, note) {
   await env.DB.prepare('INSERT INTO tenant_versions (tenant_id,actor_email,field,previous_value,note,created_at) VALUES (?,?,?,?,?,?)')
     .bind(tenantId, actor, 'users', null, `${note} (rol ${role})`, new Date().toISOString()).run();
   ctx.waitUntil(sendTelegramText(env, `👤 <b>${escapeHtml(actor)}</b> · ${escapeHtml(note)}`).catch(() => {}));
@@ -2614,7 +2616,7 @@ function errorResponseParts(error) {
   return { status, code, ...why, detail: { ...(status >= 500 ? { error: String((error && error.message) || error).slice(0, 200) } : {}), ...why } };
 }
 
-async function handleProvision(request, env, ctx, tenantId, step, actor) {
+export async function handleProvision(request, env, ctx, tenantId, step, actor) {
   if (!env.DB) throw new HttpError(503, 'lead_storage_not_configured');
   const tenant = await env.DB.prepare('SELECT * FROM tenants WHERE id=?').bind(tenantId).first();
   if (!tenant) throw new HttpError(404, 'not_found');
@@ -2963,248 +2965,10 @@ async function adminRouterLegacy(request, env, ctx, path, url, config, scope) {
   if (scope.role !== 'velai' && !clienteAllowed(path, request.method)) throw new HttpError(403, 'not_authorized');
   const sc = scopeClause(scope);
 
-  if (path === '/api/admin/me' && request.method === 'GET') {
-    let tenantName = null; let tenantLogo = null;
-    if (scope.tenantId) {
-      const row = await env.DB.prepare('SELECT name, logo_url FROM tenants WHERE id=?').bind(scope.tenantId).first();
-      tenantName = row ? row.name : null;
-      // El panel del cliente se viste con SU logo en cuanto lo sube (pedido de Juan).
-      tenantLogo = row && row.logo_url && /^https:\/\//.test(row.logo_url) ? row.logo_url : null;
-    }
-    // tenantId: el cliente lo necesita para llamar a SUS rutas de calendario
-    // (/tenants/:id/calendar); es su propio id, no filtra nada ajeno.
-    return json({ role: scope.role, tenantName, tenantLogo, tenantId: scope.tenantId }, 200, NO_STORE);
-  }
+  // /me, /stats, ai-usage/ai-balance/infra y Configuración: worker/routes/config.js.
 
   // Leads y conversaciones (bandeja incluida) viven en worker/routes/*.js.
-  if (path === '/api/admin/tenants' && request.method === 'GET') {
-    // Semáforo de configuración de un vistazo: sin plantilla, sin equipo o con
-    // prompt sospechosamente corto se ve desde el listado, sin abrir nada.
-    const rows = (await env.DB.prepare(`
-      SELECT t.id, t.slug, t.name, t.channel_address, t.active, t.updated_at,
-             t.lead_template_sid IS NOT NULL AS has_template,
-             t.team_whatsapp IS NOT NULL AS has_team,
-             t.twilio_subaccount_sid IS NOT NULL AS has_subaccount,
-             t.twilio_auth_token_enc IS NOT NULL AS has_twilio_token,
-             t.twilio_from IS NOT NULL AS has_from,
-             t.telegram_chat_id IS NOT NULL AS has_telegram,
-             t.meta_partner_status,
-             t.sender_status,
-             (SELECT group_concat(kind) FROM tenant_channels c WHERE c.tenant_id = t.id) AS channels,
-             length(t.system_prompt) AS prompt_len,
-             COUNT(l.id) AS lead_count
-      FROM tenants t LEFT JOIN leads l ON l.tenant_id = t.id
-      GROUP BY t.id ORDER BY t.active DESC, t.name ASC`).all()).results;
-    return json({ tenants: rows }, 200, NO_STORE);
-  }
-  if (path === '/api/admin/tenants' && request.method === 'POST') {
-    const body = await readJson(request, 32000);
-    // La dirección del canal ya no se teclea en el alta: un cliente nuevo nace prospecto
-    // (`pending:<slug>`) y pasa a `web:<slug>` en cuanto se marca Activo. El panel manda
-    // el slug y el worker deriva.
-    // El default de active en este endpoint es 1 (`fields.active ?? 1`): la derivación usa
-    // EXACTAMENTE el mismo, o alta y guarda se contradicen con un 400 imposible de
-    // entender desde el panel (un alta sin `active` nacería prospecto y activa a la vez).
-    if (!body.channel_address && body.slug) {
-      const base = String(body.slug).trim().toLowerCase();
-      const willBeActive = body.active === undefined ? 1 : (body.active ? 1 : 0);
-      body.channel_address = willBeActive === 1 ? `web:${base}` : `pending:${base}`;
-    }
-    const fields = validateTenant(body, { partial: false });
-    assertNotActivePending(fields.channel_address, fields.active ?? 1);
-    const now = new Date().toISOString();
-    const tenantId = crypto.randomUUID();
-    const tokenColumn = await tenantTokenColumn(env, tenantId, body);
-    try {
-      await env.DB.prepare(`INSERT INTO tenants
-        (id,slug,name,channel_address,team_whatsapp,telegram_chat_id,lead_template_sid,twilio_from,twilio_subaccount_sid,waba_id,twilio_auth_token_enc,meta_partner_status,system_prompt,
-         bot_name,brand_name,logo_url,brand_color,brand_color_2,agent_color,greeting,greeting_en,chips_json,placeholder,wa_number,theme,web_origins,
-         active,created_at,updated_at)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
-        .bind(tenantId, fields.slug, fields.name, fields.channel_address, fields.team_whatsapp ?? null,
-          fields.telegram_chat_id ?? null, fields.lead_template_sid ?? null, fields.twilio_from ?? null,
-          fields.twilio_subaccount_sid ?? null, fields.waba_id ?? null, tokenColumn,
-          fields.meta_partner_status ?? 'pendiente', fields.system_prompt,
-          fields.bot_name ?? null, fields.brand_name ?? null, fields.logo_url ?? null,
-          fields.brand_color ?? null, fields.brand_color_2 ?? null, fields.agent_color ?? null, fields.greeting ?? null,
-          fields.greeting_en ?? null, fields.chips_json ?? null, fields.placeholder ?? null,
-          fields.wa_number ?? null, fields.theme ?? null, fields.web_origins ?? null,
-          fields.active ?? 1, now, now).run();
-    } catch (error) { throw tenantWriteError(error); }
-    await syncPrimaryChannel(env, tenantId, null, fields.channel_address);
-    // Invalidar ANTES del versionado: si el INSERT de la versión fallara, la caché
-    // no puede quedarse 5 minutos sirviendo el estado anterior.
-    await invalidateTenantCache(env, [fields]);
-    await env.DB.prepare('INSERT INTO tenant_versions (tenant_id,actor_email,field,previous_value,note,created_at) VALUES (?,?,?,?,?,?)')
-      .bind(tenantId, actor, 'config', null, clean(body.note, 200) || 'alta', now).run();
-    return json({ ok: true, id: tenantId, updated_at: now }, 201, NO_STORE);
-  }
-  if (path === '/api/admin/stats' && request.method === 'GET') {
-    // Métricas para la cabecera del panel: solo recuentos y fechas, nunca PII.
-    // El listado está paginado — contar en cliente daría números falsos.
-    // Para el rol cliente, TODAS las cuentas van filtradas a su tenant.
-    const t = scope.tenantId;
-    const leadW = t ? ' AND tenant_id = ?' : '';
-    const leadArgs = t ? [t] : [];
-    const statements = [
-      env.DB.prepare(`SELECT COUNT(*) AS n FROM leads WHERE created_at >= datetime('now','-30 days')${leadW}`).bind(...leadArgs),
-      env.DB.prepare(`SELECT COUNT(*) AS n, MIN(created_at) AS oldest FROM leads WHERE status = 'new'${leadW}`).bind(...leadArgs),
-      t
-        ? env.DB.prepare("SELECT COUNT(*) AS n FROM lead_notifications ln JOIN leads l ON l.id = ln.lead_id WHERE ln.status = 'failed' AND ln.updated_at >= datetime('now','-7 days') AND l.tenant_id = ?").bind(t)
-        : env.DB.prepare("SELECT COUNT(*) AS n FROM lead_notifications WHERE status = 'failed' AND updated_at >= datetime('now','-7 days')"),
-      // Por día Y por canal: la gráfica enseña el total y el globo el desglose. Antes
-      // solo se sabía «7 leads el jueves», que no dice si vinieron de WhatsApp o de la web
-      // — que es justo lo que decide dónde mirar cuando un día se cae.
-      env.DB.prepare(`SELECT date(created_at) AS d, source, COUNT(*) AS n FROM leads WHERE created_at >= datetime('now','-14 days')${leadW} GROUP BY d, source ORDER BY d`).bind(...leadArgs),
-      // Leads por canal: el dato ya estaba en la fila (source) y no se veía en ninguna parte.
-      env.DB.prepare(`SELECT source, COUNT(*) AS n FROM leads WHERE created_at >= datetime('now','-30 days')${leadW} GROUP BY source ORDER BY n DESC`).bind(...leadArgs),
-      // Denominador de la tasa de captura: conversaciones atendidas en el mismo periodo.
-      env.DB.prepare(`SELECT channel, SUM(convs) AS n FROM conv_daily WHERE day >= date('now','-30 days')${t ? ' AND tenant_id = ?' : ''} GROUP BY channel`).bind(...leadArgs),
-      // Valores para el desplegable de «Fuente» del filtro de leads. Salen de los DATOS y
-      // no de una lista en código porque `source` es TEXTO LIBRE: /lead acepta el `fuente`
-      // que mande la página (app.js, clean(body.fuente, 80)), así que una lista fija dejaría
-      // sin filtrar cualquier landing nueva. SIN ventana de 30 días — un lead viejo tiene
-      // que seguir siendo filtrable — y con tope, que esto alimenta un <select>.
-      env.DB.prepare(`SELECT DISTINCT source FROM leads WHERE source IS NOT NULL AND source <> ''${leadW} ORDER BY source LIMIT 60`).bind(...leadArgs),
-    ];
-    // scope-ok: el push va dentro de `if (!t)`, o sea SOLO cuando no hay tenant en el
-    // scope (Velai). Un cliente nunca llega a añadir esta consulta a la tanda. Se anota
-    // porque check-aislamiento lee el SQL, no el condicional que decide si se ejecuta.
-    if (!t) statements.push(env.DB.prepare('SELECT active, COUNT(*) AS n FROM tenants GROUP BY active'));
-    const results = await env.DB.batch(statements);
-    // OJO: el destructuring es POSICIONAL y la fila de tenants se añade condicionalmente.
-    // Toda consulta nueva va ANTES de ese push y se añade aquí en el mismo orden.
-    const [total30, nuevos, fallidos7, serieRows, canalRows, convRows, fuentesRows, tenantsRows] = results;
-    const activos = tenantsRows ? (tenantsRows.results || []).find((r) => Number(r.active) === 1) : null;
-    return json({
-      total30: total30.results[0].n,
-      sinContactar: nuevos.results[0].n,
-      sinContactarDesde: nuevos.results[0].oldest || null,
-      fallidos7: fallidos7.results[0].n,
-      tenantsActivos: t ? null : (activos ? activos.n : 0),
-      porDia: (() => {
-        // La consulta viene por día+canal: se pliega a un total por día (que es lo que
-        // pinta la barra) conservando el desglose ordenado de mayor a menor.
-        const porDiaCanal = new Map();
-        for (const r of serieRows.results || []) {
-          const e = porDiaCanal.get(r.d) || { n: 0, canales: [] };
-          e.n += r.n; e.canales.push({ canal: r.source || 'sin canal', n: r.n });
-          porDiaCanal.set(r.d, e);
-        }
-        // fillSeries rellena los días sin leads: sin eso la gráfica comprime el eje y
-        // miente sobre la distribución.
-        return fillSeries([...porDiaCanal].map(([d, e]) => ({ d, n: e.n })), 14)
-          .map((x) => ({ ...x, canales: ((porDiaCanal.get(x.d) || {}).canales || []).sort((a, b) => b.n - a.n) }));
-      })(),
-      porCanal: (canalRows.results || []).map((r) => ({ canal: r.source || 'sin canal', n: r.n })),
-      fuentes: (fuentesRows.results || []).map((r) => r.source).filter(Boolean),
-      // Tasa de captura por canal Y total. Solo cuenta desde que el registro existe
-      // (2026-08-25): las conversaciones anteriores no se guardaron, y una tasa
-      // calculada con un denominador incompleto sería mentira — el panel lo advierte.
-      captura: {
-        conversaciones: (convRows.results || []).reduce((s, r) => s + (r.n || 0), 0),
-        porCanal: (convRows.results || []).map((r) => ({ canal: r.channel, convs: r.n || 0 })),
-        desde: CONV_TRACKING_SINCE,
-      },
-    }, 200, NO_STORE);
-  }
-  const provMatch = path.match(/^\/api\/admin\/tenants\/([0-9a-f-]+)\/provision(?:\/(subaccount|template\/check|template\/resubmit|template|sender\/verify|sender\/sync|sender\/profile|sender|domains))?$/i);
-  if (provMatch) {
-    if (!UUID_RE.test(provMatch[1])) throw new HttpError(404, 'not_found');
-    return await handleProvision(request, env, ctx, provMatch[1], provMatch[2] || '', actor);
-  }
-  // ── Configuración (SOLO admins raíz): estado de integraciones y rotación del
-  // token de API de Cloudflare. Raíz = envAdmins (los del toml): ni siquiera un admin
-  // dado de alta en el panel puede tocar tokens — dos factores reales en vez de un PIN.
-  if (path === '/api/admin/config' || path === '/api/admin/config/cf-token' || path === '/api/admin/config/telegram-webhook') {
-    if (!envAdmins(env).includes(String(actor).toLowerCase())) throw new HttpError(403, 'root_only');
-  }
-  if (path === '/api/admin/config' && request.method === 'GET') {
-    const stored = await getSetting(env, 'cf_api_token');
-    const token = stored || clean(env.CF_API_TOKEN, 200) || '';
-    let verify = null;
-    if (token) { try { verify = await verifyCfToken(token); } catch (_) { verify = { valid: false, status: 'unreachable' }; } }
-    return json({
-      cf_token: { source: stored ? 'panel' : (env.CF_API_TOKEN ? 'worker' : 'none'), valid: verify ? verify.valid : null, status: verify ? verify.status : null },
-      account_id: clean(env.CF_ACCOUNT_ID, 40) || null,
-      turnstile_sitekey: clean(env.TURNSTILE_SITEKEY, 60) || null,
-      groups: { clientes: Boolean(env.CF_ACCESS_GROUP_ID), admins: Boolean(env.CF_ADMIN_GROUP_ID) },
-      d1: Boolean(env.DB), kv: Boolean(env.KV),
-    }, 200, NO_STORE);
-  }
-  // Bajo demanda y no dentro de /config: llamar a Telegram en cada carga de la vista
-  // sería una llamada externa por visita para un dato que casi nunca cambia.
-  if (path === '/api/admin/config/telegram-webhook' && request.method === 'GET') {
-    return json(await telegramWebhookInfo(env), 200, NO_STORE);
-  }
-  if (path === '/api/admin/config/cf-token' && request.method === 'POST') {
-    const body = await readJson(request, 2000);
-    const token = clean(body.token, 200);
-    if (!/^[A-Za-z0-9_-]{40,120}$/.test(token)) throw new HttpError(400, 'invalid_token_format');
-    // Se valida contra Cloudflare ANTES de guardar: un token roto no puede sustituir
-    // a uno sano. Y es write-only: se cifra con la KEK y jamás se devuelve.
-    let verify;
-    try { verify = await verifyCfToken(token); } catch (_) { throw new HttpError(502, 'token_verify_unavailable'); }
-    if (!verify.valid) throw new HttpError(400, 'token_invalid');
-    await setSetting(env, 'cf_api_token', token, actor);
-    console.log(JSON.stringify({ level: 'info', code: 'cf_token_rotated', actor }));
-    ctx.waitUntil(sendTelegramText(env, `🔑 <b>${escapeHtml(actor)}</b> rotó el token de API de Cloudflare desde el panel (estado: ${escapeHtml(verify.status)}).`).catch(() => {}));
-    return json({ ok: true, source: 'panel', status: verify.status }, 200, NO_STORE);
-  }
-  if (path === '/api/admin/config/cf-token' && request.method === 'DELETE') {
-    try { await env.DB.prepare("DELETE FROM settings WHERE key='cf_api_token'").run(); } catch (_) {}
-    ctx.waitUntil(sendTelegramText(env, `🔑 <b>${escapeHtml(actor)}</b> retiró el token del panel: vuelve a usarse el secret del worker.`).catch(() => {}));
-    return json({ ok: true, source: env.CF_API_TOKEN ? 'worker' : 'none' }, 200, NO_STORE);
-  }
-
-  // ── Admins de Velai gestionados desde el panel (migración 0009) ──────────────
-  // Solo rol velai (clienteAllowed no incluye estas rutas). Los ADMIN_EMAILS del
-  // entorno son RAÍZ: se listan pero no se pueden borrar desde aquí. La auditoría va
-  // por Telegram + log (no hay tenant al que colgar una versión). Cada alta/baja
-  // sincroniza también la política «Equipo Velai» de Access (env raíz SIEMPRE dentro).
-  if (path === '/api/admin/admins' && request.method === 'GET') {
-    let rows = [];
-    try { rows = (await env.DB.prepare('SELECT email, created_by, created_at FROM admin_users ORDER BY created_at').all()).results || []; } catch (_) {}
-    const admins = [
-      ...envAdmins(env).map((email) => ({ email, root: true })),
-      ...rows.map((r) => ({ email: r.email, root: false, created_by: r.created_by, created_at: r.created_at })),
-    ];
-    return json({ admins }, 200, NO_STORE);
-  }
-  if (path === '/api/admin/admins' && request.method === 'POST') {
-    const body = await readJson(request, 2000);
-    const email = String(body.email || '').trim().toLowerCase();
-    if (!PANEL_EMAIL_RE.test(email) || email.length > 200) throw new HttpError(400, 'invalid_email');
-    if (envAdmins(env).includes(email)) throw new HttpError(409, 'already_admin');
-    // Un correo de cliente no puede ascender a admin conservando su fila: vería TODO
-    // y seguiría pareciendo "usuario de X". Primero baja de cliente, luego alta aquí.
-    const client = await env.DB.prepare('SELECT tenant_id FROM tenant_users WHERE lower(email) = ?').bind(email).first();
-    if (client) throw new HttpError(409, 'email_is_client');
-    try {
-      await env.DB.prepare('INSERT INTO admin_users (email, created_by, created_at) VALUES (?,?,?)')
-        .bind(email, actor, new Date().toISOString()).run();
-    } catch (e) {
-      if (/UNIQUE|PRIMARY KEY/i.test(String(e.message || ''))) throw new HttpError(409, 'already_admin');
-      throw e;
-    }
-    console.log(JSON.stringify({ level: 'info', code: 'admin_added', email, actor }));
-    ctx.waitUntil(sendTelegramText(env, `👑 <b>${escapeHtml(actor)}</b> dio de alta al ADMIN <code>${escapeHtml(email)}</code> (ve todos los clientes y leads).`).catch(() => {}));
-    const gate = await syncAdminGate(env, ctx);
-    return json({ ok: true, email, gate }, 201, NO_STORE);
-  }
-  const adminDelMatch = path.match(/^\/api\/admin\/admins\/([^/]+)$/);
-  if (adminDelMatch && request.method === 'DELETE') {
-    const email = decodeURIComponent(adminDelMatch[1]).trim().toLowerCase();
-    if (envAdmins(env).includes(email)) throw new HttpError(400, 'admin_is_root');
-    // Quitarse a uno mismo es la receta del cierre accidental: que lo haga otro admin.
-    if (email === String(actor).toLowerCase()) throw new HttpError(400, 'cannot_remove_self');
-    const result = await env.DB.prepare('DELETE FROM admin_users WHERE lower(email) = ?').bind(email).run();
-    if (!result.meta || !result.meta.changes) throw new HttpError(404, 'not_found');
-    console.log(JSON.stringify({ level: 'info', code: 'admin_removed', email, actor }));
-    ctx.waitUntil(sendTelegramText(env, `👑 <b>${escapeHtml(actor)}</b> quitó al ADMIN <code>${escapeHtml(email)}</code>.`).catch(() => {}));
-    const gate = await syncAdminGate(env, ctx);
-    return json({ ok: true, gate }, 200, NO_STORE);
-  }
+  // Alta/listado/ficha/preview/versiones/usuarios/provisioning: worker/routes/tenants.js.
 
   // ── Citas (SPEC-CALENDARIO): lista scoped — velai todo (con ?tenant=), cliente
   // solo las suyas vía scopeClause (mismo único punto de paso que los leads).
@@ -3232,104 +2996,6 @@ async function adminRouterLegacy(request, env, ctx, path, url, config, scope) {
   // foto de perfil de WhatsApp. Se guarda bajo logos/<tenantId>.<ext> y se sirve por
   // /media/ del propio worker (api.hirevai.com) — nada de dominios de terceros.
   // Reaplicar a WhatsApp la imagen guardada (sin resubirla).
-  // ── Consumo de infraestructura (solo Velai) ───────────────────────────────
-  if (path === '/api/admin/infra-usage' && request.method === 'GET') {
-    return json(await cloudflareUsage(env), 200, NO_STORE);
-  }
-
-  // ── Consumo de IA por cliente (solo Velai) ────────────────────────────────
-  // El gasto real de cada cliente en euros/dólares: sin esto no se sabe si un cliente
-  // cuesta más de lo que paga, ni quién dispara el cupo diario.
-  // Saldo de IA del mes, para el panel DEL CLIENTE. Deliberadamente sin coste: la tarjeta
-  // de gasto en dólares es velai-only porque enseñarle al cliente lo que pagamos por él es
-  // enseñarle el margen. Aquí van tokens y porcentaje, que es lo que necesita saber.
-  if (path === '/api/admin/ai-balance' && request.method === 'GET') {
-    // Velai puede mirar el de cualquiera con ?tenant=; un cliente, solo el suyo.
-    const asked = clean(url.searchParams.get('tenant'), 40);
-    const tenantId = scope.tenantId || (asked && UUID_RE.test(asked) ? asked : null);
-    if (!tenantId) throw new HttpError(400, 'tenant_required');
-    if (scope.tenantId && asked && asked !== scope.tenantId) throw new HttpError(404, 'not_found');
-    const row = await env.DB.prepare('SELECT id, name, ai_monthly_tokens FROM tenants WHERE id=?').bind(tenantId).first();
-    if (!row) throw new HttpError(404, 'not_found');
-    const now = new Date();
-    const month = now.toISOString().slice(0, 7);
-    const today = now.toISOString().slice(0, 10);
-    // La misma suma que usa el dashboard: con el caché de prompt casi todo el input llega
-    // como cache_r, así que contar solo in+out no enseñaría casi nada.
-    const totals = await env.DB.prepare(`SELECT
-        SUM(in_tokens+out_tokens+cache_w_tokens+cache_r_tokens) AS mes,
-        SUM(CASE WHEN day = ? THEN in_tokens+out_tokens+cache_w_tokens+cache_r_tokens ELSE 0 END) AS hoy,
-        SUM(calls) AS llamadas
-      FROM ai_usage WHERE tenant_id = ? AND day LIKE ?`).bind(today, tenantId, `${month}-%`).first();
-    const included = Number(row.ai_monthly_tokens) || Number(env.AI_TENANT_MONTHLY_TOKENS) || 5000000;
-    const used = Number(totals && totals.mes) || 0;
-    // Serie diaria del mes para la gráfica: los días sin consumo también existen, o la
-    // gráfica comprime el eje y miente sobre la distribución.
-    const rows = (await env.DB.prepare('SELECT day, SUM(in_tokens+out_tokens+cache_w_tokens+cache_r_tokens) AS n, SUM(calls) AS c FROM ai_usage WHERE tenant_id=? AND day LIKE ? GROUP BY day').bind(tenantId, `${month}-%`).all()).results || [];
-    const byDay = new Map(rows.map((r) => [r.day, { n: r.n || 0, calls: r.c || 0 }]));
-    const days = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 0)).getUTCDate();
-    const serie = [];
-    for (let d = 1; d <= days; d++) {
-      const key = `${month}-${String(d).padStart(2, '0')}`;
-      const v = byDay.get(key);
-      // Los tokens dicen cuánto se ha gastado; las llamadas, cuántas conversaciones lo
-      // gastaron. El cliente solo veía tokens, que por sí solos no significan nada para él.
-      serie.push({ d: key, n: v ? v.n : 0, calls: v ? v.calls : 0 });
-    }
-    return json({
-      month, included, used,
-      remaining: Math.max(0, included - used),
-      // El porcentaje se acota a 100: una barra al 140% no significa nada.
-      pct: included > 0 ? Math.min(100, Math.round((used / included) * 100)) : 0,
-      over: used > included,
-      usedToday: Number(totals && totals.hoy) || 0,
-      calls: Number(totals && totals.llamadas) || 0,
-      serie,
-    }, 200, NO_STORE);
-  }
-  if (path === '/api/admin/ai-usage' && request.method === 'GET') {
-    const days = Math.min(90, Math.max(1, Number(url.searchParams.get('days')) || 30));
-    const from = new Date(Date.now() - (days - 1) * 86400000).toISOString().slice(0, 10);
-    const rows = (await env.DB.prepare(`SELECT u.tenant_id, u.day, u.model, u.calls, u.in_tokens, u.out_tokens,
-        u.cache_w_tokens, u.cache_r_tokens, t.name AS tenant_name, t.slug
-      FROM ai_usage u LEFT JOIN tenants t ON t.id = u.tenant_id
-      WHERE u.day >= ? ORDER BY u.day ASC`).bind(from).all()).results || [];
-    const porCliente = new Map(); const porDia = new Map();
-    let totalCost = 0; let totalCalls = 0; let totalTokens = 0;
-    for (const r of rows) {
-      const cost = aiCost(r);
-      const tokens = (r.in_tokens || 0) + (r.out_tokens || 0) + (r.cache_w_tokens || 0) + (r.cache_r_tokens || 0);
-      totalCost += cost; totalCalls += r.calls || 0; totalTokens += tokens;
-      const key = r.tenant_id || '';
-      const cli = porCliente.get(key) || { tenant_id: key, name: r.tenant_name || (key ? 'cliente borrado' : 'Velai (panel)'), slug: r.slug || null, calls: 0, tokens: 0, cost: 0, models: {} };
-      cli.calls += r.calls || 0; cli.tokens += tokens; cli.cost += cost;
-      cli.models[r.model] = (cli.models[r.model] || 0) + (r.calls || 0);
-      porCliente.set(key, cli);
-      const d = porDia.get(r.day) || { d: r.day, cost: 0, calls: 0, porCliente: new Map() };
-      d.cost += cost; d.calls += r.calls || 0;
-      // Llamadas POR CLIENTE en cada día: el total diario no dice quién lo gastó, y con
-      // varios clientes es lo primero que se quiere saber cuando un día se dispara.
-      d.porCliente.set(cli.name, (d.porCliente.get(cli.name) || 0) + (r.calls || 0));
-      porDia.set(r.day, d);
-    }
-    // Serie completa (los días sin consumo también existen) para que la gráfica no mienta.
-    const serie = [];
-    for (let i = days - 1; i >= 0; i--) {
-      const d = new Date(Date.now() - i * 86400000).toISOString().slice(0, 10);
-      serie.push(porDia.get(d) || { d, cost: 0, calls: 0, porCliente: new Map() });
-    }
-    return json({
-      days,
-      total: { cost: Number(totalCost.toFixed(4)), calls: totalCalls, tokens: totalTokens },
-      clientes: [...porCliente.values()].sort((a, b) => b.cost - a.cost).map((c) => ({ ...c, cost: Number(c.cost.toFixed(4)) })),
-      porDia: serie.map(({ porCliente, ...d }) => ({
-        ...d,
-        cost: Number(d.cost.toFixed(4)),
-        clientes: [...porCliente].map(([name, calls]) => ({ name, calls })).sort((a, b) => b.calls - a.calls),
-      })),
-      moneda: 'USD',
-    }, 200, NO_STORE);
-  }
 
   const logoApply = path.match(/^\/api\/admin\/tenants\/([0-9a-f-]+)\/logo\/apply$/i);
   if (logoApply && request.method === 'POST') {
@@ -3823,165 +3489,7 @@ async function adminRouterLegacy(request, env, ctx, path, url, config, scope) {
     throw new HttpError(405, 'method_not_allowed');
   }
 
-  // ── Usuarios del cliente (SPEC-USUARIOS §B.2): solo rol velai (clienteAllowed es
-  // lista blanca y no incluye estas rutas). resolveScope consulta tenant_users en cada
-  // petición sin caché, así que alta y baja surten efecto inmediato.
-  const usersMatch = path.match(/^\/api\/admin\/tenants\/([0-9a-f-]+)\/users(?:\/([^/]+))?$/i);
-  if (usersMatch) {
-    if (!UUID_RE.test(usersMatch[1])) throw new HttpError(404, 'not_found');
-    const tenantId = usersMatch[1];
-    if (!usersMatch[2] && request.method === 'GET') {
-      const rows = await env.DB.prepare('SELECT email, created_at FROM tenant_users WHERE tenant_id=? ORDER BY created_at')
-        .bind(tenantId).all();
-      return json({ users: rows.results || [] }, 200, NO_STORE);
-    }
-    if (!usersMatch[2] && request.method === 'POST') {
-      const body = await readJson(request, 2000);
-      const email = String(body.email || '').trim().toLowerCase();
-      if (!PANEL_EMAIL_RE.test(email) || email.length > 200) throw new HttpError(400, 'invalid_email');
-      // Un admin de Velai en la tabla quedaría degradado a un solo tenant al entrar
-      // (resolveScope mira ADMIN_EMAILS primero, pero el error sería silencioso).
-      if (envAdmins(env).includes(email)) throw new HttpError(400, 'email_is_admin');
-      // También los admins de D1 (migración 0009): resolveScope los mira ANTES que
-      // tenant_users, así que la fila de cliente quedaría muerta y confundiría.
-      try {
-        const adminRow = await env.DB.prepare('SELECT email FROM admin_users WHERE lower(email) = ?').bind(email).first();
-        if (adminRow) throw new HttpError(400, 'email_is_admin');
-      } catch (e) { if (e instanceof HttpError) throw e; }
-      const tenant = await env.DB.prepare('SELECT id FROM tenants WHERE id=?').bind(tenantId).first();
-      if (!tenant) throw new HttpError(404, 'not_found');
-      try {
-        await env.DB.prepare('INSERT INTO tenant_users (email, tenant_id, role, created_at) VALUES (?,?,?,?)')
-          .bind(email, tenantId, 'cliente', new Date().toISOString()).run();
-      } catch (e) {
-        // email es PK: el caso real es un gestor que ya trabaja con otro cliente vuestro.
-        if (/UNIQUE|PRIMARY KEY/i.test(String(e.message || ''))) throw new HttpError(409, 'email_taken');
-        throw e;
-      }
-      await panelUserAudit(env, ctx, tenantId, actor, scope.role, `alta usuario ${email}`);
-      const gate = await syncPanelGate(env, ctx);
-      return json({ ok: true, email, gate }, 201, NO_STORE);
-    }
-    if (usersMatch[2] && request.method === 'DELETE') {
-      const email = decodeURIComponent(usersMatch[2]).trim().toLowerCase();
-      const result = await env.DB.prepare('DELETE FROM tenant_users WHERE tenant_id=? AND lower(email)=?')
-        .bind(tenantId, email).run();
-      if (!result.meta || !result.meta.changes) throw new HttpError(404, 'not_found');
-      await panelUserAudit(env, ctx, tenantId, actor, scope.role, `baja usuario ${email}`);
-      // La baja TAMBIÉN sincroniza la puerta: si no, un correo revocado sigue pudiendo
-      // autenticarse en Access (el worker le daría 403, pero la puerta debe cerrarse).
-      const gate = await syncPanelGate(env, ctx);
-      // `remaining` permite a la interfaz avisar de "este cliente se queda sin acceso".
-      const left = await env.DB.prepare('SELECT COUNT(*) AS n FROM tenant_users WHERE tenant_id=?').bind(tenantId).first();
-      return json({ ok: true, remaining: left ? left.n : 0, gate }, 200, NO_STORE);
-    }
-    throw new HttpError(404, 'not_found');
-  }
 
-  const tenantMatch = path.match(/^\/api\/admin\/tenants\/([0-9a-f-]+)(?:\/(preview|versions))?(?:\/(\d+)\/restore)?$/i);
-  if (tenantMatch) {
-    if (!UUID_RE.test(tenantMatch[1])) throw new HttpError(404, 'not_found');
-    const tenantId = tenantMatch[1]; const tenantAction = tenantMatch[2]; const versionId = tenantMatch[3];
-    if (!tenantAction && request.method === 'GET') {
-      // Columnas explícitas, NUNCA SELECT *: twilio_auth_token_enc no sale del worker.
-      const tenant = await env.DB.prepare(`SELECT id, slug, name, channel_address, team_whatsapp, telegram_chat_id,
-        lead_template_sid, twilio_from, twilio_subaccount_sid, waba_id, meta_partner_status, system_prompt,
-        bot_name, brand_name, logo_url, brand_color, brand_color_2, agent_color, greeting, greeting_en, chips_json,
-        placeholder, wa_number, theme, web_origins, sender_sid, sender_status, telegram_chat_title,
-        ai_monthly_tokens, ai_daily_limit, support_hours, support_tz,
-        active, created_at, updated_at, twilio_auth_token_enc IS NOT NULL AS has_twilio_token
-        FROM tenants WHERE id=?`).bind(tenantId).first();
-      if (!tenant) throw new HttpError(404, 'not_found');
-      return json({ tenant, channels: await tenantChannelSummary(env, tenant) }, 200, NO_STORE);
-    }
-    if (!tenantAction && request.method === 'PATCH') {
-      const body = await readJson(request, 32000);   // el prompt es grande
-      const previous = await env.DB.prepare('SELECT * FROM tenants WHERE id=?').bind(tenantId).first();
-      if (!previous) throw new HttpError(404, 'not_found');
-      const fields = validateTenant(body, { partial: true });
-      const tokenColumn = await tenantTokenColumn(env, tenantId, body);
-      if (!Object.keys(fields).length && !tokenColumn) throw new HttpError(400, 'nothing_to_update');
-      // Activar un prospecto obligaba a reescribir `pending:<slug>` → `web:<slug>` a mano
-      // en una caja de texto. Ese paso es el que dejó a gogestion con `web:gogestion`
-      // ocupando el canal primario y su WhatsApp sin enrutar. Ahora se promueve solo.
-      // Si el llamante manda EXPLÍCITAMENTE un `pending:` y active=1, sigue siendo 400:
-      // eso es una contradicción que pidió a mano, no un hueco que rellenar.
-      if (fields.channel_address === undefined && Number(fields.active ?? previous.active) === 1
-        && PENDING_RE.test(String(previous.channel_address))) {
-        fields.channel_address = `web:${previous.slug}`;
-      }
-      assertNotActivePending(fields.channel_address ?? previous.channel_address, fields.active ?? previous.active);
-      assertTeamNotFrom(fields, previous);
-      const channelChanged = fields.channel_address !== undefined && fields.channel_address !== previous.channel_address;
-      if (channelChanged) await assertChannelFree(env, fields.channel_address, tenantId);
-      const now = new Date().toISOString();
-      // `columns` alimenta también el versionado: el token va aparte y jamás entra ahí.
-      const columns = Object.keys(fields);
-      const setSql = [...columns.map((c) => `${c}=?`), ...(tokenColumn ? ['twilio_auth_token_enc=?'] : [])].join(',');
-      const setValues = [...columns.map((c) => fields[c]), ...(tokenColumn ? [tokenColumn] : [])];
-      // Bloqueo optimista: sin el updated_at cargado, el último en guardar pisaría al otro.
-      let result;
-      try {
-        result = await env.DB.prepare(`UPDATE tenants SET ${setSql}, updated_at=? WHERE id=? AND updated_at=?`)
-          .bind(...setValues, now, tenantId, clean(body.expected_updated_at, 40)).run();
-      } catch (error) { throw tenantWriteError(error); }
-      if (!result.meta.changes) throw new HttpError(409, 'stale_tenant');
-      // El prompt se versiona aparte porque es lo que de verdad se querrá revertir.
-      const changedPrompt = fields.system_prompt !== undefined && fields.system_prompt !== previous.system_prompt;
-      await env.DB.prepare('INSERT INTO tenant_versions (tenant_id,actor_email,field,previous_value,note,created_at) VALUES (?,?,?,?,?,?)')
-        .bind(tenantId, actor, changedPrompt ? 'system_prompt' : 'config',
-          changedPrompt ? previous.system_prompt : JSON.stringify(
-            Object.fromEntries(columns.filter((c) => c !== 'system_prompt').map((c) => [c, previous[c]]))),
-          clean(body.note, 200) || null, now).run();
-      if (channelChanged) await syncPrimaryChannel(env, tenantId, previous.channel_address, fields.channel_address);
-      await invalidateTenantCache(env, [previous, fields]);
-      if (changedPrompt) {
-        ctx.waitUntil(sendTelegramText(env, `✏️ <b>${escapeHtml(actor)}</b> cambió el contexto de <b>${escapeHtml(previous.name)}</b>`).catch(() => {}));
-      }
-      return json({ ok: true, updated_at: now }, 200, NO_STORE);
-    }
-    if (tenantAction === 'versions' && !versionId && request.method === 'GET') {
-      const rows = (await env.DB.prepare('SELECT id, actor_email, field, previous_value, note, created_at FROM tenant_versions WHERE tenant_id=? ORDER BY created_at DESC LIMIT 20').bind(tenantId).all()).results;
-      return json({ versions: rows }, 200, NO_STORE);
-    }
-    if (tenantAction === 'versions' && versionId && request.method === 'POST') {
-      // Restaurar crea una versión nueva, no borra: siempre se puede deshacer el deshacer.
-      // Solo se restauran versiones de prompt; las de config son consultables ("Ver").
-      const version = await env.DB.prepare('SELECT * FROM tenant_versions WHERE id=? AND tenant_id=?').bind(versionId, tenantId).first();
-      if (!version) throw new HttpError(404, 'not_found');
-      if (version.field !== 'system_prompt' || !version.previous_value) throw new HttpError(400, 'not_restorable');
-      const previous = await env.DB.prepare('SELECT * FROM tenants WHERE id=?').bind(tenantId).first();
-      if (!previous) throw new HttpError(404, 'not_found');
-      const now = new Date().toISOString();
-      await env.DB.batch([
-        env.DB.prepare('UPDATE tenants SET system_prompt=?, updated_at=? WHERE id=?').bind(version.previous_value, now, tenantId),
-        env.DB.prepare('INSERT INTO tenant_versions (tenant_id,actor_email,field,previous_value,note,created_at) VALUES (?,?,?,?,?,?)')
-          .bind(tenantId, actor, 'system_prompt', previous.system_prompt, `restore #${version.id}`, now),
-      ]);
-      await invalidateTenantCache(env, [previous]);
-      return json({ ok: true, updated_at: now }, 200, NO_STORE);
-    }
-    if (tenantAction === 'preview' && request.method === 'POST') {
-      // Ejecuta el prompt BORRADOR contra el modelo. No guarda, no toca KV, no crea
-      // lead, no notifica. Rate limit por actor (no por IP): son llamadas que se pagan.
-      // Sin cupo por tenant a propósito: son llamadas de admin ya limitadas por actor,
-      // y no deben gastar el presupuesto diario del cliente que se está editando.
-      if (await rateLimited(env, actor, 'preview', 20)) throw new HttpError(429, 'rate_limited');
-      const body = await readJson(request, 32000);
-      const draft = String(body.prompt ?? '').trim().slice(0, PROMPT_MAX);
-      const message = clean(body.message, 500);
-      if (draft.length < PROMPT_MIN || !message) throw new HttpError(400, 'invalid_preview');
-      const reply = await callAnthropic(env, {
-        model: 'claude-sonnet-4-6', max_tokens: WA_MAX_TOKENS,
-        system: `${draft}\n${config.GUARDRAILS || ''}`.trim(),
-        messages: [{ role: 'user', content: message }],
-      }, { closing: 'equipo', bodyLimit: WA_BODY_LIMIT });
-      return json({ reply }, 200, NO_STORE);
-    }
-    // Un tenant no se borra NUNCA: los leads apuntan a tenant_id y el histórico es
-    // del negocio. El panel solo desactiva (active=0).
-    throw new HttpError(405, 'method_not_allowed');
-  }
   throw new HttpError(404, 'not_found');
 }
 
@@ -4383,8 +3891,10 @@ function buildAdminApp() {
   });
   // La lista blanca del rol cliente, ANTES de cualquier handler (403 sin tocar datos).
   admin.use('/api/admin/*', clienteGate);
+  admin.route('/', rutasConfig);
   admin.route('/', rutasLeads);
   admin.route('/', rutasConversaciones);
+  admin.route('/', rutasTenants);
   return admin;
 }
 const adminApp = buildAdminApp();

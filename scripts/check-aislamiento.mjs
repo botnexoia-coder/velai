@@ -70,7 +70,9 @@ function ejemplosDeRuta(ruta) {
       const m = e.match(PARAM);
       if (!m) return [e];
       const valores = m[2]
-        ? m[2].slice(1, -1).split('|').map((alt) => (alt === '\\d+' ? '1' : alt))
+        // Un patrón numérico ({\d+} en runtime, {\\d+} tal y como se lee del fuente)
+        // se sustituye por '1'; el resto de alternativas se usan literales.
+        ? m[2].slice(1, -1).split('|').map((alt) => alt.replace(/\\+d\+/g, '1'))
         : ['00000000-0000-4000-8000-000000000001'];
       return valores.map((v) => e.replace(m[0], v));
     });
