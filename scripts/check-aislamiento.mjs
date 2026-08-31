@@ -20,8 +20,8 @@
 //    handler: una consulta sobre una tabla con dueño que no lleve el filtro del scope ni
 //    una puerta. El middleware sabe QUIÉN pregunta; solo el handler sabe qué WHERE escribe.
 //
-// Alcance: los dominios admin de worker/routes/*.js (y, mientras dure la migración, lo que
-// quede de adminRouterLegacy en worker/app.js). publico.js queda fuera igual que quedaban
+// Alcance: los dominios admin de worker/routes/*.js (el monolito adminRouter ya no
+// existe: cada dominio vive en su módulo). publico.js queda fuera igual que quedaban
 // fuera el cron y los webhooks: ahí no hay usuario del panel delante — el tenant lo
 // resuelve el canal (firma de Twilio, slug del widget), no una identidad con alcance.
 // Punto ciego asumido (el MISMO que tenía la versión anterior, que solo leía el cuerpo de
@@ -163,91 +163,6 @@ for (const archivo of dominios) {
   escanearDominio(`worker/routes/${archivo}`, lineas, (nombre, bloque, todas, desde, hasta) => {
     analizar(nombre, bloque.rutas, todas.slice(desde, hasta + 1).join('\n'), desde);
   });
-}
-
-// B) PUENTE de la migración: lo que aún viva en adminRouterLegacy (worker/app.js) se
-// escanea con la lógica de líneas de la versión anterior. Este bloque desaparece con el
-// propio monolito.
-{
-  const src = await readFile(new URL('../worker/app.js', import.meta.url), 'utf8');
-  const lineas = src.split('\n');
-  const ini = lineas.findIndex((l) => l.startsWith('async function adminRouterLegacy'));
-  if (ini >= 0) {
-    let fin = lineas.length;
-    for (let i = ini + 1; i < lineas.length; i++) if (/^\}/.test(lineas[i])) { fin = i; break; }
-    // Ruta vigente en cada línea del monolito (mismo truco que la versión anterior).
-    const rutaEn = [];
-    let actual = '(cabecera del router)';
-    for (let i = ini; i < fin; i++) {
-      const l = lineas[i];
-      let m = l.match(/if \(path === '([^']+)'/);
-      if (m) actual = m[1];
-      else { m = l.match(/path\.match\((\/\^[^;]*?\/i?)\)/); if (m) actual = m[1]; }
-      rutaEn[i] = actual;
-    }
-    // Del regex del router a rutas de ejemplo (versión reducida de la lógica histórica).
-    function rutasDeEjemplo(regexSrc) {
-      let base = regexSrc.replace(/^\//, '').replace(/\/i?$/, '').replace(/^\^/, '').replace(/\$$/, '');
-      const expandir = (r) => {
-        const i = r.search(/\(\?:/);
-        if (i < 0) return [r];
-        let prof = 0, j = i;
-        for (; j < r.length; j++) {
-          if (r[j] === '(' && r[j - 1] !== '\\') prof++;
-          else if (r[j] === ')' && r[j - 1] !== '\\') { prof--; if (!prof) break; }
-        }
-        const opcional = r[j + 1] === '?';
-        const dentro = r.slice(i + 3, j);
-        const resto = r.slice(j + (opcional ? 2 : 1));
-        const con = expandir(r.slice(0, i) + dentro + resto);
-        return opcional ? [...expandir(r.slice(0, i) + resto), ...con] : con;
-      };
-      return [...new Set(expandir(base))].map((r) => r
-        .replace(/\(([^()|]*)\|[^()]*\)/g, '$1')
-        .replace(/\[0-9a-f-\]\+/gi, '00000000-0000-4000-8000-000000000001')
-        .replace(/\\d\+/g, '1')
-        .replace(/[()]/g, '')
-        .replace(/\\\//g, '/'));
-    }
-    const alcanzable = (ruta) => {
-      if (ruta.startsWith('(')) return true;
-      if (ruta.startsWith('/^')) return rutasDeEjemplo(ruta).some((ej) => METODOS.some((m) => clienteAllowed(ej, m)));
-      return METODOS.some((m) => clienteAllowed(ruta, m));
-    };
-    const inicioRuta = [];
-    for (let i = ini; i < fin; i++) inicioRuta[i] = (i > ini && rutaEn[i] === rutaEn[i - 1]) ? inicioRuta[i - 1] : i;
-    const inicioHandler = [];
-    for (let i = ini; i < fin; i++) {
-      inicioHandler[i] = /^ {2}(?:if|const|let) /.test(lineas[i]) ? i : (i > ini ? inicioHandler[i - 1] : i);
-    }
-    const region = lineas.slice(ini, fin).join('\n');
-    let m;
-    while ((m = RE_PREPARE.exec(region))) {
-      const sql = m[1].slice(1, -1);
-      const linea = ini + region.slice(0, m.index).split('\n').length - 1;
-      const plano = sql.replace(/\s+/g, ' ');
-      const tocadas = [...DIRECTAS, ...HIJAS].filter((t) =>
-        new RegExp(`(?:FROM|JOIN|INTO|UPDATE)\\s+${t}\\b`, 'i').test(plano));
-      if (!tocadas.length) continue;
-      total++;
-      if (CLAUSULAS.some((c) => plano.includes(c))) { filtradas++; continue; }
-      const ruta = rutaEn[linea] || '';
-      if (!alcanzable(ruta)) { soloVelai++; continue; }
-      const desde = Math.max(inicioRuta[linea], inicioHandler[linea] ?? inicioRuta[linea]);
-      const bloque = lineas.slice(desde, linea + 1).join('\n');
-      const antes = bloque.slice(0, bloque.lastIndexOf('prepare('));
-      const yaFiltrado = CLAUSULAS.some((c) => antes.includes(c));
-      const soloHijas = tocadas.every((t) => HIJAS.includes(t));
-      const puertaConCierre = yaFiltrado && /throw new HttpError\(404/.test(antes);
-      const vetadoACliente = /scope\.role !== 'velai'\) throw/.test(antes);
-      const puerta = PUERTAS.some((p) => bloque.includes(p))
-        || DESDE_EL_SCOPE.some((p) => bloque.includes(p))
-        || vetadoACliente
-        || (soloHijas ? yaFiltrado : puertaConCierre);
-      if (puerta) { conPuerta++; continue; }
-      fallos.push({ donde: `worker/app.js:${linea + 1}`, rutas: ruta, tablas: tocadas.join(','), sql: plano.slice(0, 90) });
-    }
-  }
 }
 
 console.log(`check-aislamiento: ${total} consultas del panel sobre tablas de tenant (${dominios.length} dominios)`);
