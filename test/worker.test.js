@@ -4459,3 +4459,64 @@ test('el buscador de la bandeja: persona, número normalizado y comodines escapa
   assert.ok(!comodin.sql.includes('c.external_id LIKE'), 'sin letras ni dígitos no hay número que buscar');
   assert.ok(comodin.sql.includes("ESCAPE '\\'"), 'y el LIKE declara su carácter de escape');
 });
+
+// ── setWebhook de Telegram: el motivo del fallo deja de perderse ──
+// Contexto: entre el 2026-08-21 y el 2026-08-31 NINGÚN cliente consiguió vincular su
+// Telegram. El panel decía «Telegram rechazó el registro del webhook: reintenta» y el log
+// no decía nada, porque telegramSetWebhook devolvía un booleano y tiraba el `description`.
+// Estos tests fijan que el motivo viaja SIEMPRE.
+test('setWebhook: un secreto con caracteres prohibidos se detecta sin llamar a Telegram', async () => {
+  const realFetch = globalThis.fetch;
+  let llamadas = 0;
+  globalThis.fetch = async () => { llamadas++; return new Response('{}', { status: 200 }); };
+  try {
+    // openssl rand -base64 32 produce exactamente esto: + / = que Telegram no admite.
+    const out = await testing.telegramSetWebhook({ TELEGRAM_WEBHOOK_SECRET: 'aB+cD/eF=gH' }, '123:abc');
+    assert.equal(out.ok, false);
+    assert.equal(out.code, 'webhook_secret_invalid');
+    assert.match(out.why, /A-Z a-z 0-9/);
+    assert.equal(llamadas, 0, 'no se gasta una llamada a Telegram para algo que ya se sabe');
+    // y el bueno pasa la guarda
+    globalThis.fetch = async () => new Response(JSON.stringify({ ok: true }), { status: 200 });
+    assert.equal((await testing.telegramSetWebhook({ TELEGRAM_WEBHOOK_SECRET: 'abc_123-XYZ' }, '123:abc')).ok, true);
+  } finally { globalThis.fetch = realFetch; }
+});
+
+test('setWebhook: el «description» de Telegram se traduce a un código accionable', async () => {
+  const realFetch = globalThis.fetch;
+  const env = { TELEGRAM_WEBHOOK_SECRET: 'secreto_valido-123' };
+  const responder = (body, status = 200) => { globalThis.fetch = async () => new Response(JSON.stringify(body), { status }); };
+  try {
+    responder({ ok: false, error_code: 401, description: 'Unauthorized' });
+    assert.equal((await testing.telegramSetWebhook(env, '123:abc')).code, 'invalid_bot_token');
+
+    responder({ ok: false, error_code: 400, description: 'Bad Request: secret_token contains unsupported characters' });
+    assert.equal((await testing.telegramSetWebhook(env, '123:abc')).code, 'webhook_secret_invalid');
+
+    responder({ ok: false, error_code: 429, description: 'Too Many Requests: retry after 5' });
+    assert.equal((await testing.telegramSetWebhook(env, '123:abc')).code, 'telegram_rate_limited');
+
+    // Un motivo desconocido NO se pierde: código genérico pero con el texto de Telegram.
+    responder({ ok: false, error_code: 400, description: 'Bad Request: algo nuevo que no conocemos' });
+    const raro = await testing.telegramSetWebhook(env, '123:abc');
+    assert.equal(raro.code, 'telegram_setup_failed');
+    assert.match(raro.why, /algo nuevo que no conocemos/);
+
+    // Y una caída de red tampoco se traga.
+    globalThis.fetch = async () => { throw new Error('connection reset'); };
+    const caida = await testing.telegramSetWebhook(env, '123:abc');
+    assert.equal(caida.ok, false);
+    assert.match(caida.why, /connection reset/);
+  } finally { globalThis.fetch = realFetch; }
+});
+
+test('el «why» de un HttpError llega al cuerpo de la respuesta, no solo al log', () => {
+  const conMotivo = testing.errorResponseParts(Object.assign(new Error('x'), {
+    status: 502, code: 'telegram_setup_failed', why: 'Bad Request: secret_token contains unsupported characters',
+  }));
+  assert.equal(conMotivo.status, 502);
+  assert.equal(conMotivo.why, 'Bad Request: secret_token contains unsupported characters');
+  // Sin motivo, el cuerpo no gana claves vacías (el panel hace e.why||'').
+  const sinMotivo = testing.errorResponseParts(Object.assign(new Error('y'), { status: 404, code: 'not_found' }));
+  assert.equal(sinMotivo.why, undefined);
+});

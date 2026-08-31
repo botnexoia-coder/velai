@@ -115,7 +115,13 @@ async function readJson(request, maxBytes = 16000) {
 }
 
 class HttpError extends Error {
-  constructor(status, code) { super(code); this.status = status; this.code = code; }
+  // `why` = el detalle CRUDO del tercero que falló (el "description" de Telegram, el
+  // "message" de Twilio). Va aparte del código a propósito: el código es contrato con el
+  // panel y es traducible; el why es diagnóstico y puede cambiar sin romper a nadie.
+  // Sin esto, un fallo de un tercero llega al panel como "reintenta" y al log como nada:
+  // exactamente lo que dejó el alta de Telegram de los clientes muerta y sin rastro
+  // desde el 2026-08-21 (ningún cliente llegó a vincular; ver IMPLEMENTADO.md).
+  constructor(status, code, why) { super(code); this.status = status; this.code = code; if (why) this.why = String(why).slice(0, 200); }
 }
 
 // Freno EN MEMORIA para actores ya autenticados (el panel): KV cobra una escritura por
@@ -908,14 +914,41 @@ const TELEGRAM_BOT_TOKEN_RE = /^\d{5,12}:[A-Za-z0-9_-]{25,60}$/;
 // Registra (o retira) el webhook de UN bot apuntando al worker, con el secreto
 // compartido: todos los bots (el de Velai y los de marca blanca) entran por el
 // mismo endpoint — el token de /start ya identifica al tenant.
+// Telegram solo admite A-Z a-z 0-9 _ - en secret_token (1-256). Un secreto generado con
+// `openssl rand -base64 32` trae +, / y = y Telegram rechaza el setWebhook ENTERO con un
+// 400 genérico. Se comprueba aquí para poder decirlo con esas palabras en vez de dejar
+// al cliente con un "reintenta" que no arregla nada por muchas veces que lo pulse.
+const TELEGRAM_SECRET_RE = /^[A-Za-z0-9_-]{1,256}$/;
+
+// Registra (o retira) el webhook de UN bot. Devuelve el motivo cuando falla: el
+// `description` de Telegram es lo único que distingue un token malo de un secreto con
+// caracteres prohibidos o de un tope de peticiones, y antes se tiraba a la basura.
 async function telegramSetWebhook(env, botToken) {
-  const response = await fetch(`https://api.telegram.org/bot${botToken}/setWebhook`, {
-    method: 'POST', headers: JSON_HEADERS,
-    body: JSON.stringify({ url: `${WORKER_PUBLIC_URL}/telegram/webhook`, secret_token: env.TELEGRAM_WEBHOOK_SECRET, allowed_updates: ['message'] }),
-    signal: AbortSignal.timeout(8000),
-  });
-  const data = await response.json().catch(() => ({}));
-  return Boolean(response.ok && data.ok);
+  if (!TELEGRAM_SECRET_RE.test(String(env.TELEGRAM_WEBHOOK_SECRET || ''))) {
+    return { ok: false, code: 'webhook_secret_invalid', why: 'TELEGRAM_WEBHOOK_SECRET tiene caracteres que Telegram no admite (solo A-Z a-z 0-9 _ -)' };
+  }
+  let response; let data = {};
+  try {
+    response = await fetch(`https://api.telegram.org/bot${botToken}/setWebhook`, {
+      method: 'POST', headers: JSON_HEADERS,
+      body: JSON.stringify({ url: `${WORKER_PUBLIC_URL}/telegram/webhook`, secret_token: env.TELEGRAM_WEBHOOK_SECRET, allowed_updates: ['message'] }),
+      signal: AbortSignal.timeout(8000),
+    });
+    data = await response.json().catch(() => ({}));
+  } catch (error) {
+    return { ok: false, code: 'telegram_setup_failed', why: `red: ${String(error.message || error).slice(0, 80)}` };
+  }
+  if (response.ok && data.ok) return { ok: true };
+  const why = clean(data.description, 200) || `HTTP ${response.status}`;
+  const lower = why.toLowerCase();
+  // Traducción a códigos accionables, mismo criterio que los Temas del grupo (§Telegram):
+  // el cliente tiene que saber si el problema es SU token o nuestra configuración.
+  let code = 'telegram_setup_failed';
+  if (lower.includes('secret_token')) code = 'webhook_secret_invalid';
+  else if (data.error_code === 401 || lower.includes('unauthorized')) code = 'invalid_bot_token';
+  else if (data.error_code === 429 || lower.includes('too many requests')) code = 'telegram_rate_limited';
+  else if (lower.includes('url') || lower.includes('https')) code = 'webhook_url_invalid';
+  return { ok: false, code, why };
 }
 
 // Usuario del bot (para construir los enlaces t.me): se descubre con getMe y se
@@ -2595,7 +2628,10 @@ function errorResponseParts(error) {
   const typed = error instanceof HttpError || (Number.isInteger(error && error.status) && typeof (error && error.code) === 'string');
   const status = typed ? error.status : 500;
   const code = typed ? error.code : 'server_error';
-  return { status, code, detail: status >= 500 ? { error: String((error && error.message) || error).slice(0, 200) } : {} };
+  // El why solo aparece cuando existe: añadir la clave con undefined rompe el deepEqual
+  // del contrato de esta función, que está fijado por test desde el arreglo de Twilio.
+  const why = typed && error.why ? { why: error.why } : {};
+  return { status, code, ...why, detail: { ...(status >= 500 ? { error: String((error && error.message) || error).slice(0, 200) } : {}), ...why } };
 }
 
 async function handleProvision(request, env, ctx, tenantId, step, actor) {
@@ -3919,7 +3955,11 @@ async function adminRouter(request, env, ctx, path, url, config, scope) {
     // Registra el webhook del bot (idempotente; solo Velai). OJO operativo: con el
     // webhook activo, getUpdates deja de funcionar para ese bot (OPERATIONS.md).
     if (!env.TELEGRAM_TOKEN || !env.TELEGRAM_WEBHOOK_SECRET) throw new HttpError(503, 'telegram_not_configured');
-    if (!(await telegramSetWebhook(env, env.TELEGRAM_TOKEN))) throw new HttpError(502, 'telegram_setup_failed');
+    const hook = await telegramSetWebhook(env, env.TELEGRAM_TOKEN);
+    if (!hook.ok) {
+      console.log(JSON.stringify({ level: 'error', code: 'telegram_webhook_failed', bot: 'velai', why: hook.why }));
+      throw new HttpError(502, hook.code, hook.why);
+    }
     console.log(JSON.stringify({ level: 'info', code: 'telegram_webhook_registered', actor }));
     return json({ ok: true, botUsername: await telegramBotUsername(env) }, 200, NO_STORE);
   }
@@ -4031,7 +4071,13 @@ async function adminRouter(request, env, ctx, path, url, config, scope) {
         username = (me && me.ok && me.result && me.result.is_bot && clean(me.result.username, 64)) || null;
       } catch (_) {}
       if (!username) throw new HttpError(400, 'invalid_bot_token');
-      if (!(await telegramSetWebhook(env, botToken))) throw new HttpError(502, 'telegram_setup_failed');
+      const hook = await telegramSetWebhook(env, botToken);
+      if (!hook.ok) {
+        // El log lleva el motivo de Telegram y el tenant: sin esto, «Telegram rechazó el
+        // registro del webhook» era todo lo que quedaba, en el panel y en los logs.
+        console.log(JSON.stringify({ level: 'error', code: 'telegram_webhook_failed', tenant: tenantRow.slug, bot: username, why: hook.why }));
+        throw new HttpError(502, hook.code, hook.why);
+      }
       const enc = await encryptSecret(env, `telegram:${tenantId}`, botToken);
       const now = new Date().toISOString();
       // Cambiar de bot invalida el chat vinculado (el bot nuevo no está en ese chat):
@@ -4859,13 +4905,13 @@ export function createWorker(config) {
         if (path === '/' && request.method === 'POST' && contentType.includes('application/json')) throw new HttpError(410, 'legacy_chat_retired');
         throw new HttpError(404, 'not_found');
       } catch (error) {
-        const { status, code, detail } = errorResponseParts(error);
+        const { status, code, detail, why } = errorResponseParts(error);
         console.log(JSON.stringify({ level: status >= 500 ? 'error' : 'warn', code, status, path, ...detail, requestId: request.headers.get('cf-ray') || crypto.randomUUID() }));
-        return json({ ok: false, error: code }, status, (await publicCors(request, env).catch(() => null)) || {});
+        return json({ ok: false, error: code, ...(why ? { why } : {}) }, status, (await publicCors(request, env).catch(() => null)) || {});
       }
     },
     async scheduled(event, env, ctx) { ctx.waitUntil(scheduled(env, event && event.cron)); },
   };
 }
 
-export const testing = { scheduled, MINUTE_CRON, waitedMin, QUEUE_MAX_MIN, QUEUE_WAIT_TEXT, canAttend, velaiTenantId, handleChatPoll, VISITOR_AWAY_MS, expireTakeovers, NO_ADVISOR_TEXT, graceExpired, systemWithHandoff, HANDOFF_ON, HANDOFF_OFF, supportWindows, withinSupportHours, advisorAvailable, CONV_STATES, TAKEOVER_GRACE_MIN, settleReply, TRUNCATED_CLOSING, trimToSentence, waBody, replyWindow, reportPeriod, reportMetric, weeklyReportText, weeklyStats, sendWeeklyReports, convLoad, convAppend, convLinkLead, convFilters, convRetentionDays, UNANSWERED_RE, CONV_WINDOW, cloudflareUsage, CF_FREE_LIMITS, recordConversation, aiCost, recordAiUsage, rateLimited, memLimited, applySenderProfile, pushSenderProfile, clean, persistLead, leadAlertStatus, captureWhatsAppLead, leadFromSummary, leadCaptureDone, errorResponseParts, tenantByAddress, syncPrimaryChannel, assertChannelFree, normalizePhone, extractPhone, safeUtm, publicCors, validTwilioSignature, callAnthropic, callAnthropicRaw, runToolLoop, calendarExecutor, calendarSystem, tenantCalendar, validCalendarDate, availableSlots, handleCalendarCallback, calendarCallbackFor, sendTwilioText, timingSafeEqual, telegramBotUsername, handleTelegramWebhook, sendTelegramText, tenantTelegramToken, telegramThreadFor, registerTelegramTopic, csvCell, expiryDate, leadFilters, isDemoKey, templateVar, leadTemplateVariables, readJson, deliver, drainQueuedLeads, verifyTurnstile, systemFor, validateTenant, invalidateTenantCache, tenantWriteError, assertNotActivePending, tenantChannelSummary, channelsForScope, handleProvision, pollProvisioning, fillSeries, resolveScope, scopeClause, assertOwnTenant, clienteAllowed, adminRouter, recordAuthFailure, handleAdmin, handleWidgetBoot, allowedOrigins, envOrigins, syncPanelGate, envAdmins, syncAdminGate, getSetting, setSetting, withCfToken };
+export const testing = { scheduled, MINUTE_CRON, waitedMin, QUEUE_MAX_MIN, QUEUE_WAIT_TEXT, canAttend, velaiTenantId, handleChatPoll, VISITOR_AWAY_MS, expireTakeovers, NO_ADVISOR_TEXT, graceExpired, systemWithHandoff, HANDOFF_ON, HANDOFF_OFF, supportWindows, withinSupportHours, advisorAvailable, CONV_STATES, TAKEOVER_GRACE_MIN, settleReply, TRUNCATED_CLOSING, trimToSentence, waBody, replyWindow, reportPeriod, reportMetric, weeklyReportText, weeklyStats, sendWeeklyReports, convLoad, convAppend, convLinkLead, convFilters, convRetentionDays, UNANSWERED_RE, CONV_WINDOW, cloudflareUsage, CF_FREE_LIMITS, recordConversation, aiCost, recordAiUsage, rateLimited, memLimited, applySenderProfile, pushSenderProfile, clean, persistLead, leadAlertStatus, captureWhatsAppLead, leadFromSummary, leadCaptureDone, errorResponseParts, tenantByAddress, syncPrimaryChannel, assertChannelFree, normalizePhone, extractPhone, safeUtm, publicCors, validTwilioSignature, callAnthropic, callAnthropicRaw, runToolLoop, calendarExecutor, calendarSystem, tenantCalendar, validCalendarDate, availableSlots, handleCalendarCallback, calendarCallbackFor, sendTwilioText, timingSafeEqual, telegramBotUsername, telegramSetWebhook, handleTelegramWebhook, sendTelegramText, tenantTelegramToken, telegramThreadFor, registerTelegramTopic, csvCell, expiryDate, leadFilters, isDemoKey, templateVar, leadTemplateVariables, readJson, deliver, drainQueuedLeads, verifyTurnstile, systemFor, validateTenant, invalidateTenantCache, tenantWriteError, assertNotActivePending, tenantChannelSummary, channelsForScope, handleProvision, pollProvisioning, fillSeries, resolveScope, scopeClause, assertOwnTenant, clienteAllowed, adminRouter, recordAuthFailure, handleAdmin, handleWidgetBoot, allowedOrigins, envOrigins, syncPanelGate, envAdmins, syncAdminGate, getSetting, setSetting, withCfToken };
