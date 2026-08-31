@@ -13,7 +13,10 @@ import { promisify } from 'node:util';
 import { pathToFileURL } from 'node:url';
 import { homedir } from 'node:os';
 
-const [bundlePath, outPath = '/tmp/panel.png', view = 'conversaciones'] = process.argv.slice(2);
+// 4º argumento «busy»: enciende la barra de actividad (html.busy) para poder MIRARLA.
+// Solo se ve durante una petición, así que sin esto no hay forma de revisarla sin
+// cronometrar una captura a ojo mientras carga algo.
+const [bundlePath, outPath = '/tmp/panel.png', view = 'conversaciones', busy = ''] = process.argv.slice(2);
 if (!bundlePath) { console.error('uso: node scripts/render-panel.mjs <bundle.js> [out.png] [vista]'); process.exit(2); }
 
 // Los navegadores de Playwright son lo que suele haber a mano; CHROME_PATH lo pisa.
@@ -156,6 +159,17 @@ if (!VISTAS[view]) { console.error(`render-panel: vista desconocida «${view}».
 html = html.replace('<div id="viewDashboard">', '<div id="viewDashboard" hidden>');
 html = html.replace(`<div id="view${view[0].toUpperCase()}${view.slice(1)}" hidden>`, `<div id="view${view[0].toUpperCase()}${view.slice(1)}">`);
 html = VISTAS[view](html);
+if (busy === 'busy') {
+  html = html.replace('<html lang="es">', '<html lang="es" class="busy">');
+  // Y un botón en curso: el estado que ve quien acaba de pulsar. En el panel real lo pone
+  // busyStart() con document.activeElement; aquí, sin scripts, se marca a mano.
+  html = html.replace('<button class="btn alt btnsm" id="tgSetup" type="button">',
+    '<button class="btn alt btnsm loading" id="tgSetup" type="button" disabled>');
+  html = html.replace('<button class="btn" id="tgTopicAdd" type="button">',
+    '<button class="btn loading" id="tgTopicAdd" type="button" disabled>');
+  html = html.replace('<button class="btn alt btnsm" id="wrTest" type="button">',
+    '<button class="btn alt btnsm loading" id="wrTest" type="button" disabled>');
+}
 
 const tmpHtml = outPath.replace(/\.png$/, '') + '.html';
 await writeFile(tmpHtml, html);

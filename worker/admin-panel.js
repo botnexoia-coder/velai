@@ -22,7 +22,36 @@ function nbChips(summary){if(!summary)return '<span class="muted">—</span>';
  return String(summary).split(',').map(p=>{const[ch,st]=p.split(':');const cls=st==='sent'?'ok':st==='failed'?'bad':'wait';
   return '<span class="nb '+cls+'"><i></i>'+esc(ch==='telegram'?'Telegram':'WhatsApp')+'</span>'}).join('')}
 function params(){const p=new URLSearchParams(new FormData($('#filters')));for(const[k,v]of[...p])if(!v)p.delete(k);return p}
-async function api(path,options){const r=await fetch(path,options);if(r.status===204)return null;const d=await r.json();if(!r.ok){const e=Error(d.error||'request_failed');e.why=d.why||'';throw e}return d}
+// ── Señal de «estoy pensando» ────────────────────────────────────────────────
+// Va en api() y no en cada botón a propósito: es el único paso por el que van las 71
+// llamadas del panel, así que una sola pieza cubre todas — y ninguna vista futura se
+// queda sin indicador por olvido.
+// Dos decisiones que importan:
+//  - Contador, no booleano: dos peticiones a la vez y la que acaba primero apagaría la
+//    barra con la otra aún en vuelo.
+//  - 180 ms de gracia: casi todo el panel responde antes, y una barra que aparece y
+//    desaparece en 80 ms se lee como un parpadeo defectuoso, no como progreso.
+let busyN=0,busyTimer=null;const busyBtns=new Set();
+function busyStart(){busyN++;
+ // El botón que acaba de pulsarse ES el activeElement, así que se puede marcar sin tocar
+ // ninguna de las 71 llamadas. Importa porque cuando alguien pulsa «Guardar» mira el
+ // botón, no el borde de la pantalla: la barra de arriba sola no responde a «¿lo he
+ // pulsado bien?». De paso queda bloqueado y no se puede disparar dos veces.
+ const el=document.activeElement;
+ if(el&&el.tagName==='BUTTON'&&!el.disabled&&!busyBtns.has(el)){busyBtns.add(el);el.classList.add('loading');el.disabled=true}
+ if(busyN===1&&!busyTimer)busyTimer=setTimeout(()=>{document.documentElement.classList.add('busy')},180)}
+function busyEnd(){busyN=Math.max(0,busyN-1);if(busyN)return;
+ if(busyTimer){clearTimeout(busyTimer);busyTimer=null}
+ document.documentElement.classList.remove('busy');
+ // Se sueltan solo cuando NO queda nada en vuelo: si no, la petición corta desbloquearía
+ // el botón de la larga y volveríamos a poder pulsar dos veces.
+ busyBtns.forEach(b=>{b.classList.remove('loading');b.disabled=false});busyBtns.clear()}
+// quiet = sondeo de fondo (bandeja cada 15 s, avisos cada 30 s). Sin esto la barra
+// viviría encendida sola y dejaría de significar nada.
+async function api(path,options,quiet){
+ if(!quiet)busyStart();
+ try{const r=await fetch(path,options);if(r.status===204)return null;const d=await r.json();if(!r.ok){const e=Error(d.error||'request_failed');e.why=d.why||'';throw e}return d}
+ finally{if(!quiet)busyEnd()}}
 function fmt(v){return v?new Intl.DateTimeFormat('es-ES',{dateStyle:'short',timeStyle:'short'}).format(new Date(v)):'—'}
 async function loadStats(){try{const s=await api('/api/admin/stats');
  $('#mTotal').textContent=s.total30;$('#mNew').textContent=s.sinContactar;
@@ -334,7 +363,7 @@ $('#availSw').onclick=async()=>{$('#availSw').disabled=true;
  finally{$('#availSw').disabled=false}};
 async function loadInbox(quiet=false){
  try{const p=convParams();if(convOpen)p.set('conversation',convOpen);
-  const d=await api('/api/admin/inbox?'+p);
+  const d=await api('/api/admin/inbox?'+p,null,quiet);
   if(d.queueMin)QUEUE_MIN=d.queueMin;
   if(d.pingMin)GRACE_MIN=d.pingMin;
   chTabs(d.counts||[]);
@@ -482,7 +511,7 @@ function notify(titulo,cuerpo){
   n.onclick=()=>{window.focus();const b=document.querySelector('.tab[data-view="conversaciones"]');if(b)b.click();n.close()}}
  catch(e){}}
 async function checkAlerts(){
- try{const d=await api('/api/admin/alerts');
+ try{const d=await api('/api/admin/alerts',null,true);
   // El primer sondeo solo fija la referencia: si no, al activar los avisos sonaría por
   // mensajes que ya estaban ahí desde hace horas.
   if(alertSeen===null){alertSeen=d;return}

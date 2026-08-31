@@ -555,6 +555,34 @@ body.dark .ch-ig{color:#e0a6d0}
 #brandPrev.bp-dark .bp-c span{background:#1f2c34;color:#e9edef;border-color:rgba(255,255,255,.2)}
 /* Toasts de resultado (guardado ✓ / error): contenedor popover para quedar en el top
    layer POR ENCIMA de los <dialog> abiertos — un fixed normal quedaría detrás. */
+/* Botón en curso: late, ni cambia de tamaño ni de texto.
+   Se descartaron las dos alternativas obvias por motivos concretos:
+    - Un giro DENTRO del botón obliga a padding extra y la caja crece al pulsar: en
+      Conexiones eso encogía el campo de al lado (visto en render-panel). Y sin padding
+      extra pisa la etiqueta en los .btnsm, que solo tienen 10px.
+    - Cambiar el texto a «Cargando…» pierde la palabra que dice QUÉ se está haciendo y
+      da el mismo salto de maquetación.
+   El movimiento lo pone la barra de arriba; esto dice «tu clic ha entrado y sigue en
+   marcha», que es lo que se mira al pulsar. Funciona igual en cualquier tamaño de botón
+   y en los dos temas. */
+button.loading{opacity:.6;cursor:progress;animation:busypulse .9s ease-in-out infinite alternate}
+@keyframes busypulse{to{opacity:.88}}
+@media (prefers-reduced-motion:reduce){button.loading{animation:none;opacity:.6}}
+/* ── Barra de actividad ────────────────────────────────────────────────────────
+   Señal única de «el panel está pidiendo algo al servidor». La enciende api() para
+   TODAS las peticiones salvo los sondeos de fondo (ver admin-panel.js).
+   Va en ::before de <html> y no en un elemento propio para que ninguna vista pueda
+   dejarla fuera de su maquetación, y por encima de todo (incluidos dialogs) porque
+   con un modal abierto también se piden cosas.
+   Se pinta con el naranja de marca, que es legible sobre el tema claro y el oscuro. */
+html.busy::before{content:'';position:fixed;top:0;left:0;right:0;height:3px;z-index:2147483647;pointer-events:none;
+ background-image:linear-gradient(90deg,transparent,var(--orange),var(--orange2),transparent);
+ background-size:45% 100%;background-repeat:no-repeat;animation:busybar 1.05s linear infinite}
+@keyframes busybar{from{background-position:-45% 0}to{background-position:145% 0}}
+/* Sin animación: la barra se queda fija y translúcida — sigue diciendo «esto está en
+   marcha» sin movimiento, que es lo que pide prefers-reduced-motion. */
+@media (prefers-reduced-motion:reduce){
+ html.busy::before{animation:none;background-image:linear-gradient(90deg,var(--orange),var(--orange2));background-size:100% 100%;opacity:.75}}
 #toasts{position:fixed;top:14px;right:14px;left:auto;bottom:auto;margin:0;border:0;padding:0;background:transparent;overflow:visible;flex-direction:column;align-items:flex-end;gap:8px}
 #toasts:popover-open{display:flex}
 .toast{background:var(--bg2);border:1px solid var(--ok);color:var(--white);border-radius:var(--r-sm);padding:10px 14px;box-shadow:0 8px 30px rgba(0,0,0,.45);font-size:13px;max-width:360px;opacity:0;transform:translateY(-6px);transition:opacity .2s ease,transform .2s ease}

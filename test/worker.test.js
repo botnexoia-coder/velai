@@ -4520,3 +4520,54 @@ test('el «why» de un HttpError llega al cuerpo de la respuesta, no solo al log
   const sinMotivo = testing.errorResponseParts(Object.assign(new Error('y'), { status: 404, code: 'not_found' }));
   assert.equal(sinMotivo.why, undefined);
 });
+
+// ── Señal de actividad del panel ──
+// Pedido de Juan: «cuando se tira una petición no se sabe que el sistema está pensando».
+// Vive en api() porque es el único paso por el que van las 71 llamadas del panel.
+import { panelApp } from '../worker/admin-panel.js';
+
+test('el indicador de actividad no se puede esquivar: TODA llamada pasa por api()', () => {
+  const src = panelApp.toString();
+  const fetches = src.match(/\bfetch\(/g) || [];
+  assert.equal(fetches.length, 1, 'solo api() puede llamar a fetch; si no, habrá peticiones sin indicador');
+  // …y ese fetch está dentro de api()
+  const api = src.slice(src.indexOf('async function api('), src.indexOf('function fmt('));
+  assert.match(api, /\bfetch\(/);
+  assert.match(api, /finally\{if\(!quiet\)busyEnd\(\)\}/, 'el contador se suelta en finally: un error dejaría la barra encendida para siempre');
+});
+
+test('los sondeos de fondo NO encienden la barra (si no, viviría encendida sola)', () => {
+  const src = panelApp.toString();
+  assert.match(src, /api\('\/api\/admin\/inbox\?'\+p,null,quiet\)/, 'la bandeja sondea en silencio');
+  assert.match(src, /api\('\/api\/admin\/alerts',null,true\)/, 'los avisos sondean en silencio');
+});
+
+test('el contador de actividad aguanta peticiones simultáneas', () => {
+  // Se ejecuta el código REAL del panel (extraído de panelApp) contra un DOM de mentira:
+  // el bug que se quiere evitar es que la petición corta apague la barra y desbloquee el
+  // botón mientras la larga sigue en vuelo.
+  const src = panelApp.toString();
+  const code = src.slice(src.indexOf('let busyN=0'), src.indexOf('// quiet = sondeo'));
+  const clases = new Set();
+  const html = { classList: { add: (c) => clases.add(c), remove: (c) => clases.delete(c) } };
+  const boton = { tagName: 'BUTTON', disabled: false, classList: { add() { boton.on = true; }, remove() { boton.on = false; } } };
+  const doc = { documentElement: html, activeElement: boton };
+  const timers = [];
+  const ctx = { document: doc, setTimeout: (fn) => { timers.push(fn); return timers.length; }, clearTimeout: () => {} };
+  const { busyStart, busyEnd } = new Function('document', 'setTimeout', 'clearTimeout',
+    code + ';return {busyStart,busyEnd}')(ctx.document, ctx.setTimeout, ctx.clearTimeout);
+
+  busyStart();                       // petición larga (el botón queda tomado)
+  assert.equal(boton.disabled, true);
+  assert.equal(boton.on, true);
+  doc.activeElement = null;          // la segunda no nace de un clic
+  busyStart();                       // petición corta, en paralelo
+  busyEnd();                         // termina la corta
+  assert.equal(boton.disabled, true, 'la corta NO puede desbloquear el botón de la larga');
+  timers.forEach((fn) => fn());      // vence la gracia de 180 ms
+  assert.ok(clases.has('busy'), 'con algo en vuelo, la barra está encendida');
+  busyEnd();                         // termina la larga
+  assert.equal(boton.disabled, false, 'al vaciarse la cola se suelta el botón');
+  assert.equal(boton.on, false);
+  assert.ok(!clases.has('busy'), 'y se apaga la barra');
+});
