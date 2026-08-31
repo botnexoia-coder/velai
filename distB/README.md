@@ -1,1 +1,0 @@
-This folder contains the built output assets for the worker "vai-worker" generated at 2026-08-26T17:21:57.670Z.
