@@ -10,5 +10,8 @@
     "check:aislamiento": "node scripts/check-aislamiento.mjs",
     "check:entornos": "node scripts/check-entornos.mjs",
     "test": "node --test"
+  },
+  "dependencies": {
+    "hono": "^4.13.5"
   }
 }

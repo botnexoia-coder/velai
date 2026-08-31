@@ -12,4 +12,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 24
+      # Desde la migración a Hono el repo tiene dependencias (y lockfile): sin
+      # instalar, los tests fallan en el primer `import 'hono'`.
+      - run: npm ci
       - run: npm run check

@@ -57,6 +57,9 @@ jobs:
         with:
           node-version: 24
       # El job es hermético: repite el check aunque ci.yml también lo corra.
+      # `npm ci` porque desde la migración a Hono hay dependencias con lockfile
+      # (y wrangler las bundlea en el deploy: sin node_modules no hay bundle).
+      - run: npm ci
       - run: npm run check
       # Migraciones ANTES del deploy (OPERATIONS.md §esquema): son aditivas y el
       # worker viejo convive con el esquema nuevo. Wrangler pineado a major (@4)
