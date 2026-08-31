@@ -12,6 +12,43 @@
 
 ---
 
+## Hono + panel v2 en React + orden del repo (2026-09-01, tres agentes en paralelo)
+
+La ejecución de la decisión de frameworks (memoria: decision-frameworks-2026-09), en tres
+worktrees aislados integrados por el orquestador:
+
+- **Worker sobre Hono 4.13**: `adminRouter` (1.400 líneas de `if path ===`) partido en
+  `worker/routes/{publico,leads,conversaciones,tenants,conexiones,calendario,config}.js`
+  con el perímetro admin como middleware (`worker/middleware.js`) — un endpoint nuevo ya
+  no puede nacer fuera de la cadena identidad→scope. Primera dependencia del repo
+  (package-lock.json, `npm ci` en CI). `check-aislamiento.mjs` reescrito para la
+  estructura nueva con paridad exacta (101 consultas vigiladas) y validado por mutación
+  (7 del agente + 1 independiente del orquestador, cazada por guardián Y 5 tests).
+- **Panel v2** (`panel/`): Vite + React 19 + TS estricto + TanStack Query. Shell (nav
+  siempre oscura), Dashboard, Leads y Conversaciones completas; 53 tests propios; tokens
+  de marca, TERRS, loader y tooltip portados 1:1. Lo sirve EL PROPIO WORKER como
+  estáticos (`[assets]` + run_worker_first) en el hostname del panel tras la bandera
+  `PANEL_V2` — mismo origen, sin CORS, Access intacto, JWT validado antes de servir un
+  byte. Encendido SOLO en staging; rollback = quitar la bandera (v1 intacto en el bundle).
+  Vistas restantes en `panel/TODO.md`.
+- **Repo**: `docs/ESTRUCTURA.md` (mapa y arquitectura: capas modulares; microservicios y
+  hexagonal completo descartados con razones), `docs/PLAN-SITE.md` (mover el marketing a
+  site/ — NO ejecutado, requiere dashboard), `distB/` borrado.
+- **Exposición del código cerrada en el edge** (mismo día, agente aparte): 3 apps de
+  Access con deny-everyone tapan /worker/*, /docs/*, /migrations/*, /seed/*, /tenants/*,
+  /test/*, /scripts/*, /distB/*, /.github/* y los ficheros sueltos del repo en
+  hirevai.com (todo verificado a 302 con lo público intacto, widget de clientes
+  incluido). La solución de origen sigue siendo PLAN-SITE.md.
+
+Trampa de TOML que costó un deploy de staging: una tabla `[assets]` colocada ANTES del
+array `routes` se traga las claves sueltas siguientes — las rutas de producción quedaron
+colgando de assets y la comprobación de dominios de check-entornos pasó EN VACÍO.
+Recolocada tras `routes` y check-entornos endurecido para fallar si producción «no tiene»
+admin.hirevai.com.
+
+**Estado al cierre**: 188 tests + 53 del panel, todo verde; staging desplegado con Hono y
+panel v2; producción SIN tocar (pendiente de push, decisión de Juan).
+
 ## El webhook de Telegram llevaba 10 días roto por el charset del secreto (2026-08-31)
 
 **Síntoma:** «Telegram rechazó el registro del webhook: reintenta», 502 en

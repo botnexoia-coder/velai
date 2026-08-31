@@ -64,6 +64,10 @@ for (const id of dbStg) if (dbProd.includes(id)) fallos.push(`staging usa la D1 
 
 // 2. Dominios: el fallo caro. `routes` SE HEREDA, así que su ausencia no es neutra.
 const rutasProd = t['']?.routes || '';
+// Si producción "no tiene" rutas, lo roto es este análisis o el TOML, no la realidad:
+// admin.hirevai.com y api.hirevai.com viven ahí. Pasó el 2026-09-01 — una tabla [assets]
+// colocada antes del array se tragó `routes` y esta comprobación pasó EN VACÍO.
+if (!rutasProd.includes('admin.hirevai.com')) fallos.push('el bloque raíz no declara admin.hirevai.com en routes: o el TOML está corrupto (¿una tabla antes del array?) o se borró la ruta del panel');
 const rutasStg = t['env.staging']?.routes;
 const dominiosProd = [...rutasProd.matchAll(/pattern\s*=\s*"([^"]+)"/g)].map((x) => x[1]);
 if (rutasStg === undefined) {

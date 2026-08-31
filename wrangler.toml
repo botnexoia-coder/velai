@@ -12,15 +12,6 @@ keep_vars = true
 # `routes` desactiva esa URL y rompe chat y formularios.
 workers_dev = true
 
-# Panel v2 (React): la SPA compilada viaja con el worker como estáticos. run_worker_first
-# es la pieza clave: sin él, Cloudflare serviría estos ficheros ANTES de ejecutar el worker
-# en CUALQUIER hostname (incluido api.hirevai.com); con él, todo entra al worker y es
-# worker/routes/publico.js quien decide (solo hostname del panel + bandera PANEL_V2).
-# El deploy exige que panel/dist exista: los workflows compilan el panel antes.
-[assets]
-directory = "panel/dist"
-binding = "ASSETS"
-run_worker_first = true
 
 # Dominio del panel admin (Cloudflare Access delante; el Worker valida el JWT).
 routes = [
@@ -31,6 +22,18 @@ routes = [
   # workers_dev sigue true: los widgets v<=7 cacheados (immutable, 1 año) siguen vivos.
   { pattern = "api.hirevai.com", custom_domain = true }
 ]
+
+# Panel v2 (React): la SPA compilada viaja con el worker como estáticos. run_worker_first
+# es la pieza clave: sin él, Cloudflare serviría estos ficheros ANTES de ejecutar el worker
+# en CUALQUIER hostname (incluido api.hirevai.com); con él, todo entra al worker y es
+# worker/routes/publico.js quien decide (solo hostname del panel + bandera PANEL_V2).
+# OJO TOML: este bloque va DESPUÉS del array `routes` — una tabla [assets] antes se
+# tragaría las claves sueltas que la siguen (pasó en la primera versión: las rutas de
+# producción quedaron colgando de assets y wrangler avisó de "unexpected fields").
+[assets]
+directory = "panel/dist"
+binding = "ASSETS"
+run_worker_first = true
 
 [vars]
 # BASE de la allowlist (los orígenes de Velai). Desde la migración 0008 los dominios de
