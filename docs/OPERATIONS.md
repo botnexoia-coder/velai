@@ -162,6 +162,20 @@ degrada solo cuando faltan (`deliver` devuelve `skipped`).
       ```
       El tope de staging son 100 llamadas/día (`AI_DAILY_LIMIT`), ~0,60 $ en el peor caso.
 
+### Ojo con `secret put` desde que hay dos entornos
+
+Con un `[env.staging]` en el fichero, wrangler AVISA si no se dice a qué entorno va el
+secret. No falla —usa el entorno raíz, o sea producción— pero conviene ser explícito:
+
+```bash
+npx wrangler@4 secret put NOMBRE --env=""        # producción
+npx wrangler@4 secret put NOMBRE --env staging   # staging
+```
+
+Los secrets se aplican **al momento**, sin desplegar. (Si un secret recién puesto parece
+no llegar al código, el redeploy no es la solución: casi siempre es que el valor subió
+vacío — el prompt oculta lo que se teclea y acepta una línea en blanco sin quejarse.)
+
 ### Dos trampas de staging que cuestan una tarde
 
 1. **Turnstile y `example.com`.** La clave de PRUEBA emite tokens con
