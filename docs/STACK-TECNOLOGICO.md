@@ -11,8 +11,9 @@ asistente **Vai**. Dominio público: `hirevai.com`; correo en `velai.ai`.
 Sitio **estático multipágina** servido desde **Cloudflare Pages**, con un único
 **Cloudflare Worker** como backend serverless para el chat de Vai, la captura de
 leads y el panel admin. El Worker está dividido en: `vai-worker.js` (entrypoint +
-prompts `SYSTEM`/`DEMOS`/`SUMMARY_PROMPT`) → `worker/app.js` (toda la lógica) +
-`worker/admin-page.js` (HTML del panel). No hay framework de frontend ni build
+prompts `SYSTEM`/`DEMOS`/`SUMMARY_PROMPT`) → `worker/app.js` (app de Hono 4 +
+helpers) + `worker/middleware.js` (perímetro del panel) + `worker/routes/*.js`
+(rutas por dominio) + `worker/admin-page.js` (HTML del panel). No hay framework de frontend ni build
 pesado: HTML + CSS + JavaScript vanilla, optimizado para SEO/GEO y velocidad.
 
 ```
@@ -134,7 +135,7 @@ panel) y `LEAD_RETENTION_MONTHS` (purga RGPD).
   (`vai-worker-staging`, D1 `vai-leads-staging`, sin clientes). Cada push a `main`
   ensaya en staging y solo después toca producción. Detalle y reglas:
   `docs/OPERATIONS.md` §Staging.
-- **Tooling** — `package.json` sin dependencias: `npm run check` = `node --check`
+- **Tooling** — una sola dependencia (Hono 4, con lockfile; `npm ci` en CI): `npm run check` = `node --check`
   de los JS + `scripts/check-site.mjs` (valida las 27 páginas, JSON-LD, recursos
   internos y marcadores sin sustituir) + `scripts/check-aislamiento.mjs` (ninguna
   consulta del panel sin filtro de tenant ni puerta) + `scripts/check-entornos.mjs`

@@ -18,7 +18,13 @@
 
 ```
 vai-worker.js        entrypoint: SOLO configuración/prompts + createWorker(config)
-worker/app.js        lógica: helpers, handlers, router, scheduled, export testing
+worker/app.js        ensamblador de la app Hono + helpers compartidos + scheduled +
+                     export testing (ver worker/MIGRACION-HONO.md)
+worker/middleware.js perímetro del panel: host → CORS → identidad (Access) → scope →
+                     clienteAllowed, como middlewares de TODO /api/admin/*
+worker/routes/       rutas por dominio: publico.js (chat/lead/webhooks/media) y el
+                     panel troceado (leads, conversaciones, tenants, conexiones,
+                     calendario, config)
 worker/admin-page.js ensamblador de la UI embebida: HTML+CSS en template string +
                      nonce CSP; el JS del panel se interpola como IIFE serializada
 worker/admin-panel.js el JS del panel como FUNCIÓN REAL (panelApp): node --check y
