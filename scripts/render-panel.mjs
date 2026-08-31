@@ -151,6 +151,27 @@ const VISTAS = {
       .replace('<button class="tgnode" id="tgn5" type="button" data-tgo="tgs5">', '<button class="tgnode cur done" id="tgn5" type="button" data-tgo="tgs5">')
       .replace(/<i class="tgbar" id="tgbar([1-4])"><\/i>/g, (m, n) => `<i class="tgbar done" id="tgbar${n}"></i>`);
   },
+  // Leads: la barra de filtros con contenido real. El desplegable de «Fuente» lo rellena
+  // fillSources() desde /api/admin/stats, así que sin scripts hay que sembrarlo a mano —
+  // y es justo lo que hay que MIRAR: cabe en la barra sin romper la fila de filtros.
+  leads: (h) => {
+    const fuentes = ['chat web', 'formulario web', 'whatsapp', 'calculadora-roi', 'diagnostico-whatsapp'];
+    const fila = (fecha, cliente, est, nombre, tel, asunto, fuente) =>
+      `<tr><td>${fecha}</td><td><span class="tenant"><i data-c="#3987e5"></i>${cliente}</span></td>`
+      + `<td><span class="pill s-${est}"><b></b>${({ new: 'nuevo', contacted: 'contactado', won: 'ganado' })[est]}</span></td><td>${nombre}</td><td class="tel">${tel}</td>`
+      + `<td>${asunto}</td><td>${fuente}</td><td><span class="nb ok"><i></i>Telegram</span></td></tr>`;
+    return h
+      .replace('<option value="">Todas las fuentes</option>',
+        '<option value="">Todas las fuentes</option>'
+        + fuentes.map((f) => `<option${f === 'whatsapp' ? ' selected' : ''}>${f}</option>`).join(''))
+      .replace('<select name="tenant" id="tenantFilter"><option value="">Todos los clientes</option></select>',
+        '<select name="tenant" id="tenantFilter"><option value="">Todos los clientes</option><option selected>GOgesti&oacute;n</option></select>')
+      .replace('<tbody id="rows"></tbody>', '<tbody id="rows">'
+        + fila('31/08/26 14:02', 'GOgesti&oacute;n', 'new', 'Mar&iacute;a Ferr&aacute;ndez', '+34 612 345 678', 'quiere cita para el jueves', 'whatsapp')
+        + fila('31/08/26 12:41', 'GOgesti&oacute;n', 'contacted', 'Juan Luis Escribano', '+34 655 433 803', 'pregunta por el precio del plan profesional', 'chat web')
+        + fila('30/08/26 19:15', 'GOgesti&oacute;n', 'won', 'Carmen', '+34 602 608 940', 'reserva confirmada', 'calculadora-roi')
+        + '</tbody>');
+  },
   // El calendario esconde su configuración hasta que hay conexión: aquí se destapa para
   // poder mirar la rejilla del horario laboral sin montar un OAuth.
   calendario: (h) => h.replace('<div id="calViewWrap" hidden>', '<div id="calViewWrap">'),

@@ -4571,3 +4571,51 @@ test('el contador de actividad aguanta peticiones simultáneas', () => {
   assert.equal(boton.on, false);
   assert.ok(!clases.has('busy'), 'y se apaga la barra');
 });
+
+// ── Desplegable de «Fuente» en el filtro de leads ──
+// Los valores salen de los DATOS y no de una lista en código: /lead guarda el «fuente»
+// que mande la página (texto libre, 80 car.), así que una lista fija dejaría sin filtrar
+// cualquier landing nueva.
+test('stats devuelve las fuentes existentes, y a un cliente solo las suyas', async () => {
+  const vistas = [];
+  const db = {
+    prepare(sql) {
+      return { sql, bind(...args) { return { sql, args }; }, args: [] };
+    },
+    async batch(stmts) {
+      for (const s of stmts) vistas.push({ sql: s.sql.replace(/\s+/g, ' '), args: s.args });
+      return stmts.map((s) => {
+        if (/DISTINCT source/.test(s.sql)) {
+          // El mock respeta el filtro: sin él devolvería también la fuente del otro cliente.
+          const propias = ['chat web', 'whatsapp'];
+          return { results: (s.args || []).length ? propias.map((source) => ({ source })) : [...propias, 'landing-ajena'].map((source) => ({ source })) };
+        }
+        if (/FROM leads WHERE status/.test(s.sql)) return { results: [{ n: 0, oldest: null }] };
+        return { results: [{ n: 0 }] };
+      });
+    },
+  };
+  const env = { DB: db, KV: { async get() { return null; }, async put() {} } };
+  const url = new URL('https://admin.hirevai.com/api/admin/stats');
+  const req = new Request(url.toString());
+  const ctx = { waitUntil() {} };
+
+  const cliente = { role: 'cliente', tenantId: 't-mio', email: 'c@x.com' };
+  const res = await testing.adminRouter(req, env, ctx, '/api/admin/stats', url, {}, cliente);
+  const d = await res.json();
+  assert.deepEqual(d.fuentes, ['chat web', 'whatsapp']);
+  assert.ok(!JSON.stringify(d).includes('landing-ajena'), 'un cliente no ve las fuentes de otro');
+
+  // La consulta va SIN ventana de 30 días: un lead viejo tiene que seguir siendo filtrable.
+  const q = vistas.find((v) => /DISTINCT source/.test(v.sql));
+  assert.ok(q, 'la consulta de fuentes entra en la misma tanda, sin petición extra');
+  assert.ok(!/-30 days/.test(q.sql), 'sin ventana temporal');
+  assert.match(q.sql, /tenant_id = \?/, 'filtrada por tenant');
+  assert.deepEqual(q.args, ['t-mio']);
+
+  // Y Velai las ve todas.
+  vistas.length = 0;
+  const velai = { role: 'velai', tenantId: null, email: 'a@velai' };
+  const todas = await (await testing.adminRouter(req, env, ctx, '/api/admin/stats', url, {}, velai)).json();
+  assert.ok(todas.fuentes.includes('landing-ajena'));
+});

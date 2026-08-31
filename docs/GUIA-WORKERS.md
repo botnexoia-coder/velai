@@ -107,6 +107,16 @@ en cada `npm run check`:
 | 4 | el id sale del scope (`.bind(scope.tenantId …)`, o un `?tenant=` validado contra él) | `/me`, `/availability`, `/ai-balance` |
 | 5 | `// scope-ok: <motivo>` | escape explícito, para lo que no encaje arriba |
 
+Y dos matices que el chequeo distingue, porque la diferencia importa:
+
+- **Tablas hijas** (sin `tenant_id`): les basta que una consulta ANTERIOR del mismo handler
+  fuera filtrada — es su única vía.
+- **Tablas con dueño propio**: además, esa consulta padre tiene que haber cerrado con un
+  **404** antes de seguir. Sin ese cierre, en un handler con varias consultas —`/stats`
+  tiene siete— bastaría con que UNA llevara el filtro para excusar a sus hermanas.
+- Un `if (scope.role !== 'velai') throw` en el handler también vale: la consulta no es
+  alcanzable por un cliente aunque la ruta sí lo sea.
+
 Dos aclaraciones que ahorran tiempo:
 
 - **Ajeno = 404, nunca 403.** Un 403 confirma que el recurso existe; con un id ajeno en

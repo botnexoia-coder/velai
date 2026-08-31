@@ -16,8 +16,10 @@
 // Cómo se justifica una consulta sin filtro (por orden de preferencia):
 //   1. assertOwnTenant(scope, id)  — el recurso va por id en la ruta y se comprueba antes.
 //   2. canAttend(env, scope, ...)  — puerta de la bandeja/handoff.
-//   3. una consulta ANTERIOR del mismo handler ya filtrada por tenant (patrón padre→hijas:
-//      se comprueba el padre con filtro y las hijas van por su FK).
+//   3. una consulta ANTERIOR del mismo handler ya filtrada por tenant. Para las tablas
+//      HIJAS basta (es su única vía: no tienen tenant_id). Para una tabla con dueño propio
+//      hace falta además que esa consulta padre cerrara con un 404 antes de seguir.
+//   3b. `if (scope.role !== 'velai') throw` — handler vetado al cliente en el propio código.
 //   4. el id sale del scope       — .bind(scope.tenantId ...) o un ?tenant= validado
 //                                    contra el scope: el cliente no puede nombrar otro.
 //   5. // scope-ok: <motivo>       — escape explícito, para lo que no encaje arriba.
@@ -108,6 +110,14 @@ const alcanzablePorCliente = (ruta) => {
 // Línea donde arranca el bloque de la ruta vigente (para buscar la puerta dentro de ÉL).
 const inicioRuta = [];
 for (let i = ini; i < fin; i++) inicioRuta[i] = (i > ini && rutaEn[i] === rutaEn[i - 1]) ? inicioRuta[i - 1] : i;
+// …y la del HANDLER concreto, que es la ventana que de verdad vale para buscar puertas.
+// Una ruta con :id agrupa GET, PATCH, notes, retry y DELETE bajo el mismo path.match, así
+// que con la ventana de la ruta el `throw 404` del GET excusaba al DELETE. Se corta en el
+// `if (` de primer nivel del router (dos espacios), que es donde empieza cada handler.
+const inicioHandler = [];
+for (let i = ini; i < fin; i++) {
+  inicioHandler[i] = /^ {2}(?:if|const|let) /.test(lineas[i]) ? i : (i > ini ? inicioHandler[i - 1] : i);
+}
 
 const region = lineas.slice(ini, fin).join('\n');
 const re = /prepare\(\s*(`[\s\S]*?`|'[^']*'|"[^"]*")/g;
@@ -124,12 +134,28 @@ while ((m = re.exec(region))) {
   if (CLAUSULAS.some((c) => plano.includes(c))) { filtradas++; continue; }
   const ruta = rutaEn[linea] || '';
   if (!alcanzablePorCliente(ruta)) { soloVelai++; continue; }
-  // Buscar una puerta en el bloque de la ruta, por encima de la consulta.
-  const bloque = lineas.slice(inicioRuta[linea], linea + 1).join('\n');
+  // Ventana de búsqueda: el handler, no la ruta entera (ver inicioHandler). Se toma la
+  // más ajustada de las dos por si el handler no se detectó.
+  const desde = Math.max(inicioRuta[linea], inicioHandler[linea] ?? inicioRuta[linea]);
+  const bloque = lineas.slice(desde, linea + 1).join('\n');
+  const antes = bloque.slice(0, bloque.lastIndexOf('prepare('));
+  const yaFiltrado = CLAUSULAS.some((c) => antes.includes(c));
+  // Una consulta ANTERIOR filtrada no basta por sí sola: en un bloque con varias
+  // —/api/admin/stats tiene siete— bastaba con que UNA llevara el filtro para excusar a
+  // sus hermanas. Se descubrió el 2026-08-31 quitándole el filtro a la consulta de
+  // fuentes: el test de aislamiento la cazó y este chequeo no. Ahora se distingue:
+  //  · tablas HIJAS (sin tenant_id): les vale la consulta padre filtrada — es su única vía.
+  //  · tablas con dueño propio: hace falta además una PUERTA de verdad, o sea que el padre
+  //    filtrado haya cerrado con 404 («no existe para ti») antes de tocar la fila.
+  const soloHijas = tocadas.every((t) => HIJAS.includes(t));
+  const puertaConCierre = yaFiltrado && /throw new HttpError\(404/.test(antes);
+  // Handler vetado al rol cliente EN CÓDIGO (defensa en profundidad del router): la
+  // consulta no es alcanzable aunque la ruta sí lo sea.
+  const vetadoACliente = /scope\.role !== 'velai'\) throw/.test(antes);
   const puerta = PUERTAS.some((p) => bloque.includes(p))
     || DESDE_EL_SCOPE.some((p) => bloque.includes(p))
-    // patrón padre→hijas: alguna consulta anterior del bloque ya iba filtrada
-    || CLAUSULAS.some((c) => bloque.slice(0, bloque.lastIndexOf('prepare(')).includes(c));
+    || vetadoACliente
+    || (soloHijas ? yaFiltrado : puertaConCierre);
   if (puerta) { conPuerta++; continue; }
   fallos.push({ linea: linea + 1, ruta, tablas: tocadas.join(','), sql: plano.slice(0, 90) });
 }

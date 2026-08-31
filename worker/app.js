@@ -3512,10 +3512,21 @@ async function adminRouter(request, env, ctx, path, url, config, scope) {
       env.DB.prepare(`SELECT source, COUNT(*) AS n FROM leads WHERE created_at >= datetime('now','-30 days')${leadW} GROUP BY source ORDER BY n DESC`).bind(...leadArgs),
       // Denominador de la tasa de captura: conversaciones atendidas en el mismo periodo.
       env.DB.prepare(`SELECT channel, SUM(convs) AS n FROM conv_daily WHERE day >= date('now','-30 days')${t ? ' AND tenant_id = ?' : ''} GROUP BY channel`).bind(...leadArgs),
+      // Valores para el desplegable de «Fuente» del filtro de leads. Salen de los DATOS y
+      // no de una lista en código porque `source` es TEXTO LIBRE: /lead acepta el `fuente`
+      // que mande la página (app.js, clean(body.fuente, 80)), así que una lista fija dejaría
+      // sin filtrar cualquier landing nueva. SIN ventana de 30 días — un lead viejo tiene
+      // que seguir siendo filtrable — y con tope, que esto alimenta un <select>.
+      env.DB.prepare(`SELECT DISTINCT source FROM leads WHERE source IS NOT NULL AND source <> ''${leadW} ORDER BY source LIMIT 60`).bind(...leadArgs),
     ];
+    // scope-ok: el push va dentro de `if (!t)`, o sea SOLO cuando no hay tenant en el
+    // scope (Velai). Un cliente nunca llega a añadir esta consulta a la tanda. Se anota
+    // porque check-aislamiento lee el SQL, no el condicional que decide si se ejecuta.
     if (!t) statements.push(env.DB.prepare('SELECT active, COUNT(*) AS n FROM tenants GROUP BY active'));
     const results = await env.DB.batch(statements);
-    const [total30, nuevos, fallidos7, serieRows, canalRows, convRows, tenantsRows] = results;
+    // OJO: el destructuring es POSICIONAL y la fila de tenants se añade condicionalmente.
+    // Toda consulta nueva va ANTES de ese push y se añade aquí en el mismo orden.
+    const [total30, nuevos, fallidos7, serieRows, canalRows, convRows, fuentesRows, tenantsRows] = results;
     const activos = tenantsRows ? (tenantsRows.results || []).find((r) => Number(r.active) === 1) : null;
     return json({
       total30: total30.results[0].n,
@@ -3525,6 +3536,7 @@ async function adminRouter(request, env, ctx, path, url, config, scope) {
       tenantsActivos: t ? null : (activos ? activos.n : 0),
       porDia: fillSeries(serieRows.results || [], 14),
       porCanal: (canalRows.results || []).map((r) => ({ canal: r.source || 'sin canal', n: r.n })),
+      fuentes: (fuentesRows.results || []).map((r) => r.source).filter(Boolean),
       // Tasa de captura por canal Y total. Solo cuenta desde que el registro existe
       // (2026-08-25): las conversaciones anteriores no se guardaron, y una tasa
       // calculada con un denominador incompleto sería mentira — el panel lo advierte.

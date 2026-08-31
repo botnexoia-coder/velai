@@ -53,7 +53,24 @@ async function api(path,options,quiet){
  try{const r=await fetch(path,options);if(r.status===204)return null;const d=await r.json();if(!r.ok){const e=Error(d.error||'request_failed');e.why=d.why||'';throw e}return d}
  finally{if(!quiet)busyEnd()}}
 function fmt(v){return v?new Intl.DateTimeFormat('es-ES',{dateStyle:'short',timeStyle:'short'}).format(new Date(v)):'—'}
+// El desplegable de «Fuente» se rellena con los valores que hay EN LOS DATOS, que llegan
+// dentro de /api/admin/stats (misma tanda, sin petición extra). No es una lista en código
+// porque source es texto libre: /lead guarda el «fuente» que mande la página, así que
+// una lista fija dejaría sin filtrar cualquier landing nueva. Para el rol cliente vienen
+// ya filtradas a su tenant, así que nadie ve las fuentes de otro.
+function fillSources(fuentes){const sel=$('#sourceFilter');if(!sel||!fuentes)return;
+ // Se conserva lo elegido: loadStats se vuelve a llamar al guardar un lead y repintar
+ // el desplegable sin esto borraría el filtro que la persona acaba de aplicar.
+ const elegido=sel.value;
+ sel.innerHTML='<option value="">Todas las fuentes</option>';
+ for(const f of fuentes)sel.insertAdjacentHTML('beforeend','<option value="'+esc(f)+'">'+esc(f)+'</option>');
+ // Si la fuente elegida ya no existe (se borró el último lead que la usaba), el select
+ // se quedaria en «Todas» sin avisar: se vuelve a meter para que el filtro siga diciendo
+ // la verdad de lo que se esta viendo.
+ if(elegido&&!fuentes.includes(elegido))sel.insertAdjacentHTML('beforeend','<option value="'+esc(elegido)+'">'+esc(elegido)+'</option>');
+ sel.value=elegido}
 async function loadStats(){try{const s=await api('/api/admin/stats');
+ fillSources(s.fuentes);
  $('#mTotal').textContent=s.total30;$('#mNew').textContent=s.sinContactar;
  $('#mNewSub').textContent=s.sinContactar&&s.sinContactarDesde?('el más antiguo, del '+new Intl.DateTimeFormat('es-ES',{dateStyle:'short'}).format(new Date(s.sinContactarDesde))):'';
  $('#mFail').textContent=s.fallidos7;$('#mFailCard').classList.toggle('alerta',s.fallidos7>0);
