@@ -2957,6 +2957,17 @@ function scopeClause(scope, alias = 'l') {
     : { sql: '', args: [] };
 }
 
+// La OTRA mitad del aislamiento. scopeClause filtra listados; esto cierra los recursos
+// direccionados por su id en la ruta (/tenants/:id/...), donde no hay listado que filtrar
+// y la única defensa es comprobar que ese id es el tuyo ANTES de leer la fila.
+// Ajeno = 404 y nunca 403: un 403 confirmaría que el tenant existe.
+// Estaba escrita a mano en nueve sitios; ahora tiene nombre para que check-aislamiento.mjs
+// pueda exigirla y para que la puerta número diez no se escriba distinta.
+function assertOwnTenant(scope, tenantId) {
+  if (scope.role !== 'velai' && scope.tenantId !== tenantId) throw new HttpError(404, 'not_found');
+  return tenantId;
+}
+
 // Rutas que el rol cliente SÍ puede usar. Todo lo demás — tenants, provisioning,
 // preview, versiones, retry, borrado RGPD — es 403 ANTES de tocar datos.
 function clienteAllowed(path, method) {
@@ -3698,7 +3709,7 @@ async function adminRouter(request, env, ctx, path, url, config, scope) {
   const logoApply = path.match(/^\/api\/admin\/tenants\/([0-9a-f-]+)\/logo\/apply$/i);
   if (logoApply && request.method === 'POST') {
     if (!UUID_RE.test(logoApply[1])) throw new HttpError(404, 'not_found');
-    if (scope.role !== 'velai' && scope.tenantId !== logoApply[1]) throw new HttpError(404, 'not_found');
+    assertOwnTenant(scope, logoApply[1]);
     const tenant = await env.DB.prepare(`SELECT id, slug, name, logo_url, logo_wa_url, brand_name, greeting, web_origins,
       sender_sid, twilio_subaccount_sid, twilio_auth_token_enc FROM tenants WHERE id=?`).bind(logoApply[1]).first();
     if (!tenant) throw new HttpError(404, 'not_found');
@@ -3715,7 +3726,7 @@ async function adminRouter(request, env, ctx, path, url, config, scope) {
   if (logoMatch && request.method === 'POST') {
     if (!UUID_RE.test(logoMatch[1])) throw new HttpError(404, 'not_found');
     // Cliente ajeno = 404 ANTES de tocar D1 (nunca 403: no se confirma que exista).
-    if (scope.role !== 'velai' && scope.tenantId !== logoMatch[1]) throw new HttpError(404, 'not_found');
+    assertOwnTenant(scope, logoMatch[1]);
     const tenantId = logoMatch[1];
     const tenant = await env.DB.prepare(`SELECT id, slug, name, logo_url, logo_wa_url, brand_name, greeting, web_origins,
       sender_sid, twilio_subaccount_sid, twilio_auth_token_enc FROM tenants WHERE id=?`).bind(tenantId).first();
@@ -3810,7 +3821,7 @@ async function adminRouter(request, env, ctx, path, url, config, scope) {
   const chMatch = path.match(/^\/api\/admin\/tenants\/([0-9a-f-]+)\/channels$/i);
   if (chMatch && request.method === 'GET') {
     if (!UUID_RE.test(chMatch[1])) throw new HttpError(404, 'not_found');
-    if (scope.role !== 'velai' && scope.tenantId !== chMatch[1]) throw new HttpError(404, 'not_found');
+    assertOwnTenant(scope, chMatch[1]);
     const row = await env.DB.prepare(`SELECT id, slug, active, channel_address, twilio_from, sender_sid,
              telegram_chat_id, telegram_chat_title, web_origins
       FROM tenants WHERE id=?`).bind(chMatch[1]).first();
@@ -3821,7 +3832,7 @@ async function adminRouter(request, env, ctx, path, url, config, scope) {
   const waMatch = path.match(/^\/api\/admin\/tenants\/([0-9a-f-]+)\/whatsapp$/i);
   if (waMatch && request.method === 'GET') {
     if (!UUID_RE.test(waMatch[1])) throw new HttpError(404, 'not_found');
-    if (scope.role !== 'velai' && scope.tenantId !== waMatch[1]) throw new HttpError(404, 'not_found');
+    assertOwnTenant(scope, waMatch[1]);
     // `routed`: existe la fila de tenant_channels que hace que el webhook entrante
     // resuelva a este cliente. Sin ella el sender puede estar ONLINE y el bot mudo, así
     // que el estado que ve el cliente NO puede salir solo de sender_status.
@@ -3845,7 +3856,7 @@ async function adminRouter(request, env, ctx, path, url, config, scope) {
   if (notifyMatch && request.method === 'PATCH') {
     if (!UUID_RE.test(notifyMatch[1])) throw new HttpError(404, 'not_found');
     const tenantId = notifyMatch[1];
-    if (scope.role !== 'velai' && scope.tenantId !== tenantId) throw new HttpError(404, 'not_found');
+    assertOwnTenant(scope, tenantId);
     const previous = await env.DB.prepare('SELECT id, slug, channel_address, twilio_from, team_whatsapp, wa_number, weekly_report, support_hours, support_tz FROM tenants WHERE id=?').bind(tenantId).first();
     if (!previous) throw new HttpError(404, 'not_found');
     const body = await readJson(request, 4000);
@@ -3879,7 +3890,7 @@ async function adminRouter(request, env, ctx, path, url, config, scope) {
   if (reportTestMatch && request.method === 'POST') {
     if (!UUID_RE.test(reportTestMatch[1])) throw new HttpError(404, 'not_found');
     const tenantId = reportTestMatch[1];
-    if (scope.role !== 'velai' && scope.tenantId !== tenantId) throw new HttpError(404, 'not_found');
+    assertOwnTenant(scope, tenantId);
     // Un botón que escribe en el grupo del cliente no se pulsa en bucle.
     if (await rateLimited(env, `${actor}:${tenantId}`, 'reporttest', 5)) throw new HttpError(429, 'rate_limited');
     const tenantRow = await env.DB.prepare('SELECT id, slug, name, telegram_chat_id, telegram_bot_token_enc FROM tenants WHERE id=?').bind(tenantId).first();
@@ -3918,7 +3929,7 @@ async function adminRouter(request, env, ctx, path, url, config, scope) {
   if (tgTopicMatch) {
     if (!UUID_RE.test(tgTopicMatch[1])) throw new HttpError(404, 'not_found');
     const tenantId = tgTopicMatch[1];
-    if (scope.role !== 'velai' && scope.tenantId !== tenantId) throw new HttpError(404, 'not_found');
+    assertOwnTenant(scope, tenantId);
     const row = await env.DB.prepare('SELECT id, slug, name, channel_address, telegram_chat_id, telegram_topics, telegram_bot_token_enc, telegram_whitelabel FROM tenants WHERE id=?').bind(tenantId).first();
     if (!row) throw new HttpError(404, 'not_found');
     let topics = [];
@@ -3969,7 +3980,7 @@ async function adminRouter(request, env, ctx, path, url, config, scope) {
     if (!UUID_RE.test(tgMatch[1])) throw new HttpError(404, 'not_found');
     const tenantId = tgMatch[1];
     // Autoservicio: el cliente solo SU tenant — ajeno = 404, ANTES de tocar D1.
-    if (scope.role !== 'velai' && scope.tenantId !== tenantId) throw new HttpError(404, 'not_found');
+    assertOwnTenant(scope, tenantId);
     const tenantRow = await env.DB.prepare('SELECT id, slug, name, channel_address, telegram_chat_id, telegram_chat_title, telegram_linked_at, telegram_bot_username, telegram_bot_token_enc, telegram_whitelabel, telegram_topics, weekly_report FROM tenants WHERE id=?').bind(tenantId).first();
     if (!tenantRow) throw new HttpError(404, 'not_found');
     // La marca blanca es una feature que ACTIVA VELAI por cliente: sin el flag, el
@@ -4093,7 +4104,7 @@ async function adminRouter(request, env, ctx, path, url, config, scope) {
     const tenantId = calMatch[1];
     // Autoservicio del cliente: SOLO su propio calendario. Fuera de alcance = 404
     // (un 403 confirmaría que ese tenant existe), y ANTES de tocar D1.
-    if (scope.role !== 'velai' && scope.tenantId !== tenantId) throw new HttpError(404, 'not_found');
+    assertOwnTenant(scope, tenantId);
     const tenantRow = await env.DB.prepare('SELECT id, slug, name FROM tenants WHERE id=?').bind(tenantId).first();
     if (!tenantRow) throw new HttpError(404, 'not_found');
     if (calMatch[2] === 'connect' && request.method === 'POST') {
@@ -4857,4 +4868,4 @@ export function createWorker(config) {
   };
 }
 
-export const testing = { scheduled, MINUTE_CRON, waitedMin, QUEUE_MAX_MIN, QUEUE_WAIT_TEXT, canAttend, velaiTenantId, handleChatPoll, VISITOR_AWAY_MS, expireTakeovers, NO_ADVISOR_TEXT, graceExpired, systemWithHandoff, HANDOFF_ON, HANDOFF_OFF, supportWindows, withinSupportHours, advisorAvailable, CONV_STATES, TAKEOVER_GRACE_MIN, settleReply, TRUNCATED_CLOSING, trimToSentence, waBody, replyWindow, reportPeriod, reportMetric, weeklyReportText, weeklyStats, sendWeeklyReports, convLoad, convAppend, convLinkLead, convFilters, convRetentionDays, UNANSWERED_RE, CONV_WINDOW, cloudflareUsage, CF_FREE_LIMITS, recordConversation, aiCost, recordAiUsage, rateLimited, memLimited, applySenderProfile, pushSenderProfile, clean, persistLead, leadAlertStatus, captureWhatsAppLead, leadFromSummary, leadCaptureDone, errorResponseParts, tenantByAddress, syncPrimaryChannel, assertChannelFree, normalizePhone, extractPhone, safeUtm, publicCors, validTwilioSignature, callAnthropic, callAnthropicRaw, runToolLoop, calendarExecutor, calendarSystem, tenantCalendar, validCalendarDate, availableSlots, handleCalendarCallback, calendarCallbackFor, sendTwilioText, timingSafeEqual, telegramBotUsername, handleTelegramWebhook, sendTelegramText, tenantTelegramToken, telegramThreadFor, registerTelegramTopic, csvCell, expiryDate, leadFilters, isDemoKey, templateVar, leadTemplateVariables, readJson, deliver, drainQueuedLeads, verifyTurnstile, systemFor, validateTenant, invalidateTenantCache, tenantWriteError, assertNotActivePending, tenantChannelSummary, channelsForScope, handleProvision, pollProvisioning, fillSeries, resolveScope, scopeClause, clienteAllowed, adminRouter, recordAuthFailure, handleAdmin, handleWidgetBoot, allowedOrigins, envOrigins, syncPanelGate, envAdmins, syncAdminGate, getSetting, setSetting, withCfToken };
+export const testing = { scheduled, MINUTE_CRON, waitedMin, QUEUE_MAX_MIN, QUEUE_WAIT_TEXT, canAttend, velaiTenantId, handleChatPoll, VISITOR_AWAY_MS, expireTakeovers, NO_ADVISOR_TEXT, graceExpired, systemWithHandoff, HANDOFF_ON, HANDOFF_OFF, supportWindows, withinSupportHours, advisorAvailable, CONV_STATES, TAKEOVER_GRACE_MIN, settleReply, TRUNCATED_CLOSING, trimToSentence, waBody, replyWindow, reportPeriod, reportMetric, weeklyReportText, weeklyStats, sendWeeklyReports, convLoad, convAppend, convLinkLead, convFilters, convRetentionDays, UNANSWERED_RE, CONV_WINDOW, cloudflareUsage, CF_FREE_LIMITS, recordConversation, aiCost, recordAiUsage, rateLimited, memLimited, applySenderProfile, pushSenderProfile, clean, persistLead, leadAlertStatus, captureWhatsAppLead, leadFromSummary, leadCaptureDone, errorResponseParts, tenantByAddress, syncPrimaryChannel, assertChannelFree, normalizePhone, extractPhone, safeUtm, publicCors, validTwilioSignature, callAnthropic, callAnthropicRaw, runToolLoop, calendarExecutor, calendarSystem, tenantCalendar, validCalendarDate, availableSlots, handleCalendarCallback, calendarCallbackFor, sendTwilioText, timingSafeEqual, telegramBotUsername, handleTelegramWebhook, sendTelegramText, tenantTelegramToken, telegramThreadFor, registerTelegramTopic, csvCell, expiryDate, leadFilters, isDemoKey, templateVar, leadTemplateVariables, readJson, deliver, drainQueuedLeads, verifyTurnstile, systemFor, validateTenant, invalidateTenantCache, tenantWriteError, assertNotActivePending, tenantChannelSummary, channelsForScope, handleProvision, pollProvisioning, fillSeries, resolveScope, scopeClause, assertOwnTenant, clienteAllowed, adminRouter, recordAuthFailure, handleAdmin, handleWidgetBoot, allowedOrigins, envOrigins, syncPanelGate, envAdmins, syncAdminGate, getSetting, setSetting, withCfToken };

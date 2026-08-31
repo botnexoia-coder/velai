@@ -91,6 +91,35 @@ degradar la seguridad de nadie. Todo estado por conversación/lead se namespacea
 `tenant.id` (historiales, marcas KV, `request_id`); sin eso dos clientes con el mismo
 usuario final se pisan. Alta de clientes: `docs/OPERATIONS.md` §Multi-tenant.
 
+### Aislamiento en el panel — la regla que no se negocia
+
+En `adminRouter` la identidad de quien pregunta decide qué filas se leen, y el panel
+construye ~100 consultas a mano. Con 4 clientes eso cabe en la cabeza de quien escribe
+el handler; con 30, no. Por eso toda consulta del panel sobre una tabla con dueño tiene
+que estar en **uno** de estos cinco casos, y `scripts/check-aislamiento.mjs` lo verifica
+en cada `npm run check`:
+
+| | Patrón | Cuándo |
+|---|---|---|
+| 1 | `scopeClause(scope, alias)` interpolado en el `WHERE` | listados (leads, conversaciones, citas) |
+| 2 | `assertOwnTenant(scope, id)` antes de tocar la fila | recursos con `:id` en la ruta (`/tenants/:id/...`) |
+| 3 | `canAttend(env, scope, tenantId)` | bandeja y handoff |
+| 4 | el id sale del scope (`.bind(scope.tenantId …)`, o un `?tenant=` validado contra él) | `/me`, `/availability`, `/ai-balance` |
+| 5 | `// scope-ok: <motivo>` | escape explícito, para lo que no encaje arriba |
+
+Dos aclaraciones que ahorran tiempo:
+
+- **Ajeno = 404, nunca 403.** Un 403 confirma que el recurso existe; con un id ajeno en
+  la ruta, la respuesta correcta es «no existe para ti».
+- **Tablas hijas** (`conv_messages`, `lead_notes`, `lead_events`, `lead_notifications`)
+  no tienen `tenant_id`: se llega a ellas por FK. El patrón es **padre con filtro →
+  404 si no aparece → hijas por su FK**. Nunca al revés.
+
+La otra mitad es `test/aislamiento.test.js`: recorre TODAS las rutas que `clienteAllowed`
+abre al rol cliente contra un mock de D1 adversario (si una consulta no filtra, el mock
+devuelve la fila del otro cliente) y **exige que cada ruta nueva tenga su caso**. Abrir
+una ruta al rol cliente sin añadirla ahí pone CI en rojo a propósito.
+
 ## 5. Persistencia y resiliencia
 
 - **D1 = fuente de verdad**; **KV** = estado efímero con TTL (historiales, rate limit,
@@ -147,5 +176,7 @@ npx wrangler deploy              # manual; Pages se despliega solo al push a mai
 - [ ] Idempotencia si hay reintentos (requestId/UNIQUE)
 - [ ] Timeout en todo fetch externo; `waitUntil` con `.catch`
 - [ ] Test en `test/worker.test.js` (mínimo: caso feliz del router + un rechazo)
+- [ ] Si lo abre `clienteAllowed` al rol cliente: caso en `test/aislamiento.test.js` y
+      consulta filtrada o con puerta (§4b) — `npm run check:aislamiento`
 - [ ] Variable nueva → `.dev.vars.example` + `docs/OPERATIONS.md`; secret → `wrangler secret put`
 - [ ] `npm run check` verde → deploy → verificación en producción
