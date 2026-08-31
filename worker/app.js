@@ -3540,7 +3540,10 @@ async function adminRouter(request, env, ctx, path, url, config, scope) {
       t
         ? env.DB.prepare("SELECT COUNT(*) AS n FROM lead_notifications ln JOIN leads l ON l.id = ln.lead_id WHERE ln.status = 'failed' AND ln.updated_at >= datetime('now','-7 days') AND l.tenant_id = ?").bind(t)
         : env.DB.prepare("SELECT COUNT(*) AS n FROM lead_notifications WHERE status = 'failed' AND updated_at >= datetime('now','-7 days')"),
-      env.DB.prepare(`SELECT date(created_at) AS d, COUNT(*) AS n FROM leads WHERE created_at >= datetime('now','-14 days')${leadW} GROUP BY d ORDER BY d`).bind(...leadArgs),
+      // Por día Y por canal: la gráfica enseña el total y el globo el desglose. Antes
+      // solo se sabía «7 leads el jueves», que no dice si vinieron de WhatsApp o de la web
+      // — que es justo lo que decide dónde mirar cuando un día se cae.
+      env.DB.prepare(`SELECT date(created_at) AS d, source, COUNT(*) AS n FROM leads WHERE created_at >= datetime('now','-14 days')${leadW} GROUP BY d, source ORDER BY d`).bind(...leadArgs),
       // Leads por canal: el dato ya estaba en la fila (source) y no se veía en ninguna parte.
       env.DB.prepare(`SELECT source, COUNT(*) AS n FROM leads WHERE created_at >= datetime('now','-30 days')${leadW} GROUP BY source ORDER BY n DESC`).bind(...leadArgs),
       // Denominador de la tasa de captura: conversaciones atendidas en el mismo periodo.
@@ -3567,7 +3570,20 @@ async function adminRouter(request, env, ctx, path, url, config, scope) {
       sinContactarDesde: nuevos.results[0].oldest || null,
       fallidos7: fallidos7.results[0].n,
       tenantsActivos: t ? null : (activos ? activos.n : 0),
-      porDia: fillSeries(serieRows.results || [], 14),
+      porDia: (() => {
+        // La consulta viene por día+canal: se pliega a un total por día (que es lo que
+        // pinta la barra) conservando el desglose ordenado de mayor a menor.
+        const porDiaCanal = new Map();
+        for (const r of serieRows.results || []) {
+          const e = porDiaCanal.get(r.d) || { n: 0, canales: [] };
+          e.n += r.n; e.canales.push({ canal: r.source || 'sin canal', n: r.n });
+          porDiaCanal.set(r.d, e);
+        }
+        // fillSeries rellena los días sin leads: sin eso la gráfica comprime el eje y
+        // miente sobre la distribución.
+        return fillSeries([...porDiaCanal].map(([d, e]) => ({ d, n: e.n })), 14)
+          .map((x) => ({ ...x, canales: ((porDiaCanal.get(x.d) || {}).canales || []).sort((a, b) => b.n - a.n) }));
+      })(),
       porCanal: (canalRows.results || []).map((r) => ({ canal: r.source || 'sin canal', n: r.n })),
       fuentes: (fuentesRows.results || []).map((r) => r.source).filter(Boolean),
       // Tasa de captura por canal Y total. Solo cuenta desde que el registro existe
@@ -3737,13 +3753,16 @@ async function adminRouter(request, env, ctx, path, url, config, scope) {
     const used = Number(totals && totals.mes) || 0;
     // Serie diaria del mes para la gráfica: los días sin consumo también existen, o la
     // gráfica comprime el eje y miente sobre la distribución.
-    const rows = (await env.DB.prepare('SELECT day, SUM(in_tokens+out_tokens+cache_w_tokens+cache_r_tokens) AS n FROM ai_usage WHERE tenant_id=? AND day LIKE ? GROUP BY day').bind(tenantId, `${month}-%`).all()).results || [];
-    const byDay = new Map(rows.map((r) => [r.day, r.n || 0]));
+    const rows = (await env.DB.prepare('SELECT day, SUM(in_tokens+out_tokens+cache_w_tokens+cache_r_tokens) AS n, SUM(calls) AS c FROM ai_usage WHERE tenant_id=? AND day LIKE ? GROUP BY day').bind(tenantId, `${month}-%`).all()).results || [];
+    const byDay = new Map(rows.map((r) => [r.day, { n: r.n || 0, calls: r.c || 0 }]));
     const days = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 0)).getUTCDate();
     const serie = [];
     for (let d = 1; d <= days; d++) {
       const key = `${month}-${String(d).padStart(2, '0')}`;
-      serie.push({ d: key, n: byDay.get(key) || 0 });
+      const v = byDay.get(key);
+      // Los tokens dicen cuánto se ha gastado; las llamadas, cuántas conversaciones lo
+      // gastaron. El cliente solo veía tokens, que por sí solos no significan nada para él.
+      serie.push({ d: key, n: v ? v.n : 0, calls: v ? v.calls : 0 });
     }
     return json({
       month, included, used,
@@ -3774,20 +3793,28 @@ async function adminRouter(request, env, ctx, path, url, config, scope) {
       cli.calls += r.calls || 0; cli.tokens += tokens; cli.cost += cost;
       cli.models[r.model] = (cli.models[r.model] || 0) + (r.calls || 0);
       porCliente.set(key, cli);
-      const d = porDia.get(r.day) || { d: r.day, cost: 0, calls: 0 };
-      d.cost += cost; d.calls += r.calls || 0; porDia.set(r.day, d);
+      const d = porDia.get(r.day) || { d: r.day, cost: 0, calls: 0, porCliente: new Map() };
+      d.cost += cost; d.calls += r.calls || 0;
+      // Llamadas POR CLIENTE en cada día: el total diario no dice quién lo gastó, y con
+      // varios clientes es lo primero que se quiere saber cuando un día se dispara.
+      d.porCliente.set(cli.name, (d.porCliente.get(cli.name) || 0) + (r.calls || 0));
+      porDia.set(r.day, d);
     }
     // Serie completa (los días sin consumo también existen) para que la gráfica no mienta.
     const serie = [];
     for (let i = days - 1; i >= 0; i--) {
       const d = new Date(Date.now() - i * 86400000).toISOString().slice(0, 10);
-      serie.push(porDia.get(d) || { d, cost: 0, calls: 0 });
+      serie.push(porDia.get(d) || { d, cost: 0, calls: 0, porCliente: new Map() });
     }
     return json({
       days,
       total: { cost: Number(totalCost.toFixed(4)), calls: totalCalls, tokens: totalTokens },
       clientes: [...porCliente.values()].sort((a, b) => b.cost - a.cost).map((c) => ({ ...c, cost: Number(c.cost.toFixed(4)) })),
-      porDia: serie.map((d) => ({ ...d, cost: Number(d.cost.toFixed(4)) })),
+      porDia: serie.map(({ porCliente, ...d }) => ({
+        ...d,
+        cost: Number(d.cost.toFixed(4)),
+        clientes: [...porCliente].map(([name, calls]) => ({ name, calls })).sort((a, b) => b.calls - a.calls),
+      })),
       moneda: 'USD',
     }, 200, NO_STORE);
   }

@@ -1727,6 +1727,10 @@ test('el panel arranca contra un DOM mínimo y pide me, leads, stats y escalatio
     },
     FormData: class { *[Symbol.iterator]() {} },
     URLSearchParams, Intl, Response,
+    // window: el panel lo usa para scroll/resize (tooltip), el AudioContext del aviso y
+    // focus(). Faltaba en el stub y solo se notaba si el uso estaba al ARRANQUE — un
+    // window.loQueSea mal escrito dentro de un handler seguía colándose hasta el navegador.
+    window: { addEventListener: () => {}, focus: () => {}, AudioContext: null, webkitAudioContext: null },
     setTimeout: () => 0, requestAnimationFrame: () => {}, confirm: () => false,
   });
   try {
@@ -4685,4 +4689,80 @@ test('el diagnóstico del webhook es solo para admins RAÍZ, como el resto de Co
     const body = await res.text();
     assert.ok(!body.includes('123:abc'), 'el token del bot no sale nunca en la respuesta');
   } finally { globalThis.fetch = realFetch; }
+});
+
+// ── Tooltips y desgloses de las gráficas ──
+test('el panel no usa ya el tooltip del navegador: todo pasa por el componente', async () => {
+  const { ADMIN_HTML } = await import('../worker/admin-page.js');
+  const { panelApp } = await import('../worker/admin-panel.js');
+  // `title=` nativo: no se puede vestir, tarda ~1 s, se corta a una línea y NUNCA sale con
+  // el teclado. Si vuelve a aparecer uno, este test lo caza — es la única forma de que la
+  // migración no se deshaga sola en el siguiente markup que alguien pegue.
+  assert.equal((ADMIN_HTML.match(/\stitle="/g) || []).length, 0, 'title= en el HTML del panel');
+  assert.equal((panelApp.toString().match(/\stitle="/g) || []).length, 0, 'title= generado por el JS del panel');
+  assert.ok(ADMIN_HTML.includes('id="tip"'), 'el globo existe en el markup');
+  // Sale también con el teclado, que es la mitad de por qué se cambió.
+  assert.match(panelApp.toString(), /addEventListener\('focusin'/);
+});
+
+test('las etiquetas del globo no pueden romper el formato aunque vengan de fuera', async () => {
+  const { panelApp } = await import('../worker/admin-panel.js');
+  const src = panelApp.toString();
+  const code = src.slice(src.indexOf('function tipRows'), src.indexOf('// ── Señal de'));
+  const tipRows = new Function(code + ';return tipRows')();
+  // Caso normal.
+  assert.equal(tipRows([['Leads', 7], ['whatsapp', 4]]), 'Leads:7|whatsapp:4');
+  // El nombre de una fuente lo escribe quien monta la landing (source es texto libre) y el
+  // de un cliente lo escribimos nosotros: ninguno puede partir una fila en dos.
+  assert.equal(tipRows([['web|movil', 3]]), 'web movil:3');
+  // Los dos puntos SÍ pueden ir en la etiqueta: el panel parte por el ÚLTIMO.
+  const fila = tipRows([['ratio 1:1', 9]]);
+  assert.equal(fila.slice(0, fila.lastIndexOf(':')), 'ratio 1:1');
+  assert.equal(fila.slice(fila.lastIndexOf(':') + 1), '9');
+});
+
+test('leads por día trae el desglose por canal, y suma lo mismo que la barra', async () => {
+  const filas = [
+    { d: '2026-08-30', source: 'whatsapp', n: 4 },
+    { d: '2026-08-30', source: 'chat web', n: 2 },
+    { d: '2026-08-31', source: 'whatsapp', n: 1 },
+  ];
+  const db = {
+    prepare(sql) { return { sql, bind(...args) { return { sql, args }; }, args: [] }; },
+    async batch(stmts) {
+      return stmts.map((s) => {
+        if (/date\(created_at\) AS d, source/.test(s.sql)) return { results: filas };
+        if (/DISTINCT source/.test(s.sql)) return { results: [] };
+        if (/FROM leads WHERE status/.test(s.sql)) return { results: [{ n: 0, oldest: null }] };
+        return { results: [{ n: 0 }] };
+      });
+    },
+  };
+  const url = new URL('https://admin.hirevai.com/api/admin/stats');
+  const res = await testing.adminRouter(new Request(url.toString()), { DB: db }, { waitUntil() {} }, '/api/admin/stats', url, {}, { role: 'velai', tenantId: null, email: 'a@velai' });
+  const d = await res.json();
+  assert.equal(d.porDia.length, 14, 'los días sin leads siguen existiendo');
+  const dia = d.porDia.find((x) => x.d === '2026-08-30');
+  assert.equal(dia.n, 6, 'la barra sigue siendo el TOTAL del día');
+  assert.deepEqual(dia.canales, [{ canal: 'whatsapp', n: 4 }, { canal: 'chat web', n: 2 }], 'desglose de mayor a menor');
+  assert.equal(dia.canales.reduce((a, c) => a + c.n, 0), dia.n, 'el desglose suma lo mismo que la barra');
+  // Un día sin leads trae el desglose vacío, no undefined: el panel itera sin comprobar.
+  const vacio = d.porDia.find((x) => x.n === 0);
+  assert.deepEqual(vacio.canales, []);
+});
+
+test('el gasto de IA trae las llamadas POR CLIENTE de cada día', async () => {
+  const rows = [
+    { tenant_id: 't1', day: '2026-08-31', model: 'm', calls: 5, in_tokens: 10, out_tokens: 5, cache_w_tokens: 0, cache_r_tokens: 0, tenant_name: 'GOgestión', slug: 'gogestion' },
+    { tenant_id: 't2', day: '2026-08-31', model: 'm', calls: 2, in_tokens: 4, out_tokens: 2, cache_w_tokens: 0, cache_r_tokens: 0, tenant_name: 'Zoe', slug: 'zoe' },
+  ];
+  const db = { prepare: () => ({ bind: () => ({ all: async () => ({ results: rows }) }) }) };
+  const url = new URL('https://admin.hirevai.com/api/admin/ai-usage?days=7');
+  const res = await testing.adminRouter(new Request(url.toString()), { DB: db }, { waitUntil() {} }, '/api/admin/ai-usage', url, {}, { role: 'velai', tenantId: null, email: 'a@velai' });
+  const d = await res.json();
+  const dia = d.porDia.find((x) => x.d === '2026-08-31');
+  assert.equal(dia.calls, 7, 'el total del día no cambia');
+  assert.deepEqual(dia.clientes, [{ name: 'GOgestión', calls: 5 }, { name: 'Zoe', calls: 2 }], 'quién gastó, de mayor a menor');
+  // El Map interno no puede colarse en el JSON.
+  assert.ok(!('porCliente' in dia), 'el Map interno no viaja al panel');
 });

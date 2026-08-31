@@ -18,10 +18,77 @@ const TENANT_COLORS=['#3987e5','#9085e9','#199e70','#c98500','#2aa8b8','#c96bb4'
 function tenantColor(id){let h=0;for(const c of String(id||''))h=(h*31+c.charCodeAt(0))>>>0;return TENANT_COLORS[h%TENANT_COLORS.length]}
 function statusPill(s){return '<span class="pill s-'+esc(s)+'"><b></b>'+esc(ST_LABEL[s]||s)+'</span>'}
 function tenantChip(id,name){return name?'<span class="tenant"><i data-c="'+tenantColor(id)+'"></i>'+esc(name)+'</span>':'<span class="muted">—</span>'}
+// Estos chips llevaban el color del estado y NADA que lo explicara: un punto rojo en la
+// tabla no dice si el aviso falló, está en cola o se saltó a propósito. La leyenda de abajo
+// solo cubre los estados del lead, no los de los avisos.
+const NB_TIP={sent:'Entregado',failed:'Falló. Se reintenta solo (5 veces, espaciando).',
+ pending:'En cola, aún sin enviar',skipped:'No se envió: ese canal no está configurado para este cliente'};
 function nbChips(summary){if(!summary)return '<span class="muted">—</span>';
  return String(summary).split(',').map(p=>{const[ch,st]=p.split(':');const cls=st==='sent'?'ok':st==='failed'?'bad':'wait';
-  return '<span class="nb '+cls+'"><i></i>'+esc(ch==='telegram'?'Telegram':'WhatsApp')+'</span>'}).join('')}
+  const canal=ch==='telegram'?'Telegram':'WhatsApp';
+  return '<span class="nb '+cls+'" tabindex="0" data-tip="'+esc(canal+'\n'+(NB_TIP[st]||st))+'"><i></i>'+esc(canal)+'</span>'}).join('')}
 function params(){const p=new URLSearchParams(new FormData($('#filters')));for(const[k,v]of[...p])if(!v)p.delete(k);return p}
+// ── Tooltip propio ──────────────────────────────────────────────────────────
+// Sustituye al title del navegador, que no se puede vestir, tarda casi un segundo en
+// salir, se corta a una línea en algunos navegadores y NUNCA aparece con el teclado.
+//
+// Un solo globo para toda la app, colocado por JS. Se dispara con [data-tip] por
+// delegación, así que sirve para el markup que ya existe y para el que pinten las vistas
+// después — que es la mitad del panel.
+//
+// El contenido va por textContent (con pre-line para los saltos) y JAMÁS por innerHTML:
+// estos globos llevan nombres de cliente y de fuente, que son datos que escribe gente de
+// fuera. Excepción controlada: las filas clave/valor de las gráficas, que se construyen
+// con createElement y meten el texto también por textContent.
+let tipEl=null,tipTimer=null,tipFor=null;
+function tipShow(el){
+ const texto=el.getAttribute('data-tip');if(!texto)return;
+ if(!tipEl)tipEl=$('#tip');if(!tipEl)return;
+ tipFor=el;tipEl.hidden=false;
+ // data-tip-rows = filas clave/valor separadas por | y con : dentro, para los desgloses
+ // de las gráficas. Sin él, texto plano y ya.
+ const filas=el.getAttribute('data-tip-rows');
+ tipEl.textContent='';
+ if(filas){
+  const t=document.createElement('b');t.textContent=texto;tipEl.appendChild(t);
+  for(const f of filas.split('|')){
+   const i=f.lastIndexOf(':');if(i<0)continue;
+   const row=document.createElement('div');row.className='tipk';
+   const k=document.createElement('span');k.textContent=f.slice(0,i);
+   const v=document.createElement('span');v.textContent=f.slice(i+1);
+   row.appendChild(k);row.appendChild(v);tipEl.appendChild(row)}
+ }else tipEl.textContent=texto;
+ // Colocar: encima y centrado; si no cabe arriba, debajo. Y siempre dentro del viewport,
+ // que es donde fallan los tooltips caseros — una barra del extremo derecho de la gráfica
+ // se saldría de la pantalla.
+ const r=el.getBoundingClientRect();const t=tipEl.getBoundingClientRect();
+ const arriba=r.top>t.height+10;
+ let x=r.left+r.width/2-t.width/2;
+ x=Math.max(8,Math.min(x,document.documentElement.clientWidth-t.width-8));
+ tipEl.style.left=Math.round(x)+'px';
+ tipEl.style.top=Math.round(arriba?r.top-t.height-8:r.bottom+8)+'px';
+ requestAnimationFrame(()=>tipEl.classList.add('on'));
+ // Lectores de pantalla: el globo describe al elemento mientras está abierto.
+ el.setAttribute('aria-describedby','tip')}
+function tipHide(){if(tipTimer){clearTimeout(tipTimer);tipTimer=null}
+ if(tipFor){tipFor.removeAttribute('aria-describedby');tipFor=null}
+ if(tipEl){tipEl.classList.remove('on');tipEl.hidden=true}}
+// 120 ms de espera: sin ellos, pasar el ratón por encima de una fila de barras dispara
+// catorce globos seguidos. Con el teclado sale al instante, que es lo que se espera.
+document.addEventListener('pointerover',(e)=>{const el=e.target.closest&&e.target.closest('[data-tip]');
+ if(!el||el===tipFor)return;tipHide();tipTimer=setTimeout(()=>tipShow(el),120)});
+document.addEventListener('pointerout',(e)=>{const el=e.target.closest&&e.target.closest('[data-tip]');if(el)tipHide()});
+document.addEventListener('focusin',(e)=>{const el=e.target.closest&&e.target.closest('[data-tip]');if(el)tipShow(el)});
+document.addEventListener('focusout',tipHide);
+document.addEventListener('keydown',(e)=>{if(e.key==='Escape')tipHide()});
+// Al hacer scroll el globo se quedaria flotando donde ya no esta su elemento.
+window.addEventListener('scroll',tipHide,true);window.addEventListener('resize',tipHide);
+
+// Filas clave/valor para el globo. El separador es | y las etiquetas pueden traer datos
+// de fuera (nombres de canal y de cliente), así que se les quita el | antes de unir: si no,
+// una fuente llamada «web|movil» partiría la fila en dos.
+function tipRows(pares){return pares.map(([k,v])=>String(k).replace(/\|/g,' ')+':'+v).join('|')}
+
 // ── Señal de «estoy pensando» ────────────────────────────────────────────────
 // Va en api() y no en cada botón a propósito: es el único paso por el que van las 71
 // llamadas del panel, así que una sola pieza cubre todas — y ninguna vista futura se
@@ -76,7 +143,11 @@ async function loadStats(){try{const s=await api('/api/admin/stats');
  $('#mFail').textContent=s.fallidos7;$('#mFailCard').classList.toggle('alerta',s.fallidos7>0);
  $('#mTenants').textContent=s.tenantsActivos;
  const max=Math.max(1,...s.porDia.map(x=>x.n));
- $('#chart').innerHTML=s.porDia.map(x=>'<div class="bar" data-h="'+(x.n===0?6:Math.max(12,Math.round(x.n/max*100)))+'" title="'+esc(x.d)+': '+x.n+'"></div>').join('');paint($('#chart'));
+ // tabindex: las barras entran en el recorrido del teclado, o el desglose solo existiría
+ // para quien use ratón.
+ $('#chart').innerHTML=s.porDia.map(x=>'<div class="bar" tabindex="0" data-h="'+(x.n===0?6:Math.max(12,Math.round(x.n/max*100)))+'"'
+  +' data-tip="'+esc(diaLargo(x.d))+'"'
+  +' data-tip-rows="'+esc(tipRows([['Leads',x.n]].concat((x.canales||[]).map(c=>[c.canal,c.n]))))+'"></div>').join('');paint($('#chart'));
  $('#chartFrom').textContent=s.porDia[0]?s.porDia[0].d.slice(5):'';$('#chartTo').textContent=s.porDia.at(-1)?s.porDia.at(-1).d.slice(5):'';
  // Leads por canal: barra horizontal proporcional al canal que más aporta.
  const cmax=Math.max(1,...(s.porCanal||[]).map(x=>x.n));
@@ -99,6 +170,9 @@ async function loadStats(){try{const s=await api('/api/admin/stats');
 // dashboard. El coste lo calcula el worker con las tarifas por modelo.
 const usd=(n)=>'$'+(n<1?n.toFixed(4):n.toFixed(2));
 const miles=(n)=>new Intl.NumberFormat('es-ES').format(n);
+// Los globos llevaban la fecha en crudo (2026-08-31). En un globo hay sitio para decirla
+// como se dice, y saber el día de la semana es la mitad de la lectura de una gráfica diaria.
+const diaLargo=(iso)=>{try{return new Intl.DateTimeFormat('es-ES',{weekday:'long',day:'numeric',month:'long'}).format(new Date(iso+'T12:00:00'))}catch(e){return iso}};
 // Barra horizontal etiquetada (canales, captura, límites de Cloudflare): un solo
 // componente para las tres tarjetas.
 function bar(label,val,pct,right,cls){return '<div class="brow'+(cls?' '+cls:'')+'"><span>'+esc(label)+'</span><span class="bt"><i data-w="'+Math.max(1,Math.min(100,pct))+'"></i></span><span class="bv">'+esc(right)+'</span></div>'}
@@ -113,14 +187,18 @@ async function loadSaldo(){if(!ME||ME.role==='velai')return;
  try{const d=await api('/api/admin/ai-balance');
   $('#saldoTitle').textContent='Saldo de IA · '+(MESES[Number(String(d.month).slice(5,7))-1]||d.month);
   $('#saldoLeft').textContent=miles(d.remaining)+' tokens';
-  $('#saldoOf').textContent='de '+miles(d.included)+' de este mes';
+  // Los tokens por sí solos no le dicen nada a un cliente; las llamadas sí — son, más o
+  // menos, las veces que Vai ha contestado.
+  $('#saldoOf').textContent='de '+miles(d.included)+' de este mes'+(d.calls?' · '+miles(d.calls)+' llamadas':'');
   // La barra pinta lo CONSUMIDO, no lo que queda: es lo que se lee de un vistazo.
   $('#saldoBar').className='bigbar'+(d.pct>=80?' hot':'');
   $('#saldoBar').innerHTML='<i data-w="'+Math.max(1,d.pct)+'"></i>';
   $('#saldoToday').textContent='Consumido hoy: '+miles(d.usedToday)+' tokens';
   $('#saldoPct').textContent=d.pct+'% del mes';
   const max=Math.max(1,...(d.serie||[]).map(x=>x.n));
-  $('#saldoChart').innerHTML=(d.serie||[]).map(x=>'<div class="bar" data-h="'+(x.n===0?6:Math.max(12,Math.round(x.n/max*100)))+'" title="'+esc(x.d)+': '+miles(x.n)+' tokens"></div>').join('');
+  $('#saldoChart').innerHTML=(d.serie||[]).map(x=>'<div class="bar" tabindex="0" data-h="'+(x.n===0?6:Math.max(12,Math.round(x.n/max*100)))+'"'
+   +' data-tip="'+esc(diaLargo(x.d))+'"'
+   +' data-tip-rows="'+esc(tipRows([['Tokens',miles(x.n)],['Llamadas',miles(x.calls||0)]]))+'"></div>').join('');
   $('#saldoNote').textContent=d.over
    ?'Has pasado del saldo incluido este mes. No se ha cortado nada ni se te cobra de más: lo revisamos juntos y ajustamos tu plan si hace falta.'
    :'Al agotarse no se corta nada ni se te cobra de más: es un contador para que sepas cuánto usas.';
@@ -150,7 +228,10 @@ async function loadAiUsage(){if(!ME||ME.role!=='velai')return;
   $('#aiCalls').textContent=miles(d.total.calls);
   $('#aiTokens').textContent=miles(d.total.tokens);
   const max=Math.max(0.000001,...d.porDia.map(x=>x.cost));
-  $('#aiChart').innerHTML=d.porDia.map(x=>'<div class="bar" data-h="'+(x.cost===0?4:Math.max(10,Math.round(x.cost/max*100)))+'" title="'+esc(x.d)+': '+usd(x.cost)+' · '+x.calls+' llamadas"></div>').join('');
+  $('#aiChart').innerHTML=d.porDia.map(x=>'<div class="bar" tabindex="0" data-h="'+(x.cost===0?4:Math.max(10,Math.round(x.cost/max*100)))+'"'
+   +' data-tip="'+esc(diaLargo(x.d))+'"'
+   +' data-tip-rows="'+esc(tipRows([['Coste',usd(x.cost)],['Llamadas',miles(x.calls)]]
+     .concat((x.clientes||[]).map(c=>[c.name,miles(c.calls)+' ll.']))))+'"></div>').join('');
   $('#aiFrom').textContent=d.porDia[0]?d.porDia[0].d.slice(5):'';
   $('#aiTo').textContent=d.porDia.at(-1)?d.porDia.at(-1).d.slice(5):'';
   const tot=d.total.cost||1;
@@ -237,7 +318,10 @@ function chTabs(counts){const cur=$('#convChannel').value;
  const tabs=[{k:'',label:'Todos',n:suma('n'),u:suma('u')}]
   .concat(canales.map(k=>({k:k,label:CH_LABEL[k]||k,n:(by[k]||{}).n||0,u:(by[k]||{}).u||0})));
  $('#chTabs').innerHTML=tabs.map(t=>'<button type="button" class="chtab'+(t.k===cur?' is-on':'')+(t.n?'':' is-zero')
-  +'" data-ch="'+esc(t.k)+'" title="'+esc(t.label)+'" aria-label="'+esc(t.label)+'">'
+  // El globo solo en las pestañas de ICONO: la de «Todos» ya lleva su palabra escrita y
+  // repetirla sería ruido. De paso dice qué significa el punto de sin leer.
+  +'" data-ch="'+esc(t.k)+'"'+(t.k?' data-tip="'+esc(t.label+(t.u?'\n'+t.u+' sin leer de '+t.n:'\n'+t.n+' conversaciones'))+'"':'')
+  +' aria-label="'+esc(t.label)+'">'
   +(t.k?chIcon(t.k):'<span>'+esc(t.label)+'</span>')+' <b>'+esc(t.n)+'</b>'
   +(t.u?'<i></i>':'')+'</button>').join('')}
 $('#chTabs').onclick=e=>{const b=e.target.closest('[data-ch]');if(!b)return;$('#convChannel').value=b.dataset.ch;loadInbox()};
@@ -284,7 +368,7 @@ function composer(win,c){const box=$('#composer');
     :'<span class="cwin">El visitante está en la página.</span>')
   :'<span class="cwin">Quedan <b>'+Math.max(0,Math.round((new Date(win.closesAt)-new Date())/3600000))+' h</b> de la ventana de WhatsApp.</span>';
  box.innerHTML='<div class="cvfield"><textarea id="cmsg" rows="1" placeholder="Escribe tu respuesta…"></textarea>'
-  +'<button class="cvsend" id="csend" type="button" title="Enviar" aria-label="Enviar">'+ICO_SEND+'</button></div>'
+  +'<button class="cvsend" id="csend" type="button" data-tip="Enviar (Ctrl+Intro)" aria-label="Enviar">'+ICO_SEND+'</button></div>'
   +'<div class="crow"><span class="cwin"><b>Tienes el control</b>'+(c&&c.agent_email?' · '+esc(c.agent_email):'')+'</span>'
   +'<span class="sp"></span>'+estado
   +'<span class="sp"></span><button class="btn alt btnsm" id="release" type="button">Devolver a Vai</button></div>';
@@ -311,7 +395,7 @@ function renderThread(t){
  $('#threadEmpty').hidden=true;$('#thread').hidden=false;
  const c=t.conversation;
  const quien=whoOf(c);
- $('#threadHead').innerHTML='<button class="cvback" id="convBack" type="button" title="Volver a la lista" aria-label="Volver a la lista">'+ICO_BACK+'</button>'
+ $('#threadHead').innerHTML='<button class="cvback" id="convBack" type="button" data-tip="Volver a la lista" aria-label="Volver a la lista">'+ICO_BACK+'</button>'
   +'<span class="cvav" data-c="'+tenantColor(c.external_id)+'">'+esc(initials(quien))+'<span class="cvch">'+chIcon(c.channel)+'</span></span>'
   +'<span class="grow"><span class="thwho">'+esc(quien)+'</span>'
   +'<span class="thmeta"><b>'+esc(CH_LABEL[c.channel]||c.channel)+'</b>'
@@ -628,8 +712,8 @@ async function loadConexiones(){$('#tgLinkBox').hidden=true;
   $('#tgTopics').innerHTML=(t.topics&&t.topics.length)
    ?'<div class="cxtopics">'+t.topics.map(tp=>'<div class="cxtrow"><span class="cxtn2">'+esc(tp.name)+'</span>'
      +'<span class="cxtd">'+(tp.description?esc(tp.description):'sin descripción')+'</span>'
-     +'<button class="cxibtn" type="button" data-tdesc="'+esc(String(tp.thread_id))+'" title="Editar la descripción" aria-label="Editar la descripción">'+ICO_PEN+'</button>'
-     +'<button class="cxibtn del" type="button" data-tdel="'+esc(String(tp.thread_id))+'" title="Quitar del enrutado" aria-label="Quitar del enrutado">'+ICO_X+'</button></div>').join('')+'</div>'
+     +'<button class="cxibtn" type="button" data-tdesc="'+esc(String(tp.thread_id))+'" data-tip="Editar la descripción. Es lo que Vai usa para decidir qué lead va a este tema." aria-label="Editar la descripción">'+ICO_PEN+'</button>'
+     +'<button class="cxibtn del" type="button" data-tdel="'+esc(String(tp.thread_id))+'" data-tip="Quitar del enrutado. El tema sigue en Telegram; solo deja de recibir leads." aria-label="Quitar del enrutado">'+ICO_X+'</button></div>').join('')+'</div>'
    :'<p class="muted">Aún no hay temas: crea el primero arriba.</p>';
   tgRenderWiz(t)}
  catch(e){$('#tgState').textContent=e.message}
@@ -874,7 +958,7 @@ $('#whCheck').onclick=async()=>{const out=$('#whOut');out.className='mt6 muted';
 
 // ── Admins de Velai: alta/baja desde el panel, con la puerta de Access incluida ──
 async function loadAdmins(){try{const d=await api('/api/admin/admins');
- $('#adminsList').innerHTML=d.admins.map(a=>'<span class="flag '+(a.root?'ok':'off')+'">'+esc(a.email)+(a.root?' · raíz':' <a href="#" data-adel="'+esc(a.email)+'" title="Quitar admin">✕</a>')+'</span>').join(' ');
+ $('#adminsList').innerHTML=d.admins.map(a=>'<span class="flag '+(a.root?'ok':'off')+'">'+esc(a.email)+(a.root?' · raíz':' <a href="#" data-adel="'+esc(a.email)+'" data-tip="Quitar admin. Pierde el acceso al panel y sale de la puerta de Access.">✕</a>')+'</span>').join(' ');
  const roots=d.admins.filter(a=>a.root).length;
  $('#adminsCount').textContent=d.admins.length+(d.admins.length===1?' admin':' admins')+' · '+roots+(roots===1?' raíz':' raíces')}
  catch(e){$('#adminsList').textContent=TERRS[e.message]||e.message;$('#adminsCount').textContent=''}}
@@ -959,7 +1043,7 @@ async function loadChannels(){try{const d=await api('/api/admin/channels');chDat
  chPaint()}
  catch(e){$('#chRows').innerHTML='<tr><td colspan="5" class="empty">'+esc(e.message)+'</td></tr>'}}
 $('#chQ').oninput=chPaint;$('#chTenant').onchange=chPaint;$('#chState').onchange=chPaint;
-function meter(chars){const w=Math.min(100,Math.round(chars/12000*100));return '<span class="meter" title="El contexto viaja al modelo en CADA mensaje"><i data-w="'+w+'"></i></span><span class="muted">'+chars+' car.</span>'}
+function meter(chars){const w=Math.min(100,Math.round(chars/12000*100));return '<span class="meter" data-tip="El contexto viaja al modelo en CADA mensaje, así que un prompt largo consume saldo en cada turno."><i data-w="'+w+'"></i></span><span class="muted">'+chars+' car.</span>'}
 async function loadTenantList(){try{const d=await api('/api/admin/tenants');tenantList=d.tenants;$('#tenantRows').innerHTML=d.tenants.map(t=>'<tr data-tid="'+t.id+'"><td>'+tenantChip(t.id,t.name)+'</td><td class="muted">'+esc(t.channel_address)+'</td><td>'+t.lead_count+'</td><td>'+meter(t.prompt_len)+'</td><td>'+semaforo(t)+'</td><td>'+(t.active?'<span class="flag ok">activo</span>':'<span class="flag off">inactivo</span>')+'</td><td><button type="button" class="btn alt btnsm" data-cal="'+t.id+'">Abrir</button></td></tr>').join('')||'<tr><td colspan="7" class="empty">Sin clientes.</td></tr>';paint($('#tenantRows'))}catch(e){toast('No se pudo cargar la lista de clientes: '+e.message,false)}}
 $('#tenantRows').onclick=e=>{const cal=e.target.closest('[data-cal]');if(cal)return openCalendar(cal.dataset.cal);const tr=e.target.closest('[data-tid]');if(tr)openTenant(tr.dataset.tid)};
 $('#newTenant').onclick=()=>openTenant(null);
@@ -1099,7 +1183,7 @@ async function provPost(step,body){clearTenantErrs();
  catch(e){toast('Paso «'+step+'» fallido: '+(TERRS[e.message]||e.message),false)}}
 let panelUsers=[];
 async function loadUsers(id){try{const d=await api('/api/admin/tenants/'+id+'/users');panelUsers=d.users;
- $('#tUsersList').innerHTML=d.users.map(u=>'<span class="flag off">'+esc(u.email)+' <a href="#" data-udel="'+esc(u.email)+'" title="Quitar acceso">✕</a></span>').join(' ')||'Sin usuarios: este cliente no tiene acceso al panel.'}
+ $('#tUsersList').innerHTML=d.users.map(u=>'<span class="flag off">'+esc(u.email)+' <a href="#" data-udel="'+esc(u.email)+'" data-tip="Quitar acceso. Deja de entrar al panel de este cliente.">✕</a></span>').join(' ')||'Sin usuarios: este cliente no tiene acceso al panel.'}
  catch(e){$('#tUsersList').textContent=e.message}}
 $('#uAdd').onclick=async()=>{clearTenantErrs();const email=$('#uEmail').value.trim();if(!email)return;
  try{const r=await api('/api/admin/tenants/'+editing.id+'/users',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email})});

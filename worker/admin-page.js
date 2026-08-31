@@ -568,6 +568,28 @@ body.dark .ch-ig{color:#e0a6d0}
 button.loading{opacity:.6;cursor:progress;animation:busypulse .9s ease-in-out infinite alternate}
 @keyframes busypulse{to{opacity:.88}}
 @media (prefers-reduced-motion:reduce){button.loading{animation:none;opacity:.6}}
+/* ── Tooltip propio ───────────────────────────────────────────────────────────
+   Sustituye al title del navegador, que no se puede vestir, tarda ~1 s en salir, se
+   corta a una línea en algunos navegadores y no aparece nunca con el teclado.
+   UNO solo para toda la app, movido por JS (ver admin-panel.js): así no hay un elemento
+   por cada disparador ni riesgo de que un overflow:hidden lo recorte.
+   El texto va con textContent y white-space:pre-line — nunca innerHTML: estos globos
+   llevan nombres de cliente y de fuente, que son datos que escribe gente de fuera. */
+#tip{position:fixed;z-index:2147483646;max-width:min(320px,calc(100vw - 24px));
+ background:var(--bg2);color:var(--white);border:1px solid var(--border2);border-radius:var(--r-sm);
+ padding:8px 11px;font-size:12.5px;line-height:1.45;white-space:pre-line;
+ box-shadow:0 10px 34px rgba(0,0,0,.45);pointer-events:none;opacity:0;
+ transform:translateY(3px);transition:opacity .13s ease,transform .13s ease}
+#tip.on{opacity:1;transform:none}
+/* La primera línea, cuando la hay, hace de título del globo. */
+#tip b{display:block;font-family:var(--font-d);font-weight:900;font-size:13px;margin-bottom:3px}
+#tip .tipk{display:flex;justify-content:space-between;gap:14px}
+#tip .tipk span:last-child{color:var(--white);font-variant-numeric:tabular-nums}
+#tip .tipk span:first-child{color:var(--muted)}
+/* Marca de que un elemento explica algo: subrayado punteado discreto, solo donde hay
+   texto visible (los botones de icono no lo llevan, ya se entiende que son pulsables). */
+.hint{text-decoration:underline dotted rgba(var(--ink),.35);text-underline-offset:3px;cursor:help}
+@media (prefers-reduced-motion:reduce){#tip{transition:none}}
 /* ── Barra de actividad ────────────────────────────────────────────────────────
    Señal única de «el panel está pidiendo algo al servidor». La enciende api() para
    TODAS las peticiones salvo los sondeos de fondo (ver admin-panel.js).
@@ -777,9 +799,11 @@ body.cliente .cliente-only{display:flex}
 </nav>
 <span class="spacer"></span>
 <div class="sidefoot">
-<button class="tab" id="alertBtn" type="button" title="Suena un aviso y sale una notificación cuando llega un mensaje, aunque estés en otra pestaña"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"></path><path d="M13.7 21a2 2 0 0 1-3.4 0"></path></svg><span id="alertLabel">Activar avisos</span><i class="alertdot" id="alertDot" hidden></i></button>
-<button class="tab" id="themeBtn" type="button" title="Cambia el tema de las vistas (la barra lateral siempre es oscura)"><svg id="thMoon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12.8A9 9 0 1 1 11.2 3 7 7 0 0 0 21 12.8z"></path></svg><svg id="thSun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" hidden><circle cx="12" cy="12" r="4.5"></circle><line x1="12" y1="2.5" x2="12" y2="5"></line><line x1="12" y1="19" x2="12" y2="21.5"></line><line x1="2.5" y1="12" x2="5" y2="12"></line><line x1="19" y1="12" x2="21.5" y2="12"></line><line x1="5.3" y1="5.3" x2="7" y2="7"></line><line x1="17" y1="17" x2="18.7" y2="18.7"></line><line x1="5.3" y1="18.7" x2="7" y2="17"></line><line x1="17" y1="7" x2="18.7" y2="5.3"></line></svg><span id="themeLabel">Tema oscuro</span></button>
-<button class="tab" id="logout" type="button" title="Cerrar la sesión de Cloudflare Access"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path><path d="M16 17l5-5-5-5"></path><path d="M21 12H9"></path></svg>Salir</button>
+<button class="tab" id="alertBtn" type="button" data-tip="Suena un aviso y sale una notificación cuando llega un mensaje, aunque estés en otra pestaña.
+El navegador exige un clic antes de poder sonar: si acabas de activarlo, el primer aviso puede llegar mudo."><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"></path><path d="M13.7 21a2 2 0 0 1-3.4 0"></path></svg><span id="alertLabel">Activar avisos</span><i class="alertdot" id="alertDot" hidden></i></button>
+<button class="tab" id="themeBtn" type="button" data-tip="Cambia el tema de las vistas. La barra lateral siempre es oscura."><svg id="thMoon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12.8A9 9 0 1 1 11.2 3 7 7 0 0 0 21 12.8z"></path></svg><svg id="thSun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" hidden><circle cx="12" cy="12" r="4.5"></circle><line x1="12" y1="2.5" x2="12" y2="5"></line><line x1="12" y1="19" x2="12" y2="21.5"></line><line x1="2.5" y1="12" x2="5" y2="12"></line><line x1="19" y1="12" x2="21.5" y2="12"></line><line x1="5.3" y1="5.3" x2="7" y2="7"></line><line x1="17" y1="17" x2="18.7" y2="18.7"></line><line x1="5.3" y1="18.7" x2="7" y2="17"></line><line x1="17" y1="7" x2="18.7" y2="5.3"></line></svg><span id="themeLabel">Tema oscuro</span></button>
+<button class="tab" id="logout" type="button" data-tip="Cierra tu sesión de Cloudflare Access.
+Para volver a entrar te pedirá otro código por correo."><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path><path d="M16 17l5-5-5-5"></path><path d="M21 12H9"></path></svg>Salir</button>
 </div>
 </aside>
 <main><div id="viewDashboard">
@@ -815,19 +839,19 @@ body.cliente .cliente-only{display:flex}
 <div id="viewLeads" hidden>
 <div class="vhead"><div><h1>Leads</h1><p>Últimos 30 días</p></div><button class="btn alt" id="export" type="button">Exportar CSV</button></div>
 <div id="escalations"></div>
-<form class="filters" id="filters"><label class="search"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"></circle><path d="m21 21-4.3-4.3"></path></svg><input name="q" class="q" placeholder="Buscar nombre, teléfono, sector…"></label><span class="sel"><select name="tenant" id="tenantFilter"><option value="">Todos los clientes</option></select></span><span class="sel"><select name="status"><option value="">Todos los estados</option><option>new</option><option>contacted</option><option>qualified</option><option>won</option><option>lost</option><option>spam</option></select></span><span class="sel"><select name="notification"><option value="">Todos los avisos</option><option>pending</option><option>sent</option><option>failed</option><option>skipped</option></select></span><span class="sel"><select name="source" id="sourceFilter"><option value="">Todas las fuentes</option></select></span><input name="from" type="date" title="Desde"><input name="to" type="date" title="Hasta"><button class="btn">Filtrar</button><span id="resultCount"></span></form>
+<form class="filters" id="filters"><label class="search"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"></circle><path d="m21 21-4.3-4.3"></path></svg><input name="q" class="q" placeholder="Buscar nombre, teléfono, sector…"></label><span class="sel"><select name="tenant" id="tenantFilter"><option value="">Todos los clientes</option></select></span><span class="sel"><select name="status"><option value="">Todos los estados</option><option>new</option><option>contacted</option><option>qualified</option><option>won</option><option>lost</option><option>spam</option></select></span><span class="sel"><select name="notification"><option value="">Todos los avisos</option><option>pending</option><option>sent</option><option>failed</option><option>skipped</option></select></span><span class="sel"><select name="source" id="sourceFilter"><option value="">Todas las fuentes</option></select></span><input name="from" type="date" data-tip="Desde esta fecha (incluida)"><input name="to" type="date" data-tip="Hasta esta fecha (incluida)"><button class="btn">Filtrar</button><span id="resultCount"></span></form>
 <div id="message"></div><div class="table"><table><thead><tr><th>Fecha</th><th>Cliente</th><th>Estado</th><th>Nombre</th><th>WhatsApp</th><th>Asunto</th><th>Fuente</th><th>Avisos</th></tr></thead><tbody id="rows"></tbody></table></div>
 <div class="legend"><span><i class="d-new"></i>nuevo</span><span><i class="d-contacted"></i>contactado</span><span><i class="d-qualified"></i>cualificado</span><span><i class="d-won"></i>ganado</span><span><i class="d-lost"></i>perdido</span></div>
 <div class="pager"><button class="btn alt" id="more" hidden>Cargar más</button></div></div>
 <div id="viewConversaciones" hidden>
-<div class="cvhead"><h1>Conversaciones</h1><span class="cvsep"></span><span id="convCount"></span><span class="spacer"></span><span id="waitPill" class="pill-wait" hidden><i></i><span id="waitPillTxt">&mdash;</span></span><span class="rel"><button class="availbtn" id="availToggle" type="button" aria-expanded="false" title="Tu disponibilidad para atender conversaciones"><i></i><span id="availState">&mdash;</span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"></path></svg></button>
-<div class="pop" id="availPop" hidden><h3>Tu disponibilidad</h3><div class="swrow"><b>Recibir conversaciones</b><button class="sw" id="availSw" type="button" role="switch" aria-checked="false" aria-label="Recibir conversaciones"><i></i></button></div><p id="availNote"></p><p class="pophint" id="availHours"></p></div></span><button class="iconbtn" id="convExport" type="button" title="Exportar CSV" aria-label="Exportar CSV"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12"></path><path d="m7 11 5 5 5-5"></path><path d="M4 20h16"></path></svg></button></div>
+<div class="cvhead"><h1>Conversaciones</h1><span class="cvsep"></span><span id="convCount"></span><span class="spacer"></span><span id="waitPill" class="pill-wait" hidden><i></i><span id="waitPillTxt">&mdash;</span></span><span class="rel"><button class="availbtn" id="availToggle" type="button" aria-expanded="false" data-tip="Si lo apagas, Vai deja de pasarte conversaciones y atiende él solo. No cierra las que ya tengas."><i></i><span id="availState">&mdash;</span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"></path></svg></button>
+<div class="pop" id="availPop" hidden><h3>Tu disponibilidad</h3><div class="swrow"><b>Recibir conversaciones</b><button class="sw" id="availSw" type="button" role="switch" aria-checked="false" aria-label="Recibir conversaciones"><i></i></button></div><p id="availNote"></p><p class="pophint" id="availHours"></p></div></span><button class="iconbtn" id="convExport" type="button" data-tip="Descarga lo que estás viendo AHORA, con los filtros aplicados" aria-label="Exportar CSV"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12"></path><path d="m7 11 5 5 5-5"></path><path d="M4 20h16"></path></svg></button></div>
 <div id="convMessage"></div>
 <div class="inbox" id="inbox">
 <div class="inbox-l">
 <form class="cvfilters" id="convFilters">
 <input type="hidden" name="channel" id="convChannel">
-<div class="lsearch"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"></circle><path d="m21 21-4.3-4.3"></path></svg><input name="q" id="convQ" placeholder="Buscar persona o n&uacute;mero&hellip;" autocomplete="off" maxlength="60"><span class="rel"><button class="fbtn" id="convMore" type="button" aria-expanded="false" title="Filtros"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="4" y1="7" x2="20" y2="7"></line><circle cx="9" cy="7" r="2.4"></circle><line x1="4" y1="17" x2="20" y2="17"></line><circle cx="15" cy="17" r="2.4"></circle></svg><span>Filtros</span></button>
+<div class="lsearch"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"></circle><path d="m21 21-4.3-4.3"></path></svg><input name="q" id="convQ" placeholder="Buscar persona o n&uacute;mero&hellip;" autocomplete="off" maxlength="60"><span class="rel"><button class="fbtn" id="convMore" type="button" aria-expanded="false"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="4" y1="7" x2="20" y2="7"></line><circle cx="9" cy="7" r="2.4"></circle><line x1="4" y1="17" x2="20" y2="17"></line><circle cx="15" cy="17" r="2.4"></circle></svg><span>Filtros</span></button>
 <div class="pop" id="convPop" hidden><h3>Filtrar la bandeja</h3>
 <label class="velai-only"><span>Cliente</span><select name="tenant" id="convTenant"><option value="">Todos los clientes</option></select></label>
 <div class="popdos"><label><span>Desde</span><input name="from" type="date"></label><label><span>Hasta</span><input name="to" type="date"></label></div>
@@ -966,7 +990,8 @@ body.cliente .cliente-only{display:flex}
 <small class="muted" id="wrLast"></small></div>
 <div class="cxbox">
 <span class="cxtitle">Tu logo</span><p class="cxsub">WhatsApp la recorta en c&iacute;rculo y pide 640&times;640, as&iacute; que a veces conviene una distinta de la del chat web. M&aacute;ximo 2 MB (PNG, JPG o WebP).</p>
-<div class="cxlogos"><div class="cxlogot"><span id="cxLogoPrev" class="cxlogo" title="Imagen del chat web">&mdash;</span><span class="lb">Chat de tu web</span></div><div class="cxlogot"><span id="cxLogoPrevWa" class="cxlogo" title="Imagen de WhatsApp">&mdash;</span><span class="lb">Tu WhatsApp</span></div></div>
+<div class="cxlogos"><div class="cxlogot"><span id="cxLogoPrev" class="cxlogo" data-tip="El logo que sale en la burbuja del chat de tu web.">&mdash;</span><span class="lb">Chat de tu web</span></div><div class="cxlogot"><span id="cxLogoPrevWa" class="cxlogo" data-tip="La foto de perfil que ven los clientes en WhatsApp.
+WhatsApp la recorta en círculo y pide 640×640.">&mdash;</span><span class="lb">Tu WhatsApp</span></div></div>
 <div class="cxrow"><label class="chk2"><input type="checkbox" id="cxChWeb" checked> Chat de mi web</label><label class="chk2"><input type="checkbox" id="cxChWa" checked> Mi WhatsApp</label></div>
 <div class="cxrow"><input type="file" id="cxLogoFile" accept="image/png,image/jpeg,image/webp" class="filein"><label class="btn alt btnsm" for="cxLogoFile">Elegir imagen</label><span id="cxLogoName" class="fname muted">ninguna elegida</span><button class="btn btnsm" id="cxLogoUp" type="button">Guardar logo</button><button class="btn alt btnsm" id="cxLogoApply" type="button" hidden>Aplicar a mi WhatsApp</button></div>
 <small class="muted" id="cxLogoOut"></small></div>
@@ -1109,6 +1134,7 @@ Es la forma de mirar sin romper: <code>getUpdates</code> NO se puede usar con un
 </div></dialog>
 <dialog id="calDayDlg"><div class="modal-h"><strong id="calDayTitle">Citas del día</strong><button class="btn alt" id="calDayClose" type="button">Cerrar</button></div><div class="modal-b caldaylist" id="calDayBody"></div></dialog>
 <div id="toasts" popover="manual"></div>
+<div id="tip" role="tooltip" hidden></div>
 <script nonce="__NONCE__">var __name=(t,v)=>Object.defineProperty(t,"name",{value:v,configurable:true});(${panelApp.toString()})();</script></body></html>`;
 
 export const ADMIN_HEADERS = {

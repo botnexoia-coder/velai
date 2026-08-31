@@ -151,6 +151,31 @@ const VISTAS = {
       .replace('<button class="tgnode" id="tgn5" type="button" data-tgo="tgs5">', '<button class="tgnode cur done" id="tgn5" type="button" data-tgo="tgs5">')
       .replace(/<i class="tgbar" id="tgbar([1-4])"><\/i>/g, (m, n) => `<i class="tgbar done" id="tgbar${n}"></i>`);
   },
+  // Dashboard: la gráfica de leads por día CON el globo abierto encima de una barra.
+  // El tooltip solo existe mientras el ratón está encima, así que sin esto no hay forma
+  // de revisarlo: ni el contraste, ni si el desglose cabe, ni si se sale por el borde.
+  dashboard: (h) => {
+    const alturas = [22, 45, 12, 78, 34, 90, 56, 40, 66, 18, 100, 72, 28, 84];
+    const barras = alturas.map((a) => `<div class="bar" data-h="${a}"></div>`).join('');
+    // La altura la pone paint() por CSSOM en el panel real (la CSP con nonce bloquea los
+    // style="" del markup). Aquí, sin scripts, se inyecta como regla o la gráfica sale
+    // plana y parece rota cuando no lo está.
+    const alturasCss = '<style nonce="n">' + alturas.map((a, i) => `#chart .bar:nth-child(${i + 1}){height:${a}%}`).join('') + '</style>';
+    const fila = (k, v) => `<div class="tipk"><span>${k}</span><span>${v}</span></div>`;
+    return h
+      .replace('<div id="chart"></div>', `${alturasCss}<div id="chart">${barras}</div>`)
+      .replace('<span id="chartFrom"></span>', '<span id="chartFrom">08-18</span>')
+      .replace('<span id="chartTo"></span>', '<span id="chartTo">08-31</span>')
+      .replace('<span class="n" id="mTotal">&mdash;</span>', '<span class="n" id="mTotal">24</span>')
+      .replace('<span class="n" id="mNew">&mdash;</span>', '<span class="n" id="mNew">3</span>')
+      // El globo, abierto sobre la barra alta del centro. La posición va por CSS porque la
+      // CSP con nonce bloquea los style="" del markup (misma razón que paint()).
+      .replace('<div id="tip" role="tooltip" hidden></div>',
+        '<style nonce="n">#tip{opacity:1;transform:none;left:812px;top:262px}</style>'
+        + '<div id="tip" role="tooltip"><b>jueves, 28 de agosto</b>'
+        + fila('Leads', '7') + fila('whatsapp', '4') + fila('chat web', '2') + fila('calculadora-roi', '1')
+        + '</div>');
+  },
   // Leads: la barra de filtros con contenido real. El desplegable de «Fuente» lo rellena
   // fillSources() desde /api/admin/stats, así que sin scripts hay que sembrarlo a mano —
   // y es justo lo que hay que MIRAR: cabe en la barra sin romper la fila de filtros.
@@ -193,8 +218,8 @@ const VISTAS = {
   calendario: (h) => h.replace('<div id="calViewWrap" hidden>', '<div id="calViewWrap">'),
 };
 if (!VISTAS[view]) { console.error(`render-panel: vista desconocida «${view}». Disponibles: ${Object.keys(VISTAS).join(', ')}`); process.exit(2); }
-html = html.replace('<div id="viewDashboard">', '<div id="viewDashboard" hidden>');
-html = html.replace(`<div id="view${view[0].toUpperCase()}${view.slice(1)}" hidden>`, `<div id="view${view[0].toUpperCase()}${view.slice(1)}">`);
+if (view !== 'dashboard') html = html.replace('<div id="viewDashboard">', '<div id="viewDashboard" hidden>');
+if (view !== 'dashboard') html = html.replace(`<div id="view${view[0].toUpperCase()}${view.slice(1)}" hidden>`, `<div id="view${view[0].toUpperCase()}${view.slice(1)}">`);
 html = VISTAS[view](html);
 if (busy === 'busy') {
   html = html.replace('<html lang="es">', '<html lang="es" class="busy">');

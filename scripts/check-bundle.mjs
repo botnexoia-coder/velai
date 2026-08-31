@@ -60,6 +60,10 @@ const context = createContext({
   fetch: async (path) => { fetched.push(String(path)); return new Response('{"role":"velai","leads":[],"tenants":[],"escalations":[]}', { status: 200 }); },
   FormData: class { *[Symbol.iterator]() {} },
   URLSearchParams, Intl, Response,
+  // window: el panel lo usa para scroll/resize (tooltip), el AudioContext del aviso y
+  // focus(). Faltaba en el stub y solo se notaba si el uso estaba al ARRANQUE — un
+  // window.loQueSea mal escrito dentro de un handler seguía colándose hasta el navegador.
+  window: { addEventListener: () => {}, focus: () => {}, AudioContext: null, webkitAudioContext: null },
   setTimeout: () => 0, requestAnimationFrame: () => {}, confirm: () => false,
 });
 try {
