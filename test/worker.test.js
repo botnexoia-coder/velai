@@ -4433,8 +4433,10 @@ test('el aviso se guarda ANTES de cambiar el estado: si no, el widget deja de es
   const cambia = cuerpo.indexOf("state='bot'");
   assert.ok(guarda > 0 && cambia > 0, 'ambos pasos siguen en la función');
   assert.ok(guarda < cambia, 'el guardado va ANTES del cambio de estado');
-  // Y en «Devolver a Vai», el mismo orden.
-  const rel = src.slice(src.indexOf('MISMO orden que en la cola'));
+  // Y en «Devolver a Vai» (que desde la migración a Hono vive en el dominio de
+  // conversaciones), el mismo orden.
+  const convSrc = await readFile(new URL('../worker/routes/conversaciones.js', import.meta.url), 'utf8');
+  const rel = convSrc.slice(convSrc.indexOf('MISMO orden que en la cola'));
   assert.ok(rel.indexOf('convAppend') < rel.indexOf("state='bot'"), 'igual al devolver el control');
   // Red de seguridad en el widget: un último sondeo al volver a bot.
   const w = await readFile(new URL('../assets/vai-widget.js', import.meta.url), 'utf8');

@@ -3,9 +3,11 @@ import { ADMIN_HEADERS, ADMIN_HTML } from './admin-page.js';
 import {
   adminOrigin, adminHost, adminCorsGuard, adminIdentity, envAdmins, resolveScope,
   recordAuthFailure, scopeClause, assertOwnTenant, clienteAllowed,
-  mwAdminHost, mwAdminCors, mwAdminIdentity, mwResolveScope,
+  mwAdminHost, mwAdminCors, mwAdminIdentity, mwResolveScope, clienteGate,
 } from './middleware.js';
 import { publico } from './routes/publico.js';
+import { leads as rutasLeads } from './routes/leads.js';
+import { conversaciones as rutasConversaciones } from './routes/conversaciones.js';
 import { encryptSecret, decryptSecret } from './crypto.js';
 import { cloudflareConfigured, syncTurnstileDomains, syncAccessGroup, syncAdminGroup, verifyCfToken } from './cloudflare.js';
 import { createSubaccount, fetchSubaccount, findSubaccountByName, createLeadTemplate, submitTemplateApproval, fetchApprovalStatus, createWhatsAppSender, verifySender, fetchSenderStatus, listWhatsAppSenders, updateSenderWebhook, updateSenderProfile, fetchSender } from './twilio.js';
@@ -18,8 +20,8 @@ const WORKER_PUBLIC_URL = 'https://vai-worker.botnexo-ia.workers.dev';
 // denominador y la tasa de captura no se puede calcular sin engañar.
 const CONV_TRACKING_SINCE = '2026-08-25';
 const PUBLIC_MEDIA_BASE = 'https://api.hirevai.com'; // dominio propio: no lo cortan los adblock
-const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-const STATUSES = new Set(['new', 'contacted', 'qualified', 'won', 'lost', 'spam']);
+export const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+export const STATUSES = new Set(['new', 'contacted', 'qualified', 'won', 'lost', 'spam']);
 const UTM_KEYS = ['utm_source', 'utm_medium', 'utm_campaign', 'utm_content', 'utm_term', 'gclid', 'fbclid'];
 
 export function json(data, status = 200, headers = {}) {
@@ -105,7 +107,7 @@ export async function publicCors(request, env) {
   };
 }
 
-async function readJson(request, maxBytes = 16000) {
+export async function readJson(request, maxBytes = 16000) {
   const length = Number(request.headers.get('Content-Length') || 0);
   if (length > maxBytes) throw new HttpError(413, 'payload_too_large');
   let text = await request.text();
@@ -426,7 +428,7 @@ async function runToolLoop(env, payload, tools, executor, options = {}, first = 
   }
 }
 
-function expiryDate(env) {
+export function expiryDate(env) {
   // `Number('')` es 0 (finito) y el clamp lo convertía en 1 mes; `|| 24` cubre '', 0 y NaN.
   const months = Number(env.LEAD_RETENTION_MONTHS) || 24;
   const date = new Date();
@@ -1405,7 +1407,7 @@ async function deliver(env, channel, lead, tenant) {
   return { ok: true, partial: delivered < recipients.length };
 }
 
-async function processNotifications(env, leadId, force = false) {
+export async function processNotifications(env, leadId, force = false) {
   if (!env.DB) return;
   const lead = await env.DB.prepare('SELECT * FROM leads WHERE id = ?').bind(leadId).first();
   if (!lead) return;
@@ -1957,7 +1959,7 @@ async function convLoad(env, tenant, channel, externalId, inbox = null) {
 // ha pagado — devolverla sin memoria es malo, tirarla es peor.
 // `expires_at` se recalcula en cada turno para que el reloj de retención corra desde el
 // último mensaje: una conversación viva no se purga a media frase.
-async function convAppend(env, conv, turns) {
+export async function convAppend(env, conv, turns) {
   const list = (turns || []).filter((t) => t && t.content);
   if (!list.length) return false;
   const now = new Date().toISOString();
@@ -2008,8 +2010,8 @@ const CONV_STATES = ['bot', 'esperando', 'humano'];
 // La cola de espera (migración 0027). Los 5 minutos son el primer AVISO, no el final:
 // con un asesor ocupado en otra conversación, rendirse a los 5 minutos saltaba casi
 // siempre y el visitante lo leía como «no hay nadie», cuando sí había.
-const TAKEOVER_GRACE_MIN = 5;    // primer aviso: «seguimos buscando a alguien»
-const QUEUE_MAX_MIN = 15;        // final: la IA retoma y pide el teléfono
+export const TAKEOVER_GRACE_MIN = 5;    // primer aviso: «seguimos buscando a alguien»
+export const QUEUE_MAX_MIN = 15;        // final: la IA retoma y pide el teléfono
 
 // Mismo formato y mismo default que tenant_calendars.business_hours: si la interacción
 // humana va con horario, un NULL no puede significar «sin límite».
@@ -2023,7 +2025,7 @@ function supportWindows(tenant, weekday) {
 
 // hourCycle h23 a propósito: con otras variantes la medianoche sale como «24:00» y la
 // comparación de cadenas dejaría fuera la primera hora del día.
-function withinSupportHours(tenant, nowMs = Date.now()) {
+export function withinSupportHours(tenant, nowMs = Date.now()) {
   const tz = (tenant && tenant.support_tz) || 'Europe/Madrid';
   const when = new Date(nowMs);
   let day; let hhmm;
@@ -2081,7 +2083,7 @@ function systemWithHandoff(config, tenant, available) {
 // las de todos los clientes —lo necesita para dar soporte y diagnosticar— pero no
 // responderlas ni tomar su control: el cliente final de un negocio no debe encontrarse a
 // Velai dentro de su chat, y la burbuja del panel lleva el correo de quien escribe.
-async function velaiTenantId(env) {
+export async function velaiTenantId(env) {
   const slug = clean(env.DEFAULT_TENANT_SLUG, 40) || 'velai';
   try {
     const row = await env.DB.prepare('SELECT id FROM tenants WHERE slug = ?').bind(slug).first();
@@ -2091,7 +2093,7 @@ async function velaiTenantId(env) {
 
 // ¿Puede ESTA persona atender ESTA conversación? Un cliente, las suyas; Velai, solo las de
 // Velai. Devuelve booleano y no lanza: el código de error lo elige el que llama.
-async function canAttend(env, scope, tenantId) {
+export async function canAttend(env, scope, tenantId) {
   if (!tenantId) return false;
   if (scope.role !== 'velai') return scope.tenantId === tenantId;
   const mine = await velaiTenantId(env);
@@ -2110,7 +2112,7 @@ const VISITOR_AWAY_MS = 90000;
 // el agente escribe, pulsa enviar y el mensaje muere en Twilio.
 // Devuelve el MOTIVO cuando está cerrada: el panel lo traduce y cierra el cajón antes de
 // que alguien escriba, en vez de después.
-async function replyWindow(env, conv) {
+export async function replyWindow(env, conv) {
   // El cajón se abre SOLO con el control tomado (migración 0025): escribir en una
   // conversación que la IA sigue atendiendo mete dos voces en el mismo hilo.
   if (conv.state !== 'humano') return { open: false, reason: conv.state === 'esperando' ? 'sin_control' : 'atiende_la_ia' };
@@ -2275,7 +2277,7 @@ async function settleTwilioReply(config, env, ctx, tenant, from, message, conv, 
 // es legal aquí: la ventana de 24 h la abrió el mensaje entrante del usuario. From =
 // el To del webhook (la dirección del tenant). Credenciales de la subcuenta si existe
 // — regla de oro de deliver(): los recursos de una subcuenta se operan con SUS credenciales.
-async function sendTwilioText(env, tenant, fromAddress, toAddress, body) {
+export async function sendTwilioText(env, tenant, fromAddress, toAddress, body) {
   const sub = tenant && tenant.twilio_subaccount_sid;
   const sid = sub || env.TWILIO_ACCOUNT_SID;
   const token = sub ? await twilioAuthTokenFor(env, tenant) : env.TWILIO_AUTH_TOKEN;
@@ -2432,7 +2434,7 @@ export function decodeBase64Url(value) {
   return Uint8Array.from(atob(normalized), (char) => char.charCodeAt(0));
 }
 
-function leadFilters(url) {
+export function leadFilters(url) {
   const clauses = ['1=1']; const values = [];
   const status = clean(url.searchParams.get('status'), 20);
   if (status && STATUSES.has(status)) { clauses.push('l.status = ?'); values.push(status); }
@@ -2457,7 +2459,7 @@ function leadFilters(url) {
 
 // Filtros de la vista Conversaciones. Alias `c.` — el aislamiento por tenant NO se
 // construye aquí, lo pone scopeClause(scope, 'c') en el endpoint.
-function convFilters(url) {
+export function convFilters(url) {
   const clauses = ['1=1']; const values = [];
   const channel = clean(url.searchParams.get('channel'), 20);
   // Instagram entra en la lista aunque el canal no exista aún: el panel pinta su chip a 0
@@ -2495,7 +2497,7 @@ function convFilters(url) {
   return { sql: clauses.join(' AND '), values };
 }
 
-function csvCell(value) {
+export function csvCell(value) {
   const text = String(value ?? '');
   // Prefijo ' contra inyección de fórmulas al abrir el CSV en Excel/Sheets.
   const guarded = /^[=+\-@\t\r]/.test(text) ? `'${text}` : text;
@@ -2956,7 +2958,7 @@ async function handleAdmin(request, env, ctx, path, url, config) {
   return adminRouter(request, env, ctx, path, url, config, scope);
 }
 
-async function adminRouter(request, env, ctx, path, url, config, scope) {
+async function adminRouterLegacy(request, env, ctx, path, url, config, scope) {
   const actor = scope.email;
   if (scope.role !== 'velai' && !clienteAllowed(path, request.method)) throw new HttpError(403, 'not_authorized');
   const sc = scopeClause(scope);
@@ -2974,327 +2976,7 @@ async function adminRouter(request, env, ctx, path, url, config, scope) {
     return json({ role: scope.role, tenantName, tenantLogo, tenantId: scope.tenantId }, 200, NO_STORE);
   }
 
-  if (path === '/api/admin/escalations' && request.method === 'GET') {
-    if (!env.KV) return json({ escalations: [] }, 200, NO_STORE);
-    const prefix = scope.tenantId ? `pause:${scope.tenantId}:` : 'pause:';
-    const list = await env.KV.list({ prefix, limit: 100 });
-    const escalations = list.keys.map((k) => {
-      const rest = k.name.slice('pause:'.length);
-      const cut = rest.indexOf(':');
-      return { tenantId: rest.slice(0, cut), from: rest.slice(cut + 1) };
-    });
-    return json({ escalations }, 200, NO_STORE);
-  }
-  if (path === '/api/admin/escalations/resume' && request.method === 'POST') {
-    const body = await readJson(request, 2000);
-    // Un cliente solo puede reanudar SUS conversaciones: su tenantId manda.
-    const tenantId = scope.tenantId || clean(body.tenantId, 40);
-    const from = clean(body.from, 80);
-    if (!tenantId || !from) throw new HttpError(400, 'invalid_resume');
-    if (env.KV) { try { await env.KV.delete(`pause:${tenantId}:${from}`); } catch (_) {} }
-    console.log(JSON.stringify({ level: 'info', code: 'bot_resumed', actor_role: scope.role }));
-    return json({ ok: true }, 200, NO_STORE);
-  }
-
-  if (path === '/api/admin/leads' && request.method === 'GET') {
-    const filters = leadFilters(url);
-    // Sin ?limit el default es 50: Number(null) es 0 (finito) y el clamp lo convertía
-    // en 1 — el panel paginaba de lead en lead. NaN/0/'' caen todos al default.
-    const limit = Math.min(100, Math.max(1, Number(url.searchParams.get('limit')) || 50)); // NaN en LIMIT = sin límite en SQLite
-    // Cursor por tupla (created_at, id): un created_at repetido en el borde de página no salta leads.
-    const cursor = clean(url.searchParams.get('cursor'), 80);
-    if (cursor) {
-      const [cAt, cId] = cursor.split('|');
-      if (cId) { filters.sql += ' AND (l.created_at < ? OR (l.created_at = ? AND l.id < ?))'; filters.values.push(cAt, cAt, cId); }
-      else { filters.sql += ' AND l.created_at < ?'; filters.values.push(cAt); }
-    }
-    const result = await env.DB.prepare(`SELECT l.*, t.name AS tenant_name, GROUP_CONCAT(n.channel || ':' || n.status) notification_summary FROM leads l LEFT JOIN tenants t ON t.id=l.tenant_id LEFT JOIN lead_notifications n ON n.lead_id=l.id WHERE ${filters.sql}${sc.sql} GROUP BY l.id ORDER BY l.created_at DESC, l.id DESC LIMIT ?`).bind(...filters.values, ...sc.args, limit + 1).all();
-    const rows = result.results; const more = rows.length > limit; if (more) rows.pop();
-    // Un cliente nunca recibe nombres de tenant (el suyo va en su cabecera).
-    if (scope.role !== 'velai') for (const row of rows) { delete row.tenant_name; delete row.tenant_id; }
-    return json({ leads: rows, nextCursor: more ? `${rows.at(-1).created_at}|${rows.at(-1).id}` : null }, 200, NO_STORE);
-  }
-  if (path === '/api/admin/leads/export.csv' && request.method === 'GET') {
-    const filters = leadFilters(url);
-    const rows = (await env.DB.prepare(`SELECT l.created_at,l.status,t.name AS tenant_name,l.source,l.name,l.whatsapp,l.need,l.context,l.sector,l.messages_per_day,l.channel,l.score,l.note,l.page_url FROM leads l LEFT JOIN tenants t ON t.id=l.tenant_id WHERE ${filters.sql}${sc.sql} ORDER BY l.created_at DESC LIMIT 5000`).bind(...filters.values, ...sc.args).all()).results;
-    // need/context van DELANTE de sector: es lo que lee quien va a llamar, y sector viene
-    // vacío en casi todo lead de cliente (es un concepto del embudo de Velai).
-    const keys = scope.role === 'velai'
-      ? ['created_at','status','tenant_name','source','name','whatsapp','need','context','sector','messages_per_day','channel','score','note','page_url']
-      : ['created_at','status','source','name','whatsapp','need','context','sector','messages_per_day','channel','score','note','page_url'];
-    const csv = [keys.join(','), ...rows.map((row) => keys.map((key) => csvCell(row[key])).join(','))].join('\r\n');
-    return new Response('\uFEFF' + csv, { headers: { 'Content-Type': 'text/csv; charset=utf-8', 'Content-Disposition': 'attachment; filename="velai-leads.csv"', 'Cache-Control': 'no-store' } });
-  }
-
-  // ── Conversaciones (migración 0021) ────────────────────────────────────────
-  // El hueco de paridad número uno: hasta ahora la conversación vivía en KV con TTL de
-  // 24 h y cuando un lead salía mal no había forma de mirar qué pasó.
-  if (path === '/api/admin/conversations' && request.method === 'GET') {
-    const f = convFilters(url);
-    const limit = Math.min(100, Math.max(1, Number(url.searchParams.get('limit')) || 50));
-    // Mismo cursor por tupla que los leads: un last_at repetido en el borde de página no
-    // se salta conversaciones.
-    const cursor = clean(url.searchParams.get('cursor'), 80);
-    if (cursor) {
-      const [cAt, cId] = cursor.split('|');
-      if (cId) { f.sql += ' AND (c.last_at < ? OR (c.last_at = ? AND c.id < ?))'; f.values.push(cAt, cAt, cId); }
-      else { f.sql += ' AND c.last_at < ?'; f.values.push(cAt); }
-    }
-    const scc = scopeClause(scope, 'c');
-    const rows = (await env.DB.prepare(`
-      SELECT c.id, c.channel, c.msgs, c.unanswered, c.started_at, c.last_at, c.lead_id,
-             c.demo <> '' AS is_demo, t.name AS tenant_name, c.tenant_id,
-             l.name AS lead_name, l.status AS lead_status
-      FROM conversations c
-      LEFT JOIN tenants t ON t.id = c.tenant_id
-      LEFT JOIN leads l ON l.id = c.lead_id
-      WHERE ${f.sql}${scc.sql} ORDER BY c.last_at DESC, c.id DESC LIMIT ?`)
-      .bind(...f.values, ...scc.args, limit + 1).all()).results;
-    const more = rows.length > limit; if (more) rows.pop();
-    // Un cliente nunca recibe nombres de otros tenants (el suyo va en su cabecera).
-    if (scope.role !== 'velai') for (const row of rows) { delete row.tenant_name; delete row.tenant_id; }
-    return json({ conversations: rows, nextCursor: more ? `${rows.at(-1).last_at}|${rows.at(-1).id}` : null }, 200, NO_STORE);
-  }
-  if (path === '/api/admin/conversations/export.csv' && request.method === 'GET') {
-    const f = convFilters(url);
-    const scc = scopeClause(scope, 'c');
-    // Un mensaje por fila, con la conversación como columna: es el formato que sirve
-    // para leer en una hoja de cálculo, y el que pide un cliente que quiere auditar.
-    const rows = (await env.DB.prepare(`
-      SELECT c.id AS conversacion, c.channel AS canal, m.created_at AS fecha, m.role AS quien, m.text AS mensaje
-      FROM conversations c JOIN conv_messages m ON m.conversation_id = c.id
-      LEFT JOIN leads l ON l.id = c.lead_id
-      WHERE ${f.sql}${scc.sql} ORDER BY c.last_at DESC, c.id DESC, m.id ASC LIMIT 20000`)
-      .bind(...f.values, ...scc.args).all()).results;
-    const keys = ['conversacion', 'canal', 'fecha', 'quien', 'mensaje'];
-    const csv = [keys.join(','), ...rows.map((row) => keys.map((key) => csvCell(row[key])).join(','))].join('\r\n');
-    return new Response('\uFEFF' + csv, { headers: { 'Content-Type': 'text/csv; charset=utf-8', 'Content-Disposition': 'attachment; filename="velai-conversaciones.csv"', 'Cache-Control': 'no-store' } });
-  }
-  // ── Bandeja: lista + hilo abierto en UNA llamada (docs/H2-BANDEJA.md §5) ────
-  // Un solo endpoint porque el panel hace polling: dos llamadas cada 5 s con seis paneles
-  // abiertos son 35.000 peticiones/día, un tercio del plan gratuito de Workers en
-  // refrescar una pantalla. Con una cada 15 s y solo con la pestaña visible, ~11.500.
-  if (path === '/api/admin/inbox' && request.method === 'GET') {
-    const f = convFilters(url);
-    const scc = scopeClause(scope, 'c');
-    const limit = Math.min(100, Math.max(1, Number(url.searchParams.get('limit')) || 40));
-    const rows = (await env.DB.prepare(`
-      SELECT c.id, c.channel, c.external_id, c.msgs, c.unanswered, c.last_at, c.lead_id,
-             (c.last_read_at IS NULL OR c.last_read_at < c.last_at) AS unread,
-             c.state, c.state_at, c.agent_email,
-             t.name AS tenant_name, c.tenant_id, l.name AS lead_name, l.status AS lead_status,
-             (SELECT m.text FROM conv_messages m WHERE m.conversation_id = c.id ORDER BY m.id DESC LIMIT 1) AS preview,
-             (SELECT m.role FROM conv_messages m WHERE m.conversation_id = c.id ORDER BY m.id DESC LIMIT 1) AS preview_role
-      FROM conversations c
-      LEFT JOIN tenants t ON t.id = c.tenant_id
-      LEFT JOIN leads l ON l.id = c.lead_id
-      WHERE ${f.sql}${scc.sql}
-      -- Lo que ESPERA a que alguien lo tome va primero, y lo más antiguo antes: con varias
-      -- en cola, atender por «lo último que llegó» es dejar tirado justo al que más lleva.
-      ORDER BY CASE c.state WHEN 'esperando' THEN 0 WHEN 'humano' THEN 1 ELSE 2 END,
-               CASE WHEN c.state = 'esperando' THEN c.state_at END ASC,
-               c.last_at DESC
-      LIMIT ?`)
-      .bind(...f.values, ...scc.args, limit).all()).results;
-    // Contadores por canal para las pestañas: se cuentan SOBRE EL MISMO filtro de scope,
-    // no sobre el de canal — si no, la pestaña activa se contaría a sí misma y las demás
-    // saldrían a cero.
-    const counts = (await env.DB.prepare(`SELECT channel, COUNT(*) AS n,
-        SUM(CASE WHEN last_read_at IS NULL OR last_read_at < last_at THEN 1 ELSE 0 END) AS unread,
-        SUM(CASE WHEN state = 'esperando' THEN 1 ELSE 0 END) AS waiting
-      FROM conversations c WHERE demo = ''${scc.sql} GROUP BY channel`).bind(...scc.args).all()).results;
-    if (scope.role !== 'velai') for (const row of rows) { delete row.tenant_name; delete row.tenant_id; }
-    let thread = null;
-    const wanted = clean(url.searchParams.get('conversation'), 40);
-    if (wanted && UUID_RE.test(wanted)) {
-      const head = await env.DB.prepare(`SELECT c.*, t.name AS tenant_name FROM conversations c
-        LEFT JOIN tenants t ON t.id = c.tenant_id WHERE c.id=?${scc.sql}`).bind(wanted, ...scc.args).first();
-      if (head) {
-        const messages = (await env.DB.prepare('SELECT role, agent_email, text, created_at FROM conv_messages WHERE conversation_id=? ORDER BY id ASC LIMIT 500').bind(head.id).all()).results;
-        const win = await replyWindow(env, head);
-        // La misma puerta que el endpoint de respuesta, pero ANTES: el cajón se cierra con
-        // el motivo escrito en vez de dejar que alguien escriba y se coma un 403.
-        if (!(await canAttend(env, scope, head.tenant_id))) { win.open = false; win.reason = 'velai_no_atiende_clientes'; }
-        // Marcar leído SOLO si hay algo nuevo: en un polling cada 15 s, un UPDATE
-        // incondicional serían 1.900 escrituras al día por panel abierto para nada.
-        if (!head.last_read_at || head.last_read_at < head.last_at) {
-          await env.DB.prepare('UPDATE conversations SET last_read_at=? WHERE id=?').bind(new Date().toISOString(), head.id).run();
-        }
-        // El token cifrado del bot y el interno del tenant no salen del worker.
-        delete head.demo; if (scope.role !== 'velai') { delete head.tenant_name; delete head.tenant_id; }
-        thread = { conversation: head, messages, window: win };
-      }
-    }
-    // queueMin viaja para que el panel pinte la cuenta atrás con el MISMO número que usa el
-    // worker: si se escribiera a mano en el panel, un día dirían cosas distintas.
-    return json({ conversations: rows, counts, thread, queueMin: QUEUE_MAX_MIN, pingMin: TAKEOVER_GRACE_MIN }, 200, NO_STORE);
-  }
-
-  // Aviso de mensajes nuevos. Deliberadamente MÍNIMO: lo sondea el panel cada 30 segundos
-  // incluso con la pestaña oculta (es el caso que hay que cubrir), así que es una sola
-  // consulta agregada sobre una tabla pequeña y devuelve tres números, nada más.
-  if (path === '/api/admin/alerts' && request.method === 'GET') {
-    const scc = scopeClause(scope, 'c');
-    const row = await env.DB.prepare(`SELECT
-        SUM(CASE WHEN c.state = 'esperando' THEN 1 ELSE 0 END) AS waiting,
-        SUM(CASE WHEN c.last_read_at IS NULL OR c.last_read_at < c.last_at THEN 1 ELSE 0 END) AS unread,
-        MAX(c.last_inbound_at) AS lastInbound
-      FROM conversations c WHERE c.demo = ''${scc.sql}`).bind(...scc.args).first();
-    return json({
-      waiting: Number(row && row.waiting) || 0,
-      unread: Number(row && row.unread) || 0,
-      lastInbound: (row && row.lastInbound) || null,
-    }, 200, NO_STORE);
-  }
-
-  // Disponibilidad de la persona que mira el panel. El interruptor es POR PERSONA; el
-  // horario es del cliente y lo cierra por fuera (docs/H2-HANDOFF.md).
-  if (path === '/api/admin/availability' && ['GET', 'PATCH'].includes(request.method)) {
-    // Velai solo puede estar disponible para SUS conversaciones: el ?tenant= se ignora a
-    // propósito, porque no hay nada que elegir.
-    const asked = clean(url.searchParams.get('tenant'), 40);
-    if (scope.tenantId && asked && asked !== scope.tenantId) throw new HttpError(404, 'not_found');
-    const tenantId = scope.tenantId || await velaiTenantId(env);
-    if (!tenantId) throw new HttpError(503, 'velai_tenant_missing');
-    const tenantRow = await env.DB.prepare('SELECT id, name, support_hours, support_tz FROM tenants WHERE id=?').bind(tenantId).first();
-    if (!tenantRow) throw new HttpError(404, 'not_found');
-    if (request.method === 'PATCH') {
-      const body = await readJson(request, 2000);
-      const on = body.available ? 1 : 0;
-      const now = new Date().toISOString();
-      await env.DB.prepare(`INSERT INTO agent_presence (tenant_id,email,available,updated_at) VALUES (?,?,?,?)
-        ON CONFLICT(tenant_id,email) DO UPDATE SET available=excluded.available, updated_at=excluded.updated_at`)
-        .bind(tenantId, String(actor).toLowerCase(), on, now).run();
-      console.log(JSON.stringify({ level: 'info', code: 'agent_availability', available: on === 1, actor_role: scope.role }));
-    }
-    const mine = await env.DB.prepare('SELECT available FROM agent_presence WHERE tenant_id=? AND email=?')
-      .bind(tenantId, String(actor).toLowerCase()).first();
-    const total = await env.DB.prepare('SELECT COUNT(*) AS n FROM agent_presence WHERE tenant_id=? AND available=1').bind(tenantId).first();
-    const dentro = withinSupportHours(tenantRow);
-    return json({
-      available: Boolean(mine && mine.available),
-      withinHours: dentro,
-      // Lo que de verdad decide si se ofrece un asesor: el interruptor Y el horario.
-      offering: dentro && Number(total && total.n) > 0,
-      advisors: Number(total && total.n) || 0,
-      hours: tenantRow.support_hours ? JSON.parse(tenantRow.support_hours) : DEFAULT_BUSINESS_HOURS,
-      tz: tenantRow.support_tz || 'Europe/Madrid',
-      graceMin: TAKEOVER_GRACE_MIN,
-      // Para quién es esta disponibilidad. El panel lo enseña porque un admin de Velai ve
-      // conversaciones de todos y tiene que saber que solo cubre las de Velai.
-      forTenant: tenantRow.name || null,
-    }, 200, NO_STORE);
-  }
-
-  // Tomar / devolver el control de una conversación. Es un CERROJO de una conversación, no
-  // una cola con dueños: la asignación sigue descartada en PLAN-PANEL.md.
-  const ctrlMatch = path.match(/^\/api\/admin\/conversations\/([0-9a-f-]+)\/(takeover|release)$/i);
-  if (ctrlMatch && request.method === 'POST') {
-    if (!UUID_RE.test(ctrlMatch[1])) throw new HttpError(404, 'not_found');
-    const scc = scopeClause(scope, 'c');
-    const conv = await env.DB.prepare(`SELECT c.id, c.state, c.agent_email, c.channel, c.tenant_id, c.external_id, c.inbox_address, c.demo, c.msgs FROM conversations c WHERE c.id=?${scc.sql}`)
-      .bind(ctrlMatch[1], ...scc.args).first();
-    if (!conv) throw new HttpError(404, 'not_found');
-    // 403 y no 404 a propósito: Velai SÍ ve esta conversación, así que fingir que no existe
-    // sería mentirle al panel. Lo que no puede es meterse a atenderla.
-    if (!(await canAttend(env, scope, conv.tenant_id))) throw new HttpError(403, 'velai_no_atiende_clientes');
-    const now = new Date().toISOString();
-    const who = String(actor).toLowerCase();
-    if (ctrlMatch[2] === 'takeover') {
-      // Ya lo tiene OTRA persona: se dice quién, en vez de dejar que dos escriban a la vez
-      // creyendo cada una que la otra no está.
-      if (conv.state === 'humano' && conv.agent_email && conv.agent_email !== who) {
-        throw new HttpError(409, 'ya_tomada');
-      }
-      if (!['esperando', 'humano'].includes(conv.state)) throw new HttpError(409, 'nada_que_tomar');
-      await env.DB.prepare("UPDATE conversations SET state='humano', agent_email=?, state_at=? WHERE id=?").bind(who, now, conv.id).run();
-      console.log(JSON.stringify({ level: 'info', code: 'takeover', channel: conv.channel, actor_role: scope.role }));
-      return json({ ok: true, state: 'humano', agent_email: who }, 200, NO_STORE);
-    }
-    // Devolver el control. Al principio no mandaba nada al cliente final, razonando que un
-    // «te devuelvo al bot» sobraba. Estaba mal (Juan, 2026-08-26): el visitante estaba
-    // hablando con una PERSONA y de golpe vuelve el bot sin que nadie se lo diga — se queda
-    // esperando a alguien que ya no está. Se le avisa, con el nombre del asistente.
-    // MISMO orden que en la cola: guardar el aviso, luego cambiar el estado, y Twilio al
-    // final. El widget deja de preguntar al ver 'bot', así que invertirlo abre el hueco en el
-    // que el aviso se escribe sin nadie escuchando.
-    const tRow = await env.DB.prepare('SELECT * FROM tenants WHERE id=?').bind(conv.tenant_id).first();
-    const quien = clean(tRow && tRow.bot_name, 40) || 'El asistente';
-    const aviso = `${quien} vuelve a atenderte a partir de aquí. Si necesitas otra vez a alguien del equipo, solo tienes que pedírmelo.`;
-    await convAppend(env, { id: conv.id, tenant: conv.tenant_id, channel: conv.channel, externalId: conv.external_id,
-      inbox: conv.inbox_address, demo: conv.demo || '', msgs: conv.msgs, isNew: false },
-    [{ role: 'assistant', content: aviso }]);
-    await env.DB.prepare("UPDATE conversations SET state='bot', agent_email=NULL, state_at=? WHERE id=?").bind(now, conv.id).run();
-    // La clave de pausa se borra con el tenant y el destinatario REALES de la conversación,
-    // no con el scope: para un admin de Velai scope.tenantId es null y la clave saldría
-    // malformada, dejando al bot callado para siempre.
-    if (env.KV) { try { await env.KV.delete(`pause:${conv.tenant_id}:${conv.external_id}`); } catch (_) {} }
-    // Twilio al final y sin bloquear: si falla, la conversación ya está devuelta y el bot
-    // vuelve a atender. Quedarse en 'humano' sin nadie delante sería peor.
-    if (tRow && conv.channel !== 'web' && conv.inbox_address) {
-      const out = await sendTwilioText(env, tRow, conv.inbox_address, conv.external_id, aviso);
-      if (!out.ok) console.log(JSON.stringify({ level: 'error', code: 'release_notice_failed', tenant: tRow.slug, error: clean(out.error || 'skipped', 40) }));
-    }
-    console.log(JSON.stringify({ level: 'info', code: 'control_released', channel: conv.channel, actor_role: scope.role }));
-    return json({ ok: true, state: 'bot' }, 200, NO_STORE);
-  }
-
-  // Responder desde el panel. La parte difícil no es enviar: es NO enviar cuando no se
-  // puede, y decir por qué (docs/H2-BANDEJA.md §1 y §2).
-  const replyMatch = path.match(/^\/api\/admin\/conversations\/([0-9a-f-]+)\/reply$/i);
-  if (replyMatch && request.method === 'POST') {
-    if (!UUID_RE.test(replyMatch[1])) throw new HttpError(404, 'not_found');
-    const scc = scopeClause(scope, 'c');
-    const conv = await env.DB.prepare(`SELECT c.* FROM conversations c WHERE c.id=?${scc.sql}`).bind(replyMatch[1], ...scc.args).first();
-    if (!conv) throw new HttpError(404, 'not_found');   // de otro cliente = 404, nunca 403
-    if (!(await canAttend(env, scope, conv.tenant_id))) throw new HttpError(403, 'velai_no_atiende_clientes');
-    const body = await readJson(request, 4000);
-    const text = clean(body.text, 1500);
-    if (!text) throw new HttpError(400, 'invalid_message');
-    if (await rateLimited(env, `${actor}:${conv.id}`, 'convreply', 30)) throw new HttpError(429, 'rate_limited');
-    // La guarda va ANTES de tocar Twilio: el 63016 de un texto libre fuera de ventana
-    // llega cuando el mensaje ya se dio por enviado en la pantalla.
-    const win = await replyWindow(env, conv);
-    if (!win.open) throw new HttpError(409, win.reason);
-    const tenant = await env.DB.prepare('SELECT * FROM tenants WHERE id=?').bind(conv.tenant_id).first();
-    if (!tenant) throw new HttpError(404, 'not_found');
-    // En el canal web no hay proveedor al que enviar: el mensaje se guarda y el widget lo
-    // recoge en su siguiente sondeo. Por eso aquí no se toca Twilio.
-    if (conv.channel !== 'web') {
-      const sent = await sendTwilioText(env, tenant, conv.inbox_address, conv.external_id, text);
-      if (!sent.ok) throw new HttpError(502, clean(sent.error || 'twilio_failed', 40));
-    }
-    // El bot se CALLA: dos voces en la misma conversación es peor que ninguna. Es la
-    // MISMA pausa que escribe el centinela [[HUMANO]], así que la vista de escalaciones y
-    // su botón de reanudar siguen valiendo tal cual — sin mecanismo nuevo.
-    // En web NO se escribe: allí manda conv.state, y gastar una escritura de KV por
-    // respuesta sería el peor uso del recurso más escaso que tenemos.
-    if (env.KV && conv.channel !== 'web') { try { await env.KV.put(`pause:${conv.tenant_id}:${conv.external_id}`, '1', { expirationTtl: 4 * 3600 }); } catch (_) {} }
-    const saved = await convAppend(env, {
-      id: conv.id, tenant: conv.tenant_id, channel: conv.channel, externalId: conv.external_id,
-      inbox: conv.inbox_address, demo: conv.demo || '', msgs: conv.msgs, isNew: false,
-    }, [{ role: 'agent', content: text, agentEmail: actor }]);
-    console.log(JSON.stringify({ level: 'info', code: 'agent_reply', channel: conv.channel, saved, actor_role: scope.role }));
-    return json({ ok: true, window: win }, 200, NO_STORE);
-  }
-
-  const convMatch = path.match(/^\/api\/admin\/conversations\/([0-9a-f-]+)$/i);
-  if (convMatch && request.method === 'GET') {
-    if (!UUID_RE.test(convMatch[1])) throw new HttpError(404, 'not_found');
-    const scc = scopeClause(scope, 'c');
-    // La transcripción ajena es un 404, nunca un 403: un 403 confirmaría que la
-    // conversación existe. Mismo criterio que el resto del panel.
-    const head = await env.DB.prepare(`
-      SELECT c.id, c.channel, c.external_id, c.msgs, c.unanswered, c.started_at, c.last_at,
-             c.expires_at, c.lead_id, c.demo <> '' AS is_demo, t.name AS tenant_name
-      FROM conversations c LEFT JOIN tenants t ON t.id = c.tenant_id
-      WHERE c.id = ?${scc.sql}`).bind(convMatch[1], ...scc.args).first();
-    if (!head) throw new HttpError(404, 'not_found');
-    if (scope.role !== 'velai') delete head.tenant_name;
-    const messages = (await env.DB.prepare('SELECT role, text, created_at FROM conv_messages WHERE conversation_id=? ORDER BY id ASC LIMIT 500')
-      .bind(head.id).all()).results;
-    return json({ conversation: head, messages }, 200, NO_STORE);
-  }
+  // Leads y conversaciones (bandeja incluida) viven en worker/routes/*.js.
   if (path === '/api/admin/tenants' && request.method === 'GET') {
     // Semáforo de configuración de un vistazo: sin plantilla, sin equipo o con
     // prompt sospechosamente corto se ve desde el listado, sin abrir nada.
@@ -4300,53 +3982,7 @@ async function adminRouter(request, env, ctx, path, url, config, scope) {
     // del negocio. El panel solo desactiva (active=0).
     throw new HttpError(405, 'method_not_allowed');
   }
-  const match = path.match(/^\/api\/admin\/leads\/([0-9a-f-]+)(?:\/(notes|retry))?$/i);
-  if (!match || !UUID_RE.test(match[1])) throw new HttpError(404, 'not_found');
-  const id = match[1]; const action = match[2];
-  if (!action && request.method === 'GET') {
-    // Fuera de alcance = 404, no 403: un 403 confirmaría que el lead existe.
-    const lead = await env.DB.prepare(`SELECT l.*, t.name AS tenant_name FROM leads l LEFT JOIN tenants t ON t.id=l.tenant_id WHERE l.id=?${sc.sql}`).bind(id, ...sc.args).first();
-    if (!lead) throw new HttpError(404, 'not_found');
-    if (scope.role !== 'velai') { delete lead.tenant_name; delete lead.tenant_id; }
-    const [notes, events, notifications] = await Promise.all([
-      env.DB.prepare('SELECT * FROM lead_notes WHERE lead_id=? ORDER BY created_at DESC').bind(id).all(),
-      env.DB.prepare('SELECT * FROM lead_events WHERE lead_id=? ORDER BY created_at DESC').bind(id).all(),
-      env.DB.prepare('SELECT * FROM lead_notifications WHERE lead_id=?').bind(id).all(),
-    ]);
-    return json({ lead, notes: notes.results, events: events.results, notifications: notifications.results }, 200, NO_STORE);
-  }
-  if (!action && request.method === 'PATCH') {
-    const body = await readJson(request, 2000); if (!STATUSES.has(body.status)) throw new HttpError(400, 'invalid_status');
-    // Propiedad primero: el UPDATE lleva el scope y 0 cambios = 404 (no existe para ti).
-    const now = new Date().toISOString();
-    const updated = await env.DB.prepare(`UPDATE leads SET status=?,updated_at=?,expires_at=? WHERE id=?${sc.sql.replace('l.', '')}`).bind(body.status, now, expiryDate(env), id, ...sc.args).run();
-    if (!updated.meta.changes) throw new HttpError(404, 'not_found');
-    await env.DB.prepare("INSERT INTO lead_events (lead_id,actor_email,actor_role,event_type,detail,created_at) VALUES (?,?,?,'status_changed',?,?)").bind(id, actor, scope.role, body.status, now).run();
-    return json({ ok: true }, 200, NO_STORE);
-  }
-  if (action === 'notes' && request.method === 'POST') {
-    const body = await readJson(request, 3000); const text = clean(body.text, 2000); if (!text) throw new HttpError(400, 'invalid_note');
-    const now = new Date().toISOString();
-    const owned = await env.DB.prepare(`SELECT l.id FROM leads l WHERE l.id=?${sc.sql}`).bind(id, ...sc.args).first();
-    if (!owned) throw new HttpError(404, 'not_found');
-    await env.DB.batch([
-      env.DB.prepare('INSERT INTO lead_notes (lead_id,author_email,author_role,text,created_at) VALUES (?,?,?,?,?)').bind(id, actor, scope.role, text, now),
-      env.DB.prepare('UPDATE leads SET updated_at=?,expires_at=? WHERE id=?').bind(now, expiryDate(env), id),
-    ]);
-    return json({ ok: true }, 201, NO_STORE);
-  }
-  if (action === 'retry' && request.method === 'POST') {
-    // Defensa en profundidad: el router ya lo bloquea, pero el endpoint valida igual.
-    if (scope.role !== 'velai') throw new HttpError(403, 'not_authorized');
-    const now = new Date().toISOString();
-    await env.DB.prepare("UPDATE lead_notifications SET status='pending',attempts=0,next_attempt_at=NULL,last_error=NULL,updated_at=? WHERE lead_id=? AND status!='sent'").bind(now, id).run();
-    ctx.waitUntil(processNotifications(env, id, true)); return json({ ok: true }, 202, NO_STORE);
-  }
-  if (!action && request.method === 'DELETE') {
-    if (scope.role !== 'velai') throw new HttpError(403, 'not_authorized'); // borrado RGPD: solo Velai
-    await env.DB.prepare('DELETE FROM leads WHERE id=?').bind(id).run(); return new Response(null, { status: 204 });
-  }
-  throw new HttpError(405, 'method_not_allowed');
+  throw new HttpError(404, 'not_found');
 }
 
 // ── Callback OAuth de Google Calendar (SPEC-CALENDARIO §1.2) ─────────────────
@@ -4728,6 +4364,56 @@ async function scheduled(env, cron) {
   } catch (error) {
     console.log(JSON.stringify({ level: 'error', code: 'conv_purge_failed', error: clean(String(error.message || error), 80) }));
   }
+}
+
+// ── Sub-app admin: los dominios migrados a worker/routes/*.js ────────────────
+// El scope aquí NO se resuelve: llega puesto en el contexto — en producción lo pone
+// mwResolveScope; en los tests, la inyección de abajo. Así el barrido adversario de
+// test/aislamiento.test.js ejerce EXACTAMENTE el mismo despacho que producción.
+const COMPAT_INJECT = new WeakMap();
+
+function buildAdminApp() {
+  const admin = new Hono();
+  admin.use('/api/admin/*', async (c, next) => {
+    // Inyección de scope/config para las llamadas directas de los tests
+    // (testing.adminRouter): producción nunca tiene entrada en el WeakMap.
+    const inj = COMPAT_INJECT.get(c.req.raw);
+    if (inj) { c.set('scope', inj.scope); c.set('config', inj.config); }
+    await next();
+  });
+  // La lista blanca del rol cliente, ANTES de cualquier handler (403 sin tocar datos).
+  admin.use('/api/admin/*', clienteGate);
+  admin.route('/', rutasLeads);
+  admin.route('/', rutasConversaciones);
+  return admin;
+}
+const adminApp = buildAdminApp();
+// 599 = «ninguna ruta migrada atendió esto»: el puente cae al monolito restante.
+// Ningún handler real puede producirlo. Desaparece cuando el monolito quede vacío.
+const SIN_RUTA = 599;
+adminApp.notFound(() => new Response(null, { status: SIN_RUTA }));
+// Los errores SALEN como excepción (no como Response): el catch central de la app de
+// producción los formatea, y los tests que llaman testing.adminRouter los reciben
+// tal cual (assert.rejects con e.status / e.code, como siempre).
+adminApp.onError((error) => { throw error; });
+
+// El contrato histórico del router admin, ahora como despachador: primero los dominios
+// migrados (Hono), después lo que aún vive en adminRouterLegacy. Los tests lo invocan
+// directo con el scope ya resuelto — sigue funcionando igual que el monolito.
+async function adminRouter(request, env, ctx, path, url, config, scope) {
+  // El destino se construye con el `path` del contrato (los tests a veces pasan una
+  // `url` que no coincide) y con el search de `url`, que es de donde los handlers
+  // leen los query params.
+  const destino = new URL(request.url);
+  destino.pathname = path;
+  destino.search = url ? url.search : '';
+  const req = new Request(destino, request);
+  COMPAT_INJECT.set(req, { scope, config });
+  const res = await adminApp.fetch(req, env, ctx);
+  if (res.status !== SIN_RUTA) return res;
+  // `req` y no `request`: construir el Request de arriba ya adoptó el body del
+  // original — el monolito debe leer del que aún lo tiene.
+  return adminRouterLegacy(req, env, ctx, path, url, config, scope);
 }
 
 // ── Ensamblaje del worker (Hono 4) ───────────────────────────────────────────
