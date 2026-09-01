@@ -11,7 +11,7 @@ import {
   tenantWriteError, syncPrimaryChannel, assertChannelFree, invalidateTenantCache,
   tenantChannelSummary, handleProvision, panelUserAudit, syncPanelGate,
   sendTelegramText, escapeHtml, UUID_RE, PANEL_EMAIL_RE, PENDING_RE,
-  PROMPT_MIN, PROMPT_MAX, WA_MAX_TOKENS, WA_BODY_LIMIT,
+  PROMPT_MIN, PROMPT_MAX, WA_MAX_TOKENS, WA_BODY_LIMIT, reminderHoursFor,
 } from '../app.js';
 
 export const tenants = new Hono();
@@ -106,10 +106,12 @@ tenants.get('/api/admin/plantillas', async (c) => {
   // OJO: no citar aquí el patrón literal del bind — check-aislamiento lee texto plano
   // y un comentario que lo nombre le taparía una consulta sin puerta de verdad.
   if (scope.role !== 'velai') {
-    const propio = await env.DB.prepare('SELECT id, slug, name, active, lead_template_sid, lead_template_status, lead_template_category FROM tenants WHERE id = ?').bind(scope.tenantId).first();
+    const propio = await env.DB.prepare('SELECT id, slug, name, active, reminder_hours, lead_template_sid, lead_template_status, lead_template_category FROM tenants WHERE id = ?').bind(scope.tenantId).first();
     if (!propio) throw new HttpError(404, 'not_found');
     const registro = await leerRegistro(env, scope.tenantId);
-    return json({ kinds: catalogKinds(), tenants: [plantillasDe(propio, registro, { sinSid: true })] }, 200, NO_STORE);
+    // `hours` = su antelación vigente: los selectores de solicitud del cliente parten
+    // de lo actual para que el de→a sea honesto.
+    return json({ kinds: catalogKinds(), tenants: [{ ...plantillasDe(propio, registro, { sinSid: true }), hours: reminderHoursFor(propio) }] }, 200, NO_STORE);
   }
   // Velai: la matriz GLOBAL — filas de TODOS los clientes, sin scope a propósito
   // (la rama del cliente ya retornó arriba: estas consultas no son alcanzables por él).

@@ -13,15 +13,15 @@
 // catálogo vía el endpoint: el kind nº 5 será una tarjeta más sin tocar esta vista.
 // La celda sin crear de un kind legacy-columnas (aviso_lead) no lleva botón: esa
 // plantilla se crea en el paso 2 del aprovisionamiento de la ficha del cliente.
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { confirmar, pedirTexto } from '../components/Confirmar';
 import { CrearPlantilla } from '../components/CrearPlantilla';
 import { traducir } from '../api/errors';
 import { useToast } from '../components/Toasts';
 import { IcoClock, IcoTick, IcoX } from '../components/icons';
 import { categoriaReal, chipsDeKind, cuentaPlantillas, filtraChips, resumenKind, resumenSolicitud, type ChipCliente, type EstadoPlantilla } from '../lib/plantillas';
-import { useMe, usePlantillas, useSolicitudes, useSolicitudResolve, useTemplateCreate } from '../hooks/queries';
-import type { PlantillaKind, PlantillasResponse } from '../api/types';
+import { useMe, usePlantillas, useSolicitudCreate, useSolicitudes, useSolicitudResolve, useTemplateCreate } from '../hooks/queries';
+import type { PlantillaKind, PlantillasResponse, Solicitud } from '../api/types';
 
 // Presentación de cada estado: clase de la píldora e icono (11px, dimensiona el CSS).
 const CHIP: Record<Exclude<EstadoPlantilla, 'sin'>, { cls: string; icon: React.ReactNode; label: string }> = {
@@ -47,6 +47,7 @@ export function Plantillas() {
 // SIN botones de crear ni interruptores: la gestión sigue siendo de Velai.
 function PlantillasCliente({ data, error }: { data: PlantillasResponse | undefined; error: unknown }) {
   const mio = data?.tenants[0] ?? null;
+  const { data: sols } = useSolicitudes(Boolean(data));
   return (
     <div>
       <div className="vhead">
@@ -57,11 +58,13 @@ function PlantillasCliente({ data, error }: { data: PlantillasResponse | undefin
       </div>
       {error ? <p className="error">{traducir(error)}</p> : null}
       {data && mio
-        ? data.kinds.map((k) => <KindCardCliente key={k.kind} k={k} celda={mio.plantillas[k.kind]} />)
+        ? data.kinds.map((k) => (
+            <KindCardCliente key={k.kind} k={k} celda={mio.plantillas[k.kind]} hours={mio.hours ?? 24} solicitudes={sols?.solicitudes ?? []} />
+          ))
         : null}
       <p className="muted mt12">
         Estas plantillas las gestiona el equipo de Velai y las revisa WhatsApp antes de poder enviarse. ¿Quieres
-        activar alguna o cambiar algo? Escríbenos y lo dejamos listo.
+        activar alguna o cambiar algo más? Escríbenos y lo dejamos listo.
       </p>
     </div>
   );
@@ -79,20 +82,44 @@ function estadoCliente(celda: PlantillasResponse['tenants'][number]['plantillas'
 function KindCardCliente({
   k,
   celda,
+  hours,
+  solicitudes,
 }: {
   k: PlantillaKind;
   celda: PlantillasResponse['tenants'][number]['plantillas'][string];
+  hours: number;
+  solicitudes: Solicitud[];
 }) {
+  const toast = useToast();
+  const solicitar = useSolicitudCreate();
   const estado = estadoCliente(celda);
-  // Los botones de SU plantilla: lo elegido al crearla; sin opciones (o aún sin
-  // plantilla), la pareja por defecto del catálogo.
-  const defaultPareja = k.config?.botones?.find((b) => b.id === k.config?.botonesDefault) ?? k.config?.botones?.[0] ?? null;
-  const textos = celda?.opciones?.textos ?? defaultPareja;
+  // La categoría REAL de Twilio, sin el matiz de coste (eso es de Velai): solo el hecho.
+  const cat = categoriaReal(celda, k);
+  // Los botones VIGENTES de su plantilla: lo elegido al crearla; sin opciones (o aún
+  // sin plantilla), la pareja por defecto del catálogo.
+  const parejas = k.config?.botones ?? [];
+  const actualId = celda?.opciones?.botones ?? k.config?.botonesDefault ?? parejas[0]?.id ?? '';
+  // Lo que el cliente ELIGE (y ve en la preview). Se re-ancla si cambian los vigentes.
+  const [pareja, setPareja] = useState(actualId);
+  const [antelacion, setAntelacion] = useState(hours);
+  useEffect(() => setPareja(actualId), [actualId]);
+  useEffect(() => setAntelacion(hours), [hours]);
+  // Solo el recordatorio es solicitable hoy (tipo 'plantilla_recordatorio').
+  const solicitable = k.kind === 'recordatorio_cita' && parejas.length > 0;
+  const pendiente = solicitudes.find((s) => s.tipo === 'plantilla_recordatorio' && s.status === 'pending') ?? null;
+  // La nota de un rechazo se enseña SOLO si es lo último que pasó (la lista llega DESC).
+  const ultima = solicitudes.find((s) => s.tipo === 'plantilla_recordatorio') ?? null;
+  const rechazada = !pendiente && ultima && ultima.status === 'rejected' ? ultima : null;
+  const cambios: { botones?: string; antelacion?: number } = {};
+  if (solicitable && pareja && pareja !== actualId) cambios.botones = pareja;
+  if (solicitable && antelacion !== hours) cambios.antelacion = antelacion;
+  const textos = parejas.find((b) => b.id === (pareja || actualId)) ?? celda?.opciones?.textos ?? null;
   return (
     <div className="panelcard plk">
       <div className="plk-head">
         <b>{k.label}</b>
         <span className={`flag ${estado.cls}`.trim()}>{estado.label}</span>
+        {cat ? <span className="flag off">{cat.label}</span> : null}
         {k.descripcion ? <span className="plk-desc">{k.descripcion}</span> : null}
       </div>
       {k.config?.preview ? (
@@ -100,7 +127,7 @@ function KindCardCliente({
           <p className="muted mt6">Así le llega a tu cliente{k.kind === 'aviso_lead' ? ' (a tu equipo)' : ''}:</p>
           <div className="wapre">
             <div className="wapre-body">{k.config.preview}</div>
-            {k.config.botones && textos ? (
+            {parejas.length && textos ? (
               <div className="wapre-btns">
                 <span>{textos.confirmar}</span>
                 <span>{textos.cancelar}</span>
@@ -109,6 +136,87 @@ function KindCardCliente({
           </div>
           {!celda?.status ? <p className="muted mt6">Así se verá cuando se cree. ¿Quieres activarla? Escríbenos.</p> : null}
         </>
+      ) : null}
+      {solicitable ? (
+        <div className="mt6">
+          {/* El cliente ELIGE aquí, pero nada se aplica sin aprobación de Velai:
+              esto crea una SOLICITUD (tenant_solicitudes) — las opciones son las
+              curadas del catálogo, las mismas del alta. */}
+          <b>¿Quieres cambiarla?</b>
+          <div className="mt6">
+            <span className="sel">
+              <select
+                value={antelacion}
+                disabled={Boolean(pendiente)}
+                aria-label="Antelación del recordatorio"
+                onChange={(e) => setAntelacion(Number(e.target.value))}
+              >
+                {(k.config?.antelaciones ?? []).map((h) => (
+                  <option key={h} value={h}>
+                    Recordar {h} h antes
+                  </option>
+                ))}
+              </select>
+            </span>
+          </div>
+          <div className="crp-parejas" role="radiogroup" aria-label="Botones de respuesta">
+            {parejas.map((b) => (
+              <label key={b.id} className={`crp-pareja${pareja === b.id ? ' on' : ''}`}>
+                <input
+                  type="radio"
+                  name={`sol-${k.kind}`}
+                  value={b.id}
+                  checked={pareja === b.id}
+                  disabled={Boolean(pendiente)}
+                  onChange={() => setPareja(b.id)}
+                />
+                <span className="crp-btnprev">{b.confirmar}</span>
+                <span className="crp-btnprev">{b.cancelar}</span>
+              </label>
+            ))}
+          </div>
+          {pendiente ? (
+            <p className="muted mt6">
+              <span className="flag">Solicitud enviada — pendiente de Velai</span> Te avisamos en cuanto se revise.
+            </p>
+          ) : (
+            <>
+              {rechazada ? (
+                <p className="muted mt6">
+                  Tu última solicitud se rechazó{rechazada.nota ? `: «${rechazada.nota}»` : ''}. Puedes pedir otro
+                  cambio cuando quieras.
+                </p>
+              ) : null}
+              <div className="actions actions0">
+                <button
+                  className="btn btnsm"
+                  type="button"
+                  disabled={solicitar.isPending || !Object.keys(cambios).length}
+                  onClick={async () => {
+                    if (
+                      !(await confirmar({
+                        titulo: '¿Enviar la solicitud de cambio?',
+                        cuerpo: 'El equipo de Velai la revisa y la aplica si todo está bien. Si cambian los botones, WhatsApp vuelve a revisar la plantilla.',
+                        accion: 'Solicitar cambio',
+                      }))
+                    )
+                      return;
+                    solicitar.mutate(
+                      { tipo: 'plantilla_recordatorio', ...cambios },
+                      {
+                        onSuccess: () => toast('Solicitud enviada: Velai la revisará en breve ✓'),
+                        onError: (e) => toast(`No se pudo enviar la solicitud: ${traducir(e)}`, false),
+                      },
+                    );
+                  }}
+                >
+                  Solicitar cambio
+                </button>
+                {!Object.keys(cambios).length ? <span className="muted">Elige arriba lo que quieras cambiar.</span> : null}
+              </div>
+            </>
+          )}
+        </div>
       ) : null}
     </div>
   );

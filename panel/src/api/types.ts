@@ -785,5 +785,8 @@ export interface PlantillasResponse {
     name: string;
     active: number;
     plantillas: Record<string, PlantillaCelda | undefined>;
+    /** Solo en la respuesta del CLIENTE: su antelación vigente (los selectores de
+     *  solicitud parten de lo actual). */
+    hours?: number;
   }[];
 }

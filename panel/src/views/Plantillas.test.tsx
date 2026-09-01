@@ -428,3 +428,92 @@ describe('categoría real de Twilio y solicitudes en la vista de Velai', () => {
     expect(posts[0]!.body).toEqual({ nota: 'Mejor 24 h por ahora' });
   });
 });
+
+describe('el cliente SOLICITA cambios (nada se aplica sin Velai)', () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  const MIO = {
+    id: meCliente.tenantId!,
+    slug: 'barberia-lopez',
+    name: 'Barbería López',
+    active: 1,
+    hours: 24,
+    plantillas: {
+      recordatorio_cita: {
+        status: 'approved',
+        updated_at: null,
+        categoria: 'UTILITY',
+        opciones: { botones: 'confirmo_cancelar', textos: { confirmar: 'Confirmo', cancelar: 'Cancelar' } },
+      },
+    },
+  };
+
+  function renderCliente(solicitudes: unknown[], onPost?: (url: string, body: unknown) => void) {
+    const base = mockFetch({
+      '/api/admin/me': meCliente,
+      '/api/admin/plantillas': { kinds: RESP.kinds, tenants: [MIO] },
+      '/api/admin/solicitudes': { solicitudes },
+    });
+    vi.stubGlobal('fetch', (async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+      if (init?.method === 'POST') {
+        onPost?.(url, JSON.parse(String(init.body)));
+        return new Response(JSON.stringify({ ok: true, id: 1, status: 'pending' }), { status: 201, headers: { 'Content-Type': 'application/json' } });
+      }
+      return base(url, init);
+    }) as typeof fetch);
+    render(
+      <QueryClientProvider client={createQueryClient()}>
+        <ToastProvider>
+          <MemoryRouter>
+            <Plantillas />
+          </MemoryRouter>
+          <ConfirmarHost />
+        </ToastProvider>
+      </QueryClientProvider>,
+    );
+  }
+
+  it('selectores curados anclados a lo VIGENTE, y la solicitud lleva SOLO lo que cambia', async () => {
+    const user = userEvent.setup();
+    const posts: { url: string; body: unknown }[] = [];
+    renderCliente([], (url, body) => posts.push({ url, body }));
+    await waitFor(() => expect(screen.getByText('¿Quieres cambiarla?')).toBeInTheDocument());
+    // Anclados a lo vigente: 24 h y su pareja actual (Confirmo/Cancelar) marcada.
+    const sel = screen.getByLabelText('Antelación del recordatorio') as HTMLSelectElement;
+    expect(sel.value).toBe('24');
+    const radios = screen.getAllByRole('radio') as HTMLInputElement[];
+    expect(radios[0]!.checked).toBe(true);
+    // Sin cambios elegidos, el botón no dispara nada.
+    expect(screen.getByRole('button', { name: 'Solicitar cambio' })).toBeDisabled();
+    expect(screen.getByText('Elige arriba lo que quieras cambiar.')).toBeInTheDocument();
+    // Elige otra pareja: la preview la sigue (ve lo que pide) y el botón se activa.
+    await user.click(screen.getByRole('radio', { name: /Sí, voy/ }));
+    expect([...document.querySelectorAll('.wapre-btns span')].map((e) => e.textContent)).toEqual(['Sí, voy', 'No puedo ir']);
+    await user.selectOptions(sel, '12');
+    await user.click(screen.getByRole('button', { name: 'Solicitar cambio' }));
+    // Confirmación con el diálogo propio: el botón de acción vive dentro de .cfm.
+    await waitFor(() => expect(document.querySelector('dialog.cfm')).not.toBeNull());
+    await user.click(within(document.querySelector('dialog.cfm') as HTMLElement).getByRole('button', { name: 'Solicitar cambio' }));
+    await waitFor(() => expect(posts.length).toBe(1));
+    expect(posts[0]!.url).toContain('/api/admin/solicitudes');
+    expect(posts[0]!.body).toEqual({ tipo: 'plantilla_recordatorio', botones: 'si_voy_no_puedo', antelacion: 12 });
+  });
+
+  it('con una solicitud pendiente los selectores se bloquean y se dice claro', async () => {
+    renderCliente([{ id: 3, tipo: 'plantilla_recordatorio', payload: { antelacion: 12 }, status: 'pending', nota: null, created_at: '2026-09-01T10:00:00Z', resolved_at: null }]);
+    await waitFor(() => expect(screen.getByText('Solicitud enviada — pendiente de Velai')).toBeInTheDocument());
+    expect(screen.getByLabelText('Antelación del recordatorio')).toBeDisabled();
+    for (const r of screen.getAllByRole('radio')) expect(r).toBeDisabled();
+    expect(screen.queryByRole('button', { name: 'Solicitar cambio' })).toBeNull();
+  });
+
+  it('un rechazo enseña la nota de Velai y deja volver a solicitar', async () => {
+    renderCliente([{ id: 4, tipo: 'plantilla_recordatorio', payload: { antelacion: 12 }, status: 'rejected', nota: 'Mejor 24 h por ahora', created_at: '2026-09-01T10:00:00Z', resolved_at: '2026-09-01T11:00:00Z' }]);
+    await waitFor(() => expect(screen.getByText(/«Mejor 24 h por ahora»/)).toBeInTheDocument());
+    expect(screen.getByRole('button', { name: 'Solicitar cambio' })).toBeInTheDocument();
+    expect(screen.getByLabelText('Antelación del recordatorio')).not.toBeDisabled();
+    // Y la categoría real también se ve en su tarjeta (solo el hecho, sin ámbar de coste).
+    expect(screen.getByText('Utility')).toBeInTheDocument();
+  });
+});

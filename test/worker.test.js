@@ -5444,6 +5444,7 @@ test('GET /plantillas por rol: velai la matriz global con opciones; el cliente S
   const mio = propio.tenants[0];
   assert.deepEqual(mio.plantillas.recordatorio_cita.opciones.textos, { confirmar: 'Sí, voy', cancelar: 'No puedo ir' }, 'SUS botones elegidos, para la preview');
   assert.equal(mio.plantillas.aviso_lead.status, 'pending');
+  assert.equal(mio.hours, 24, 'su antelación vigente viaja: los selectores de solicitud parten de lo actual');
   // La fila con kind 'constructor' (clave del prototipo) y opciones corruptas no entra.
   const conBasura = await (await call({ role: 'cliente', tenantId: 't-b', email: 'x@b.com' })).json();
   assert.ok(!Object.prototype.hasOwnProperty.call(conBasura.tenants[0].plantillas, 'constructor'), 'clave del prototipo fuera');
