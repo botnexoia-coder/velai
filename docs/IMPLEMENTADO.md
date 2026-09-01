@@ -12,6 +12,19 @@
 
 ---
 
+## Cutover del panel v2 (2026-09-01)
+
+`PANEL_V2 = "1"` en producción: el panel React de `panel/` es EL panel de
+`admin.hirevai.com` para Velai y para los clientes. Validado por Juan en staging (7
+vistas, avisos sonoros, diálogos de marca, y los arreglos de su revisión: checkboxes
+del filtro —la regla `.lsearch input` se colaba en el popover anidado— y el input de
+pedirTexto vuelto no controlado tras un flaky real de CI).
+
+El v1 serializado SIGUE en el bundle: el rollback es vaciar la bandera y desplegar.
+**Pendiente consciente**: retirar el v1 (ADMIN_HTML, admin-page.js, admin-panel.js,
+check-bundle.mjs y la vista config de render-panel) cuando el v2 lleve unos días sin
+sustos, y portar la tarjeta de infra-usage (panel/TODO.md).
+
 ## Hono + panel v2 en React + orden del repo (2026-09-01, tres agentes en paralelo)
 
 La ejecución de la decisión de frameworks (memoria: decision-frameworks-2026-09), en tres
