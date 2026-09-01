@@ -23,7 +23,20 @@ con chips-píldora por cliente (aprobada/pendiente/rechazada/sin crear), botón
 «Crear» dentro del chip donde falta (paso genérico `plantillas/<kind>`, con
 diálogo propio), buscador de clientes sin acentos (la tarjeta sin coincidencias
 se atenúa, nunca desaparece) y contadores-filtro globales por estado que pliegan
-el resto en un «+N más». Endpoint
+el resto en un «+N más».
+
+**Vista del CLIENTE (v2.5.0, decisión de Juan):** /plantillas sirve a ambos roles.
+El cliente ve SUS plantillas en solo lectura — tarjeta por kind con estado en su
+idioma («Activa ✓» / «En revisión por WhatsApp» / «Rechazada — estamos en ello» /
+«Aún no creada») y la vista previa estilo WhatsApp del mensaje real con LOS BOTONES
+QUE ÉL TIENE elegidos (opciones de su fila; sin opciones, la pareja default). Cero
+gestión (sigue siendo de Velai). El endpoint es consciente del rol (patrón /stats):
+al cliente le devuelve SOLO su fila (id atado desde el scope — mutaciones probadas:
+sin WHERE el guardián se pone rojo; cayendo a la rama global, el barrido adversario
+caza la fuga) y SIN sids; entra en clienteAllowed con su caso en el barrido. El
+cuerpo del aviso de lead se MUDÓ al catálogo (aviso_lead.content, única fuente: el
+paso `template` del aprovisionamiento lo lee de ahí y createLeadTemplate se retiró)
+para poder previsualizarlo también. Endpoint
 `GET /api/admin/plantillas` (403 al rol cliente, fuera de clienteAllowed): une el
 registro `tenant_templates` con la plantilla de LEADS de las columnas históricas,
 presentada como kind `aviso_lead` fuente 'columnas' — unificación de LECTURA; su
