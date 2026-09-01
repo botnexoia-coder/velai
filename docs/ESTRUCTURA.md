@@ -7,30 +7,29 @@
 
 ## La restricción que lo gobierna todo
 
-**La raíz de este repo ES el directorio publicado de Cloudflare Pages.**
+**`site/` ES el directorio publicado de Cloudflare Pages.**
 El proyecto Pages `velai` (dominio `hirevai.com`) despliega en cada push a
-`main` con *build output directory* = raíz, sin build. Consecuencias:
+`main` con *build output directory* = `site`, sin build:
+`site/clinicas/index.html` se sirve como `hirevai.com/clinicas/`. Consecuencias:
 
-1. **Cada carpeta con `index.html` es una URL pública con SEO invertido**
-   (sitemap.xml, backlinks, campañas de pauta). Moverla o renombrarla
-   cambia la URL y rompe todo eso. **Prohibido moverlas** salvo plan
-   explícito con redirecciones (ver [`PLAN-SITE.md`](./PLAN-SITE.md)).
-2. **Todo lo commiteado en la raíz es públicamente descargable.** Hoy
-   `hirevai.com/worker/app.js`, `/wrangler.toml`, `/docs/OPERATIONS.md`,
-   `/seed/seed-velai.sql` y `/tenants/velai.md` devuelven 200 (verificado
-   2026-09-01). No hay secretos ahí (los secretos van en `.dev.vars` local
-   y en secrets de wrangler/GitHub), pero el código del backend y los
-   prompts de negocio quedan expuestos. El arreglo real es el plan de
-   `site/` ([`PLAN-SITE.md`](./PLAN-SITE.md)); mientras tanto: **nunca
-   commitear nada sensible, en ninguna carpeta**.
+1. **Cada carpeta de `site/` con `index.html` es una URL pública con SEO
+   invertido** (sitemap.xml, backlinks, campañas de pauta). Moverla o
+   renombrarla cambia la URL y rompe todo eso. **Prohibido moverlas** salvo
+   plan explícito con redirecciones.
+2. **Todo lo commiteado dentro de `site/` es públicamente descargable.**
+   El resto del repo (worker/, docs/, seed/, tenants/…) ya NO lo publica
+   Pages — esa era la exposición que cerró el plan de `site/`
+   ([`PLAN-SITE.md`](./PLAN-SITE.md)). Aun así: **nunca commitear nada
+   sensible, en ninguna carpeta** (los secretos van en `.dev.vars` local y
+   en secrets de wrangler/GitHub).
 3. `.gitignore` no protege de Pages: ignora lo no commiteado, pero Pages
-   sirve lo commiteado. Son dos capas distintas.
+   sirve lo commiteado dentro de `site/`. Son dos capas distintas.
 
 ## Mapa de la raíz
 
-### (a) Publicado e intocable (URLs con SEO/campañas encima)
+### (a) `site/` — publicado e intocable (URLs con SEO/campañas encima)
 
-| Elemento | Qué es |
+| Elemento (dentro de `site/`) | Qué es |
 |---|---|
 | `index.html` | Home de hirevai.com |
 | `que-es-velai/`, `privacidad/`, `condiciones/` | Páginas corporativas/legales |
@@ -40,7 +39,7 @@ El proyecto Pages `velai` (dominio `hirevai.com`) despliega en cada push a
 | `calculadora-roi/`, `calculadora-ventas-perdidas/`, `cotizador-precio/`, `diagnostico-whatsapp/`, `generador-link-whatsapp/`, `test-ley-atencion-cliente/` | Lead magnets interactivos |
 | `assets/` | `funnel.js` (tracking+consentimiento+Turnstile), `vai-widget.js` (chat), `leadform.js`, `styles.css` (compilado de `styles.scss`, ver STACK-TECNOLOGICO.md) |
 | `fonts/` | Tipografías de marca (el panel las consume cross-origin; CORS en `_headers`) |
-| `favicon.svg`, `og-velai.jpg`, `robots.txt`, `sitemap.xml`, `_headers` | Infra del sitio estático |
+| `favicon.svg`, `og-velai.jpg`, `robots.txt`, `sitemap.xml`, `_headers` | Infra del sitio estático (`_headers` DEBE vivir dentro de `site/`: Pages lo lee desde el output dir) |
 
 ### (b) Infraestructura del worker (backend)
 
@@ -56,7 +55,7 @@ El proyecto Pages `velai` (dominio `hirevai.com`) despliega en cada push a
 
 | Elemento | Qué es |
 |---|---|
-| `scripts/` | `check-site.mjs` (valida las 26 páginas), `check-aislamiento.mjs`, `check-entornos.mjs`, `check-bundle.mjs` (panel contra bundle real), `render-panel.mjs` (render a PNG) |
+| `scripts/` | `check-site.mjs` (valida las 27 páginas de `site/`), `check-aislamiento.mjs`, `check-entornos.mjs`, `check-bundle.mjs` (panel contra bundle real), `render-panel.mjs` (render a PNG) |
 | `test/` | `node --test`, sin dependencias |
 | `package.json` | Solo scripts (`npm run check`), sin deps aún |
 | `.github/workflows/` | `ci.yml` (npm run check en cada push), `deploy-worker.yml` (staging → producción) |
@@ -99,12 +98,12 @@ modulares** — `routes/` (HTTP), `services/` (lógica de negocio) y adaptadores
   papeleo: no las verifica nadie en compile-time. La disciplina se sostiene con
   la estructura de carpetas y `npm run check`, no con ceremonia.
 
-**Estructura objetivo del repo:**
+**Estructura del repo:**
 
 ```
+site/              el marketing publicado por Pages (27 páginas + assets/fonts/_headers…)
 worker/            backend: routes/ + services/ + adaptadores (Hono; en curso)
 panel/             panel admin como app React autocontenida (en curso)
-site/              FUTURO: el marketing sale de la raíz (ver PLAN-SITE.md; NO ejecutado)
 migrations/        esquema D1
 docs/              documentación
 test/              tests node --test
@@ -113,9 +112,10 @@ seed/              datos iniciales
 tenants/           prompts de negocio versionados
 ```
 
-Hasta que `site/` se ejecute (requiere tocar el dashboard de Cloudflare, ver
-[`PLAN-SITE.md`](./PLAN-SITE.md)), el marketing sigue en la raíz y aplica la
-restricción del principio.
+La consolidación en `site/` está EN EJECUCIÓN: el repo ya está listo (copia +
+retirada de la raíz) y falta el flip del *build output directory* en el
+dashboard, que es del dueño — pasos restantes y verificación en
+[`PLAN-SITE.md`](./PLAN-SITE.md).
 
 ## docs/ — qué doc es la fuente de verdad de qué
 
@@ -125,7 +125,7 @@ restricción del principio.
 | [`GUIA-WORKERS.md`](./GUIA-WORKERS.md) | ★ Cómo crear/consumir Workers (arquitectura vigente, para el equipo) |
 | [`STACK-TECNOLOGICO.md`](./STACK-TECNOLOGICO.md) | Referencia de stack y servicios (incl. SCSS → CSS) |
 | [`ESTRUCTURA.md`](./ESTRUCTURA.md) | Este doc: mapa del repo y decisión de arquitectura |
-| [`PLAN-SITE.md`](./PLAN-SITE.md) | Plan NO ejecutado de mover el marketing a `site/` |
+| [`PLAN-SITE.md`](./PLAN-SITE.md) | Consolidación del marketing en `site/` — EN EJECUCIÓN (falta el flip del dashboard) |
 | [`IMPLEMENTADO.md`](./IMPLEMENTADO.md) | Registro consolidado de specs cerradas (el texto íntegro vive en el historial de git) |
 | [`TAREAS-PENDIENTES.md`](./TAREAS-PENDIENTES.md) | Pasos manuales pendientes de Juan (cuentas, IDs, terceros) |
 | [`CONTEXTOS-AMPLIOS.md`](./CONTEXTOS-AMPLIOS.md) | Fases 2–4 de contextos (fase 1 consolidada en IMPLEMENTADO.md) |

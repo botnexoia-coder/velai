@@ -7,33 +7,35 @@ Worker** (chat, captura de leads en D1, panel administrativo) — sin frameworks
 ## Estructura
 
 ```
-*.html / */index.html      26 páginas (home, 4 verticales, 4 lp/ de pauta, blog, lead magnets…)
-assets/                    funnel.js (tracking+consentimiento+Turnstile), vai-widget.js (chat),
-                           leadform.js (formulario de demo), estilos
+site/                      TODO el sitio publicado por Pages: 27 páginas (home, verticales,
+                           lp/ de pauta, blog, lead magnets…), assets/, fonts/, _headers,
+                           sitemap.xml, robots.txt (site/x/index.html se sirve como /x/)
 vai-worker.js              Entrypoint del Worker: prompts (SYSTEM, DEMOS, SUMMARY_PROMPT)
-worker/app.js              Lógica del Worker: /chat, /lead, webhook Twilio, /api/admin/*, cron
-worker/admin-page.js       HTML del panel de leads (admin.hirevai.com, tras Cloudflare Access)
+worker/                    Lógica del Worker: rutas (chat, leads, webhook Twilio, /api/admin/*), cron
+panel/                     Panel admin v2 (React), servido por el worker (admin.hirevai.com)
 migrations/                Esquema D1 (aplicar con wrangler d1 migrations apply)
-test/worker.test.js        Tests (node --test, sin dependencias)
+test/worker.test.js        Tests (node --test)
 scripts/check-site.mjs     Validador del sitio (páginas, JSON-LD, enlaces, marcadores)
 docs/OPERATIONS.md         ★ Runbook: puesta en marcha, deploy, degradación, rollback
 docs/GUIA-WORKERS.md       ★ Para el equipo: cómo crear/consumir Workers (arquitectura vigente)
+docs/ESTRUCTURA.md         Mapa del repo y reglas (qué es público, qué no)
 docs/STACK-TECNOLOGICO.md  Referencia de arquitectura y servicios
 ```
 
 ## Desarrollo
 
 ```bash
-npm run check                  # sintaxis JS + validación de las 26 páginas + tests (sin npm install)
+npm run check                  # sintaxis JS + validación de las 27 páginas de site/ + tests
 cp .dev.vars.example .dev.vars # secretos locales (NUNCA se commitea)
 npx wrangler dev               # worker local en :8787
-python3 -m http.server 8080    # sitio estático
+python3 -m http.server 8080 -d site  # sitio estático
 ```
 
 ## Despliegue
 
 - **Sitio**: push a `main` → Cloudflare Pages despliega solo (proyecto `velai`, dominio
-  `hirevai.com`; previews por rama en `https://<rama>.velai-dey.pages.dev`).
+  `hirevai.com`, build output directory = `site`; previews por rama en
+  `https://<rama>.velai-dey.pages.dev`).
 - **Worker**: `npx wrangler deploy` (manual). Bindings y variables viven en `wrangler.toml`.
 - Orden, requisitos (D1, Turnstile, secrets, Access) y verificación: **`docs/OPERATIONS.md`**.
 

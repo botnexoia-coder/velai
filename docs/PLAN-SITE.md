@@ -1,12 +1,23 @@
-# PLAN-SITE — mover el marketing a `site/` (NO ejecutado)
+# PLAN-SITE — mover el marketing a `site/` (EN EJECUCIÓN)
 
-> **Estado: plan, sin ejecutar.** Requiere una acción del dueño en el dashboard
-> de Cloudflare que ningún agente puede hacer ni verificar desde el repo.
+> **Estado: EN EJECUCIÓN.** La parte de repo está hecha en la rama
+> `consolidacion-site`, en dos commits separados a propósito:
+>
+> 1. **Commit A (convivencia)** — copia del marketing a `site/` + tooling
+>    validando `site/`. **Mergeable ya**: la raíz sigue intacta y publicada.
+> 2. **Commit B (retirada)** — borra los originales de la raíz y actualiza
+>    docs. **NO mergear hasta después del flip del dashboard** (paso 3).
+>
+> Lo que falta (en orden): mergear/pushear el commit A → verificar (paso 2)
+> → **flip del dashboard, acción del dueño** (paso 3) → verificación en
+> caliente (paso 4) → mergear/pushear el commit B → verificar de nuevo →
+> paso 6 (docs ya van en el commit B; queda registrar en `IMPLEMENTADO.md`
+> y borrar este MD según el flujo de specs).
 > Contexto y restricción: [`ESTRUCTURA.md`](./ESTRUCTURA.md).
 
 ## Qué es
 
-Mover todo lo publicado (las 26 páginas, `assets/`, `fonts/`, `favicon.svg`,
+Mover todo lo publicado (las 27 páginas, `assets/`, `fonts/`, `favicon.svg`,
 `robots.txt`, `sitemap.xml`, `_headers`, `og-velai.jpg`) de la raíz del repo a
 `site/`, y cambiar el **build output directory** del proyecto Pages `velai` de
 `/` a `/site`. **Las URLs públicas no cambian**: `site/blog/index.html` se
@@ -37,21 +48,22 @@ sigue sirviendo como `hirevai.com/blog/` — el SEO no se toca.
   output dir). Si se queda fuera: sin cache-control, sin CORS de `fonts/`
   (el panel deja de cargar la tipografía), sin cabeceras de seguridad.
 
-## Prerrequisitos en el repo (parte automatizable, en el mismo PR)
+## Prerrequisitos en el repo (HECHOS, rama `consolidacion-site`)
 
-- `scripts/check-site.mjs`: hoy toma `process.cwd()` como raíz del sitio y
-  recorre todo el repo. Debe apuntar a `site/` (o aceptar la raíz por
-  argumento) y seguir validando las 26 páginas, JSON-LD, enlaces y `?v=`.
-- `package.json` → `check:js`: las rutas `assets/funnel.js`,
-  `assets/leadform.js`, `assets/vai-widget.js` pasan a `site/assets/…`.
-- `.github/workflows/deploy-worker.yml`: revisar el filtro `paths` — no lista
-  carpetas de marketing (correcto), pero confirmar que nada nuevo de `site/**`
-  lo dispare. `ci.yml` corre en todo push: sin cambios.
-- Verificar `_headers` tras moverlo: las reglas son rutas de URL
-  (`/fonts/*`, `/*.css`…), no de repo — no cambian de contenido, solo de sitio.
-- Buscar referencias en `worker/` y docs a rutas de repo del marketing
-  (no de URL): `grep -rn "assets/" worker/ docs/` y ajustar las que sean rutas
-  de fichero.
+- [x] `scripts/check-site.mjs`: la raíz del sitio ya es `site/` (con override
+  por argumento). Valida las 27 páginas, JSON-LD, enlaces y `?v=`.
+- [x] `package.json` → `check:js`: las rutas `assets/*.js` pasaron a
+  `site/assets/…`.
+- [x] `.github/workflows/deploy-worker.yml`: filtro `paths` revisado — no
+  lista carpetas de marketing y nada de `site/**` lo dispara. `ci.yml` corre
+  en todo push: sin cambios.
+- [x] `_headers` verificado tras copiarlo: las reglas son rutas de URL
+  (`/fonts/*`, `/*.css`…), no de repo — mismo contenido, viaja dentro de `site/`.
+- [x] Referencias a rutas de repo del marketing revisadas con grep: los HTML
+  solo usan rutas absolutas (cero relativas); `test/worker.test.js` lee ahora
+  `site/assets/*`; docs con rutas de fichero actualizados (STACK-TECNOLOGICO,
+  TAREAS-PENDIENTES, README, ESTRUCTURA). Las URLs `hirevai.com/assets|fonts`
+  del worker, el panel y los docs de integración NO cambian (misma URL).
 
 ## Ejecución sin ventana de caída (fase de convivencia)
 
@@ -59,9 +71,9 @@ El truco: que durante el cambio de dashboard **la raíz y `site/` contengan lo
 mismo**, de modo que sirva quien sirva, se sirve lo correcto. Rollback en
 cualquier paso = revertir un solo ajuste.
 
-1. **Commit A (convivencia):** `git mv` NO — **copiar** el marketing a `site/`
-   dejando los originales en la raíz. Ajustar scripts/workflows para validar
-   `site/` (prerrequisitos de arriba). Push a `main`. Pages redespliega desde
+1. **Commit A (convivencia) — HECHO** (`consolidacion-site`): el marketing
+   está **copiado** (no movido) a `site/` con los originales en la raíz, y el
+   tooling valida `site/`. Falta el push a `main`. Pages redespliega desde
    la raíz: **nada cambia para el visitante** (solo aparece /site/ duplicado,
    público unos días — ya lo era).
 2. **Verificar el despliegue de A:** `hirevai.com/` y 3–4 URLs de muestra
@@ -79,11 +91,13 @@ cualquier paso = revertir un solo ajuste.
      CORS presente (prueba de que `_headers` viaja) y el panel carga la fuente
    - `curl -I https://hirevai.com/worker/app.js` → **404** (la ganancia nº 2)
    - Sitemap en Search Console sin errores nuevos en 48 h
-5. **Commit B (limpieza):** borrar los originales de la raíz (quedan solo en
-   `site/`). Push. Verificar de nuevo el punto 4.
-6. Actualizar `README.md` y [`ESTRUCTURA.md`](./ESTRUCTURA.md) (la restricción
-   pasa de "la raíz es pública" a "site/ es público") y registrar en
-   `IMPLEMENTADO.md`.
+5. **Commit B (limpieza) — HECHO en la rama, NO mergear antes del paso 3:**
+   borra los originales de la raíz (quedan solo en `site/`) y actualiza los
+   docs. Tras el flip verificado: push y verificar de nuevo el punto 4.
+6. `README.md` y [`ESTRUCTURA.md`](./ESTRUCTURA.md) ya van actualizados en el
+   commit B (la restricción pasa de "la raíz es pública" a "site/ es
+   público"). Queda: registrar en `IMPLEMENTADO.md` y borrar este MD (flujo
+   de specs).
 
 **Rollback total** (si algo raro aparece días después): dashboard a `/` +
 revert del commit B. La convivencia (commit A) se conserva hasta estar seguros.

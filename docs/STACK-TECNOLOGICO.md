@@ -36,19 +36,19 @@ Navegador ──► Cloudflare Pages (HTML/CSS/JS estáticos)
 |---|---|
 | **HTML5 semántico** | Páginas estáticas (`index.html`, landings `lp/`, herramientas, blog). |
 | **CSS3** | Estilos. Custom properties (CSS vars) en `:root`, mayoría inline en cada HTML. |
-| **SCSS** | `assets/styles.scss` → se compila a `assets/styles.css`. Compilar con: `npx sass --no-source-map --style=compressed assets/styles.scss assets/styles.css`. |
-| **JavaScript vanilla (ES5/ES6)** | Sin frameworks. IIFE con `'use strict'`. Scripts en `assets/`. |
-| **Web fonts self-hosted** | Cabinet Grotesk + Satoshi en `.woff2` (`fonts/fonts.css`), con `font-display: swap`. |
+| **SCSS** | `site/assets/styles.scss` → se compila a `site/assets/styles.css`. Compilar con: `npx sass --no-source-map --style=compressed site/assets/styles.scss site/assets/styles.css`. |
+| **JavaScript vanilla (ES5/ES6)** | Sin frameworks. IIFE con `'use strict'`. Scripts en `site/assets/`. |
+| **Web fonts self-hosted** | Cabinet Grotesk + Satoshi en `.woff2` (`site/fonts/fonts.css`), con `font-display: swap`. |
 
 ### Scripts de frontend
-- **`assets/funnel.js`** — fundación de medición: Google Consent Mode v2,
+- **`site/assets/funnel.js`** — fundación de medición: Google Consent Mode v2,
   banner de consentimiento bilingüe (ES/EN, sin CMP externo), captura y
   persistencia de UTM / gclid / fbclid (atribución), wiring de eventos de
   conversión y enlaces `wa.me`.
-- **`assets/leadform.js`** — formulario cualificador de demo reutilizable
+- **`site/assets/leadform.js`** — formulario cualificador de demo reutilizable
   (`data-velai-leadform`), bilingüe, con descalificación honesta (<10 msgs/día
   no envía lead), envía a la ruta `/lead` del Worker con reintento recuperable.
-- **`assets/vai-widget.js`** — widget de chat autocontenido (26 páginas): llama a
+- **`site/assets/vai-widget.js`** — widget de chat autocontenido (26 páginas): llama a
   `/chat`, persiste la conversación entre páginas (sessionStorage), Turnstile en
   el primer mensaje con reintento ante 403, modo demo por sector.
 - **Turnstile en cliente** — `funnel.js` expone `window.VELAI_HUMAN.execute(action)`
@@ -56,7 +56,7 @@ Navegador ──► Cloudflare Pages (HTML/CSS/JS estáticos)
   (`window.VELAI_TURNSTILE_SITEKEY`).
 
 ### Convención de caché (importante)
-Definida en `_headers`: los assets (`.js`, `.css`, fuentes, imágenes) son
+Definida en `site/_headers`: los assets (`.js`, `.css`, fuentes, imágenes) son
 **`immutable`, max-age 1 año**; el HTML es **`max-age=0, must-revalidate`**.
 Por eso la configuración variable (IDs de tracking, número de WhatsApp) va
 **inline en el HTML** y la lógica en los `.js` versionados con `?v=N`
@@ -127,7 +127,7 @@ panel) y `LEAD_RETENTION_MONTHS` (purga RGPD).
 - **Cloudflare KV** — almacén key-value para historial de conversaciones.
 - **Cloudflare D1** — persistencia de leads durante 24 meses desde la última actividad.
 - **Cloudflare Access** — acceso administrativo sin contraseñas propias.
-- **`_headers`** — políticas de caché y cabeceras de seguridad (`X-Content-Type-Options`,
+- **`site/_headers`** — políticas de caché y cabeceras de seguridad (`X-Content-Type-Options`,
   `X-Frame-Options`, `Referrer-Policy`, `Permissions-Policy`, HSTS con preload,
   COOP y CSP base con `frame-ancestors`).
 - **Git** — control de versiones (rama `main`).
@@ -160,7 +160,7 @@ Pilar central del proyecto. Conocimientos aplicados:
 - **`hreflang`** (`es`, `x-default`) — base multi-idioma.
 - **Schema.org / JSON-LD** — datos estructurados (`SoftwareApplication`,
   `Organization`, etc.) en `index.html` y `blog/`.
-- **`sitemap.xml`** y **`robots.txt`** mantenidos a mano.
+- **`site/sitemap.xml`** y **`site/robots.txt`** mantenidos a mano.
 - **GEO/AEO (optimización para IA generativa)**: `robots.txt` permite
   explícitamente bots de IA (GPTBot, ChatGPT-User, OAI-SearchBot,
   PerplexityBot, ClaudeBot, Claude-Web, Google-Extended, Applebot-Extended)

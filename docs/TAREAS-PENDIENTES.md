@@ -92,7 +92,7 @@ Ahora cada cliente puede completar SU vinculación, cosa que nunca fue posible:
 
 ### 2e. Restos del plan del chat web (código desplegado — ver `IMPLEMENTADO.md`)
 
-- [ ] Quitar el CSS muerto `.vai-fab` de `assets/styles.scss` (3 apariciones) y `assets/styles.css` (1).
+- [ ] Quitar el CSS muerto `.vai-fab` de `site/assets/styles.scss` (3 apariciones) y `site/assets/styles.css` (1).
 - [ ] En Cloudflare: `www.hirevai.com` figura "Inactivo (Error)", DMARC sigue en `p=none`, y el proyecto Pages legacy `hirevai` sin retirar.
 - [ ] Revisar las métricas del chat (eventos `chat_*` en GA4) a partir del ~2026-08-24, con una semana de datos.
 
