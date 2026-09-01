@@ -321,3 +321,370 @@ export interface ReplyResponse {
   ok: true;
   window: ReplyWindow;
 }
+
+// ═════════════════════════════════════════════════════════════════════════════
+// Segunda tanda — tipos derivados leyendo worker/routes/{tenants,conexiones,
+// config,calendario}.js (los handlers reales tras la migración a Hono).
+// ═════════════════════════════════════════════════════════════════════════════
+
+// ── Ficha del tenant (GET /api/admin/tenants/:id — columnas explícitas) ──────
+export interface TenantDetail {
+  id: string;
+  slug: string;
+  name: string;
+  channel_address: string;
+  team_whatsapp: string | null;
+  telegram_chat_id: string | null;
+  lead_template_sid: string | null;
+  twilio_from: string | null;
+  twilio_subaccount_sid: string | null;
+  waba_id: string | null;
+  meta_partner_status: string | null;
+  system_prompt: string;
+  bot_name: string | null;
+  brand_name: string | null;
+  logo_url: string | null;
+  brand_color: string | null;
+  brand_color_2: string | null;
+  agent_color: string | null;
+  greeting: string | null;
+  greeting_en: string | null;
+  chips_json: string | null;
+  placeholder: string | null;
+  wa_number: string | null;
+  theme: string | null;
+  web_origins: string | null;
+  sender_sid: string | null;
+  sender_status: string | null;
+  telegram_chat_title: string | null;
+  ai_monthly_tokens: number | null;
+  ai_daily_limit: number | null;
+  support_hours: string | null;
+  support_tz: string | null;
+  active: number;
+  created_at: string;
+  updated_at: string;
+  /** El token cifrado JAMÁS sale del worker: solo se dice si existe. */
+  has_twilio_token: number;
+}
+
+/**
+ * Canal de un tenant (tenantChannelSummary). Para velai el estado es el diagnóstico
+ * crudo; para el cliente, channelsForScope lo colapsa a su vocabulario (on/paused/
+ * preparing/off) — dos vocabularios a propósito: el cliente nunca lee un diagnóstico.
+ */
+export type TenantChannelState = 'live' | 'inactive' | 'unrouted' | 'off' | 'on' | 'paused' | 'preparing';
+export interface TenantChannel {
+  kind: 'web' | 'whatsapp' | 'telegram' | 'messenger';
+  address: string | null;
+  state: TenantChannelState;
+}
+
+export interface TenantDetailResponse {
+  tenant: TenantDetail;
+  channels: TenantChannel[];
+}
+
+/** POST /api/admin/tenants (201) y PATCH /api/admin/tenants/:id (200). */
+export interface TenantSaveResponse {
+  ok: true;
+  id?: string;
+  updated_at: string;
+}
+
+/** GET /api/admin/tenants/:id/versions */
+export interface TenantVersion {
+  id: number;
+  actor_email: string;
+  field: string;
+  previous_value: string | null;
+  note: string | null;
+  created_at: string;
+}
+export interface TenantVersionsResponse {
+  versions: TenantVersion[];
+}
+
+/** GET /api/admin/tenants/:id/users */
+export interface TenantUser {
+  email: string;
+  created_at: string;
+}
+export interface TenantUsersResponse {
+  users: TenantUser[];
+}
+/** Estado de la puerta de Access tras un alta/baja: sincronizado | pendiente | manual. */
+export type GateState = string | null | undefined;
+export interface UserMutationResponse {
+  ok: true;
+  email?: string;
+  remaining?: number;
+  gate?: GateState;
+}
+
+/** POST /api/admin/tenants/:id/preview */
+export interface PreviewResponse {
+  reply: string;
+}
+
+// ── Aprovisionamiento Twilio ─────────────────────────────────────────────────
+/** GET /api/admin/tenants/:id/provision */
+export interface ProvisionState {
+  subaccount: { sid: string | null; hasToken: boolean };
+  template: { sid: string | null; status: string | null };
+  sender: { sid: string | null; status: string | null };
+  provisioned_at: string | null;
+  warnings: string[];
+}
+/** POST /:id/provision/template/check */
+export interface TemplateCheckResponse {
+  ok: true;
+  status: string;
+  reason?: string | null;
+  applied: boolean;
+  stored: string | null;
+  sid: string | null;
+  raw: unknown;
+}
+/** POST /:id/provision/template/resubmit */
+export interface TemplateResubmitResponse {
+  ok: true;
+  raw: unknown;
+}
+/** POST /:id/provision/sender/sync */
+export interface SenderSyncResponse {
+  ok: true;
+  applied: number;
+  sender: { senderSid: string; senderId: string | null; status: string | null; wabaId: string | null };
+  conflicts: { field: string; current: string; fromTwilio: string }[];
+  webhookOk: boolean;
+  webhookFixed: boolean;
+  channelRegistered: boolean;
+}
+/** POST /:id/provision/sender/profile y /:id/logo/apply */
+export interface ProfileApplyResponse {
+  ok: true;
+  applied: { logo: boolean; websites: number; description: boolean };
+}
+
+// ── Conexiones: Telegram del tenant ──────────────────────────────────────────
+export interface TelegramTopic {
+  thread_id: number;
+  name: string;
+  description?: string;
+}
+export interface TelegramLastReport {
+  period_start: string;
+  status: string;
+  detail: string | null;
+  sent_at: string | null;
+}
+/** GET /api/admin/tenants/:id/telegram */
+export interface TelegramInfo {
+  linked: boolean;
+  title: string | null;
+  linked_at: string | null;
+  botUsername: string | null;
+  whitelabel: boolean;
+  topics: TelegramTopic[];
+  weeklyReport: boolean;
+  lastReport: TelegramLastReport | null;
+}
+export interface TelegramInfoResponse {
+  telegram: TelegramInfo;
+}
+/** POST /api/admin/tenants/:id/telegram/link */
+export interface TelegramLinkResponse {
+  token: string;
+  dmUrl: string;
+  groupUrl: string;
+  expiresInSeconds: number;
+}
+export interface TelegramBotResponse {
+  ok: true;
+  botUsername: string;
+}
+export interface TopicsResponse {
+  ok: true;
+  topics: TelegramTopic[];
+}
+/** POST /api/admin/telegram/setup (webhook del bot de Velai; solo velai). */
+export interface TelegramSetupResponse {
+  ok: true;
+  botUsername: string | null;
+}
+
+// ── Conexiones: WhatsApp del tenant ──────────────────────────────────────────
+/** GET /api/admin/tenants/:id/whatsapp — columnas explícitas, sin secretos. */
+export interface WhatsappRow {
+  channel_address: string | null;
+  twilio_from: string | null;
+  has_waba: number;
+  sender_status: string | null;
+  lead_template_status: string | null;
+  meta_partner_status: string | null;
+  team_whatsapp: string | null;
+  wa_number: string | null;
+  logo_url: string | null;
+  logo_wa_url: string | null;
+  has_token: number;
+  has_subaccount: number;
+  /** Existe la fila de tenant_channels que enruta el webhook a este cliente. */
+  routed: number;
+}
+export type AlertDeliveryState = 'on' | 'off' | 'pending_template';
+/** Estado de ENTREGA de los avisos (leadAlertStatus): mismas condiciones que deliver(). */
+export interface LeadAlerts {
+  telegram: AlertDeliveryState;
+  whatsapp: AlertDeliveryState;
+  any: boolean;
+}
+/** Cómo fue el último empujón de la foto al perfil de WhatsApp (KV waprof:<id>). */
+export interface ProfileSync {
+  ok: boolean;
+  at?: string;
+  error?: string;
+  why?: string;
+}
+export interface WhatsappInfoResponse {
+  whatsapp: WhatsappRow;
+  alerts: LeadAlerts;
+  profileSync: ProfileSync | null;
+}
+
+/** POST /api/admin/tenants/:id/logo?channels=web,whatsapp */
+export interface LogoUploadResponse {
+  ok: true;
+  logo_url: string;
+  store: string;
+  canales: { web: boolean; whatsapp: boolean };
+  /** true si además se lanzó la actualización de la foto de WhatsApp en segundo plano. */
+  whatsapp: boolean;
+}
+
+// ── Canales (vista global, solo velai) ───────────────────────────────────────
+export type GlobalChannelState = 'live' | 'inactive' | 'from_mismatch' | 'orphan';
+export interface GlobalChannel {
+  address: string;
+  kind: string;
+  created_at: string;
+  tenant_id: string | null;
+  slug: string | null;
+  name: string | null;
+  active: number | null;
+  twilio_from: string | null;
+  sender_status: string | null;
+  state: GlobalChannelState;
+}
+/** Sender vivo en Twilio sin fila que lo enrute: el bot calla en verde (caso gogestion). */
+export interface UnroutedSender {
+  tenant_id: string;
+  slug: string;
+  name: string;
+  active: number;
+  channel_address: string | null;
+  twilio_from: string;
+  sender_status: string | null;
+}
+export interface ChannelsResponse {
+  channels: GlobalChannel[];
+  unrouted: UnroutedSender[];
+}
+
+// ── Configuración (solo admins raíz salvo /admins) ───────────────────────────
+/** GET /api/admin/config */
+export interface ConfigInfo {
+  cf_token: {
+    source: 'panel' | 'worker' | 'none';
+    valid: boolean | null;
+    status: string | null;
+  };
+  account_id: string | null;
+  turnstile_sitekey: string | null;
+  groups: { clientes: boolean; admins: boolean };
+  d1: boolean;
+  kv: boolean;
+}
+/** POST /api/admin/config/cf-token */
+export interface CfTokenSaveResponse {
+  ok: true;
+  source: 'panel';
+  status: string;
+}
+/** DELETE /api/admin/config/cf-token */
+export interface CfTokenClearResponse {
+  ok: true;
+  source: 'worker' | 'none';
+}
+/** GET /api/admin/config/telegram-webhook (solo lectura, bajo demanda). */
+export interface WebhookInfo {
+  configured: boolean;
+  error?: string;
+  url?: string | null;
+  esperada?: string;
+  coincide?: boolean;
+  pendientes?: number;
+  ultimoError?: { mensaje: string; cuando: string | null } | null;
+  maxConexiones?: number | null;
+  ip?: string | null;
+}
+
+/** GET /api/admin/admins */
+export interface AdminEntry {
+  email: string;
+  root: boolean;
+  created_by?: string;
+  created_at?: string;
+}
+export interface AdminsResponse {
+  admins: AdminEntry[];
+}
+export interface AdminMutationResponse {
+  ok: true;
+  email?: string;
+  gate?: GateState;
+}
+
+// ── Calendario ───────────────────────────────────────────────────────────────
+/** GET /api/admin/tenants/:id/calendar (sin el refresh token, claro). */
+export interface CalendarRow {
+  provider: string;
+  account_email: string | null;
+  calendar_id: string | null;
+  timezone: string | null;
+  slot_minutes: number | null;
+  /** JSON string de {dia: [["HH:MM","HH:MM"],…]} o null (= default L-V 9-19). */
+  business_hours: string | null;
+  status: string;
+  last_error: string | null;
+  connected_at: string | null;
+  updated_at: string | null;
+}
+export interface CalendarResponse {
+  calendar: CalendarRow | null;
+}
+/** POST /api/admin/tenants/:id/calendar/connect */
+export interface CalendarConnectResponse {
+  authUrl: string;
+}
+/** GET /api/admin/appointments */
+export interface Appointment {
+  id: string;
+  tenant_id?: string;
+  tenant_name?: string | null;
+  channel: string;
+  customer_name: string;
+  customer_phone: string;
+  reason: string | null;
+  starts_at: string;
+  ends_at: string;
+  timezone: string | null;
+  status: string;
+  created_at: string;
+}
+export interface AppointmentsResponse {
+  appointments: Appointment[];
+}
+
+/** Horario semanal ya parseado: {mon: [["09:00","19:00"], …], …}. */
+export type WeekHours = Record<string, [string, string][]>;

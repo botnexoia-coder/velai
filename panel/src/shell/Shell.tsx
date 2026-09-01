@@ -9,7 +9,10 @@
 import { useEffect, useState } from 'react';
 import { NavLink, Outlet, useLocation } from 'react-router';
 import { useMe } from '../hooks/queries';
+import { useAvisos } from '../hooks/avisos';
+import { useToast } from '../components/Toasts';
 import {
+  IcoBell,
   IcoBriefcase,
   IcoCalendar,
   IcoChannels,
@@ -50,6 +53,8 @@ export function Shell() {
   const location = useLocation();
   const isVelai = me?.role === 'velai';
   const isCliente = me?.role === 'cliente';
+  const toast = useToast();
+  const avisos = useAvisos(toast);
 
   // Tema de las VISTAS: claro por defecto, body.dark las devuelve al oscuro. La barra
   // lateral no cambia nunca.
@@ -114,6 +119,18 @@ export function Shell() {
         ) : null}
         <span className="spacer" />
         <div className="sidefoot">
+          <button
+            className="tab"
+            type="button"
+            onClick={avisos.toggle}
+            data-tip={
+              'Suena un aviso y sale una notificación cuando llega un mensaje, aunque estés en otra pestaña.\nEl navegador exige un clic antes de poder sonar: si acabas de activarlo, el primer aviso puede llegar mudo.'
+            }
+          >
+            <IcoBell />
+            <span>{avisos.on ? 'Avisos activados' : 'Activar avisos'}</span>
+            {avisos.on ? <i className="alertdot" /> : null}
+          </button>
           <button
             className="tab"
             type="button"
