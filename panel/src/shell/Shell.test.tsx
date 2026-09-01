@@ -83,6 +83,22 @@ describe('shell y navegación por rol', () => {
     await waitFor(() => expect(document.body.classList.contains('wide')).toBe(true));
   });
 
+  it('«Activar avisos»: preferencia por pestaña y aviso de que puede llegar mudo', async () => {
+    renderApp(meVelai);
+    const user = userEvent.setup();
+    const btn = await screen.findByRole('button', { name: /activar avisos/i });
+    // El tooltip explica que el navegador exige un clic antes de poder sonar.
+    expect(btn.getAttribute('data-tip')).toMatch(/puede llegar mudo/);
+    await user.click(btn);
+    await waitFor(() => expect(screen.getByRole('button', { name: /avisos activados/i })).toBeInTheDocument());
+    expect(sessionStorage.getItem('velai-panel-alerts')).toBe('1');
+    // El toast dice la verdad: sin permiso de notificaciones, solo sonará.
+    await waitFor(() => expect(screen.getByText(/Avisos activados ✓/)).toBeInTheDocument());
+    // Apagar limpia la preferencia.
+    await user.click(screen.getByRole('button', { name: /avisos activados/i }));
+    expect(sessionStorage.getItem('velai-panel-alerts')).toBe('');
+  });
+
   it('el pie firma de Velai aunque el panel sea de un cliente', async () => {
     const { container } = renderApp(meCliente);
     await waitFor(() => expect(screen.getByText(/todos los derechos reservados/i)).toBeInTheDocument());
