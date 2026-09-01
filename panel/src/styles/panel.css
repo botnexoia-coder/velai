@@ -232,6 +232,11 @@ body.dark .pop{box-shadow:0 20px 50px rgba(0,0,0,.55)}
 .pop p{margin:11px 0 0;font-size:12px;line-height:1.5;color:var(--muted)}
 .pop .pophint{font-size:11.5px;color:var(--muted2)}
 .pop label{display:block;margin-top:11px}
+/* Checkboxes del popover de filtros: regla del v1 que no se portó — sin ella caían al
+   display:block de arriba y el cuadro quedaba flotando lejos de su etiqueta, cada fila
+   alineada a su manera. Flex: cuadro a la izquierda, etiqueta al lado, filas parejas. */
+.fchk{display:flex;align-items:center;gap:8px;margin-top:11px;font-size:12.5px;cursor:pointer}
+.fchk input{width:15px;height:15px;margin:0;flex:none;accent-color:var(--orange)}
 .pop label span{display:block;margin-bottom:5px;font-size:11px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--muted2)}
 .pop select,.pop input[type=date]{width:100%;background:var(--bg3);color:var(--white);border:1px solid rgba(var(--ink),.10);border-radius:var(--r-sm);padding:8px 11px;font-size:12.5px}
 .pop .popdos{display:flex;gap:9px}
