@@ -1,103 +1,41 @@
-# Panel v2 — lo que falta por migrar
+# Panel v2 — lo que queda
 
-Primera entrega (hecha): shell con navegación por rol y tema, Dashboard, Leads
-(filtros + cursor + detalle + CSV + escalaciones), Conversaciones (bandeja completa:
-cola, takeover/release, responder, ventana de 24 h, contadores por canal, disponibilidad,
-filtros, export). Todo lo demás enseña «En construcción» y sigue viviendo en el panel v1.
+Con la segunda tanda, TODAS las vistas del panel v1 están migradas: shell con
+navegación por rol y tema, Dashboard, Leads, Conversaciones, Conexiones, Clientes
+(listado + ficha completa + alta guiada + aprovisionamiento), Calendario, Canales,
+Configuración y los avisos sonoros. La referencia de conducta sigue siendo
+`worker/admin-panel.js` + `worker/admin-page.js` (v1) y los contratos,
+`worker/routes/*.js`.
 
-La referencia de comportamiento de CADA vista pendiente es `worker/admin-panel.js`
-(y su markup en `worker/admin-page.js`): portar, no inventar.
+## Pendiente de verdad
 
-## Vistas pendientes
+- **Infraestructura Cloudflare** en el Dashboard (solo velai):
+  `GET /api/admin/infra-usage` — barras contra los límites del plan gratuito
+  (CF_FREE_LIMITS), el caso `cloudflare_analytics_denied` explicado con el permiso
+  que falta, y el aviso de que superar un límite degrada, no cobra. Es la única
+  tarjeta del v1 sin puerto.
+- **Deep-linking**: `/leads?estado=…` y `/conversaciones?c=<id>` en la URL. El v1 no
+  lo tenía; con react-router es barato y hace compartibles las vistas. (El único que
+  ya existe: `/calendario?t=<tenantId>` desde la lista de Clientes.)
+- **Retirada del v1**: cuando Juan valide esta tanda en staging y producción, quitar
+  `ADMIN_HTML`, `worker/admin-page.js`, `worker/admin-panel.js` y
+  `scripts/check-bundle.mjs` en un PR aparte (fuera del alcance de `panel/`).
 
-### Conexiones (`/conexiones`)
-La vista más grande. Por bloques:
-- **Tira de canales del cliente**: `GET /api/admin/tenants/:id/channels` (estados ya
-  colapsados por rol en el worker: on/preparing/unrouted/off/soon — dos vocabularios).
-- **Asistente de Telegram** (riel de 5 pasos, marca blanca):
-  `GET/PATCH/DELETE /api/admin/tenants/:id/telegram`,
-  `POST /api/admin/tenants/:id/telegram/link` (enlace que caduca en 15 min),
-  `POST/DELETE /api/admin/tenants/:id/telegram/bot` (token write-only),
-  `POST /api/admin/tenants/:id/telegram/topics` y
-  `PATCH/DELETE /api/admin/tenants/:id/telegram/topics/:threadId`.
-  Ojo: los pasos «hechos» los marca el estado real del servidor; los pasos sin señal
-  (grupo, permisos) se confirman con su botón y viven solo en memoria (tgManual).
-- **Horario de atención humana** (interruptor por día, dos tramos, tz):
-  se LEE de `GET /api/admin/availability?tenant=` (devuelve el horario en vigor con el
-  default aplicado) y se guarda con `PATCH /api/admin/tenants/:id/notify`
-  (`support_hours` como JSON string + `support_tz`). Un objeto vacío = «nunca se ofrece
-  asesor» y hay que decirlo (shSummary).
-- **Quién recibe los avisos + números de WhatsApp**: `GET /api/admin/tenants/:id/whatsapp`
-  (estado del sender en lenguaje de negocio + alerts) y `PATCH /:id/notify`
-  (`team_whatsapp`, `wa_number`). La guarda del 63031 (número del bot) la pone el worker.
-- **Informe semanal**: interruptor (`PATCH /:id/notify` con `weekly_report`) y
-  `POST /api/admin/tenants/:id/report/test`; el último envío viene en el GET de telegram
-  (`lastReport`).
-- **Logo en autoservicio**: `POST /api/admin/tenants/:id/logo?channels=web,whatsapp`
-  (cuerpo binario, máx. 2 MB, magic bytes en el worker) y
-  `POST /api/admin/tenants/:id/logo/apply` (reaplicar a WhatsApp sin resubir).
-- **Solo Velai**: `POST /:id/provision/sender/sync`, `POST /:id/provision/sender/profile`,
-  `POST /api/admin/telegram/setup` (webhook del bot, una vez), toggle de marca blanca.
+## Deuda consciente
 
-### Clientes y ficha (`/clientes`, solo velai)
-- Listado: `GET /api/admin/tenants` (semáforo de configuración por columnas has_*).
-- Ficha con pestañas y UN solo Guardar (punto ámbar por pestaña sucia, confirmación al
-  descartar): `GET/PATCH /api/admin/tenants/:id` con `expected_updated_at` (el 409
-  `stale_tenant` existe y hay que respetarlo), `POST /api/admin/tenants` (alta guiada
-  por stepper: el borrador nace prospecto `pending:<slug>` y se promueve al activar).
-- Contexto: contador de tokens, duplicar de otro cliente, probar borrador
-  (`POST /:id/preview`), cupos de IA (`ai_monthly_tokens`, `ai_daily_limit`).
-- Marca del widget con previsualización en vivo (mini-mock del chat) y subida de logo
-  (`POST /:id/logo`); sincronizar Turnstile (`POST /:id/provision/domains`).
-- Aprovisionamiento Twilio: `POST /:id/provision/{subaccount,template,template/check,
-  template/resubmit,sender,sender/verify}` — provPost SIEMPRE recarga la ficha entera
-  (regla §7: evita stale_tenant y no pisa SIDs recién creados).
-- Usuarios del panel: `GET/POST /:id/users`, `DELETE /:id/users/:email` (avisos del
-  estado de la puerta de Access: sincronizado/pendiente/manual).
-- Historial: `GET /:id/versions`, `POST /:id/versions/:vid/restore`.
-
-### Calendario (`/calendario`)
-- `GET/PATCH/DELETE /api/admin/tenants/:id/calendar`,
-  `POST /api/admin/tenants/:id/calendar/connect` (OAuth de Google; al volver, el
-  callback redirige con `#calendar=ok:<tenantId>` — hay que leer ese hash al arrancar).
-- Citas del mes: `GET /api/admin/appointments?tenant=&from=&to=` (el corte por tz se
-  hace al pintar, con la tz del calendario).
-- Rejilla mensual estilo Google (chips por día, modal del día), config de citas
-  (calendar_id, tz, slot_minutes, horario laboral: vacío → null, JAMÁS `{}` — un `{}`
-  significa «ningún hueco jamás»).
-- Para velai: selector de cliente y «Volver a Clientes».
-
-### Canales (`/canales`, solo velai)
-- `GET /api/admin/channels`: la tabla de ENRUTADO real + `unrouted` (números vivos en
-  Twilio que nadie atiende — siempre visibles, nunca los esconde el filtro).
-- Filtrado 100% en cliente (búsqueda sin acentos y sin prefijo `whatsapp:`), píldora
-  global con el TOTAL del sistema, no lo filtrado.
-
-### Configuración (`/configuracion`, solo velai; el worker exige raíz con 403 root_only)
-- Admins: `GET/POST /api/admin/admins`, `DELETE /api/admin/admins/:email`.
-- Estado de integraciones: `GET /api/admin/config` (tarjetas con semáforo).
-- Token de Cloudflare (write-only): `POST/DELETE /api/admin/config/cf-token`.
-- Webhook de Telegram (solo lectura, bajo demanda): `GET /api/admin/config/telegram-webhook`.
-
-## Piezas transversales pendientes
-
-- **Avisos sonoros y notificaciones** (botón del sidebar): sondeo de
-  `GET /api/admin/alerts` cada 30 s SIN mirar visibilityState (es el caso que cubre),
-  primer sondeo solo fija referencia, beep con Web Audio (oscilador — la CSP no declara
-  media-src), Notification API solo tras gesto del usuario, preferencia en sessionStorage.
-- **Infraestructura Cloudflare** en el dashboard (solo velai):
-  `GET /api/admin/infra-usage` con los límites del plan gratuito y el caso
-  `cloudflare_analytics_denied` explicado.
-- **Deep-linking**: `/leads?estado=…` y `/conversaciones?c=<id>` en la URL (el v1 no lo
-  tenía; con react-router es barato y hace compartibles las vistas).
-
-## Deuda consciente de esta entrega
-
-- El botón «Filtrar» de Leads no repuebla el select de Fuente con la elegida si esa
-  fuente desaparece de los datos (el v1 la re-inyectaba para que el filtro siguiera
-  diciendo la verdad). Menor: solo pasa si se borra el último lead de esa fuente.
-- `composerKey` está portado y testeado pero el cajón usa estado por conversación de
-  React (equivalente en la práctica: el polling no borra el borrador). Si algún día el
-  cajón se repinta por algo más que la conversación abierta, usarlo como `key=`.
-- El export CSV navega con `window.location.href` (como el v1): no pasa por api() y no
-  enciende la barra de actividad.
+- El logo que el cliente sube en Conexiones no refresca la cabecera del shell hasta
+  recargar: `/api/admin/me` se cachea con staleTime Infinity. Arreglo barato:
+  invalidar `['me']` en `useLogoUpload` cuando el canal web cambió.
+- El select de Fuente en Leads no re-inyecta una fuente elegida que desapareció de
+  los datos (v1 sí lo hacía). Solo pasa si se borra el último lead de esa fuente.
+- Los export CSV navegan con `window.location.href` (como el v1): no pasan por
+  api() y no encienden la barra de actividad.
+- `composerKey` está portado y testeado pero el cajón usa estado por conversación
+  de React (equivalente en la práctica). Si el cajón se repinta por algo más que la
+  conversación abierta, usarlo como `key=`.
+- Las confirmaciones manuales del asistente de Telegram (grupo creado, permisos
+  dados) viven en memoria del componente y se pierden al navegar fuera de
+  Conexiones (el v1 las perdía al recargar; mismo espíritu, ventana algo menor).
+- El botón de avisos comparte el molde del v1: tras recargar con la preferencia
+  activa, el primer beep puede llegar mudo hasta el primer clic en la página (el
+  navegador no deja crear el AudioContext sin gesto). El tooltip lo cuenta.
