@@ -5691,3 +5691,194 @@ test('PATCH /reminders acepta hours de la lista curada y rechaza el resto', asyn
   await assert.rejects(patch({ hours: '24; DROP' }), (e) => e.code === 'invalid_hours');
   await assert.rejects(patch({}), (e) => e.code === 'nothing_to_update');
 });
+
+// ── Solicitudes del cliente (tenant_solicitudes, 0032): pedir → Velai resuelve ──
+
+function solicitudesDb({ tenant, template = null, solicitudes = [] }) {
+  const state = { solicitudes: [...solicitudes], updates: [], nextId: 100 };
+  const db = { prepare: (sql) => {
+    const stmt = (args = []) => ({
+      bind: (...a) => stmt(a),
+      first: async () => {
+        if (/FROM tenant_solicitudes WHERE id = \?/.test(sql)) return state.solicitudes.find((s) => s.id === args[0]) || null;
+        if (/FROM tenant_templates/.test(sql)) return template;
+        if (/FROM tenants/.test(sql)) return tenant;
+        return null;
+      },
+      all: async () => {
+        if (/FROM tenant_solicitudes s/.test(sql)) {
+          return { results: state.solicitudes.filter((s) => s.status === 'pending')
+            .map((s) => ({ ...s, tenant_name: tenant.name, reminder_hours: tenant.reminder_hours, actual_opciones: template ? template.opciones : null })) };
+        }
+        if (/FROM tenant_solicitudes/.test(sql)) return { results: state.solicitudes.filter((s) => s.tenant_id === args[0]) };
+        return { results: [] };
+      },
+      run: async () => {
+        if (/INSERT INTO tenant_solicitudes/.test(sql)) {
+          const [tenantId, tipo] = args;
+          if (state.solicitudes.some((s) => s.tenant_id === tenantId && s.tipo === tipo && s.status === 'pending')) {
+            throw new Error('UNIQUE constraint failed: tenant_solicitudes.tenant_id');
+          }
+          const row = { id: state.nextId++, tenant_id: tenantId, tipo, payload: args[2], status: args[3], requested_by: args[4], nota: null, created_at: args[5], resolved_at: null };
+          state.solicitudes.push(row);
+          return { meta: { changes: 1, last_row_id: row.id } };
+        }
+        if (/UPDATE tenant_solicitudes SET status='rejected'/.test(sql)) {
+          const s = state.solicitudes.find((x) => x.id === args[3] && x.status === 'pending');
+          if (s) Object.assign(s, { status: 'rejected', nota: args[0], resolved_by: args[1], resolved_at: args[2] });
+          return { meta: { changes: s ? 1 : 0 } };
+        }
+        if (/UPDATE tenant_solicitudes SET status='approved'/.test(sql)) {
+          const s = state.solicitudes.find((x) => x.id === args[2] && x.status === 'pending');
+          if (s) Object.assign(s, { status: 'approved', resolved_by: args[0], resolved_at: args[1] });
+          return { meta: { changes: s ? 1 : 0 } };
+        }
+        state.updates.push({ sql, args });
+        return { meta: { changes: 1 } };
+      },
+    });
+    return stmt();
+  }, batch: async () => [] };
+  return { db, state };
+}
+
+const SOLICITUD_TENANT = { id: 't-mio', slug: 'mio', name: 'Mi Negocio', reminder_hours: '24',
+  twilio_subaccount_sid: 'AC' + 's'.repeat(32) };
+const solPath = '/api/admin/solicitudes';
+const solReq = (init) => adminReq(solPath, init);
+const solCall = (env, scope, init) => testing.adminRouter(solReq(init), env, { waitUntil(p) { p.catch(() => {}); } }, solPath, new URL('https://x' + solPath), {}, scope);
+const solPost = (env, scope, body) => solCall(env, scope, { method: 'POST', body: JSON.stringify(body), headers: { 'content-type': 'application/json' } });
+
+test('solicitud del cliente: validada contra el catálogo, 1 pendiente por tipo y aviso a Velai', async () => {
+  const { db, state } = solicitudesDb({ tenant: SOLICITUD_TENANT });
+  const telegramSends = [];
+  const env = { DB: db, KV: { async get() { return null; }, async put() {}, async delete() {} }, TELEGRAM_TOKEN: 'bot', TELEGRAM_CHAT_ID: '-1' };
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = async (url, init) => {
+    if (String(url).includes('api.telegram.org')) { telegramSends.push(JSON.parse(String(init.body))); return new Response(JSON.stringify({ ok: true }), { status: 200 }); }
+    return new Response('{}', { status: 200 });
+  };
+  try {
+    // Hostiles: pareja/antelación fuera del catálogo, tipo inventado, solicitud vacía.
+    for (const [body, code] of [
+      [{ tipo: 'plantilla_recordatorio', botones: 'constructor' }, 'invalid_botones'],
+      [{ tipo: 'plantilla_recordatorio', botones: '<script>' }, 'invalid_botones'],
+      [{ tipo: 'plantilla_recordatorio', antelacion: 13 }, 'invalid_antelacion'],
+      [{ tipo: 'otra_cosa', antelacion: 24 }, 'invalid_tipo'],
+      [{ tipo: 'plantilla_recordatorio' }, 'empty_solicitud'],
+    ]) {
+      await assert.rejects(solPost(env, CLIENTE, body), (e) => e.code === code, JSON.stringify(body));
+    }
+    assert.equal(state.solicitudes.length, 0, 'nada hostil deja fila');
+
+    const ok = await (await solPost(env, CLIENTE, { tipo: 'plantilla_recordatorio', botones: 'si_voy_no_puedo', antelacion: 12 })).json();
+    assert.deepEqual([ok.ok, ok.status], [true, 'pending']);
+    assert.equal(state.solicitudes[0].tenant_id, 't-mio', 'el tenant es SIEMPRE el del scope');
+    assert.deepEqual(JSON.parse(state.solicitudes[0].payload), { botones: 'si_voy_no_puedo', antelacion: 12 });
+    // Aviso a Velai con el de→a.
+    assert.equal(telegramSends.length, 1);
+    assert.ok(String(telegramSends[0].text).includes('Mi Negocio'));
+    assert.ok(String(telegramSends[0].text).includes('24 h → 12 h'));
+    assert.ok(String(telegramSends[0].text).includes('Sí, voy'));
+    // Segunda pendiente del mismo tipo: 409 (el UNIQUE parcial de la 0032).
+    await assert.rejects(solPost(env, CLIENTE, { tipo: 'plantilla_recordatorio', antelacion: 48 }), (e) => e.code === 'solicitud_pendiente');
+    // El GET del cliente devuelve la suya con el payload parseado.
+    const mias = await (await solCall(env, CLIENTE, {})).json();
+    assert.equal(mias.solicitudes.length, 1);
+    assert.deepEqual(mias.solicitudes[0].payload, { botones: 'si_voy_no_puedo', antelacion: 12 });
+    // El GET de velai la lista con el nombre y lo ACTUAL al lado.
+    const pendientes = await (await solCall(env, VELAI, {})).json();
+    assert.equal(pendientes.solicitudes.length, 1);
+    assert.equal(pendientes.solicitudes[0].tenant_name, 'Mi Negocio');
+    assert.equal(pendientes.solicitudes[0].actual.hours, 24);
+  } finally { globalThis.fetch = realFetch; }
+});
+
+async function resolverCall(env, id, accion, body) {
+  const path = `/api/admin/solicitudes/${id}/${accion}`;
+  const init = { method: 'POST', ...(body ? { body: JSON.stringify(body), headers: { 'content-type': 'application/json' } } : {}) };
+  return testing.adminRouter(adminReq(path, init), env, { waitUntil(p) { p.catch(() => {}); } }, path, new URL('https://x' + path), {}, VELAI);
+}
+
+test('aprobar APLICA: antelación a reminder_hours y botones distintos recrean la plantilla', async () => {
+  const enc = await encryptSecret({ SECRETS_KEK: TEST_KEK }, 't-mio', 'a1b2c3d4e5f60718293a4b5c6d7e8f90');
+  const tenant = { ...SOLICITUD_TENANT, twilio_auth_token_enc: enc };
+  const template = { sid: 'HX' + 'v'.repeat(32), status: 'approved', opciones: JSON.stringify({ botones: 'confirmo_cancelar', textos: { confirmar: 'Confirmo', cancelar: 'Cancelar' } }) };
+  const solicitud = { id: 7, tenant_id: 't-mio', tipo: 'plantilla_recordatorio', status: 'pending',
+    payload: JSON.stringify({ botones: 'si_voy_no_puedo', antelacion: 12 }), requested_by: 'cliente@mio.com', created_at: '2026-09-01T00:00:00Z' };
+  const { db, state } = solicitudesDb({ tenant, template, solicitudes: [solicitud] });
+  const env = { DB: db, KV: mapKV(), SECRETS_KEK: TEST_KEK };
+  const twilioCalls = [];
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = async (url, init) => {
+    const u = String(url);
+    if (u === 'https://content.twilio.com/v1/Content') { twilioCalls.push(JSON.parse(String(init.body))); return new Response(JSON.stringify({ sid: 'HX' + 'n'.repeat(32) }), { status: 201 }); }
+    if (u.includes('/ApprovalRequests/whatsapp')) return new Response('{}', { status: 201 });
+    return new Response('{}', { status: 200 });
+  };
+  try {
+    const out = await (await resolverCall(env, 7, 'aprobar')).json();
+    assert.deepEqual([out.ok, out.status, out.aplicado.recreada, out.aplicado.antelacion], [true, 'approved', true, 12]);
+    // La plantilla NUEVA lleva los botones solicitados con los payloads intactos.
+    const actions = twilioCalls[0].types['twilio/quick-reply'].actions;
+    assert.deepEqual(actions.map((a) => a.title), ['Sí, voy', 'No puedo ir']);
+    assert.deepEqual(actions.map((a) => a.id), ['conf:{{6}}', 'canc:{{6}}']);
+    // La antelación fue a la fila del tenant y la solicitud quedó approved.
+    assert.ok(state.updates.some((u) => /reminder_hours=\?/.test(u.sql) && u.args[0] === '12'));
+    assert.equal(state.solicitudes[0].status, 'approved');
+    // El upsert del registro dejó la fila pending con las opciones nuevas.
+    assert.ok(state.updates.some((u) => /INSERT INTO tenant_templates/.test(u.sql) && String(u.args[3]).includes('si_voy_no_puedo')));
+  } finally { globalThis.fetch = realFetch; }
+});
+
+test('aprobar sin subcuenta: falla con el código claro y la solicitud SIGUE pending', async () => {
+  const tenant = { ...SOLICITUD_TENANT, twilio_subaccount_sid: null };
+  const solicitud = { id: 8, tenant_id: 't-mio', tipo: 'plantilla_recordatorio', status: 'pending',
+    payload: JSON.stringify({ botones: 'si_voy_no_puedo' }), requested_by: 'cliente@mio.com', created_at: '2026-09-01T00:00:00Z' };
+  const { db, state } = solicitudesDb({ tenant, template: null, solicitudes: [solicitud] });
+  const env = { DB: db, KV: mapKV(), SECRETS_KEK: TEST_KEK };
+  let twilioCalls = 0;
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = async (url) => { if (String(url).includes('twilio.com')) twilioCalls++; return new Response('{}', { status: 200 }); };
+  try {
+    await assert.rejects(resolverCall(env, 8, 'aprobar'), (e) => e.code === 'subaccount_required');
+    assert.equal(state.solicitudes[0].status, 'pending', 'la solicitud no se consume: se reintenta tras aprovisionar');
+    assert.equal(twilioCalls, 0);
+    assert.ok(!state.updates.some((u) => /reminder_hours/.test(u.sql)), 'nada aplicado a medias');
+  } finally { globalThis.fetch = realFetch; }
+});
+
+test('aprobar con la MISMA pareja no recrea nada; rechazar exige nota y el cliente la ve', async () => {
+  const enc = await encryptSecret({ SECRETS_KEK: TEST_KEK }, 't-mio', 'a1b2c3d4e5f60718293a4b5c6d7e8f90');
+  const tenant = { ...SOLICITUD_TENANT, twilio_auth_token_enc: enc };
+  const template = { sid: 'HX' + 'v'.repeat(32), status: 'approved', opciones: JSON.stringify({ botones: 'si_voy_no_puedo', textos: { confirmar: 'Sí, voy', cancelar: 'No puedo ir' } }) };
+  const iguales = { id: 9, tenant_id: 't-mio', tipo: 'plantilla_recordatorio', status: 'pending',
+    payload: JSON.stringify({ botones: 'si_voy_no_puedo', antelacion: 48 }), requested_by: 'cliente@mio.com', created_at: '2026-09-01T00:00:00Z' };
+  const otra = { id: 10, tenant_id: 't-mio', tipo: 'plantilla_recordatorio', status: 'pending',
+    payload: JSON.stringify({ antelacion: 12 }), requested_by: 'cliente@mio.com', created_at: '2026-09-01T00:00:00Z' };
+  const { db, state } = solicitudesDb({ tenant, template, solicitudes: [iguales] });
+  const env = { DB: db, KV: mapKV(), SECRETS_KEK: TEST_KEK };
+  let contentCalls = 0;
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = async (url) => {
+    if (String(url) === 'https://content.twilio.com/v1/Content') { contentCalls++; return new Response(JSON.stringify({ sid: 'HX1' }), { status: 201 }); }
+    return new Response('{}', { status: 200 });
+  };
+  try {
+    const out = await (await resolverCall(env, 9, 'aprobar')).json();
+    assert.deepEqual([out.ok, out.aplicado.recreada, out.aplicado.antelacion], [true, undefined, 48]);
+    assert.equal(contentCalls, 0, 'mismos botones = nada que enviar a Meta');
+    // Rechazar: nota obligatoria (el cliente la ve), y la solicitud queda rejected.
+    state.solicitudes.push(otra);
+    await assert.rejects(resolverCall(env, 10, 'rechazar', { nota: '' }), (e) => e.code === 'invalid_nota');
+    await assert.rejects(resolverCall(env, 10, 'rechazar', {}), (e) => e.code === 'invalid_nota');
+    const rj = await (await resolverCall(env, 10, 'rechazar', { nota: 'Con 12 h el cliente no llega a reorganizarse' })).json();
+    assert.deepEqual([rj.ok, rj.status], [true, 'rejected']);
+    assert.equal(state.solicitudes.find((s) => s.id === 10).nota, 'Con 12 h el cliente no llega a reorganizarse');
+    // Resolver dos veces: 409, no un segundo efecto.
+    await assert.rejects(resolverCall(env, 9, 'aprobar'), (e) => e.code === 'solicitud_resuelta');
+    // El rol cliente no llega ni al handler (clienteAllowed no abre resolver).
+    const path = '/api/admin/solicitudes/9/aprobar';
+    await assert.rejects(testing.adminRouter(adminReq(path, { method: 'POST' }), env, { waitUntil() {} }, path, new URL('https://x' + path), {}, CLIENTE), (e) => e.status === 403);
+  } finally { globalThis.fetch = realFetch; }
+});

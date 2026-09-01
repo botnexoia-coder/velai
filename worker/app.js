@@ -12,6 +12,7 @@ import { tenants as rutasTenants } from './routes/tenants.js';
 import { configuracion as rutasConfig } from './routes/config.js';
 import { conexiones as rutasConexiones } from './routes/conexiones.js';
 import { calendario as rutasCalendario } from './routes/calendario.js';
+import { solicitudes as rutasSolicitudes } from './routes/solicitudes.js';
 import { encryptSecret, decryptSecret } from './crypto.js';
 import { cloudflareConfigured, syncTurnstileDomains, syncAccessGroup, syncAdminGroup, verifyCfToken } from './cloudflare.js';
 import { createSubaccount, fetchSubaccount, findSubaccountByName, createContentTemplate, submitTemplateApproval, fetchApprovalStatus, createWhatsAppSender, verifySender, fetchSenderStatus, listWhatsAppSenders, updateSenderWebhook, updateSenderProfile, fetchSender } from './twilio.js';
@@ -3036,6 +3037,37 @@ export async function pushSenderProfile(env, tenant) {
   }
 }
 
+// Recrea (o crea) la plantilla de un kind del REGISTRO con otra pareja de botones —
+// el camino de la aprobación de una solicitud del cliente. Misma maquinaria que el
+// alta configurable: plantilla NUEVA en Twilio + nueva revisión de Meta (cambiar los
+// botones no se puede en caliente); los payloads conf:/canc: no cambian jamás. El
+// upsert sustituye sid/estado/opciones de la fila y RESETEA la categoría real (la de
+// la plantilla vieja no describe a la nueva — el poll la volverá a leer). La vieja
+// queda en Twilio: histórico y rollback manual. Las credenciales se comprueban ANTES
+// de tocar nada: sin subcuenta o sin token, el error sale limpio y no se aplicó nada.
+export async function recreateTemplateWithOptions(env, ctx, tenant, def, pareja, actor) {
+  if (!tenant.twilio_subaccount_sid) throw new HttpError(400, 'subaccount_required');
+  const token = await twilioAuthTokenFor(env, tenant);
+  if (!token) throw new HttpError(400, 'twilio_auth_token_missing');
+  const credentials = { sid: tenant.twilio_subaccount_sid, token };
+  const now = new Date().toISOString();
+  const { contentSid } = await createContentTemplate(credentials, def.content(tenant.slug, tenant.name, pareja));
+  const opcionesJson = JSON.stringify({ botones: pareja.id, textos: { confirmar: pareja.confirmar, cancelar: pareja.cancelar } });
+  try {
+    await submitTemplateApproval(credentials, contentSid, def.approvalName(tenant.slug), def.categoria);
+    await env.DB.prepare(`INSERT INTO tenant_templates (tenant_id,kind,sid,status,opciones,categoria,created_at,updated_at)
+      VALUES (?,?,?,'pending',?,NULL,?,?)
+      ON CONFLICT(tenant_id,kind) DO UPDATE SET sid=excluded.sid, status='pending', opciones=excluded.opciones, categoria=NULL, updated_at=excluded.updated_at`)
+      .bind(tenant.id, def.kind, contentSid, opcionesJson, now, now).run();
+  } catch (error) {
+    if (error instanceof HttpError) throw error;
+    await provisionOrphan(env, ctx, tenant, `plantilla ${def.kind} (recreación)`, contentSid, error);
+  }
+  await provisionAudit(env, ctx, tenant, actor,
+    `plantilla ${def.approvalName(tenant.slug)} RECREADA (${contentSid}) con botones «${pareja.confirmar}»/«${pareja.cancelar}» — nueva revisión de Meta`);
+  return contentSid;
+}
+
 async function runProvisionStep(request, env, ctx, tenant, tenantId, step, actor) {
   const now = new Date().toISOString();
 
@@ -3872,6 +3904,7 @@ function buildAdminApp() {
   admin.route('/', rutasConversaciones);
   admin.route('/', rutasConexiones);
   admin.route('/', rutasCalendario);
+  admin.route('/', rutasSolicitudes);
   admin.route('/', rutasTenants);
   return admin;
 }

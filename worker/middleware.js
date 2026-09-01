@@ -137,6 +137,9 @@ export function clienteAllowed(path, method) {
   // Sus plantillas, en su espacio (solo lectura): el handler devuelve SOLO su fila
   // (el id sale del scope) y sin sids. La gestión sigue siendo solo de Velai.
   if (path === '/api/admin/plantillas' && method === 'GET') return true;
+  // Sus SOLICITUDES de cambio: crear (validada contra el catálogo, tenant del scope,
+  // 1 pendiente por tipo) y ver las suyas. Aprobar/rechazar sigue siendo solo-Velai.
+  if (path === '/api/admin/solicitudes' && ['GET', 'POST'].includes(method)) return true;
   // Calendario en autoservicio: el cliente conecta y gestiona SU calendario. El
   // handler exige que el :id sea el suyo (ajeno = 404, nunca 403).
   if (/^\/api\/admin\/tenants\/[0-9a-f-]+\/calendar$/i.test(path) && ['GET', 'PATCH', 'DELETE'].includes(method)) return true;

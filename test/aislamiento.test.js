@@ -121,6 +121,16 @@ function adversarialDb() {
       return { rows: [], one: id === B ? { tenant_id: B, google_email: 'ajeno@otro.com', access_token_enc: null, refresh_token_enc: null } : null };
     }
     if (tabla('agent_presence')) return { rows: [], one: null };
+    // Solicitudes de cambio: la de B lleva marcadores en nota y payload — si la
+    // consulta del cliente no filtra por tenant, salen en su respuesta.
+    if (tabla('tenant_solicitudes')) {
+      const todos = [
+        { id: 1, tenant_id: A, tipo: 'plantilla_recordatorio', payload: '{"antelacion":12}', status: 'pending', requested_by: 'cliente@mio.com', nota: null, created_at: '2026-09-01T00:00:00Z', resolved_at: null },
+        { id: 2, tenant_id: B, tipo: 'plantilla_recordatorio', payload: '{"botones":"AJENOSLUG"}', status: 'rejected', requested_by: 'ajeno@otro.com', nota: 'AJENONOMBRE', created_at: '2026-09-01T00:00:00Z', resolved_at: null },
+      ];
+      const rows = filtra(todos, s, args);
+      return { rows, one: rows[0] || null, changes: rows.length };
+    }
     if (tabla('tenant_channels')) {
       const id = args.find((a) => a === A || a === B);
       return { rows: id === B ? [{ tenant_id: B, channel: 'whatsapp', address: 'whatsapp:+34699999999', active: 1 }] : [], one: null };
@@ -159,6 +169,7 @@ const CASOS = [
   { key: '/api/admin/leads/export.csv', m: 'GET', path: () => '/api/admin/leads/export.csv' },
   { key: '/api/admin/appointments', m: 'GET', path: () => '/api/admin/appointments' },
   { key: '/api/admin/plantillas', m: 'GET', path: () => '/api/admin/plantillas' },
+  { key: '/api/admin/solicitudes', m: ['GET', 'POST'], path: () => '/api/admin/solicitudes', body: { tipo: 'plantilla_recordatorio', antelacion: 12 } },
   { key: 'calendar$', m: ['GET', 'PATCH', 'DELETE'], path: (t) => `/api/admin/tenants/${t}/calendar`, body: { active: true } },
   { key: 'calendar\\/connect$', m: 'POST', path: (t) => `/api/admin/tenants/${t}/calendar/connect` },
   { key: 'telegram$', m: ['GET', 'DELETE'], path: (t) => `/api/admin/tenants/${t}/telegram` },
