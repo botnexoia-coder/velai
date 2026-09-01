@@ -7,6 +7,7 @@ import { Leads } from './views/Leads';
 import { Conversaciones } from './views/Conversaciones';
 import { Pendiente } from './views/Pendiente';
 import { Configuracion } from './views/Configuracion';
+import { Canales } from './views/Canales';
 import { TipHost } from './components/Tip';
 
 export function App() {
@@ -20,7 +21,7 @@ export function App() {
           <Route path="/calendario" element={<Pendiente titulo="Calendario" />} />
           <Route path="/conexiones" element={<Pendiente titulo="Conexiones" />} />
           <Route path="/clientes" element={<Pendiente titulo="Clientes" />} />
-          <Route path="/canales" element={<Pendiente titulo="Canales" />} />
+          <Route path="/canales" element={<Canales />} />
           <Route path="/configuracion" element={<Configuracion />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Route>
