@@ -1,6 +1,10 @@
 # SPEC — Confirmaciones de cita por WhatsApp (módulo tipo Confirmafy)
 
-> Estado: BORRADOR para decisión de Juan (2026-09-01). Investigación: Confirmafy vende
+> Estado: DECIDIDO (Juan, 2026-09-01) — EN IMPLEMENTACIÓN.
+> Decisiones: (1) ADDON que Velai habilita por cliente (interruptor solo-Velai; el
+> cliente lo ve). (2) Antelación única de 24 h. (3) Primera entrega = F1+F2 juntas
+> (recordatorio+confirmación Y reagendado conversacional). (4) Nombre: «Confirmaciones»,
+> dentro de la vista Calendario del panel (opera sobre citas; sin navegación propia). Investigación: Confirmafy vende
 > recordatorio + confirmación de citas por WhatsApp (el cliente responde Sí/No), sincronía
 > con Google Calendar, autoagenda por enlace y reportes; cobra por volumen de citas
 > (~12–31 USD/mes por 50–200 citas). Su cliente tipo es el nuestro: clínicas, estética,
@@ -28,7 +32,8 @@ actualizar la cita. Todo lo demás es reutilización.
      kind ('previo_24h' | 'previo_2h'), status, attempts, next_attempt_at, sent_at, error.
    - `appointments`: + `customer_confirmed_at TEXT`, + `cancelled_by TEXT` ('customer'|'business'),
      y ampliar CHECK de status si hace falta (se mantiene confirmed/cancelled/error).
-   - `tenants`: + `reminder_hours TEXT` (default `'24'`; CSV, p. ej. `'24,2'`),
+   - `tenants`: + `reminder_hours TEXT` (default `'24'`; CSV por si un día se amplía —
+     la decisión de Juan es 24 h única),
      + `reminder_template_sid` / `reminder_template_status` (mismo ciclo de aprobación que
      la plantilla de leads), + `reminders_enabled INTEGER DEFAULT 0` (opt-in por tenant).
 2. **Plantilla WhatsApp** (categoría **Utility**, recordatorio = mensaje iniciado por el
