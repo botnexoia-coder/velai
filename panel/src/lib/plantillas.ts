@@ -17,14 +17,6 @@ export function estadoDeCelda(celda: PlantillaCelda | undefined | null): EstadoP
   return 'pending';
 }
 
-/** Comparación de nombres sin acentos ni mayúsculas (mismo criterio que chNorm de
- *  lib/canales: buscar «lopez» tiene que encontrar «López»). */
-export function sinAcentos(s: string): string {
-  return s
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .toLowerCase();
-}
 
 /** Un chip de cliente dentro de la tarjeta de un kind. */
 export interface ChipCliente {
@@ -53,14 +45,16 @@ export interface ChipsFiltrados {
   atenuada: boolean;
 }
 
-export function filtraChips(chips: ChipCliente[], q: string, estado: EstadoPlantilla | ''): ChipsFiltrados {
-  const needle = sinAcentos(q.trim());
-  const delCliente = needle ? chips.filter((c) => sinAcentos(c.name).includes(needle)) : chips;
+// El filtro de cliente es EXACTO por id (viene de un desplegable, no de texto libre):
+// el patrón de cliente del resto del panel. La búsqueda sin acentos se fue con el
+// buscador — un select no tiene faltas de ortografía.
+export function filtraChips(chips: ChipCliente[], clienteId: string, estado: EstadoPlantilla | ''): ChipsFiltrados {
+  const delCliente = clienteId ? chips.filter((c) => c.id === clienteId) : chips;
   const visibles = estado ? delCliente.filter((c) => c.estado === estado) : delCliente;
   return {
     visibles,
     ocultos: delCliente.length - visibles.length,
-    atenuada: Boolean(needle) && delCliente.length === 0,
+    atenuada: Boolean(clienteId) && delCliente.length === 0,
   };
 }
 

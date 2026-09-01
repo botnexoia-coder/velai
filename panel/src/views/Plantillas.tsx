@@ -17,7 +17,7 @@ import { useState } from 'react';
 import { confirmar } from '../components/Confirmar';
 import { traducir } from '../api/errors';
 import { useToast } from '../components/Toasts';
-import { IcoClock, IcoSearch, IcoTick, IcoX } from '../components/icons';
+import { IcoClock, IcoTick, IcoX } from '../components/icons';
 import { chipsDeKind, cuentaPlantillas, filtraChips, resumenKind, type ChipCliente, type EstadoPlantilla } from '../lib/plantillas';
 import { useMe, usePlantillas, useTemplateCreate } from '../hooks/queries';
 import type { PlantillaKind, PlantillasResponse } from '../api/types';
@@ -35,7 +35,7 @@ export function Plantillas() {
   // La defensa real es del worker (403 al rol cliente); el enabled solo evita una
   // llamada que sabemos condenada si alguien teclea la URL a mano.
   const { data, error } = usePlantillas(isVelai === true);
-  const [q, setQ] = useState('');
+  const [clienteId, setClienteId] = useState('');
   const [estado, setEstado] = useState<EstadoPlantilla | ''>('');
 
   const n = data ? cuentaPlantillas(data) : null;
@@ -58,10 +58,19 @@ export function Plantillas() {
         </div>
         {data ? (
           <div className="plctrl">
-            <label className="search">
-              <IcoSearch />
-              <input className="q" placeholder="Buscar cliente…" value={q} onChange={(e) => setQ(e.target.value)} />
-            </label>
+            {/* Desplegable y no texto libre (pedido de Juan): es el patrón de cliente del
+                resto del panel (Leads, Conversaciones) y con un conjunto CERRADO de
+                clientes, elegir gana a teclear. */}
+            <span className="sel">
+              <select aria-label="Filtrar por cliente" value={clienteId} onChange={(e) => setClienteId(e.target.value)}>
+                <option value="">Todos los clientes</option>
+                {data.tenants.map((t) => (
+                  <option key={t.id} value={t.id}>
+                    {t.name}
+                  </option>
+                ))}
+              </select>
+            </span>
             <div className="plpills" role="group" aria-label="Filtrar por estado">
               {pills.map((p) => (
                 <button
@@ -79,7 +88,7 @@ export function Plantillas() {
         ) : null}
       </div>
       {error ? <p className="error">{traducir(error)}</p> : null}
-      {data ? data.kinds.map((k) => <KindCard key={k.kind} k={k} data={data} q={q} estado={estado} onTodas={() => setEstado('')} />) : null}
+      {data ? data.kinds.map((k) => <KindCard key={k.kind} k={k} data={data} clienteId={clienteId} estado={estado} onTodas={() => setEstado('')} />) : null}
       <p className="muted mt12">
         El cuerpo de cada plantilla vive en el código (es un contrato con quien la envía); aquí se gestiona su alta y
         su estado por cliente. El worker revisa la aprobación de Meta cada 5 minutos y avisa por Telegram cuando una
@@ -92,18 +101,18 @@ export function Plantillas() {
 function KindCard({
   k,
   data,
-  q,
+  clienteId,
   estado,
   onTodas,
 }: {
   k: PlantillaKind;
   data: PlantillasResponse;
-  q: string;
+  clienteId: string;
   estado: EstadoPlantilla | '';
   onTodas: () => void;
 }) {
   const chips = chipsDeKind(data, k.kind);
-  const { visibles, ocultos, atenuada } = filtraChips(chips, q, estado);
+  const { visibles, ocultos, atenuada } = filtraChips(chips, clienteId, estado);
   return (
     <div className={`panelcard plk${atenuada ? ' atenuada' : ''}`}>
       <div className="plk-head">

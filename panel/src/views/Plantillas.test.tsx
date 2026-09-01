@@ -1,5 +1,5 @@
 // Plantillas (rediseño «por plantilla»): la lógica pura del filtrado y la vista —
-// una tarjeta por kind, chips-píldora por estado, buscador sin acentos que atenúa,
+// una tarjeta por kind, chips-píldora por estado, desplegable de cliente que atenúa,
 // contador-filtro con «+N más», «Crear» solo donde toca y la legacy sin botón.
 import { QueryClientProvider } from '@tanstack/react-query';
 import { render, screen, waitFor } from '@testing-library/react';
@@ -8,7 +8,7 @@ import { MemoryRouter } from 'react-router';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createQueryClient } from '../api/queryClient';
 import { ToastProvider } from '../components/Toasts';
-import { chipsDeKind, cuentaPlantillas, estadoDeCelda, filtraChips, resumenKind, sinAcentos } from '../lib/plantillas';
+import { chipsDeKind, cuentaPlantillas, estadoDeCelda, filtraChips, resumenKind } from '../lib/plantillas';
 import { meVelai, mockFetch } from '../test/fixtures';
 import { Plantillas } from './Plantillas';
 import type { PlantillasResponse } from '../api/types';
@@ -64,26 +64,26 @@ describe('lógica pura del filtrado de Plantillas', () => {
     expect(estadoDeCelda({ sid: 'x', status: 'inventado', updated_at: null })).toBe('pending');
   });
 
-  it('el buscador iguala sin acentos y OCULTA los chips que no casan (sin plegarlos)', () => {
-    expect(sinAcentos('López')).toBe('lopez');
-    const r = filtraChips(chips, 'lopez', '');
+  it('el desplegable de cliente filtra EXACTO por id y OCULTA los chips que no casan (sin plegarlos)', () => {
+    // Desplegable, no texto libre (pedido de Juan): patrón de cliente del resto del panel.
+    const r = filtraChips(chips, '22222222-2222-4222-8222-222222222222', '');
     expect(r.visibles.map((c) => c.name)).toEqual(['Barbería López']);
-    expect(r.ocultos).toBe(0); // lo que quita el buscador NO va al «+N más»
+    expect(r.ocultos).toBe(0); // lo que quita el filtro de cliente NO va al «+N más»
     expect(r.atenuada).toBe(false);
-    // Sin coincidencias en la tarjeta: se atenúa, nunca desaparece.
-    expect(filtraChips(chips, 'zzz', '').atenuada).toBe(true);
+    // Un id que no está en esta tarjeta: se atenúa, nunca desaparece.
+    expect(filtraChips(chips, 'ffffffff-ffff-4fff-8fff-ffffffffffff', '').atenuada).toBe(true);
   });
 
-  it('el filtro de estado PLIEGA el resto en ocultos, y compone con el buscador', () => {
+  it('el filtro de estado PLIEGA el resto en ocultos, y compone con el de cliente', () => {
     const r = filtraChips(chips, '', 'rejected');
     expect(r.visibles.map((c) => c.name)).toEqual(['Barbería López']);
     expect(r.ocultos).toBe(2); // pending de Alfa + sin de Gama
-    expect(r.atenuada).toBe(false); // el estado no atenúa: eso es solo del buscador
+    expect(r.atenuada).toBe(false); // el estado no atenúa: eso es solo del filtro de cliente
     // Compuestos: cliente Y estado a la vez.
-    const both = filtraChips(chips, 'alfa', 'pending');
+    const both = filtraChips(chips, '11111111-1111-4111-8111-111111111111', 'pending');
     expect(both.visibles.map((c) => c.name)).toEqual(['Clínica Alfa']);
     expect(both.ocultos).toBe(0);
-    expect(filtraChips(chips, 'alfa', 'rejected')).toEqual({ visibles: [], ocultos: 1, atenuada: false });
+    expect(filtraChips(chips, '11111111-1111-4111-8111-111111111111', 'rejected')).toEqual({ visibles: [], ocultos: 1, atenuada: false });
   });
 
   it('resumen por tarjeta con plurales, y recuentos globales con «todas»', () => {
@@ -95,6 +95,11 @@ describe('lógica pura del filtrado de Plantillas', () => {
 });
 
 describe('vista Plantillas (rediseño por plantilla)', () => {
+  // El desplegable de cliente mete cada nombre TAMBIÉN como <option>: las consultas por
+  // texto deben contar solo los chips, no las opciones del select.
+  const chipsDe = (nombre: string) => screen.getAllByText(nombre).filter((e) => e.tagName !== 'OPTION');
+  const sinChips = (nombre: string) => screen.queryAllByText(nombre).filter((e) => e.tagName !== 'OPTION').length === 0;
+
   afterEach(() => vi.unstubAllGlobals());
 
   function renderVista(resp: PlantillasResponse = RESP) {
@@ -137,39 +142,35 @@ describe('vista Plantillas (rediseño por plantilla)', () => {
     expect(screen.getByRole('button', { name: /Rechazadas 1/ })).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: /Rechazadas 1/ }));
     // En la tarjeta del recordatorio queda solo López; el resto plegado en «+2 más».
-    expect(screen.getByText('Barbería López')).toBeInTheDocument();
-    expect(screen.queryByText('Taller Gama')).toBeNull();
+    expect(chipsDe('Barbería López').length).toBeGreaterThan(0);
+    expect(sinChips('Taller Gama')).toBe(true);
     expect(screen.getByRole('button', { name: '+2 más' })).toBeInTheDocument();
     // Los recuentos NO cambian al filtrar.
     expect(screen.getByRole('button', { name: /Todas 6/ })).toBeInTheDocument();
     // El «+N más» restaura «Todas».
     await user.click(screen.getByRole('button', { name: '+2 más' }));
-    await waitFor(() => expect(screen.getAllByText('Taller Gama').length).toBe(2));
+    await waitFor(() => expect(chipsDe('Taller Gama').length).toBe(2));
     expect(screen.getByRole('button', { name: /Todas 6/ })).toHaveAttribute('aria-pressed', 'true');
   });
 
-  it('el buscador (sin acentos) filtra chips y atenúa la tarjeta sin coincidencias', async () => {
+  it('el desplegable de cliente filtra chips en todas las tarjetas', async () => {
     const user = userEvent.setup();
     renderVista();
-    await waitFor(() => expect(screen.getByPlaceholderText('Buscar cliente…')).toBeInTheDocument());
-    await user.type(screen.getByPlaceholderText('Buscar cliente…'), 'lopez');
-    // «lopez» (sin acento) encuentra a «Barbería López» en las dos tarjetas y
-    // esconde a los demás — sin plegarlos: lo del buscador se OCULTA, no va al «+N más».
-    expect(screen.getAllByText('Barbería López').length).toBe(2);
-    expect(screen.queryByText('Clínica Alfa')).toBeNull();
+    await waitFor(() => expect(screen.getByRole('combobox', { name: 'Filtrar por cliente' })).toBeInTheDocument());
+    await user.selectOptions(screen.getByRole('combobox', { name: 'Filtrar por cliente' }), 'Barbería López');
+    // Elegir a López lo deja solo en las dos tarjetas y esconde a los demás — sin
+    // plegarlos: lo del filtro de cliente se OCULTA, no va al «+N más».
+    expect(chipsDe('Barbería López').length).toBe(2);
+    expect(sinChips('Clínica Alfa')).toBe(true);
     expect(screen.queryByText(/más$/)).toBeNull();
     expect(screen.getByText('Aviso de lead').closest('.plk')?.className).not.toContain('atenuada');
-    // Sin coincidencias en NINGUNA tarjeta: se atenúan sin desaparecer — el catálogo
-    // entero sigue a la vista.
-    await user.clear(screen.getByPlaceholderText('Buscar cliente…'));
-    await user.type(screen.getByPlaceholderText('Buscar cliente…'), 'zzz');
-    expect(screen.getByText('Aviso de lead').closest('.plk')?.className).toContain('atenuada');
-    expect(screen.getByText('Recordatorio de cita (Confirmaciones)').closest('.plk')?.className).toContain('atenuada');
+    // El desplegable enseña TODOS los clientes como opciones.
+    expect(screen.getAllByRole('option').length).toBe(1 + 3); // «Todos» + 3 clientes
   });
 
   it('«Crear» solo en celdas sin crear del registro; la legacy remite a su paso', async () => {
     renderVista();
-    await waitFor(() => expect(screen.getAllByText('Taller Gama').length).toBe(2));
+    await waitFor(() => expect(chipsDe('Taller Gama').length).toBe(2));
     // Gama sin recordatorio (registro) → botón Crear dentro del chip discontinuo.
     const botones = screen.getAllByRole('button', { name: 'Crear' });
     expect(botones.length).toBe(1);
