@@ -12,6 +12,20 @@
 
 ---
 
+## Marketing consolidado en site/ — la raíz del repo queda limpia (2026-09-01)
+
+Pedido de Juan («no quiero ver más carpetas y carpetas de HTML»). Ejecutado el plan de
+PLAN-SITE.md en dos tiempos sin un segundo de ventana: copia a `site/` (convivencia) →
+flip del «build output directory» del proyecto Pages a `site` (dashboard, Juan) →
+retirada de los originales. URLs idénticas antes y después (checklist en caliente: home,
+blog, verticales, lp con pauta, widget de clientes como application/javascript, CORS de
+fuentes, robots/sitemap — todo 200).
+
+Raíz resultante: `site/` (marketing entero), `panel/` (React), `worker/` (API) + infra
+(docs, migrations, test, scripts, seed, tenants). Ganancia de seguridad de raíz: el
+repo ya no es descargable por URL — las apps de Access que tapaban /worker/* y demás
+quedan como defensa en profundidad (se pueden retirar cuando se quiera; no estorban).
+
 ## Cutover del panel v2 (2026-09-01)
 
 `PANEL_V2 = "1"` en producción: el panel React de `panel/` es EL panel de
