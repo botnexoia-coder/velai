@@ -968,6 +968,11 @@ test('fuga B3: rutas prohibidas para cliente → 403 sin tocar datos', async () 
     ['/api/admin/leads/' + LEADS[0].id, 'DELETE'],
     ['/api/admin/leads/' + LEADS[0].id + '/retry', 'POST'],
     ['/api/admin/tenants/00000000-0000-4000-8000-000000000001/preview', 'POST'],
+    // Resolver solicitudes es SOLO de Velai: un cliente que aprobara la suya se saltaría
+    // el punto entero del flujo (pedir ≠ aplicar). Doble defensa en código (fuera de
+    // clienteAllowed + veto de rol en el handler); esto la clava por test.
+    ['/api/admin/solicitudes/00000000-0000-4000-8000-000000000001/aprobar', 'POST'],
+    ['/api/admin/solicitudes/00000000-0000-4000-8000-000000000001/rechazar', 'POST'],
   ];
   for (const [path, method] of forbidden) {
     const before = db.queries.length;
