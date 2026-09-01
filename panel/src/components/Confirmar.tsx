@@ -33,22 +33,23 @@ export interface PedirTextoOpts {
 }
 
 type Peticion =
-  | { tipo: 'confirmar'; opts: ConfirmarOpts; resolve: (v: boolean) => void }
-  | { tipo: 'texto'; opts: PedirTextoOpts; resolve: (v: string | null) => void };
+  | { id: number; tipo: 'confirmar'; opts: ConfirmarOpts; resolve: (v: boolean) => void }
+  | { id: number; tipo: 'texto'; opts: PedirTextoOpts; resolve: (v: string | null) => void };
 
 let abrir: ((p: Peticion) => void) | null = null;
+let siguienteId = 1;
 
 export function confirmar(opts: ConfirmarOpts): Promise<boolean> {
   return new Promise((resolve) => {
     if (!abrir) return resolve(window.confirm(opts.cuerpo ? `${opts.titulo}\n\n${opts.cuerpo}` : opts.titulo));
-    abrir({ tipo: 'confirmar', opts, resolve });
+    abrir({ id: siguienteId++, tipo: 'confirmar', opts, resolve });
   });
 }
 
 export function pedirTexto(opts: PedirTextoOpts): Promise<string | null> {
   return new Promise((resolve) => {
     if (!abrir) return resolve(window.prompt(opts.titulo, opts.inicial ?? ''));
-    abrir({ tipo: 'texto', opts, resolve });
+    abrir({ id: siguienteId++, tipo: 'texto', opts, resolve });
   });
 }
 
@@ -56,7 +57,11 @@ export function ConfirmarHost() {
   // Cola, no valor único: dos confirmaciones seguidas (raro pero posible con toasts de
   // error de por medio) no pueden pisarse la promesa una a la otra.
   const [cola, setCola] = useState<Peticion[]>([]);
-  const [texto, setTexto] = useState('');
+  // El campo de pedirTexto es NO CONTROLADO (defaultValue + key por petición + ref):
+  // la versión controlada lo pre-rellenaba en un useEffect y existía un frame con el
+  // input vacío — en el runner lento de CI, los tests llegaban justo a ese frame
+  // (flaky real, run 33490470320). Sin estado no hay frame intermedio que cazar.
+  const inputRef = useRef<HTMLInputElement>(null);
   const dlgRef = useRef<HTMLDialogElement>(null);
   const actual = cola[0];
 
@@ -68,7 +73,6 @@ export function ConfirmarHost() {
   useEffect(() => {
     const d = dlgRef.current;
     if (!actual || !d || d.open) return;
-    setTexto(actual.tipo === 'texto' ? (actual.opts.inicial ?? '') : '');
     // jsdom y navegadores viejos pueden no tener showModal: el atributo open pierde el
     // backdrop pero el diálogo funciona.
     try { d.showModal(); } catch { d.setAttribute('open', ''); }
@@ -78,7 +82,7 @@ export function ConfirmarHost() {
 
   const resolver = (positivo: boolean) => {
     if (actual.tipo === 'confirmar') actual.resolve(positivo);
-    else actual.resolve(positivo ? texto.trim() : null);
+    else actual.resolve(positivo ? (inputRef.current?.value ?? '').trim() : null);
     try { dlgRef.current?.close(); } catch { dlgRef.current?.removeAttribute('open'); }
     setCola((c) => c.slice(1));
   };
@@ -104,10 +108,11 @@ export function ConfirmarHost() {
         {actual.opts.cuerpo ? <p className="cfm-cuerpo">{actual.opts.cuerpo}</p> : null}
         {actual.tipo === 'texto' ? (
           <input
+            key={actual.id}
+            ref={inputRef}
             className="cfm-input"
-            value={texto}
+            defaultValue={actual.opts.inicial ?? ''}
             placeholder={actual.opts.placeholder ?? ''}
-            onChange={(e) => setTexto(e.target.value)}
             // eslint-disable-next-line jsx-a11y/no-autofocus -- es un diálogo modal de un solo campo
             autoFocus
           />
