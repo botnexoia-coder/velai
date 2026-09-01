@@ -107,6 +107,9 @@ export function Shell() {
           <Tab to="/conversaciones" label="Conversaciones" icon={<IcoChat />} />
           <Tab to="/calendario" label="Calendario" icon={<IcoCalendar />} />
           <Tab to="/conexiones" label="Conexiones" icon={<IcoLink />} />
+          {/* El cliente ve SUS plantillas (solo lectura) aquí, tras Conexiones — no
+              tiene sección Sistema. Velai la sigue teniendo en Sistema, abajo. */}
+          {isCliente ? <Tab to="/plantillas" label="Plantillas" icon={<IcoTemplate />} /> : null}
           {isVelai ? <Tab to="/clientes" label="Clientes" icon={<IcoBriefcase />} /> : null}
           {isVelai ? <Tab to="/canales" label="Canales" icon={<IcoChannels />} /> : null}
         </nav>

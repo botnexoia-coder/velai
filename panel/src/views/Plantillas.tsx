@@ -32,10 +32,90 @@ const CHIP: Record<Exclude<EstadoPlantilla, 'sin'>, { cls: string; icon: React.R
 
 export function Plantillas() {
   const { data: me } = useMe();
-  const isVelai = me?.role === 'velai';
-  // La defensa real es del worker (403 al rol cliente); el enabled solo evita una
-  // llamada que sabemos condenada si alguien teclea la URL a mano.
-  const { data, error } = usePlantillas(isVelai === true);
+  const isCliente = me?.role === 'cliente';
+  // La ruta sirve a AMBOS roles (decisión de Juan): la defensa real es del worker,
+  // que al cliente le devuelve SOLO su fila y sin sids.
+  const { data, error } = usePlantillas(Boolean(me?.role));
+  if (isCliente) return <PlantillasCliente data={data} error={error} />;
+  return <PlantillasVelai data={data} error={error} />;
+}
+
+// ── Vista del CLIENTE: solo lectura — sus plantillas y lo que ve su cliente final ──
+// Estados en su idioma, y la pieza central: la vista previa estilo WhatsApp del
+// mensaje real, con LOS BOTONES QUE ÉL TIENE elegidos (tenant_templates.opciones de
+// su fila; sin opciones o sin plantilla, la pareja por defecto del catálogo).
+// SIN botones de crear ni interruptores: la gestión sigue siendo de Velai.
+function PlantillasCliente({ data, error }: { data: PlantillasResponse | undefined; error: unknown }) {
+  const mio = data?.tenants[0] ?? null;
+  return (
+    <div>
+      <div className="vhead">
+        <div>
+          <h1>Plantillas</h1>
+          <p>Los mensajes automáticos que enviamos por WhatsApp en tu nombre</p>
+        </div>
+      </div>
+      {error ? <p className="error">{traducir(error)}</p> : null}
+      {data && mio
+        ? data.kinds.map((k) => <KindCardCliente key={k.kind} k={k} celda={mio.plantillas[k.kind]} />)
+        : null}
+      <p className="muted mt12">
+        Estas plantillas las gestiona el equipo de Velai y las revisa WhatsApp antes de poder enviarse. ¿Quieres
+        activar alguna o cambiar algo? Escríbenos y lo dejamos listo.
+      </p>
+    </div>
+  );
+}
+
+// El estado, en palabras del cliente — nada de jerga de aprobaciones de Meta.
+function estadoCliente(celda: PlantillasResponse['tenants'][number]['plantillas'][string]): { cls: string; label: string } {
+  const status = celda?.status ?? null;
+  if (!status) return { cls: 'off', label: 'Aún no creada' };
+  if (status === 'approved') return { cls: 'ok', label: 'Activa ✓' };
+  if (status === 'rejected') return { cls: 'bad', label: 'Rechazada — estamos en ello' };
+  return { cls: '', label: 'En revisión por WhatsApp' };
+}
+
+function KindCardCliente({
+  k,
+  celda,
+}: {
+  k: PlantillaKind;
+  celda: PlantillasResponse['tenants'][number]['plantillas'][string];
+}) {
+  const estado = estadoCliente(celda);
+  // Los botones de SU plantilla: lo elegido al crearla; sin opciones (o aún sin
+  // plantilla), la pareja por defecto del catálogo.
+  const defaultPareja = k.config?.botones?.find((b) => b.id === k.config?.botonesDefault) ?? k.config?.botones?.[0] ?? null;
+  const textos = celda?.opciones?.textos ?? defaultPareja;
+  return (
+    <div className="panelcard plk">
+      <div className="plk-head">
+        <b>{k.label}</b>
+        <span className={`flag ${estado.cls}`.trim()}>{estado.label}</span>
+        {k.descripcion ? <span className="plk-desc">{k.descripcion}</span> : null}
+      </div>
+      {k.config?.preview ? (
+        <>
+          <p className="muted mt6">Así le llega a tu cliente{k.kind === 'aviso_lead' ? ' (a tu equipo)' : ''}:</p>
+          <div className="wapre">
+            <div className="wapre-body">{k.config.preview}</div>
+            {k.config.botones && textos ? (
+              <div className="wapre-btns">
+                <span>{textos.confirmar}</span>
+                <span>{textos.cancelar}</span>
+              </div>
+            ) : null}
+          </div>
+          {!celda?.status ? <p className="muted mt6">Así se verá cuando se cree. ¿Quieres activarla? Escríbenos.</p> : null}
+        </>
+      ) : null}
+    </div>
+  );
+}
+
+// ── Vista de VELAI: la matriz global, tal cual (ni un píxel cambia) ───────────
+function PlantillasVelai({ data, error }: { data: PlantillasResponse | undefined; error: unknown }) {
   const [clienteId, setClienteId] = useState('');
   const [estado, setEstado] = useState<EstadoPlantilla | ''>('');
 

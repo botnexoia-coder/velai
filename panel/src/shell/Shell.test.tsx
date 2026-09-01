@@ -60,6 +60,8 @@ describe('shell y navegación por rol', () => {
     expect(screen.getByRole('tab', { name: /calendario/i })).toBeInTheDocument();
     // …y las de Velai, no (la defensa real es del worker; esto es la interfaz).
     await waitFor(() => expect(document.body.classList.contains('cliente')).toBe(true));
+    // Sus plantillas (solo lectura) también son suyas, tras Conexiones.
+    expect(screen.getByRole('tab', { name: /plantillas/i })).toBeInTheDocument();
     expect(screen.queryByRole('tab', { name: /clientes/i })).toBeNull();
     expect(screen.queryByRole('tab', { name: /canales/i })).toBeNull();
     expect(screen.queryByRole('tab', { name: /configuración/i })).toBeNull();

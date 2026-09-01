@@ -9,7 +9,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createQueryClient } from '../api/queryClient';
 import { ToastProvider } from '../components/Toasts';
 import { chipsDeKind, cuentaPlantillas, estadoDeCelda, filtraChips, resumenKind } from '../lib/plantillas';
-import { meVelai, mockFetch } from '../test/fixtures';
+import { meCliente, meVelai, mockFetch } from '../test/fixtures';
 import { Plantillas } from './Plantillas';
 import type { PlantillasResponse } from '../api/types';
 
@@ -32,7 +32,11 @@ const RESP: PlantillasResponse = {
         botonesDefault: 'confirmo_cancelar',
       },
     },
-    { kind: 'aviso_lead', label: 'Aviso de lead', fuente: 'columnas', categoria: 'UTILITY', descripcion: 'Avisa al equipo del negocio.' },
+    {
+      kind: 'aviso_lead', label: 'Aviso de lead', fuente: 'columnas', categoria: 'UTILITY',
+      descripcion: 'Avisa al equipo del negocio.',
+      config: { preview: '🔥 Nuevo lead – Clínica Ejemplo\n\n📱 WhatsApp: 34612345678\n👤 Nombre: María' },
+    },
   ],
   tenants: [
     {
@@ -199,5 +203,84 @@ describe('vista Plantillas (rediseño por plantilla)', () => {
     expect(screen.getByLabelText('Antelación del recordatorio')).toBeInTheDocument();
     expect(screen.getAllByRole('radio').length).toBe(2);
     expect(screen.getByText(/Hola María, te escribimos de Clínica Ejemplo/)).toBeInTheDocument();
+  });
+});
+
+describe('vista Plantillas del CLIENTE (solo lectura)', () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  // Lo que el worker devuelve al rol cliente: SOLO su fila, sin sids, con sus opciones.
+  const RESP_CLIENTE: PlantillasResponse = {
+    kinds: RESP.kinds,
+    tenants: [
+      {
+        id: meCliente.tenantId!,
+        slug: 'barberia-lopez',
+        name: 'Barbería López',
+        active: 1,
+        plantillas: {
+          recordatorio_cita: {
+            status: 'approved',
+            updated_at: '2026-09-01T10:00:00Z',
+            opciones: { botones: 'si_voy_no_puedo', textos: { confirmar: 'Sí, voy', cancelar: 'No puedo ir' } },
+          },
+          // aviso_lead sin crear: ni celda.
+        },
+      },
+    ],
+  };
+
+  function renderCliente(resp: PlantillasResponse = RESP_CLIENTE) {
+    vi.stubGlobal('fetch', mockFetch({ '/api/admin/me': meCliente, '/api/admin/plantillas': resp }));
+    render(
+      <QueryClientProvider client={createQueryClient()}>
+        <ToastProvider>
+          <MemoryRouter>
+            <Plantillas />
+          </MemoryRouter>
+        </ToastProvider>
+      </QueryClientProvider>,
+    );
+  }
+
+  it('una tarjeta por kind con el estado en SU idioma y la preview con SUS botones', async () => {
+    renderCliente();
+    await waitFor(() => expect(screen.getByText('Recordatorio de cita (Confirmaciones)')).toBeInTheDocument());
+    // Estado en palabras del cliente, no jerga de Meta.
+    expect(screen.getByText('Activa ✓')).toBeInTheDocument();
+    expect(screen.getByText('Aún no creada')).toBeInTheDocument();
+    // La pieza central: la preview estilo WhatsApp con LOS BOTONES QUE ÉL eligió.
+    expect(screen.getByText(/Hola María, te escribimos de Clínica Ejemplo/)).toBeInTheDocument();
+    const botones = [...document.querySelectorAll('.wapre-btns span')].map((e) => e.textContent);
+    expect(botones).toEqual(['Sí, voy', 'No puedo ir']);
+    // aviso_lead también se previsualiza (sin botones: es texto), con su nota de sin crear.
+    expect(screen.getByText(/Nuevo lead – Clínica Ejemplo/)).toBeInTheDocument();
+    expect(screen.getByText(/Así se verá cuando se cree/)).toBeInTheDocument();
+    expect(screen.getByText(/Escríbenos y lo dejamos listo/)).toBeInTheDocument();
+  });
+
+  it('cero gestión: sin crear, sin enviar, sin interruptores ni filtros de la matriz', async () => {
+    renderCliente();
+    await waitFor(() => expect(screen.getByText('Activa ✓')).toBeInTheDocument());
+    expect(screen.queryByRole('button', { name: /Crear/ })).toBeNull();
+    expect(screen.queryByRole('button', { name: /Enviar a aprobación/ })).toBeNull();
+    expect(screen.queryByRole('button', { name: /Activar|Desactivar/ })).toBeNull();
+    expect(screen.queryByRole('button', { name: /Todas/ })).toBeNull();
+    expect(screen.queryByLabelText('Filtrar por cliente')).toBeNull();
+    // El subtítulo habla en su idioma.
+    expect(screen.getByText('Los mensajes automáticos que enviamos por WhatsApp en tu nombre')).toBeInTheDocument();
+  });
+
+  it('sin opciones guardadas, la preview usa la pareja por defecto del catálogo', async () => {
+    renderCliente({
+      kinds: RESP.kinds,
+      tenants: [{
+        id: meCliente.tenantId!, slug: 'barberia-lopez', name: 'Barbería López', active: 1,
+        plantillas: { recordatorio_cita: { status: 'pending', updated_at: null, opciones: null } },
+      }],
+    });
+    await waitFor(() => expect(screen.getByText('En revisión por WhatsApp')).toBeInTheDocument());
+    const botones = [...document.querySelectorAll('.wapre-btns span')].map((e) => e.textContent);
+    expect(botones).toEqual(['Confirmo', 'Cancelar']);
   });
 });

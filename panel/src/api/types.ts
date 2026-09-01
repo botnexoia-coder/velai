@@ -712,9 +712,12 @@ export type WeekHours = Record<string, [string, string][]>;
 /** Estado de UNA plantilla de un cliente. updated_at null en las legacy de columnas
  *  (aviso_lead): las columnas no guardan cuándo cambió ESA plantilla. */
 export interface PlantillaCelda {
-  sid: string | null;
+  /** Ausente para el rol cliente: el sid es dato operativo de Velai. */
+  sid?: string | null;
   status: string | null;
   updated_at: string | null;
+  /** Lo elegido al crearla (0031). null = creada sin opciones → defaults del catálogo. */
+  opciones?: { botones?: string; textos?: { confirmar: string; cancelar: string } } | null;
 }
 /** Una pareja de botones CURADA del catálogo (nunca texto libre — decisión de Juan). */
 export interface ParejaBotones {
