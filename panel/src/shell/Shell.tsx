@@ -24,6 +24,7 @@ import {
   IcoMoon,
   IcoSliders,
   IcoSun,
+  IcoTemplate,
 } from '../components/icons';
 
 const SS_DARK = 'velai-panel-dark';
@@ -113,6 +114,7 @@ export function Shell() {
           <>
             <div className="navlabel">Sistema</div>
             <nav className="tabs">
+              <Tab to="/plantillas" label="Plantillas" icon={<IcoTemplate />} />
               <Tab to="/configuracion" label="Configuración" icon={<IcoSliders />} />
             </nav>
           </>

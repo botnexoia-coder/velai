@@ -707,3 +707,24 @@ export interface AppointmentsResponse {
 
 /** Horario semanal ya parseado: {mon: [["09:00","19:00"], …], …}. */
 export type WeekHours = Record<string, [string, string][]>;
+
+// ── Vista «Plantillas» (solo velai) ──────────────────────────────────────────
+/** Estado de UNA plantilla de un cliente. updated_at null en las legacy de columnas
+ *  (aviso_lead): las columnas no guardan cuándo cambió ESA plantilla. */
+export interface PlantillaCelda {
+  sid: string | null;
+  status: string | null;
+  updated_at: string | null;
+}
+/** GET /api/admin/plantillas — matriz clientes × kinds del catálogo (worker/plantillas.js). */
+export interface PlantillasResponse {
+  kinds: { kind: string; label: string; fuente: 'registro' | 'columnas' }[];
+  /** Activos primero (orden del SQL). `plantillas` solo trae los kinds que existen. */
+  tenants: {
+    id: string;
+    slug: string;
+    name: string;
+    active: number;
+    plantillas: Record<string, PlantillaCelda | undefined>;
+  }[];
+}

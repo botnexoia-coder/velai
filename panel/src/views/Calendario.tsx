@@ -377,7 +377,8 @@ function ConfirmacionesCard({ tenantId, conf, isCliente, sinCalendario = false }
         «Cancelar». Si el cliente cancela, Vai le ofrece huecos y reagenda en la misma conversación.
       </p>
       <div className="mt6">
-        {conf.enabled ? <span className="flag on">Activado</span> : <span className="flag off">Desactivado</span>}{' '}
+        {/* .flag.ok es la clase real del sistema (.flag.on no existe y pintaba ámbar). */}
+        {conf.enabled ? <span className="flag ok">Activado</span> : <span className="flag off">Desactivado</span>}{' '}
         {isCliente ? (
           <span className="muted">Este módulo lo activa el equipo de Velai: escríbenos si quieres cambiarlo.</span>
         ) : null}

@@ -7,6 +7,7 @@ import { Leads } from './views/Leads';
 import { Conversaciones } from './views/Conversaciones';
 import { Configuracion } from './views/Configuracion';
 import { Canales } from './views/Canales';
+import { Plantillas } from './views/Plantillas';
 import { Calendario } from './views/Calendario';
 import { Conexiones } from './views/Conexiones';
 import { Clientes } from './views/Clientes';
@@ -25,6 +26,7 @@ export function App() {
           <Route path="/conexiones" element={<Conexiones />} />
           <Route path="/clientes" element={<Clientes />} />
           <Route path="/canales" element={<Canales />} />
+          <Route path="/plantillas" element={<Plantillas />} />
           <Route path="/configuracion" element={<Configuracion />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Route>

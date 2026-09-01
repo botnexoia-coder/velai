@@ -17,14 +17,6 @@ Configuración y los avisos sonoros. La referencia de conducta sigue siendo
 - **Deep-linking**: `/leads?estado=…` y `/conversaciones?c=<id>` en la URL. El v1 no
   lo tenía; con react-router es barato y hace compartibles las vistas. (El único que
   ya existe: `/calendario?t=<tenantId>` desde la lista de Clientes.)
-- **Vista de catálogo de plantillas** (solo velai): con el registro genérico
-  `tenant_templates` (migración 0030) y el catálogo en `worker/plantillas.js`, una
-  vista que liste cada kind del catálogo con su estado por cliente sale casi sola.
-  Los datos y los hooks ya están preparados: `useTemplateCreate({ id, kind })` llama
-  al paso genérico `/provision/plantillas/<kind>` y el bloque `confirmaciones` del
-  GET del calendario enseña cómo leer `tenant_templates` por kind. Hoy el único
-  consumidor es la card «Confirmaciones» de Calendario; la plantilla de LEADS sigue
-  en sus columnas históricas de `tenants` hasta que se unifique (paso aparte).
 - **Retirada del v1**: cuando Juan valide esta tanda en staging y producción, quitar
   `ADMIN_HTML`, `worker/admin-page.js`, `worker/admin-panel.js` y
   `scripts/check-bundle.mjs` en un PR aparte (fuera del alcance de `panel/`).

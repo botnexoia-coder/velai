@@ -28,6 +28,7 @@ import type {
   InboxResponse,
   LeadDetail,
   LeadsResponse,
+  PlantillasResponse,
   LogoUploadResponse,
   Me,
   OkResponse,
@@ -567,7 +568,19 @@ export function useTemplateCreate() {
   return useMutation({
     mutationFn: ({ id, kind }: { id: string; kind: string }) =>
       apiPost<{ ok: true; kind: string; sid: string; status: string }>(`/api/admin/tenants/${id}/provision/plantillas/${kind}`),
-    onSettled: (_d, _e, { id }) => void client.invalidateQueries({ queryKey: ['tenant-calendar', id] }),
+    onSettled: (_d, _e, { id }) => {
+      void client.invalidateQueries({ queryKey: ['tenant-calendar', id] });
+      // La matriz de la vista Plantillas enseña la misma celda: se recarga también.
+      void client.invalidateQueries({ queryKey: ['plantillas'] });
+    },
+  });
+}
+/** La matriz de la vista «Plantillas» — SOLO velai (el worker responde 403 al cliente). */
+export function usePlantillas(enabled: boolean) {
+  return useQuery({
+    queryKey: ['plantillas'],
+    queryFn: () => api<PlantillasResponse>('/api/admin/plantillas'),
+    enabled,
   });
 }
 export function useAppointments(tenant: string | null, from: string, to: string, isCliente: boolean) {
