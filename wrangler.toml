@@ -64,10 +64,12 @@ AI_TENANT_DAILY_LIMIT = "1500"
 # tenants.ai_monthly_tokens lo pisa por fila). NO corta nada: es un contador.
 # ~32.000 tokens por conversación medidos en producción → 5M son ~155 conversaciones/mes.
 AI_TENANT_MONTHLY_TOKENS = "5000000"
-# Panel v2: APAGADO en producción hasta validarlo en staging. "1" = el worker sirve la
-# SPA de panel/dist en el hostname del panel; vacío = panel v1 serializado, como siempre.
-# El rollback es poner esto en vacío y desplegar (panel/INTEGRACION.md §6).
-PANEL_V2 = ""
+# Panel v2 ENCENDIDO en producción (cutover 2026-09-01, validado por Juan en staging:
+# las 7 vistas, avisos sonoros, diálogos de marca). El v1 serializado SIGUE en el bundle:
+# el rollback es poner esto en vacío y desplegar — instantáneo y sin pérdida
+# (panel/INTEGRACION.md §6). Retirar el v1 del código es un PR aparte, cuando el v2
+# lleve unos días en producción sin sustos.
+PANEL_V2 = "1"
 # Tenant del canal web cuando el payload no trae `tenant` (el widget de hirevai.com).
 DEFAULT_TENANT_SLUG = "velai"
 # Admins de Velai en el panel (rol completo). Fuera de D1 a propósito: una fila
