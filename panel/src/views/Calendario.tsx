@@ -3,7 +3,7 @@
 // modal. El cliente abre SU calendario; Velai abre el del tenant velai con selector
 // para saltar al de cualquier cliente.
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { useNavigate } from 'react-router';
+import { useNavigate, useSearchParams } from 'react-router';
 import { traducir } from '../api/errors';
 import { HoursGrid } from '../components/HoursGrid';
 import { useToast } from '../components/Toasts';
@@ -27,7 +27,9 @@ export function Calendario() {
   const { data: tenants } = useTenants(isVelai === true);
   const toast = useToast();
   const navigate = useNavigate();
-  const [selected, setSelected] = useState<string | null>(null);
+  // Desde la lista de Clientes se llega con ?t=<id> (el «Abrir» de la columna Calendario).
+  const [params] = useSearchParams();
+  const [selected, setSelected] = useState<string | null>(() => params.get('t'));
 
   // Al volver del OAuth el callback redirige con #calendar=ok:<tenantId>: se reabre SU
   // calendario (velai, el del tenant conectado; el cliente siempre el suyo).

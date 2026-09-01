@@ -5,11 +5,11 @@ import { Shell } from './shell/Shell';
 import { Dashboard } from './views/Dashboard';
 import { Leads } from './views/Leads';
 import { Conversaciones } from './views/Conversaciones';
-import { Pendiente } from './views/Pendiente';
 import { Configuracion } from './views/Configuracion';
 import { Canales } from './views/Canales';
 import { Calendario } from './views/Calendario';
 import { Conexiones } from './views/Conexiones';
+import { Clientes } from './views/Clientes';
 import { TipHost } from './components/Tip';
 
 export function App() {
@@ -22,7 +22,7 @@ export function App() {
           <Route path="/conversaciones" element={<Conversaciones />} />
           <Route path="/calendario" element={<Calendario />} />
           <Route path="/conexiones" element={<Conexiones />} />
-          <Route path="/clientes" element={<Pendiente titulo="Clientes" />} />
+          <Route path="/clientes" element={<Clientes />} />
           <Route path="/canales" element={<Canales />} />
           <Route path="/configuracion" element={<Configuracion />} />
           <Route path="*" element={<Navigate to="/" replace />} />
