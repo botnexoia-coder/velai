@@ -3158,6 +3158,9 @@ async function runProvisionStep(request, env, ctx, tenant, tenantId, step, actor
   if (plantillaStep) {
     const def = templateKind(plantillaStep[1]);
     if (!def) throw new HttpError(404, 'unknown_template_kind');
+    // Las entradas legacy-columnas (aviso_lead) son descriptivas: no tienen `content` y
+    // NO se crean por aquí — su alta sigue siendo el paso `template` del aprovisionamiento.
+    if (typeof def.content !== 'function') throw new HttpError(400, 'template_kind_not_creatable');
     const existing = await tenantTemplate(env, tenantId, def.kind);
     if (existing && (existing.sid || existing.status)) throw new HttpError(409, 'already_provisioned');
     const { contentSid } = await createContentTemplate(credentials, def.content(tenant.slug, tenant.name));

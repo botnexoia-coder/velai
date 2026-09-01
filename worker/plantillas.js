@@ -12,15 +12,18 @@
 // (pollTemplateApprovals) trabajan contra esa tabla sin saber nada de recordatorios.
 // La plantilla nº 3 debe ser SOLO una entrada nueva en este objeto.
 //
-// PENDIENTE (paso aparte, no de esta entrega): la plantilla de LEADS sigue en las
-// columnas históricas de tenants (lead_template_sid/lead_template_status) con su cuerpo
-// en twilio.js (createLeadTemplate). Unificarla aquí exige migrar datos y lectores a la
-// vez.
+// La plantilla de LEADS entra en el catálogo como entrada DESCRIPTIVA (`aviso_lead`,
+// fuente 'columnas'): así el catálogo es LA lista completa de plantillas del sistema
+// y la vista «Plantillas» del panel la enseña junto a las demás. Su ALMACENAMIENTO
+// sigue en las columnas históricas de tenants (lead_template_sid/lead_template_status)
+// y su cuerpo en twilio.js (createLeadTemplate) — unificarla en tenant_templates exige
+// migrar datos y lectores a la vez y sigue siendo un paso aparte.
 
 export const TEMPLATE_CATALOG = {
   recordatorio_cita: {
     kind: 'recordatorio_cita',
     nombre: 'Recordatorio de cita (Confirmaciones)',
+    fuente: 'registro', // estado en tenant_templates; se crea con el POST genérico plantillas/<kind>
     categoria: 'UTILITY', // mensaje iniciado por el negocio: SIEMPRE plantilla aprobada (63016)
     // Nombre con el que se somete a aprobación en Meta (exige minúsculas/0-9/_).
     approvalName: (slug) => `recordatorio_cita_${slug}`.toLowerCase().replace(/[^a-z0-9_]/g, '_'),
@@ -50,6 +53,18 @@ export const TEMPLATE_CATALOG = {
       },
     }),
   },
+  // LEGACY-COLUMNAS: entrada solo descriptiva — SIN `content`, así el paso genérico de
+  // aprovisionamiento la rechaza (template_kind_not_creatable). Se crea en el paso 2
+  // del aprovisionamiento del cliente (createLeadTemplate, twilio.js) y su estado vive
+  // en tenants.lead_template_sid/lead_template_status; la envía deliver() (app.js) al
+  // equipo del negocio cuando entra un lead.
+  aviso_lead: {
+    kind: 'aviso_lead',
+    nombre: 'Aviso de lead',
+    fuente: 'columnas',
+    categoria: 'UTILITY',
+    approvalName: (slug) => `nuevo_lead_${slug}`.toLowerCase().replace(/[^a-z0-9_]/g, '_'),
+  },
 };
 
 // Lookup seguro (GUIA-WORKERS §2): 'constructor' y '__proto__' son kinds válidos para
@@ -58,4 +73,10 @@ export function templateKind(kind) {
   return typeof kind === 'string' && kind !== ''
     && Object.prototype.hasOwnProperty.call(TEMPLATE_CATALOG, kind)
     ? TEMPLATE_CATALOG[kind] : null;
+}
+
+// La lista del catálogo para la vista «Plantillas» del panel: solo lo descriptivo
+// (los cuerpos y sample values no viajan — son contrato del worker, no dato de UI).
+export function catalogKinds() {
+  return Object.values(TEMPLATE_CATALOG).map((d) => ({ kind: d.kind, label: d.nombre, fuente: d.fuente }));
 }

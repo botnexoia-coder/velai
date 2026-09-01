@@ -5307,3 +5307,69 @@ test('GET calendar lleva el bloque de confirmaciones y el PATCH del addon es sol
   await assert.rejects(patch(OWN, { enabled: true }), (e) => e.status === 403, 'el addon lo habilita Velai');
   await assert.rejects(patch(VELAI, { enabled: 'si' }), (e) => e.code === 'invalid_enabled');
 });
+
+// ── Vista «Plantillas»: GET /api/admin/plantillas (matriz clientes × kinds) ────
+
+test('GET /plantillas: une columnas (aviso_lead) + registro (tenant_templates) y es solo-Velai', async () => {
+  const TENANTS = [
+    { id: 't-b', slug: 'beta', name: 'Beta', active: 0, lead_template_sid: null, lead_template_status: null },
+    { id: 't-a', slug: 'alfa', name: 'Alfa', active: 1, lead_template_sid: 'HX' + 'l'.repeat(32), lead_template_status: 'pending' },
+  ];
+  const REGISTRO = [
+    { tenant_id: 't-a', kind: 'recordatorio_cita', sid: 'HX' + 'r'.repeat(32), status: 'approved', updated_at: '2026-09-01T10:00:00Z' },
+    // kind retirado del catálogo y clave del prototipo: NUNCA se pintan
+    { tenant_id: 't-a', kind: 'retirada', sid: 'HX' + 'x'.repeat(32), status: 'approved', updated_at: null },
+    { tenant_id: 't-b', kind: 'constructor', sid: 'HX' + 'y'.repeat(32), status: 'approved', updated_at: null },
+  ];
+  const db = { prepare: (sql) => {
+    const stmt = () => ({
+      bind: () => stmt(),
+      all: async () => ({ results: /FROM tenant_templates/.test(sql) ? REGISTRO : (/FROM tenants/.test(sql) ? TENANTS : []) }),
+      first: async () => null,
+      run: async () => ({ meta: { changes: 1 } }),
+    });
+    return stmt();
+  }, batch: async () => [] };
+  const env = { DB: db, KV: mapKV() };
+  const ctx = { waitUntil() {} };
+  const path = '/api/admin/plantillas';
+  const call = (scope) => testing.adminRouter(adminReq(path), env, ctx, path, new URL('https://x' + path), {}, scope);
+  const out = await (await call(VELAI)).json();
+  // El catálogo es LA lista completa: el registro Y la legacy de columnas.
+  assert.deepEqual(out.kinds.map((k) => `${k.kind}:${k.fuente}`).sort(), ['aviso_lead:columnas', 'recordatorio_cita:registro']);
+  assert.ok(out.kinds.every((k) => k.label));
+  // El orden del SQL (activos primero) se respeta tal cual.
+  assert.deepEqual(out.tenants.map((t) => t.slug), ['beta', 'alfa']);
+  const alfa = out.tenants.find((t) => t.slug === 'alfa');
+  assert.deepEqual(alfa.plantillas.recordatorio_cita, { sid: 'HX' + 'r'.repeat(32), status: 'approved', updated_at: '2026-09-01T10:00:00Z' });
+  assert.deepEqual(alfa.plantillas.aviso_lead, { sid: 'HX' + 'l'.repeat(32), status: 'pending', updated_at: null });
+  assert.equal(alfa.plantillas.retirada, undefined, 'un kind fuera del catálogo no viaja');
+  const beta = out.tenants.find((t) => t.slug === 'beta');
+  assert.deepEqual(beta.plantillas, {}, 'sin plantillas = objeto vacío (la celda pinta «sin crear»)');
+  // El rol cliente no llega ni al handler: clienteAllowed no abre la ruta (403 del gate).
+  await assert.rejects(call(CLIENTE), (e) => e.status === 403);
+});
+
+test('el POST genérico rechaza los kinds legacy-columnas: aviso_lead no se crea por ahí', async () => {
+  const TID = '00000000-0000-4000-8000-0000000000d2';
+  const env0 = { SECRETS_KEK: TEST_KEK };
+  const enc = await encryptSecret(env0, TID, 'a1b2c3d4e5f60718293a4b5c6d7e8f90');
+  const db = { prepare: (sql) => ({ bind: () => ({
+    first: async () => (/FROM tenants WHERE id=\?/.test(sql)
+      ? { id: TID, slug: 'conf', name: 'Conf', twilio_subaccount_sid: 'AC' + 's'.repeat(32), twilio_auth_token_enc: enc }
+      : null),
+    all: async () => ({ results: [] }),
+    run: async () => ({ meta: { changes: 1 } }),
+  }) }), batch: async () => [] };
+  const env = { DB: db, KV: mapKV(), SECRETS_KEK: TEST_KEK };
+  let twilioCalls = 0;
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = async (url) => { if (String(url).includes('twilio.com')) twilioCalls++; return new Response('{}', { status: 200 }); };
+  try {
+    const path = `/api/admin/tenants/${TID}/provision/plantillas/aviso_lead`;
+    await assert.rejects(
+      testing.adminRouter(adminReq(path, { method: 'POST' }), env, { waitUntil() {} }, path, new URL('https://x' + path), {}, VELAI),
+      (e) => e.code === 'template_kind_not_creatable');
+    assert.equal(twilioCalls, 0, 'ni una llamada a Twilio: se corta antes');
+  } finally { globalThis.fetch = realFetch; }
+});

@@ -4,6 +4,7 @@
 // adminRouter monolítico — misma conducta, mismos códigos.
 import { Hono } from 'hono';
 import { partesAdmin, envAdmins } from '../middleware.js';
+import { templateKind, catalogKinds } from '../plantillas.js';
 import {
   HttpError, json, NO_STORE, clean, readJson, rateLimited, callAnthropic,
   validateTenant, tenantTokenColumn, assertNotActivePending, assertTeamNotFrom,
@@ -35,6 +36,45 @@ tenants.get('/api/admin/tenants', async (c) => {
     FROM tenants t LEFT JOIN leads l ON l.tenant_id = t.id
     GROUP BY t.id ORDER BY t.active DESC, t.name ASC`).all()).results;
   return json({ tenants: rows }, 200, NO_STORE);
+});
+
+// ── Catálogo de plantillas: la matriz clientes × kinds (vista «Plantillas») ───
+// SOLO Velai: no está en clienteAllowed (clienteGate corta con 403 antes de tocar
+// datos) y el handler lo veta ADEMÁS en código. Las consultas van SIN scope a
+// propósito (§4b caso 3b): es una vista de operación GLOBAL de Velai — filas de
+// TODOS los clientes — y la puerta es el rol, no un tenant que filtrar.
+tenants.get('/api/admin/plantillas', async (c) => {
+  const { env, scope } = partesAdmin(c);
+  if (scope.role !== 'velai') throw new HttpError(403, 'not_authorized');
+  const rows = (await env.DB.prepare(`SELECT id, slug, name, active, lead_template_sid, lead_template_status
+    FROM tenants ORDER BY active DESC, name ASC`).all()).results || [];
+  // tenant_templates puede no existir aún (deploy antes de la 0030): la matriz sale
+  // igualmente con lo que vive en columnas.
+  let registro = [];
+  try {
+    registro = (await env.DB.prepare('SELECT tenant_id, kind, sid, status, updated_at FROM tenant_templates').all()).results || [];
+  } catch (_) {}
+  const porTenant = new Map();
+  for (const r of registro) {
+    // Una fila de un kind retirado del catálogo no se pinta (y el lookup seguro de
+    // templateKind descarta de paso claves del prototipo).
+    if (!templateKind(r.kind)) continue;
+    const m = porTenant.get(r.tenant_id) || {};
+    m[r.kind] = { sid: r.sid || null, status: r.status || null, updated_at: r.updated_at || null };
+    porTenant.set(r.tenant_id, m);
+  }
+  const lista = rows.map((t) => {
+    const plantillas = { ...(porTenant.get(t.id) || {}) };
+    // La plantilla de LEADS vive en las columnas históricas de tenants: aquí se
+    // presenta como un kind más (unificación de LECTURA, no de almacenamiento).
+    // Sin updated_at: las columnas no guardan cuándo cambió ESA plantilla y el
+    // updated_at de la fila entera mentiría.
+    if (t.lead_template_sid || t.lead_template_status) {
+      plantillas.aviso_lead = { sid: t.lead_template_sid || null, status: t.lead_template_status || null, updated_at: null };
+    }
+    return { id: t.id, slug: t.slug, name: t.name, active: t.active, plantillas };
+  });
+  return json({ kinds: catalogKinds(), tenants: lista }, 200, NO_STORE);
 });
 
 tenants.post('/api/admin/tenants', async (c) => {
