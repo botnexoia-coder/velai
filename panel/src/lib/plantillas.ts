@@ -25,14 +25,50 @@ export interface ChipCliente {
   active: number;
   estado: EstadoPlantilla;
   sid: string | null;
+  /** La categoría REAL leída de Twilio (null = aún no leída). */
+  categoria: string | null;
 }
 
 /** Los chips de la tarjeta de un kind: TODOS los clientes, con su estado en ese kind. */
 export function chipsDeKind(data: PlantillasResponse, kind: string): ChipCliente[] {
   return data.tenants.map((t) => {
     const celda = t.plantillas[kind];
-    return { id: t.id, name: t.name, active: t.active, estado: estadoDeCelda(celda), sid: celda?.sid ?? null };
+    return { id: t.id, name: t.name, active: t.active, estado: estadoDeCelda(celda), sid: celda?.sid ?? null, categoria: celda?.categoria ?? null };
   });
+}
+
+/** La categoría a ENSEÑAR de una plantilla existente: SIEMPRE la real de Twilio, jamás
+ *  la intención del catálogo disfrazada de hecho (cazada de Juan: la de lead de
+ *  gogestion es Marketing en Twilio y el panel pintaba Utility). null cuando no hay
+ *  plantilla; label «—» cuando existe pero la categoría aún no se leyó; `distinta`
+ *  marca la divergencia con el catálogo (aviso de coste: Marketing es más cara). */
+export function categoriaReal(
+  celda: { status?: string | null; categoria?: string | null } | undefined | null,
+  kind: { categoria?: string },
+): { label: string; distinta: boolean } | null {
+  if (!celda || !celda.status) return null;
+  if (!celda.categoria) return { label: '—', distinta: false };
+  const real = String(celda.categoria).toUpperCase();
+  const label = real.charAt(0) + real.slice(1).toLowerCase();
+  return { label, distinta: Boolean(kind.categoria) && real !== String(kind.categoria).toUpperCase() };
+}
+
+/** Las líneas de→a de una solicitud, para la tarjeta de Velai (y sus tests): lo
+ *  ACTUAL sale de la respuesta del worker y los textos de pareja, del catálogo. */
+export function resumenSolicitud(
+  payload: { botones?: string; antelacion?: number },
+  actual: { hours: number; opciones: { botones?: string; textos?: { confirmar: string; cancelar: string } } | null } | undefined,
+  kind: { config?: { botones?: { id: string; confirmar: string; cancelar: string }[]; botonesDefault?: string } } | undefined,
+): string[] {
+  const lineas: string[] = [];
+  if (payload.antelacion) lineas.push(`Antelación: ${actual ? `${actual.hours} h` : '?'} → ${payload.antelacion} h`);
+  if (payload.botones) {
+    const parejas = kind?.config?.botones ?? [];
+    const de = actual?.opciones?.textos ?? parejas.find((b) => b.id === kind?.config?.botonesDefault) ?? null;
+    const a = parejas.find((b) => b.id === payload.botones) ?? null;
+    lineas.push(`Botones: «${de ? `${de.confirmar} / ${de.cancelar}` : '?'}» → «${a ? `${a.confirmar} / ${a.cancelar}` : payload.botones}»`);
+  }
+  return lineas;
 }
 
 export interface ChipsFiltrados {

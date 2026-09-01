@@ -14,13 +14,13 @@
 // La celda sin crear de un kind legacy-columnas (aviso_lead) no lleva botón: esa
 // plantilla se crea en el paso 2 del aprovisionamiento de la ficha del cliente.
 import { useState } from 'react';
-import { confirmar } from '../components/Confirmar';
+import { confirmar, pedirTexto } from '../components/Confirmar';
 import { CrearPlantilla } from '../components/CrearPlantilla';
 import { traducir } from '../api/errors';
 import { useToast } from '../components/Toasts';
 import { IcoClock, IcoTick, IcoX } from '../components/icons';
-import { chipsDeKind, cuentaPlantillas, filtraChips, resumenKind, type ChipCliente, type EstadoPlantilla } from '../lib/plantillas';
-import { useMe, usePlantillas, useTemplateCreate } from '../hooks/queries';
+import { categoriaReal, chipsDeKind, cuentaPlantillas, filtraChips, resumenKind, resumenSolicitud, type ChipCliente, type EstadoPlantilla } from '../lib/plantillas';
+import { useMe, usePlantillas, useSolicitudes, useSolicitudResolve, useTemplateCreate } from '../hooks/queries';
 import type { PlantillaKind, PlantillasResponse } from '../api/types';
 
 // Presentación de cada estado: clase de la píldora e icono (11px, dimensiona el CSS).
@@ -169,12 +169,100 @@ function PlantillasVelai({ data, error }: { data: PlantillasResponse | undefined
         ) : null}
       </div>
       {error ? <p className="error">{traducir(error)}</p> : null}
+      {data ? <SolicitudesBlock data={data} /> : null}
       {data ? data.kinds.map((k) => <KindCard key={k.kind} k={k} data={data} clienteId={clienteId} estado={estado} onTodas={() => setEstado('')} />) : null}
       <p className="muted mt12">
         El cuerpo de cada plantilla vive en el código (es un contrato con quien la envía); aquí se gestiona su alta y
         su estado por cliente. El worker revisa la aprobación de Meta cada 5 minutos y avisa por Telegram cuando una
-        plantilla pasa a aprobada o rechazada.
+        plantilla pasa a aprobada o rechazada. La categoría junto a cada cliente es la REAL de Twilio («—» mientras no
+        se haya leído); en ámbar cuando difiere de la del catálogo — Marketing es más cara y con topes.
       </p>
+    </div>
+  );
+}
+
+// ── Solicitudes pendientes de los clientes: arriba de la matriz, solo si hay ──
+// El cliente pidió un cambio desde SU vista; aquí se decide. Aprobar APLICA (la
+// antelación al momento; botones distintos recrean la plantilla → nueva revisión de
+// Meta). Rechazar exige una nota breve, que el cliente ve en su panel.
+function SolicitudesBlock({ data }: { data: PlantillasResponse }) {
+  const toast = useToast();
+  const { data: sols } = useSolicitudes(true);
+  const resolver = useSolicitudResolve();
+  const pendientes = sols?.solicitudes ?? [];
+  if (!pendientes.length) return null; // vacío = no ocupa sitio
+  const kindRecordatorio = data.kinds.find((k) => k.kind === 'recordatorio_cita');
+  return (
+    <div className="panelcard plk">
+      <div className="plk-head">
+        <b>
+          Solicitudes de clientes<span className="pt-count">{pendientes.length}</span>
+        </b>
+        <span className="plk-desc">Cambios pedidos desde su panel: nada se aplica sin aprobarlo aquí.</span>
+      </div>
+      {pendientes.map((s) => (
+        <div className="mt6" key={s.id}>
+          <b>{s.tenant_name}</b>{' '}
+          <span className="muted">· {s.requested_by}</span>
+          {resumenSolicitud(s.payload, s.actual, kindRecordatorio).map((linea) => (
+            <div className="muted" key={linea}>
+              {linea}
+            </div>
+          ))}
+          <div className="actions actions0">
+            <button
+              className="btn btnsm"
+              type="button"
+              disabled={resolver.isPending}
+              onClick={async () => {
+                if (
+                  !(await confirmar({
+                    titulo: `¿Aprobar la solicitud de ${s.tenant_name}?`,
+                    cuerpo: s.payload.botones
+                      ? 'Se aplica al momento. Si los botones cambian, la plantilla se recrea y pasa otra revisión de Meta.'
+                      : 'La antelación se aplica al momento, sin nueva revisión de Meta.',
+                    accion: 'Aprobar y aplicar',
+                  }))
+                )
+                  return;
+                resolver.mutate(
+                  { id: s.id, accion: 'aprobar' },
+                  {
+                    onSuccess: () => toast('Solicitud aprobada y aplicada ✓'),
+                    onError: (e) => toast(`No se pudo aprobar: ${traducir(e)}`, false),
+                  },
+                );
+              }}
+            >
+              Aprobar
+            </button>
+            <button
+              className="btn alt btnsm"
+              type="button"
+              disabled={resolver.isPending}
+              onClick={async () => {
+                // La nota es obligatoria: el cliente la ve en su panel.
+                const nota = await pedirTexto({
+                  titulo: `Rechazar la solicitud de ${s.tenant_name}`,
+                  cuerpo: 'El motivo se le enseña al cliente en su panel.',
+                  placeholder: 'Motivo breve del rechazo',
+                  accion: 'Rechazar',
+                });
+                if (nota === null) return;
+                resolver.mutate(
+                  { id: s.id, accion: 'rechazar', nota },
+                  {
+                    onSuccess: () => toast('Solicitud rechazada'),
+                    onError: (e) => toast(`No se pudo rechazar: ${traducir(e)}`, false),
+                  },
+                );
+              }}
+            >
+              Rechazar
+            </button>
+          </div>
+        </div>
+      ))}
     </div>
   );
 }
@@ -223,10 +311,15 @@ function Chip({ c, kind }: { c: ChipCliente; kind: PlantillaKind }) {
   const [abierto, setAbierto] = useState(false);
   if (c.estado !== 'sin') {
     const p = CHIP[c.estado];
+    // La categoría a la vista es la REAL de Twilio; «—» mientras el poll no la lea.
+    // En ámbar cuando difiere de la intención del catálogo: aviso de coste (Marketing
+    // es más cara y con topes), no un adorno.
+    const cat = categoriaReal({ status: 'x', categoria: c.categoria }, kind);
     return (
       <span className={`plchip ${p.cls}`} title={`Plantilla ${p.label}${c.sid ? ` · ${c.sid}` : ''}`}>
         {p.icon}
         {c.name}
+        {cat ? <span className={`plcat${cat.distinta ? ' warn' : ''}`}>{cat.label}</span> : null}
       </span>
     );
   }

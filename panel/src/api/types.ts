@@ -718,6 +718,35 @@ export interface PlantillaCelda {
   updated_at: string | null;
   /** Lo elegido al crearla (0031). null = creada sin opciones → defaults del catálogo. */
   opciones?: { botones?: string; textos?: { confirmar: string; cancelar: string } } | null;
+  /** La categoría REAL leída de Twilio por el poll (0032). null = aún no leída: se
+   *  enseña «—», JAMÁS la intención del catálogo como si fuera un hecho. */
+  categoria?: string | null;
+}
+
+// ── Solicitudes de cambio del cliente (tenant_solicitudes, 0032) ─────────────
+export interface SolicitudPayload {
+  botones?: string;
+  antelacion?: number;
+}
+/** GET /api/admin/solicitudes — consciente del rol: el cliente ve las suyas (con
+ *  status/nota); velai las pendientes de todos (con tenant y lo actual al lado). */
+export interface Solicitud {
+  id: number;
+  tipo: string;
+  payload: SolicitudPayload;
+  created_at: string;
+  /** Solo en la respuesta del cliente. */
+  status?: 'pending' | 'approved' | 'rejected';
+  nota?: string | null;
+  resolved_at?: string | null;
+  /** Solo en la respuesta de velai. */
+  tenant_id?: string;
+  tenant_name?: string;
+  requested_by?: string;
+  actual?: { hours: number; opciones: { botones?: string; textos?: { confirmar: string; cancelar: string } } | null };
+}
+export interface SolicitudesResponse {
+  solicitudes: Solicitud[];
 }
 /** Una pareja de botones CURADA del catálogo (nunca texto libre — decisión de Juan). */
 export interface ParejaBotones {

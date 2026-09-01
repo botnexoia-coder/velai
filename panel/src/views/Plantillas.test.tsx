@@ -2,13 +2,14 @@
 // una tarjeta por kind, chips-píldora por estado, desplegable de cliente que atenúa,
 // contador-filtro con «+N más», «Crear» solo donde toca y la legacy sin botón.
 import { QueryClientProvider } from '@tanstack/react-query';
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createQueryClient } from '../api/queryClient';
+import { ConfirmarHost } from '../components/Confirmar';
 import { ToastProvider } from '../components/Toasts';
-import { chipsDeKind, cuentaPlantillas, estadoDeCelda, filtraChips, resumenKind } from '../lib/plantillas';
+import { categoriaReal, chipsDeKind, cuentaPlantillas, estadoDeCelda, filtraChips, resumenKind, resumenSolicitud } from '../lib/plantillas';
 import { meCliente, meVelai, mockFetch } from '../test/fixtures';
 import { Plantillas } from './Plantillas';
 import type { PlantillasResponse } from '../api/types';
@@ -45,8 +46,9 @@ const RESP: PlantillasResponse = {
       name: 'Clínica Alfa',
       active: 1,
       plantillas: {
-        recordatorio_cita: { sid: 'HX1', status: 'pending', updated_at: '2026-09-01T10:00:00Z' },
-        aviso_lead: { sid: 'HX2', status: 'approved', updated_at: null },
+        recordatorio_cita: { sid: 'HX1', status: 'pending', updated_at: '2026-09-01T10:00:00Z', categoria: 'UTILITY' },
+        // Categoría REAL distinta de la intención del catálogo: el caso gogestion.
+        aviso_lead: { sid: 'HX2', status: 'approved', updated_at: null, categoria: 'MARKETING' },
       },
     },
     {
@@ -282,5 +284,147 @@ describe('vista Plantillas del CLIENTE (solo lectura)', () => {
     await waitFor(() => expect(screen.getByText('En revisión por WhatsApp')).toBeInTheDocument());
     const botones = [...document.querySelectorAll('.wapre-btns span')].map((e) => e.textContent);
     expect(botones).toEqual(['Confirmo', 'Cancelar']);
+  });
+});
+
+describe('categoría real de Twilio y solicitudes en la vista de Velai', () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it('categoriaReal: la de Twilio manda, «—» si no se leyó, warn si difiere del catálogo, null sin plantilla', () => {
+    const kind = { categoria: 'UTILITY' };
+    expect(categoriaReal(undefined, kind)).toBeNull();
+    expect(categoriaReal({ status: null }, kind)).toBeNull();
+    expect(categoriaReal({ status: 'approved', categoria: null }, kind)).toEqual({ label: '—', distinta: false });
+    expect(categoriaReal({ status: 'approved', categoria: 'UTILITY' }, kind)).toEqual({ label: 'Utility', distinta: false });
+    expect(categoriaReal({ status: 'approved', categoria: 'MARKETING' }, kind)).toEqual({ label: 'Marketing', distinta: true });
+    // Sin intención en el catálogo no hay con qué divergir.
+    expect(categoriaReal({ status: 'approved', categoria: 'MARKETING' }, {})).toEqual({ label: 'Marketing', distinta: false });
+  });
+
+  it('resumenSolicitud: el de→a con lo actual delante y los textos del catálogo', () => {
+    const kind = RESP.kinds[0]!;
+    const actual = { hours: 24, opciones: { botones: 'confirmo_cancelar', textos: { confirmar: 'Confirmo', cancelar: 'Cancelar' } } };
+    expect(resumenSolicitud({ antelacion: 12 }, actual, kind)).toEqual(['Antelación: 24 h → 12 h']);
+    expect(resumenSolicitud({ botones: 'si_voy_no_puedo' }, actual, kind)).toEqual(['Botones: «Confirmo / Cancelar» → «Sí, voy / No puedo ir»']);
+    // Sin opciones guardadas, el «de» es la pareja default del catálogo.
+    expect(resumenSolicitud({ botones: 'si_voy_no_puedo' }, { hours: 24, opciones: null }, kind)[0]).toContain('«Confirmo / Cancelar»');
+  });
+
+  function renderVelai(solicitudes: unknown[]) {
+    vi.stubGlobal(
+      'fetch',
+      mockFetch({
+        '/api/admin/me': meVelai,
+        '/api/admin/plantillas': RESP,
+        '/api/admin/solicitudes': { solicitudes },
+      }),
+    );
+    render(
+      <QueryClientProvider client={createQueryClient()}>
+        <ToastProvider>
+          <MemoryRouter>
+            <Plantillas />
+          </MemoryRouter>
+        </ToastProvider>
+      </QueryClientProvider>,
+    );
+  }
+
+  it('el chip enseña la categoría REAL («—» sin leer, ámbar si difiere) y nunca la del catálogo', async () => {
+    renderVelai([]);
+    await waitFor(() => expect(screen.getAllByText('Clínica Alfa').length).toBeGreaterThan(0));
+    // Alfa/recordatorio: categoria real UTILITY (fixture) → texto sin warn.
+    // Alfa/aviso_lead: categoria real MARKETING difiere de UTILITY → warn (ámbar).
+    const cats = [...document.querySelectorAll('.plcat')].map((e) => ({ t: e.textContent, warn: e.className.includes('warn') }));
+    expect(cats).toContainEqual({ t: 'Utility', warn: false });
+    expect(cats).toContainEqual({ t: 'Marketing', warn: true });
+    // López/recordatorio existe pero sin categoría leída → «—», jamás la del catálogo.
+    expect(cats).toContainEqual({ t: '—', warn: false });
+  });
+
+  it('sin pendientes el bloque de solicitudes NO ocupa sitio; con ellas, de→a y resolver', async () => {
+    const user = userEvent.setup();
+    const posts: string[] = [];
+    const base = mockFetch({
+      '/api/admin/me': meVelai,
+      '/api/admin/plantillas': RESP,
+      '/api/admin/solicitudes': {
+        solicitudes: [{
+          id: 7, tenant_id: 'x', tenant_name: 'Clínica Alfa', tipo: 'plantilla_recordatorio',
+          payload: { botones: 'si_voy_no_puedo', antelacion: 12 }, requested_by: 'gestora@alfa.com',
+          created_at: '2026-09-01T10:00:00Z',
+          actual: { hours: 24, opciones: { botones: 'confirmo_cancelar', textos: { confirmar: 'Confirmo', cancelar: 'Cancelar' } } },
+        }],
+      },
+    });
+    vi.stubGlobal('fetch', (async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+      if (init?.method === 'POST') {
+        posts.push(url);
+        return new Response(JSON.stringify({ ok: true, status: 'approved' }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      }
+      return base(url, init);
+    }) as typeof fetch);
+    render(
+      <QueryClientProvider client={createQueryClient()}>
+        <ToastProvider>
+          <MemoryRouter>
+            <Plantillas />
+          </MemoryRouter>
+          <ConfirmarHost />
+        </ToastProvider>
+      </QueryClientProvider>,
+    );
+    await waitFor(() => expect(screen.getByText(/Solicitudes de clientes/)).toBeInTheDocument());
+    expect(screen.getByText('Antelación: 24 h → 12 h')).toBeInTheDocument();
+    expect(screen.getByText('Botones: «Confirmo / Cancelar» → «Sí, voy / No puedo ir»')).toBeInTheDocument();
+    expect(screen.getByText(/gestora@alfa\.com/)).toBeInTheDocument();
+    // Aprobar pasa por el diálogo propio (nunca window.confirm) y hace el POST.
+    await user.click(screen.getByRole('button', { name: 'Aprobar' }));
+    await user.click(await screen.findByRole('button', { name: 'Aprobar y aplicar' }));
+    await waitFor(() => expect(posts.some((u) => u.includes('/api/admin/solicitudes/7/aprobar'))).toBe(true));
+  });
+
+  it('rechazar pide la nota con el diálogo propio y la manda en el POST', async () => {
+    const user = userEvent.setup();
+    const posts: { url: string; body: unknown }[] = [];
+    const base = mockFetch({
+      '/api/admin/me': meVelai,
+      '/api/admin/plantillas': RESP,
+      '/api/admin/solicitudes': {
+        solicitudes: [{
+          id: 9, tenant_id: 'x', tenant_name: 'Taller Beta', tipo: 'plantilla_recordatorio',
+          payload: { antelacion: 48 }, requested_by: 'beta@x.com', created_at: '2026-09-01T10:00:00Z',
+          actual: { hours: 24, opciones: null },
+        }],
+      },
+    });
+    vi.stubGlobal('fetch', (async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+      if (init?.method === 'POST') {
+        posts.push({ url, body: JSON.parse(String(init.body)) });
+        return new Response(JSON.stringify({ ok: true, status: 'rejected' }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      }
+      return base(url, init);
+    }) as typeof fetch);
+    render(
+      <QueryClientProvider client={createQueryClient()}>
+        <ToastProvider>
+          <MemoryRouter>
+            <Plantillas />
+          </MemoryRouter>
+          <ConfirmarHost />
+        </ToastProvider>
+      </QueryClientProvider>,
+    );
+    await user.click(await screen.findByRole('button', { name: 'Rechazar' }));
+    // El diálogo propio (pedirTexto) pide el motivo — nunca window.prompt.
+    const input = await screen.findByPlaceholderText('Motivo breve del rechazo');
+    await user.type(input, 'Mejor 24 h por ahora');
+    const dlg = document.querySelector('dialog.cfm')!;
+    await user.click(within(dlg as HTMLElement).getByRole('button', { name: 'Rechazar' }));
+    await waitFor(() => expect(posts.length).toBeGreaterThan(0));
+    expect(posts[0]!.url).toContain('/api/admin/solicitudes/9/rechazar');
+    expect(posts[0]!.body).toEqual({ nota: 'Mejor 24 h por ahora' });
   });
 });

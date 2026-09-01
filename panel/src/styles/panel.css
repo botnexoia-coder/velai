@@ -173,6 +173,10 @@ body.dark .plchip{border-color:rgba(var(--ink),.08)}
 body.dark .plchip.ok{color:var(--stt-won)}
 body.dark .plchip.wait{color:var(--amber-t)}
 body.dark .plchip.bad{color:var(--bad)}
+/* Categoría REAL de Twilio dentro del chip: «—» = aún no leída; .warn = difiere de la
+   intención del catálogo (aviso de coste: Marketing es más cara y con topes). */
+.plcat{font-size:10.5px;color:var(--muted2);border-left:1px solid rgba(var(--ink),.14);padding-left:7px;margin-left:2px}
+.plcat.warn{color:var(--amber-t);font-weight:700}
 /* sin crear: borde discontinuo, nombre muted y el botón «Crear» DENTRO del chip */
 .plchip.sin{border:1px dashed rgba(var(--ink),.25);color:var(--muted);padding:6px 8px 6px 13px;background:transparent}
 .plchip.sin .btn{border-radius:999px}

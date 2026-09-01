@@ -29,6 +29,7 @@ import type {
   LeadDetail,
   LeadsResponse,
   PlantillasResponse,
+  SolicitudesResponse,
   LogoUploadResponse,
   Me,
   OkResponse,
@@ -587,6 +588,37 @@ export function usePlantillas(enabled: boolean) {
     queryKey: ['plantillas'],
     queryFn: () => api<PlantillasResponse>('/api/admin/plantillas'),
     enabled,
+  });
+}
+/** Solicitudes de cambio (0032): el cliente ve las suyas; velai las pendientes. */
+export function useSolicitudes(enabled: boolean) {
+  return useQuery({
+    queryKey: ['solicitudes'],
+    queryFn: () => api<SolicitudesResponse>('/api/admin/solicitudes'),
+    enabled,
+  });
+}
+/** El cliente pide un cambio: nada se aplica hasta que Velai lo apruebe. */
+export function useSolicitudCreate() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (body: { tipo: string; botones?: string; antelacion?: number }) =>
+      apiPost<{ ok: true; id: number | null; status: 'pending' }>('/api/admin/solicitudes', body),
+    onSettled: () => void client.invalidateQueries({ queryKey: ['solicitudes'] }),
+  });
+}
+/** Velai resuelve: aprobar APLICA (la nota solo va al rechazar y es obligatoria). */
+export function useSolicitudResolve() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, accion, nota }: { id: number; accion: 'aprobar' | 'rechazar'; nota?: string }) =>
+      apiPost<{ ok: true; status: string }>(`/api/admin/solicitudes/${id}/${accion}`, nota === undefined ? {} : { nota }),
+    onSettled: () => {
+      void client.invalidateQueries({ queryKey: ['solicitudes'] });
+      // Aprobar puede haber recreado la plantilla y cambiado la antelación.
+      void client.invalidateQueries({ queryKey: ['plantillas'] });
+      void client.invalidateQueries({ queryKey: ['tenant-calendar'] });
+    },
   });
 }
 export function useAppointments(tenant: string | null, from: string, to: string, isCliente: boolean) {
