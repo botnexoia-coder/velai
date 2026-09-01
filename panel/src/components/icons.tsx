@@ -204,6 +204,52 @@ export const IcoDownload = () => (
     <path d="M4 20h16" />
   </Icon>
 );
+export const IcoKey = () => (
+  <Icon strokeWidth={1.8}>
+    <path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0 3 3L22 7l-3-3m-3.5 3.5L19 4" />
+  </Icon>
+);
+export const IcoCloud = () => (
+  <Icon strokeWidth={1.8}>
+    <path d="M17.5 19a4.5 4.5 0 1 0-.42-8.98 6 6 0 1 0-11.4 2.38A3.5 3.5 0 0 0 6.5 19h11z" />
+  </Icon>
+);
+export const IcoShield = () => (
+  <Icon strokeWidth={1.8}>
+    <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+    <path d="m9 12 2 2 4-4" />
+  </Icon>
+);
+export const IcoLock = () => (
+  <Icon strokeWidth={1.8}>
+    <rect x="3" y="11" width="18" height="10" rx="2" />
+    <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+  </Icon>
+);
+export const IcoDb = () => (
+  <Icon strokeWidth={1.8}>
+    <ellipse cx="12" cy="5" rx="8" ry="3" />
+    <path d="M4 5v14c0 1.66 3.58 3 8 3s8-1.34 8-3V5" />
+    <path d="M4 12c0 1.66 3.58 3 8 3s8-1.34 8-3" />
+  </Icon>
+);
+export const IcoPen = () => (
+  <Icon strokeWidth={1.8}>
+    <path d="M4 20h4l10.5-10.5a2.1 2.1 0 0 0-3-3L5 17v3z" />
+    <path d="m14.5 5.5 3 3" />
+  </Icon>
+);
+export const IcoX = () => (
+  <Icon strokeWidth={2}>
+    <path d="M18 6 6 18" />
+    <path d="m6 6 12 12" />
+  </Icon>
+);
+export const IcoTick = () => (
+  <Icon strokeWidth={2.4}>
+    <polyline points="20 6 9 17 4 12" />
+  </Icon>
+);
 export const IcoBell = () => (
   <Icon>
     <path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9" />
