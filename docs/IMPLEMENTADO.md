@@ -12,6 +12,20 @@
 
 ---
 
+## Vista «Plantillas» — catálogo de plantillas por cliente (2026-09-01)
+
+Pedido de Juan con la primera plantilla real en pending. Ítem SOLO-Velai en la
+sección Sistema del panel (v2.2.0): matriz clientes × kinds del catálogo
+(`worker/plantillas.js`) con chip de estado por celda (sin crear / pendiente /
+aprobada / rechazada), botón «Crear» donde falta (paso genérico
+`plantillas/<kind>`, con diálogo propio) y recuentos en cabecera. Endpoint
+`GET /api/admin/plantillas` (403 al rol cliente, fuera de clienteAllowed): une el
+registro `tenant_templates` con la plantilla de LEADS de las columnas históricas,
+presentada como kind `aviso_lead` fuente 'columnas' — unificación de LECTURA; su
+almacenamiento y su alta (paso 2 del aprovisionamiento) no cambian, y el POST
+genérico la rechaza (`template_kind_not_creatable`). El catálogo es desde aquí LA
+lista completa de plantillas del sistema.
+
 ## Confirmaciones — recordatorio y confirmación de citas por WhatsApp (2026-09-01)
 
 SPEC-CONFIRMACIONES F1+F2 implementadas juntas (decisión de Juan). Addon que VELAI
