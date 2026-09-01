@@ -44,6 +44,29 @@ almacenamiento y su alta (paso 2 del aprovisionamiento) no cambian, y el POST
 genérico la rechaza (`template_kind_not_creatable`). El catálogo es desde aquí LA
 lista completa de plantillas del sistema.
 
+## Solicitudes de cliente y categoría real de Twilio en Plantillas (2026-09-01)
+
+Dos evoluciones de la vista Plantillas (panel v2.6.0, migración 0032):
+
+- **El cliente SOLICITA y Velai aprueba** (tabla genérica `tenant_solicitudes`:
+  tipo + payload JSON, UNIQUE parcial de 1 pendiente por tenant+tipo). Desde su
+  vista, el cliente elige antelación (12/24/48) y pareja de botones curada viendo la
+  preview, y «Solicitar cambio» crea la solicitud (validada CONTRA EL CATÁLOGO —
+  hostiles = 400 sin efectos; tenant siempre del scope) con aviso a Velai por
+  Telegram (de→a y quién). Nada se aplica sin aprobación: Velai resuelve desde el
+  bloque «Solicitudes» sobre la matriz — aprobar APLICA (antelación al momento;
+  botones distintos recrean la plantilla con la maquinaria del alta → nueva
+  revisión de Meta; sin subcuenta el error sale limpio y la solicitud sigue
+  pending) y rechazar exige nota, que el cliente ve. Aislamiento validado por
+  mutación (sin el WHERE del scope: barrido Y guardián en rojo).
+- **Categoría REAL de Twilio, no la intención del catálogo** (cazada de Juan: la de
+  lead de gogestion es Marketing y el panel pintaba Utility). fetchApprovalStatus
+  captura `whatsapp.category`; los dos polls la persisten
+  (tenant_templates.categoria / tenants.lead_template_category) con backfill
+  AUTOCURATIVO (con sid y categoría NULL se sondea aunque esté approved). La UI
+  enseña la real («—» mientras no se lea, JAMÁS la del catálogo como hecho; en
+  ámbar para Velai cuando difiere — aviso de coste; el cliente ve solo el hecho).
+
 ## Confirmaciones — recordatorio y confirmación de citas por WhatsApp (2026-09-01)
 
 SPEC-CONFIRMACIONES F1+F2 implementadas juntas (decisión de Juan). Addon que VELAI

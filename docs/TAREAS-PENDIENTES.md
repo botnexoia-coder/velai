@@ -77,7 +77,7 @@ Ahora cada cliente puede completar SU vinculación, cosa que nunca fue posible:
 - [ ] **Auth tokens de las 4 subcuentas** pegados en el panel (campo write-only; Twilio → subcuenta → Keys & Credentials).
 - [ ] **Verificación de negocio en Meta de cada cliente** (con su CIF; añaden a Velai como socio) — bloqueante para su WhatsApp.
 - [ ] **Tope de gasto por subcuenta** en Twilio.
-- [ ] **Revisión de categoría** de `velai_solicitud_contacto` (Marketing → Utility, disponible hasta el **17 oct 2026**).
+- [ ] **Revisión de categoría** de `velai_solicitud_contacto` (Marketing → Utility, disponible hasta el **17 oct 2026**). Desde 2026-09-01 el panel (vista Plantillas) enseña la categoría REAL leída de Twilio por celda — en ámbar cuando difiere de la intención (la de lead de gogestion salió Marketing) — así que el efecto de esta revisión se verá solo, sin consultar Twilio a mano.
 - [ ] **Prueba real de Messenger** (¿acepta TwiML?) antes de prometer el canal.
 - [ ] Cerrar los `[PENDIENTE:…]` de `tenants/hiredatavision.md`, `dialogos.md` y `myxu-costura.md` (3 repos inaccesibles con el token gh actual: prompts de los bots viejos sin contrastar).
 - [ ] Los workers `hiredatavision-bot` y `gogestion-bot` NO se apagan hasta que su tenant responda igual o mejor; anotar en OPERATIONS cuando se apaguen.
@@ -234,9 +234,11 @@ El código está en `main` (ver IMPLEMENTADO.md §Confirmaciones); nada sale has
 completar esto, EN ESTE ORDEN:
 
 - [ ] **Aplicar las migraciones**: `npx wrangler d1 migrations apply vai-leads --remote`
-      (la `0030_confirmaciones.sql` y la `0031_plantilla_opciones.sql` están solo
-      como fichero) y desplegar el worker DESPUÉS de migrar — la 0031 pasa el kind
-      del ledger a 'previo' y el worker nuevo escribe ese kind.
+      (la `0030_confirmaciones.sql`, la `0031_plantilla_opciones.sql` y la
+      `0032_solicitudes_y_categoria.sql` están solo como fichero) y desplegar el
+      worker DESPUÉS de migrar — la 0031 pasa el kind del ledger a 'previo' y el
+      worker nuevo escribe ese kind; la 0032 trae las solicitudes de cliente y la
+      categoría real (el backfill de gogestion sale solo con el cron).
 - [ ] **Crear la plantilla de recordatorios** del tenant de prueba: panel →
       Calendario → card «Confirmaciones» → «Crear plantilla de recordatorios»
       (necesita subcuenta de Twilio con token). Se abre el diálogo de configuración:
