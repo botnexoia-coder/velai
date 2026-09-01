@@ -14,7 +14,7 @@ import { conexiones as rutasConexiones } from './routes/conexiones.js';
 import { calendario as rutasCalendario } from './routes/calendario.js';
 import { encryptSecret, decryptSecret } from './crypto.js';
 import { cloudflareConfigured, syncTurnstileDomains, syncAccessGroup, syncAdminGroup, verifyCfToken } from './cloudflare.js';
-import { createSubaccount, fetchSubaccount, findSubaccountByName, createLeadTemplate, createContentTemplate, submitTemplateApproval, fetchApprovalStatus, createWhatsAppSender, verifySender, fetchSenderStatus, listWhatsAppSenders, updateSenderWebhook, updateSenderProfile, fetchSender } from './twilio.js';
+import { createSubaccount, fetchSubaccount, findSubaccountByName, createContentTemplate, submitTemplateApproval, fetchApprovalStatus, createWhatsAppSender, verifySender, fetchSenderStatus, listWhatsAppSenders, updateSenderWebhook, updateSenderProfile, fetchSender } from './twilio.js';
 import { CALENDAR_TOOLS, CALENDAR_GUARDRAILS, DEFAULT_BUSINESS_HOURS, freeSlots, localToUtcMs, localDateStr, localWeekday, utcToLocalHHMM, googleAuthUrl, exchangeGoogleCode, refreshGoogleToken, revokeGoogleToken, googleBusy, createGoogleEvent, deleteGoogleEvent } from './calendar.js';
 import { templateKind, templateOptions } from './plantillas.js';
 
@@ -3148,7 +3148,9 @@ async function runProvisionStep(request, env, ctx, tenant, tenantId, step, actor
 
   if (step === 'template') {
     if (tenant.lead_template_sid || tenant.lead_template_status) throw new HttpError(409, 'already_provisioned');
-    const { contentSid } = await createLeadTemplate(credentials, tenant.slug, tenant.name);
+    // El cuerpo vive en el catálogo (aviso_lead): UNA sola fuente — la misma que
+    // previsualiza el cliente en su vista de Plantillas.
+    const { contentSid } = await createContentTemplate(credentials, templateKind('aviso_lead').content(tenant.slug, tenant.name));
     try {
       await submitTemplateApproval(credentials, contentSid, `nuevo_lead_${tenant.slug}`);
       const res = await env.DB.prepare("UPDATE tenants SET lead_template_sid=?, lead_template_status='pending', updated_at=? WHERE id=? AND lead_template_sid IS NULL")
@@ -3170,9 +3172,10 @@ async function runProvisionStep(request, env, ctx, tenant, tenantId, step, actor
   if (plantillaStep) {
     const def = templateKind(plantillaStep[1]);
     if (!def) throw new HttpError(404, 'unknown_template_kind');
-    // Las entradas legacy-columnas (aviso_lead) son descriptivas: no tienen `content` y
-    // NO se crean por aquí — su alta sigue siendo el paso `template` del aprovisionamiento.
-    if (typeof def.content !== 'function') throw new HttpError(400, 'template_kind_not_creatable');
+    // Las entradas legacy-columnas (aviso_lead) NO se crean por aquí aunque tengan
+    // content (lo tienen para la preview y para el paso `template` del
+    // aprovisionamiento, que sigue siendo su alta): la puerta es la fuente.
+    if (def.fuente !== 'registro' || typeof def.content !== 'function') throw new HttpError(400, 'template_kind_not_creatable');
     // Opciones del diálogo de alta (SPEC-CONFIRMACIONES, evolución 2026-09-01): pareja
     // de botones curada y antelación. El body es OPCIONAL — el alta sin opciones (el
     // flujo anterior y cualquier llamador viejo) sigue valiendo con los defaults del

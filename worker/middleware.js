@@ -134,6 +134,9 @@ export function clienteAllowed(path, method) {
   if (path === '/api/admin/leads' && method === 'GET') return true;
   if (path === '/api/admin/leads/export.csv' && method === 'GET') return true;
   if (path === '/api/admin/appointments' && method === 'GET') return true;
+  // Sus plantillas, en su espacio (solo lectura): el handler devuelve SOLO su fila
+  // (el id sale del scope) y sin sids. La gestión sigue siendo solo de Velai.
+  if (path === '/api/admin/plantillas' && method === 'GET') return true;
   // Calendario en autoservicio: el cliente conecta y gestiona SU calendario. El
   // handler exige que el :id sea el suyo (ajeno = 404, nunca 403).
   if (/^\/api\/admin\/tenants\/[0-9a-f-]+\/calendar$/i.test(path) && ['GET', 'PATCH', 'DELETE'].includes(method)) return true;

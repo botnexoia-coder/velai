@@ -5310,22 +5310,29 @@ test('GET calendar lleva el bloque de confirmaciones y el PATCH del addon es sol
 
 // ── Vista «Plantillas»: GET /api/admin/plantillas (matriz clientes × kinds) ────
 
-test('GET /plantillas: une columnas (aviso_lead) + registro (tenant_templates) y es solo-Velai', async () => {
+test('GET /plantillas por rol: velai la matriz global con opciones; el cliente SOLO su fila y sin sids', async () => {
   const TENANTS = [
     { id: 't-b', slug: 'beta', name: 'Beta', active: 0, lead_template_sid: null, lead_template_status: null },
-    { id: 't-a', slug: 'alfa', name: 'Alfa', active: 1, lead_template_sid: 'HX' + 'l'.repeat(32), lead_template_status: 'pending' },
+    { id: 't-mio', slug: 'alfa', name: 'Alfa', active: 1, lead_template_sid: 'HX' + 'l'.repeat(32), lead_template_status: 'pending' },
   ];
+  const OPCIONES = JSON.stringify({ botones: 'si_voy_no_puedo', textos: { confirmar: 'Sí, voy', cancelar: 'No puedo ir' } });
   const REGISTRO = [
-    { tenant_id: 't-a', kind: 'recordatorio_cita', sid: 'HX' + 'r'.repeat(32), status: 'approved', updated_at: '2026-09-01T10:00:00Z' },
+    { tenant_id: 't-mio', kind: 'recordatorio_cita', sid: 'HX' + 'r'.repeat(32), status: 'approved', opciones: OPCIONES, updated_at: '2026-09-01T10:00:00Z' },
     // kind retirado del catálogo y clave del prototipo: NUNCA se pintan
-    { tenant_id: 't-a', kind: 'retirada', sid: 'HX' + 'x'.repeat(32), status: 'approved', updated_at: null },
-    { tenant_id: 't-b', kind: 'constructor', sid: 'HX' + 'y'.repeat(32), status: 'approved', updated_at: null },
+    { tenant_id: 't-mio', kind: 'retirada', sid: 'HX' + 'x'.repeat(32), status: 'approved', opciones: null, updated_at: null },
+    { tenant_id: 't-b', kind: 'constructor', sid: 'HX' + 'y'.repeat(32), status: 'approved', opciones: 'basura{', updated_at: null },
   ];
   const db = { prepare: (sql) => {
-    const stmt = () => ({
-      bind: () => stmt(),
-      all: async () => ({ results: /FROM tenant_templates/.test(sql) ? REGISTRO : (/FROM tenants/.test(sql) ? TENANTS : []) }),
-      first: async () => null,
+    const stmt = (args = []) => ({
+      bind: (...a) => stmt(a),
+      all: async () => {
+        if (/FROM tenant_templates/.test(sql)) {
+          return { results: /WHERE tenant_id = \?/.test(sql) ? REGISTRO.filter((r) => r.tenant_id === args[0]) : REGISTRO };
+        }
+        if (/FROM tenants/.test(sql)) return { results: TENANTS };
+        return { results: [] };
+      },
+      first: async () => (/FROM tenants WHERE id = \?/.test(sql) ? TENANTS.find((t) => t.id === args[0]) || null : null),
       run: async () => ({ meta: { changes: 1 } }),
     });
     return stmt();
@@ -5341,13 +5348,27 @@ test('GET /plantillas: une columnas (aviso_lead) + registro (tenant_templates) y
   // El orden del SQL (activos primero) se respeta tal cual.
   assert.deepEqual(out.tenants.map((t) => t.slug), ['beta', 'alfa']);
   const alfa = out.tenants.find((t) => t.slug === 'alfa');
-  assert.deepEqual(alfa.plantillas.recordatorio_cita, { sid: 'HX' + 'r'.repeat(32), status: 'approved', updated_at: '2026-09-01T10:00:00Z' });
-  assert.deepEqual(alfa.plantillas.aviso_lead, { sid: 'HX' + 'l'.repeat(32), status: 'pending', updated_at: null });
+  // Las celdas de velai llevan las OPCIONES elegidas (parseadas) para el tooltip.
+  assert.deepEqual(alfa.plantillas.recordatorio_cita, {
+    sid: 'HX' + 'r'.repeat(32), status: 'approved', updated_at: '2026-09-01T10:00:00Z',
+    opciones: { botones: 'si_voy_no_puedo', textos: { confirmar: 'Sí, voy', cancelar: 'No puedo ir' } },
+  });
+  assert.deepEqual(alfa.plantillas.aviso_lead, { sid: 'HX' + 'l'.repeat(32), status: 'pending', updated_at: null, opciones: null });
   assert.equal(alfa.plantillas.retirada, undefined, 'un kind fuera del catálogo no viaja');
   const beta = out.tenants.find((t) => t.slug === 'beta');
   assert.deepEqual(beta.plantillas, {}, 'sin plantillas = objeto vacío (la celda pinta «sin crear»)');
-  // El rol cliente no llega ni al handler: clienteAllowed no abre la ruta (403 del gate).
-  await assert.rejects(call(CLIENTE), (e) => e.status === 403);
+
+  // Rol cliente (CLIENTE.tenantId = 't-mio'): SOLO su fila, con sus opciones y SIN sids.
+  const propio = await (await call(CLIENTE)).json();
+  assert.deepEqual(propio.tenants.map((t) => t.slug), ['alfa'], 'solo SU fila');
+  assert.ok(!JSON.stringify(propio).includes('beta') && !JSON.stringify(propio).includes('t-b'), 'ni rastro de otros clientes');
+  assert.ok(!JSON.stringify(propio.tenants).includes('HX'), 'los sids son dato operativo de Velai: no viajan al cliente');
+  const mio = propio.tenants[0];
+  assert.deepEqual(mio.plantillas.recordatorio_cita.opciones.textos, { confirmar: 'Sí, voy', cancelar: 'No puedo ir' }, 'SUS botones elegidos, para la preview');
+  assert.equal(mio.plantillas.aviso_lead.status, 'pending');
+  // La fila con kind 'constructor' (clave del prototipo) y opciones corruptas no entra.
+  const conBasura = await (await call({ role: 'cliente', tenantId: 't-b', email: 'x@b.com' })).json();
+  assert.ok(!Object.prototype.hasOwnProperty.call(conBasura.tenants[0].plantillas, 'constructor'), 'clave del prototipo fuera');
 });
 
 test('el POST genérico rechaza los kinds legacy-columnas: aviso_lead no se crea por ahí', async () => {
@@ -5510,8 +5531,14 @@ test('el catálogo del endpoint lleva config con preview renderizada, parejas y 
   assert.ok(rec.config.preview.includes('María') && rec.config.preview.includes('Clínica Ejemplo'));
   assert.ok(!rec.config.preview.includes('{{'));
   assert.ok(!/mañana/i.test(rec.config.preview), 'el cuerpo debe ser neutro: la antelación es configurable');
-  // La legacy de columnas no lleva config (no se crea desde el diálogo).
-  assert.equal(kinds.find((k) => k.kind === 'aviso_lead').config, undefined);
+  // La legacy de columnas TAMBIÉN se previsualiza (el cliente ve cómo llega el aviso
+  // de sus leads): preview renderizada desde su content del catálogo — la ÚNICA fuente
+  // del cuerpo, la misma que usa el paso `template` del aprovisionamiento. Pero sin
+  // parejas ni antelaciones: no se crea desde el diálogo.
+  const lead = kinds.find((k) => k.kind === 'aviso_lead');
+  assert.ok(lead.config.preview.includes('Nuevo lead – Clínica Ejemplo'));
+  assert.ok(lead.config.preview.includes('María') && !lead.config.preview.includes('{{'));
+  assert.deepEqual([lead.config.botones, lead.config.antelaciones], [undefined, undefined]);
   // templateOptions: puro, con defaults y con rechazos.
   const def = tk('recordatorio_cita');
   assert.deepEqual(templateOptions(def, {}).pareja.id, 'confirmo_cancelar');

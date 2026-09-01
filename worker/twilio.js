@@ -49,27 +49,11 @@ export async function findSubaccountByName(env, friendlyName) {
   return hit ? { sid: hit.sid, authToken: hit.auth_token, friendlyName: hit.friendly_name } : null;
 }
 
-// Plantilla de aviso de lead con las 4 variables en el orden fijado por
-// leadTemplateVariables (1 WhatsApp, 2 Nombre, 3 Negocio, 4 Necesidad).
-export async function createLeadTemplate(credentials, slug, businessName) {
-  const data = await twilioRequest('https://content.twilio.com/v1/Content', credentials, {
-    json: {
-      friendly_name: `nuevo_lead_${slug}`.replace(/[^a-z0-9_]/g, '_'),
-      language: 'es',
-      variables: { 1: '34612345678', 2: 'María', 3: 'Barbería en Madrid', 4: 'Atender clientes fuera de horario' },
-      types: {
-        'twilio/text': {
-          body: `🔥 Nuevo lead – ${businessName}\n\n📱 WhatsApp: {{1}}\n👤 Nombre: {{2}}\n🏪 Negocio: {{3}}\n🎯 Necesidad: {{4}}\n\n⚡ Contactar hoy mismo`,
-        },
-      },
-    },
-  });
-  return { contentSid: data.sid };
-}
-
 // Crea en Twilio una plantilla del CATÁLOGO (worker/plantillas.js): la definición
 // llega ya montada (friendly_name, variables de muestra, types con botones si los hay).
-// Contraparte genérica de createLeadTemplate para el registro tenant_templates.
+// Desde 2026-09-01 TAMBIÉN la de leads pasa por aquí: su cuerpo vive en el catálogo
+// (entrada aviso_lead) — el createLeadTemplate histórico se retiró para que el cuerpo
+// tenga UNA sola fuente y el cliente pueda previsualizarlo.
 export async function createContentTemplate(credentials, definition) {
   const data = await twilioRequest('https://content.twilio.com/v1/Content', credentials, { json: definition });
   return { contentSid: data.sid };

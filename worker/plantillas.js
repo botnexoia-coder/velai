@@ -12,12 +12,15 @@
 // (pollTemplateApprovals) trabajan contra esa tabla sin saber nada de recordatorios.
 // La plantilla nº 3 debe ser SOLO una entrada nueva en este objeto.
 //
-// La plantilla de LEADS entra en el catálogo como entrada DESCRIPTIVA (`aviso_lead`,
-// fuente 'columnas'): así el catálogo es LA lista completa de plantillas del sistema
-// y la vista «Plantillas» del panel la enseña junto a las demás. Su ALMACENAMIENTO
-// sigue en las columnas históricas de tenants (lead_template_sid/lead_template_status)
-// y su cuerpo en twilio.js (createLeadTemplate) — unificarla en tenant_templates exige
-// migrar datos y lectores a la vez y sigue siendo un paso aparte.
+// La plantilla de LEADS entra en el catálogo con su CUERPO incluido (`aviso_lead`,
+// fuente 'columnas'): el catálogo es LA lista completa de plantillas del sistema y,
+// desde 2026-09-01, también la ÚNICA fuente del cuerpo del aviso de lead — el paso
+// `template` del aprovisionamiento lo lee de aquí (antes vivía duplicable en
+// twilio.js/createLeadTemplate, hoy retirado) y la vista del cliente lo previsualiza.
+// Su ALMACENAMIENTO sigue en las columnas históricas de tenants
+// (lead_template_sid/lead_template_status): unificarlo en tenant_templates exige
+// migrar datos y lectores a la vez y sigue siendo un paso aparte. Por eso su
+// creación NO va por el POST genérico: la puerta es `fuente !== 'registro'`.
 
 // Parejas de botones CURADAS del recordatorio (decisión de Juan, 2026-09-01: NUNCA
 // texto libre hacia Twilio — un catálogo cerrado no puede colar inyección ni pasarse
@@ -81,11 +84,10 @@ export const TEMPLATE_CATALOG = {
       };
     },
   },
-  // LEGACY-COLUMNAS: entrada solo descriptiva — SIN `content`, así el paso genérico de
-  // aprovisionamiento la rechaza (template_kind_not_creatable). Se crea en el paso 2
-  // del aprovisionamiento del cliente (createLeadTemplate, twilio.js) y su estado vive
-  // en tenants.lead_template_sid/lead_template_status; la envía deliver() (app.js) al
-  // equipo del negocio cuando entra un lead.
+  // LEGACY-COLUMNAS: su estado vive en tenants.lead_template_sid/lead_template_status
+  // y se crea en el paso 2 del aprovisionamiento del cliente (que lee ESTE content) —
+  // el POST genérico plantillas/<kind> la rechaza por fuente (template_kind_not_creatable).
+  // La envía deliver() (app.js) al equipo del negocio cuando entra un lead.
   aviso_lead: {
     kind: 'aviso_lead',
     nombre: 'Aviso de lead',
@@ -93,6 +95,19 @@ export const TEMPLATE_CATALOG = {
     fuente: 'columnas',
     categoria: 'UTILITY',
     approvalName: (slug) => `nuevo_lead_${slug}`.toLowerCase().replace(/[^a-z0-9_]/g, '_'),
+    // CONTRATO de variables: 1 WhatsApp, 2 Nombre, 3 Negocio, 4 Necesidad — lo llena
+    // leadTemplateVariables (worker/app.js). Si cambias algo, cambia allí en el mismo
+    // commit. Cuerpo portado TAL CUAL del createLeadTemplate histórico (twilio.js).
+    content: (slug, businessName) => ({
+      friendly_name: `nuevo_lead_${slug}`.replace(/[^a-z0-9_]/g, '_'),
+      language: 'es',
+      variables: { 1: '34612345678', 2: 'María', 3: 'Barbería en Madrid', 4: 'Atender clientes fuera de horario' },
+      types: {
+        'twilio/text': {
+          body: `🔥 Nuevo lead – ${businessName}\n\n📱 WhatsApp: {{1}}\n👤 Nombre: {{2}}\n🏪 Negocio: {{3}}\n🎯 Necesidad: {{4}}\n\n⚡ Contactar hoy mismo`,
+        },
+      },
+    }),
   },
 };
 

@@ -158,6 +158,7 @@ const CASOS = [
   { key: '/api/admin/leads', m: 'GET', path: () => '/api/admin/leads' },
   { key: '/api/admin/leads/export.csv', m: 'GET', path: () => '/api/admin/leads/export.csv' },
   { key: '/api/admin/appointments', m: 'GET', path: () => '/api/admin/appointments' },
+  { key: '/api/admin/plantillas', m: 'GET', path: () => '/api/admin/plantillas' },
   { key: 'calendar$', m: ['GET', 'PATCH', 'DELETE'], path: (t) => `/api/admin/tenants/${t}/calendar`, body: { active: true } },
   { key: 'calendar\\/connect$', m: 'POST', path: (t) => `/api/admin/tenants/${t}/calendar/connect` },
   { key: 'telegram$', m: ['GET', 'DELETE'], path: (t) => `/api/admin/tenants/${t}/telegram` },

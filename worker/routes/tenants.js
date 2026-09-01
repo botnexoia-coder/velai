@@ -38,43 +38,84 @@ tenants.get('/api/admin/tenants', async (c) => {
   return json({ tenants: rows }, 200, NO_STORE);
 });
 
-// ── Catálogo de plantillas: la matriz clientes × kinds (vista «Plantillas») ───
-// SOLO Velai: no está en clienteAllowed (clienteGate corta con 403 antes de tocar
-// datos) y el handler lo veta ADEMÁS en código. Las consultas van SIN scope a
-// propósito (§4b caso 3b): es una vista de operación GLOBAL de Velai — filas de
-// TODOS los clientes — y la puerta es el rol, no un tenant que filtrar.
+// ── Catálogo de plantillas (vista «Plantillas», para AMBOS roles) ─────────────
+// Velai ve la matriz global; el cliente, SOLO su fila (decisión de Juan: «el cliente
+// debe poder ver sus plantillas, cómo están creadas y qué ve el cliente final»).
+// Mismo endpoint consciente del rol, patrón de /stats.
+
+// Parse seguro del JSON de opciones (0031): basura en la columna → null, la vista
+// nunca revienta por un dato viejo o corrupto.
+function parseOpciones(raw) {
+  if (!raw) return null;
+  try {
+    const o = JSON.parse(raw);
+    return o && typeof o === 'object' && !Array.isArray(o) ? o : null;
+  } catch (_) { return null; }
+}
+
+// La fila de UN tenant con su mapa de plantillas: el registro (tenant_templates, con
+// lo elegido en `opciones`) + la de LEADS desde las columnas históricas (unificación
+// de LECTURA; sin updated_at — el de la fila entera de tenants mentiría). `sinSid`:
+// la vista del cliente es de solo lectura y el sid es dato operativo de Velai.
+function plantillasDe(t, registroRows, { sinSid = false } = {}) {
+  const plantillas = {};
+  for (const r of registroRows) {
+    // Un kind retirado del catálogo no se pinta (y el lookup seguro de templateKind
+    // descarta de paso claves del prototipo).
+    if (!templateKind(r.kind)) continue;
+    plantillas[r.kind] = {
+      ...(sinSid ? {} : { sid: r.sid || null }),
+      status: r.status || null, updated_at: r.updated_at || null, opciones: parseOpciones(r.opciones),
+    };
+  }
+  if (t.lead_template_sid || t.lead_template_status) {
+    plantillas.aviso_lead = {
+      ...(sinSid ? {} : { sid: t.lead_template_sid || null }),
+      status: t.lead_template_status || null, updated_at: null, opciones: null,
+    };
+  }
+  return { id: t.id, slug: t.slug, name: t.name, active: t.active, plantillas };
+}
+
+// tenant_templates puede ir por detrás de las migraciones (0030/0031): primero con
+// `opciones`, si la columna falta sin ella, y si la tabla falta, vacío — la vista
+// sale igualmente con lo que viva en columnas.
+async function leerRegistro(env, tenantId) {
+  const where = tenantId ? ' WHERE tenant_id = ?' : '';
+  const args = tenantId ? [tenantId] : [];
+  try {
+    return (await env.DB.prepare(`SELECT tenant_id, kind, sid, status, opciones, updated_at FROM tenant_templates${where}`).bind(...args).all()).results || [];
+  } catch (_) {
+    try {
+      return (await env.DB.prepare(`SELECT tenant_id, kind, sid, status, updated_at FROM tenant_templates${where}`).bind(...args).all()).results || [];
+    } catch (_) { return []; }
+  }
+}
+
 tenants.get('/api/admin/plantillas', async (c) => {
   const { env, scope } = partesAdmin(c);
-  if (scope.role !== 'velai') throw new HttpError(403, 'not_authorized');
+  // Rol cliente: SOLO su fila — §4b caso 4, el id se ata desde el scope y jamás desde
+  // la petición — sin sids y de solo lectura (la gestión sigue siendo de Velai).
+  // OJO: no citar aquí el patrón literal del bind — check-aislamiento lee texto plano
+  // y un comentario que lo nombre le taparía una consulta sin puerta de verdad.
+  if (scope.role !== 'velai') {
+    const propio = await env.DB.prepare('SELECT id, slug, name, active, lead_template_sid, lead_template_status FROM tenants WHERE id = ?').bind(scope.tenantId).first();
+    if (!propio) throw new HttpError(404, 'not_found');
+    const registro = await leerRegistro(env, scope.tenantId);
+    return json({ kinds: catalogKinds(), tenants: [plantillasDe(propio, registro, { sinSid: true })] }, 200, NO_STORE);
+  }
+  // Velai: la matriz GLOBAL — filas de TODOS los clientes, sin scope a propósito
+  // (la rama del cliente ya retornó arriba: estas consultas no son alcanzables por él).
   const rows = (await env.DB.prepare(`SELECT id, slug, name, active, lead_template_sid, lead_template_status
     FROM tenants ORDER BY active DESC, name ASC`).all()).results || [];
-  // tenant_templates puede no existir aún (deploy antes de la 0030): la matriz sale
-  // igualmente con lo que vive en columnas.
-  let registro = [];
-  try {
-    registro = (await env.DB.prepare('SELECT tenant_id, kind, sid, status, updated_at FROM tenant_templates').all()).results || [];
-  } catch (_) {}
+  const registro = await leerRegistro(env, null);
   const porTenant = new Map();
   for (const r of registro) {
-    // Una fila de un kind retirado del catálogo no se pinta (y el lookup seguro de
-    // templateKind descarta de paso claves del prototipo).
-    if (!templateKind(r.kind)) continue;
-    const m = porTenant.get(r.tenant_id) || {};
-    m[r.kind] = { sid: r.sid || null, status: r.status || null, updated_at: r.updated_at || null };
-    porTenant.set(r.tenant_id, m);
+    const lista = porTenant.get(r.tenant_id) || [];
+    lista.push(r);
+    porTenant.set(r.tenant_id, lista);
   }
-  const lista = rows.map((t) => {
-    const plantillas = { ...(porTenant.get(t.id) || {}) };
-    // La plantilla de LEADS vive en las columnas históricas de tenants: aquí se
-    // presenta como un kind más (unificación de LECTURA, no de almacenamiento).
-    // Sin updated_at: las columnas no guardan cuándo cambió ESA plantilla y el
-    // updated_at de la fila entera mentiría.
-    if (t.lead_template_sid || t.lead_template_status) {
-      plantillas.aviso_lead = { sid: t.lead_template_sid || null, status: t.lead_template_status || null, updated_at: null };
-    }
-    return { id: t.id, slug: t.slug, name: t.name, active: t.active, plantillas };
-  });
-  return json({ kinds: catalogKinds(), tenants: lista }, 200, NO_STORE);
+  return json({ kinds: catalogKinds(), tenants: rows.map((t) => plantillasDe(t, porTenant.get(t.id) || [])) }, 200, NO_STORE);
 });
 
 tenants.post('/api/admin/tenants', async (c) => {
