@@ -34,8 +34,26 @@ lista completa de plantillas del sistema.
 ## Confirmaciones — recordatorio y confirmación de citas por WhatsApp (2026-09-01)
 
 SPEC-CONFIRMACIONES F1+F2 implementadas juntas (decisión de Juan). Addon que VELAI
-habilita por cliente (interruptor solo-Velai; el cliente lo ve), antelación única de
-24 h, nombre «Confirmaciones» dentro de la vista Calendario.
+habilita por cliente (interruptor solo-Velai; el cliente lo ve), nombre
+«Confirmaciones» dentro de la vista Calendario. Antelación: la decisión original
+«24 h única» EVOLUCIONÓ el mismo día a **curada 12/24/48 con default 24** (ver
+§Alta configurable más abajo) — es config del addon (`tenants.reminder_hours`),
+editable sin nueva aprobación de Meta.
+
+### Alta configurable de la plantilla (evolución del mismo día, panel v2.4.0)
+
+«Crear plantilla» pasó de un confirmar simple a un diálogo de configuración con
+envío explícito: antelación curada (12/24/48, default 24; se cambia después sin
+nueva aprobación — el cuerpo es NEUTRO respecto al tiempo), pareja de botones
+CURADA del catálogo (4 parejas, ≤25 caracteres; NUNCA texto libre hacia Twilio —
+decisión de Juan; cambiar los botones después exige plantilla nueva y otra revisión
+de Meta; los payloads conf:/canc: no cambian jamás) y vista previa del mensaje REAL
+renderizada por el worker. El POST `plantillas/<kind>` valida `{botones, antelacion}`
+contra el catálogo antes de tocar Twilio; lo elegido se persiste en
+`tenant_templates.opciones` (migración 0031, que también hace GENÉRICO el kind del
+ledger → 'previo': un kind con horas re-sembraría la cita al cambiar la antelación).
+Retrocompatible: el alta sin opciones usa los defaults y las filas ya creadas sin
+opciones siguen válidas.
 
 - **F1**: migración `0030` (ledger `appointment_reminders` con el molde de
   lead_notifications; `appointments.customer_confirmed_at/cancelled_by`;

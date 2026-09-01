@@ -233,13 +233,16 @@ en tres horizontes: [`PLAN-PANEL.md`](./PLAN-PANEL.md) es el mapa y las decision
 El código está en `main` (ver IMPLEMENTADO.md §Confirmaciones); nada sale hasta
 completar esto, EN ESTE ORDEN:
 
-- [ ] **Aplicar la migración**: `npx wrangler d1 migrations apply vai-leads --remote`
-      (la `0030_confirmaciones.sql` está solo como fichero) y desplegar el worker
-      DESPUÉS de migrar.
+- [ ] **Aplicar las migraciones**: `npx wrangler d1 migrations apply vai-leads --remote`
+      (la `0030_confirmaciones.sql` y la `0031_plantilla_opciones.sql` están solo
+      como fichero) y desplegar el worker DESPUÉS de migrar — la 0031 pasa el kind
+      del ledger a 'previo' y el worker nuevo escribe ese kind.
 - [ ] **Crear la plantilla de recordatorios** del tenant de prueba: panel →
       Calendario → card «Confirmaciones» → «Crear plantilla de recordatorios»
-      (necesita subcuenta de Twilio con token). El cron avisa por Telegram cuando
-      Meta la apruebe.
+      (necesita subcuenta de Twilio con token). Se abre el diálogo de configuración:
+      antelación (12/24/48) y pareja de botones con vista previa → «Enviar a
+      aprobación». El cron avisa por Telegram cuando Meta la apruebe. La plantilla
+      de dialogos YA pendiente (creada sin opciones) sigue válida tal cual.
 - [ ] **Activar el addon** al tenant de prueba (misma card, botón «Activar
       Confirmaciones») cuando la plantilla esté aprobada.
 - [ ] **Prueba real**: agendar una cita con Vai a >24 h vista, esperar el
