@@ -53,6 +53,7 @@ button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-vis
 .brand .blogo b{font-family:var(--font-b);font-weight:600;font-size:12.5px;line-height:1.25;letter-spacing:.01em;color:var(--white);text-transform:none;white-space:normal;overflow:hidden}
 /* Pie fijo y delgado. Vive FUERA de main: usa los tokens oscuros de :root, como el sidebar. */
 .foot{position:fixed;left:230px;right:0;bottom:0;height:30px;display:flex;align-items:center;justify-content:center;gap:6px;font-family:var(--font-b);font-size:11px;letter-spacing:.02em;color:var(--muted);background:var(--side);border-top:1px solid var(--border);z-index:15}
+.foot-ver{margin-left:10px;padding:2px 8px;border:1px solid var(--line);border-radius:999px;font-size:11px;color:var(--muted2);font-variant-numeric:tabular-nums;cursor:help}
 .foot b{font-weight:700;color:var(--white)}
 main{padding-bottom:74px}
 @media(max-width:900px){.foot{left:0}}

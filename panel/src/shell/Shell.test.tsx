@@ -105,3 +105,10 @@ describe('shell y navegación por rol', () => {
     expect(container.querySelector('.foot')).toHaveTextContent('Velai');
   });
 });
+
+it('el pie firma la versión desplegada — es lo que distingue un deploy de otro a ojo', () => {
+  renderApp(meVelai);
+  // vX.Y.Z · commit: la semántica la sube una persona; el commit cambia solo en cada
+  // deploy. Si esto desaparece del pie, volvemos al «¿estoy viendo el nuevo o el viejo?».
+  expect(document.querySelector('.foot-ver')?.textContent).toMatch(/^v\d+\.\d+\.\d+ · \S+$/);
+});

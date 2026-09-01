@@ -160,6 +160,12 @@ export function Shell() {
       </main>
       <div className="foot">
         Panel de <b>Velai</b> · {new Date().getFullYear()} · Todos los derechos reservados
+        {/* La versión resuelve el «¿estoy viendo el panel nuevo o el viejo?» de un vistazo:
+            el v1 no firma el pie, y entre deploys del v2 cambia el commit aunque nadie
+            haya subido la semántica. */}
+        <span className="foot-ver" data-tip={'Compilado el ' + __PANEL_FECHA__ + ' · commit ' + __PANEL_COMMIT__}>
+          v{__PANEL_VERSION__} · {__PANEL_COMMIT__}
+        </span>
       </div>
     </>
   );
