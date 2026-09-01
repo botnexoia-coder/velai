@@ -15,10 +15,15 @@
 ## Vista «Plantillas» — catálogo de plantillas por cliente (2026-09-01)
 
 Pedido de Juan con la primera plantilla real en pending. Ítem SOLO-Velai en la
-sección Sistema del panel (v2.2.0): matriz clientes × kinds del catálogo
-(`worker/plantillas.js`) con chip de estado por celda (sin crear / pendiente /
-aprobada / rechazada), botón «Crear» donde falta (paso genérico
-`plantillas/<kind>`, con diálogo propio) y recuentos en cabecera. Endpoint
+sección Sistema del panel: primero como matriz clientes × kinds (v2.2.0) y el
+mismo día REDISEÑADA «por plantilla» tras el ejercicio de diseño (v2.3.0, lienzo
+aprobado por Juan): una tarjeta por kind del catálogo (`worker/plantillas.js`,
+que manda label/categoría/descripción — nada por kind hardcodeado en el panel)
+con chips-píldora por cliente (aprobada/pendiente/rechazada/sin crear), botón
+«Crear» dentro del chip donde falta (paso genérico `plantillas/<kind>`, con
+diálogo propio), buscador de clientes sin acentos (la tarjeta sin coincidencias
+se atenúa, nunca desaparece) y contadores-filtro globales por estado que pliegan
+el resto en un «+N más». Endpoint
 `GET /api/admin/plantillas` (403 al rol cliente, fuera de clienteAllowed): une el
 registro `tenant_templates` con la plantilla de LEADS de las columnas históricas,
 presentada como kind `aviso_lead` fuente 'columnas' — unificación de LECTURA; su
