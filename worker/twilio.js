@@ -67,9 +67,17 @@ export async function createLeadTemplate(credentials, slug, businessName) {
   return { contentSid: data.sid };
 }
 
-export async function submitTemplateApproval(credentials, contentSid, name) {
+// Crea en Twilio una plantilla del CATÁLOGO (worker/plantillas.js): la definición
+// llega ya montada (friendly_name, variables de muestra, types con botones si los hay).
+// Contraparte genérica de createLeadTemplate para el registro tenant_templates.
+export async function createContentTemplate(credentials, definition) {
+  const data = await twilioRequest('https://content.twilio.com/v1/Content', credentials, { json: definition });
+  return { contentSid: data.sid };
+}
+
+export async function submitTemplateApproval(credentials, contentSid, name, category = 'UTILITY') {
   return twilioRequest(`https://content.twilio.com/v1/Content/${contentSid}/ApprovalRequests/whatsapp`, credentials, {
-    json: { name: name.toLowerCase().replace(/[^a-z0-9_]/g, '_'), category: 'UTILITY' },
+    json: { name: name.toLowerCase().replace(/[^a-z0-9_]/g, '_'), category },
   });
 }
 

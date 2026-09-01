@@ -94,6 +94,9 @@ const provision = async (c) => {
 tenants.all('/api/admin/tenants/:id/provision', provision);
 tenants.all('/api/admin/tenants/:id/provision/:paso{subaccount|template|sender|domains}', provision);
 tenants.all('/api/admin/tenants/:id/provision/:paso{template}/:sub{check|resubmit}', provision);
+// Plantillas del catálogo (worker/plantillas.js): el kind viaja en la ruta y el paso
+// genérico de app.js lo valida contra el catálogo (404 unknown_template_kind).
+tenants.all('/api/admin/tenants/:id/provision/:paso{plantillas}/:sub{[a-z0-9_]+}', provision);
 tenants.all('/api/admin/tenants/:id/provision/:paso{sender}/:sub{verify|sync|profile}', provision);
 
 // ── Usuarios del cliente (SPEC-USUARIOS §B.2): solo rol velai (clienteAllowed es

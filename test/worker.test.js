@@ -4820,3 +4820,373 @@ test('panel v2: la bandera y el hostname mandan — y sin JWT no se sirve ni un 
   const publico = await worker.fetch(new Request('https://api.hirevai.com/conversaciones'), env, ctx);
   assert.equal(publico.status, 404);
 });
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Confirmaciones (SPEC-CONFIRMACIONES F1): recordatorio, botones y plantillas del catálogo
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// Mock con ESTADO del ledger de recordatorios: sin él, la idempotencia entre ticks
+// y el backoff no probarían nada (mismo motivo que withConversations).
+function remindersDb({ appointments, tenant, template }) {
+  const ledger = new Map();
+  let autoId = 1;
+  return {
+    ledger,
+    prepare(sql) {
+      return { bind: (...args) => ({
+        all: async () => {
+          if (/FROM appointments a\b/.test(sql)) {
+            if (!template || template.status !== 'approved' || !template.sid || !Number(tenant.reminders_enabled) || !Number(tenant.active)) return { results: [] };
+            const [now, max] = args;
+            return { results: appointments
+              .filter((a) => a.status === 'confirmed' && a.starts_at > now && a.starts_at <= max && !ledger.has(a.id))
+              .map((a) => ({ id: a.id, starts_at: a.starts_at, created_at: a.created_at, reminder_hours: tenant.reminder_hours })) };
+          }
+          if (/FROM appointment_reminders r\b/.test(sql)) {
+            const now = args[1];
+            const out = [];
+            for (const [aid, r] of ledger) {
+              if (!['pending', 'failed'].includes(r.status) || r.attempts >= 5) continue;
+              if (r.next_attempt_at && r.next_attempt_at > now) continue;
+              const a = appointments.find((x) => x.id === aid);
+              out.push({ reminder_id: r.id, reminder_attempts: r.attempts, id: a.id, tenant_id: a.tenant_id,
+                customer_name: a.customer_name, customer_phone: a.customer_phone, reason: a.reason || null,
+                starts_at: a.starts_at, timezone: a.timezone, status: a.status });
+            }
+            return { results: out };
+          }
+          return { results: [] };
+        },
+        first: async () => {
+          if (/FROM tenants/.test(sql)) return tenant;
+          if (/FROM tenant_templates/.test(sql)) return template;
+          return null;
+        },
+        run: async () => {
+          if (/INSERT INTO appointment_reminders/.test(sql)) {
+            const [aid, kind, status, lastError, updated] = args;
+            if (ledger.has(aid)) return { meta: { changes: 0 } };
+            ledger.set(aid, { id: autoId++, kind, status, attempts: 0, next_attempt_at: null, last_error: lastError, sent_at: null, updated_at: updated });
+            return { meta: { changes: 1 } };
+          }
+          if (/UPDATE appointment_reminders/.test(sql)) {
+            const [status, attempts, next, lastError, sentAt, updated, rid] = args;
+            for (const r of ledger.values()) if (r.id === rid) Object.assign(r, { status, attempts, next_attempt_at: next, last_error: lastError, sent_at: sentAt, updated_at: updated });
+            return { meta: { changes: 1 } };
+          }
+          return { meta: { changes: 1 } };
+        },
+      }) };
+    },
+    batch: async () => [],
+  };
+}
+
+const REMINDER_TENANT = {
+  id: 't-conf', slug: 'conf', name: 'Clínica Conf', brand_name: 'Clínica Conf', active: 1,
+  reminders_enabled: 1, reminder_hours: '24', twilio_from: 'whatsapp:+15550000009',
+  twilio_subaccount_sid: null, telegram_chat_id: null,
+};
+const APPROVED = { sid: 'HX' + 'a'.repeat(32), status: 'approved' };
+
+test('recordatorios: el cron siembra y envía UNA vez — dos ticks no duplican', async () => {
+  const nowMs = Date.now();
+  const appt = { id: '00000000-0000-4000-8000-0000000000f1', tenant_id: 't-conf', status: 'confirmed',
+    customer_name: 'Marta', customer_phone: '+34600111222', reason: 'revisión',
+    starts_at: new Date(nowMs + 10 * 3600000).toISOString(), created_at: new Date(nowMs - 20 * 3600000).toISOString(),
+    timezone: 'Europe/Madrid' };
+  const db = remindersDb({ appointments: [appt], tenant: REMINDER_TENANT, template: APPROVED });
+  const env = { DB: db, TWILIO_ACCOUNT_SID: 'AC' + 'p'.repeat(32), TWILIO_AUTH_TOKEN: 'tok' };
+  const sends = [];
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = async (url, init) => {
+    if (String(url).includes('api.twilio.com')) { sends.push(new URLSearchParams(String(init.body))); return new Response('{}', { status: 201 }); }
+    return new Response('{}', { status: 200 });
+  };
+  try {
+    await testing.processReminders(env, nowMs);
+    await testing.processReminders(env, nowMs); // segundo tick: idempotente
+    assert.equal(sends.length, 1, 'un solo envío por cita');
+    assert.equal(db.ledger.get(appt.id).status, 'sent');
+    assert.equal(sends[0].get('To'), 'whatsapp:+34600111222');
+    assert.equal(sends[0].get('ContentSid'), APPROVED.sid);
+    assert.ok(!sends[0].get('Body'), 'plantilla SIEMPRE: nunca texto libre iniciado por el negocio');
+    const vars = JSON.parse(sends[0].get('ContentVariables'));
+    assert.equal(vars[6], appt.id, 'el payload de los botones lleva el id de la cita');
+    assert.equal(vars[1], 'Marta');
+  } finally { globalThis.fetch = realFetch; }
+});
+
+test('recordatorios: la hora de la plantilla va en la ZONA del negocio (Madrid vs Bogotá)', () => {
+  const starts = '2026-09-15T08:00:00.000Z';
+  const madrid = JSON.parse(testing.reminderTemplateVariables(REMINDER_TENANT, { id: 'x', customer_name: 'Ana', starts_at: starts, timezone: 'Europe/Madrid' }));
+  const bogota = JSON.parse(testing.reminderTemplateVariables(REMINDER_TENANT, { id: 'x', customer_name: 'Ana', starts_at: starts, timezone: 'America/Bogota' }));
+  assert.equal(madrid[4], '10:00', 'Madrid en verano: UTC+2');
+  assert.equal(bogota[4], '03:00', 'Bogotá: UTC-5');
+  assert.ok(madrid[3].includes('septiembre'));
+  // reminder_hours: CSV con el primer valor, acotado — basura cae al default de 24
+  assert.equal(testing.reminderHoursFor({ reminder_hours: '24' }), 24);
+  assert.equal(testing.reminderHoursFor({ reminder_hours: '2,24' }), 2);
+  assert.equal(testing.reminderHoursFor({ reminder_hours: 'basura' }), 24);
+  assert.equal(testing.reminderHoursFor({}), 24);
+});
+
+test('recordatorios: la cita recién agendada dentro de la ventana queda skipped, sin envío', async () => {
+  const nowMs = Date.now();
+  const appt = { id: '00000000-0000-4000-8000-0000000000f2', tenant_id: 't-conf', status: 'confirmed',
+    customer_name: 'Luis', customer_phone: '+34600111333', starts_at: new Date(nowMs + 10 * 3600000).toISOString(),
+    created_at: new Date(nowMs - 3600000).toISOString(), timezone: 'Europe/Madrid' };
+  const db = remindersDb({ appointments: [appt], tenant: REMINDER_TENANT, template: APPROVED });
+  const env = { DB: db, TWILIO_ACCOUNT_SID: 'AC' + 'p'.repeat(32), TWILIO_AUTH_TOKEN: 'tok' };
+  let sends = 0;
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = async (url) => { if (String(url).includes('api.twilio.com')) sends++; return new Response('{}', { status: 200 }); };
+  try {
+    await testing.processReminders(env, nowMs);
+    assert.equal(sends, 0, 'no se recuerda lo que el cliente acaba de agendar con Vai');
+    assert.equal(db.ledger.get(appt.id).status, 'skipped');
+    assert.equal(db.ledger.get(appt.id).last_error, 'creada_dentro_de_ventana');
+  } finally { globalThis.fetch = realFetch; }
+});
+
+test('recordatorios: un fallo de Twilio reintenta con backoff y respeta next_attempt_at', async () => {
+  const nowMs = Date.now();
+  const appt = { id: '00000000-0000-4000-8000-0000000000f3', tenant_id: 't-conf', status: 'confirmed',
+    customer_name: 'Eva', customer_phone: '+34600111444', starts_at: new Date(nowMs + 20 * 3600000).toISOString(),
+    created_at: new Date(nowMs - 30 * 3600000).toISOString(), timezone: 'Europe/Madrid' };
+  const db = remindersDb({ appointments: [appt], tenant: REMINDER_TENANT, template: APPROVED });
+  const env = { DB: db, TWILIO_ACCOUNT_SID: 'AC' + 'p'.repeat(32), TWILIO_AUTH_TOKEN: 'tok' };
+  let attempts = 0;
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = async (url) => { if (String(url).includes('api.twilio.com')) { attempts++; return new Response('{}', { status: 500 }); } return new Response('{}', { status: 200 }); };
+  try {
+    await testing.processReminders(env, nowMs);
+    const row = db.ledger.get(appt.id);
+    assert.deepEqual([attempts, row.status, row.attempts], [1, 'failed', 1]);
+    assert.equal(row.next_attempt_at, new Date(nowMs + 5 * 60000).toISOString(), 'backoff attempts²·5min');
+    // tick inmediato: aún no toca — el ledger manda, no la hora del cron
+    await testing.processReminders(env, nowMs + 60000);
+    assert.equal(attempts, 1, 'antes de next_attempt_at no se reintenta');
+    // pasado el plazo: segundo intento y backoff cuadrático
+    await testing.processReminders(env, nowMs + 6 * 60000);
+    assert.deepEqual([attempts, db.ledger.get(appt.id).attempts], [2, 2]);
+    assert.equal(db.ledger.get(appt.id).next_attempt_at, new Date(nowMs + 6 * 60000 + 4 * 5 * 60000).toISOString());
+  } finally { globalThis.fetch = realFetch; }
+});
+
+test('recordatorios: sin plantilla aprobada o con el addon apagado no se siembra nada', async () => {
+  const nowMs = Date.now();
+  const appt = { id: '00000000-0000-4000-8000-0000000000f4', tenant_id: 't-conf', status: 'confirmed',
+    customer_name: 'Ana', customer_phone: '+34600111555', starts_at: new Date(nowMs + 10 * 3600000).toISOString(),
+    created_at: new Date(nowMs - 48 * 3600000).toISOString(), timezone: 'Europe/Madrid' };
+  for (const [tenant, template] of [
+    [REMINDER_TENANT, { sid: 'HX' + 'b'.repeat(32), status: 'pending' }],
+    [{ ...REMINDER_TENANT, reminders_enabled: 0 }, APPROVED],
+  ]) {
+    const db = remindersDb({ appointments: [appt], tenant, template });
+    await testing.processReminders({ DB: db, TWILIO_ACCOUNT_SID: 'AC' + 'p'.repeat(32), TWILIO_AUTH_TOKEN: 'tok' }, nowMs);
+    assert.equal(db.ledger.size, 0);
+  }
+});
+
+// ── Botones del recordatorio en el webhook: determinista y aislado por tenant ──
+
+// Mock del webhook con una cita: la consulta exige id Y tenant_id (como el código);
+// si el código perdiera el filtro de tenant, aquí saldría la cita de OTRO cliente.
+function buttonDb(tenants, appt, updates) {
+  return withConversations({ prepare: (sql) => ({ bind: (...args) => ({
+    first: async () => {
+      if (sql.includes('channel_address')) return tenants[args[0]] || null;
+      if (/FROM appointments WHERE id=\? AND tenant_id=\?/.test(sql)) {
+        return (appt.id === args[0] && appt.tenant_id === args[1]) ? { ...appt } : null;
+      }
+      if (/FROM appointments WHERE id=\?/.test(sql)) return appt.id === args[0] ? { ...appt } : null; // solo si el filtro se pierde
+      if (/FROM tenant_calendars/.test(sql)) return null;
+      return null;
+    },
+    all: async () => ({ results: [] }),
+    run: async () => { if (/UPDATE appointments/.test(sql)) updates.push({ sql, args }); return { meta: { changes: 1 } }; },
+  }) }), batch: async () => [] });
+}
+
+const BTN_APPT = {
+  id: '00000000-0000-4000-8000-0000000000e1', tenant_id: 't-uno', status: 'confirmed',
+  customer_name: 'Marta', customer_phone: '+34600000000', reason: 'revisión', provider_event_id: null,
+  starts_at: '2026-09-20T08:00:00.000Z', timezone: 'Europe/Madrid',
+};
+
+async function pressButton({ payload, from = 'whatsapp:+34600000000', tenantOfAppt = 't-uno' }) {
+  const worker = createWorker({ SYSTEM: 's', DEMOS: {}, SUMMARY_PROMPT: '', GUARDRAILS: '' });
+  const waits = [];
+  const ctx = { waitUntil(p) { waits.push(p.catch(() => {})); } };
+  const tenants = {
+    'whatsapp:+15550000001': { id: 't-uno', slug: 'uno', name: 'Uno', system_prompt: 'P', telegram_chat_id: '-100200', active: 1 },
+    'whatsapp:+15550000002': { id: 't-dos', slug: 'dos', name: 'Dos', system_prompt: 'P', active: 1 },
+  };
+  const updates = [];
+  const telegramSends = [];
+  let modelCalls = 0;
+  const env = webhookEnv({}, new Map());
+  env.TELEGRAM_TOKEN = 'bot-velai';
+  env.DB = buttonDb(tenants, { ...BTN_APPT, tenant_id: tenantOfAppt }, updates);
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = async (url, init) => {
+    const u = String(url);
+    if (u.includes('api.anthropic.com')) { modelCalls++; return new Response(JSON.stringify({ content: [{ text: 'hola' }] }), { status: 200 }); }
+    if (u.includes('api.telegram.org')) { telegramSends.push(JSON.parse(String(init.body))); return new Response(JSON.stringify({ ok: true }), { status: 200 }); }
+    return new Response('{}', { status: 200 });
+  };
+  try {
+    const params = { AccountSid: env.TWILIO_ACCOUNT_SID, From: from, To: 'whatsapp:+15550000001',
+      Body: payload.startsWith('conf') ? 'Confirmo' : 'Cancelar', ButtonPayload: payload, MessageSid: 'SM' + Math.random().toString(16).slice(2).padEnd(32, '0') };
+    const res = await worker.fetch(await twilioRequest('https://worker.test/', params, 'tok'), env, ctx);
+    const body = await res.text();
+    await Promise.all(waits);
+    return { status: res.status, body, updates, telegramSends, modelCalls };
+  } finally { globalThis.fetch = realFetch; }
+}
+
+test('botón Confirmo: customer_confirmed_at + cortesía + aviso al negocio, sin modelo', async () => {
+  const r = await pressButton({ payload: `conf:${BTN_APPT.id}` });
+  assert.equal(r.status, 200);
+  assert.ok(r.body.includes('<Message>'), 'respuesta corta de cortesía');
+  assert.ok(r.body.includes('confirmada'));
+  assert.equal(r.modelCalls, 0, 'el camino es determinista: nunca llama al modelo');
+  const upd = r.updates.find((u) => u.sql.includes('customer_confirmed_at=?'));
+  assert.ok(upd, 'marca customer_confirmed_at');
+  assert.deepEqual([upd.args[1], upd.args[2]], [BTN_APPT.id, 't-uno'], 'el UPDATE va anclado al tenant');
+  assert.equal(r.telegramSends.length, 1, 'aviso al negocio por su Telegram');
+  assert.ok(String(r.telegramSends[0].text).includes('confirmó'));
+});
+
+test('botón Cancelar: status=cancelled por el cliente, aviso, e invitación a reagendar (F2)', async () => {
+  const r = await pressButton({ payload: `canc:${BTN_APPT.id}` });
+  assert.ok(r.body.includes('<Message>'));
+  assert.ok(/huecos/i.test(r.body), 'la respuesta invita a reagendar ahí mismo');
+  const upd = r.updates.find((u) => u.sql.includes("status='cancelled'"));
+  assert.ok(upd && upd.sql.includes("cancelled_by='customer'"));
+  assert.deepEqual([upd.args[0], upd.args[1]], [BTN_APPT.id, 't-uno']);
+  assert.equal(r.modelCalls, 0);
+  assert.ok(String(r.telegramSends[0].text).includes('canceló'));
+});
+
+test('ButtonPayload forjado: cita de OTRO tenant o From distinto → no-op logueado', async () => {
+  // La cita pertenece a t-dos pero el payload llega por el número de t-uno: NADA se toca.
+  const ajena = await pressButton({ payload: `conf:${BTN_APPT.id}`, tenantOfAppt: 't-dos' });
+  assert.equal(ajena.status, 200);
+  assert.ok(!ajena.body.includes('<Message>'), 'TwiML vacío: ni confirma ni niega que la cita exista');
+  assert.equal(ajena.updates.length, 0, 'FUGA: un payload forjado tocó la cita de otro tenant');
+  assert.equal(ajena.telegramSends.length, 0);
+  // El From no es el teléfono de la cita: mismo no-op.
+  const otroFrom = await pressButton({ payload: `canc:${BTN_APPT.id}`, from: 'whatsapp:+34699999999' });
+  assert.equal(otroFrom.updates.length, 0, 'un tercero no puede cancelar la cita de otro');
+  assert.ok(!otroFrom.body.includes('<Message>'));
+  // Un payload con basura no rompe el webhook: sigue a Vai como texto normal.
+  const basura = await pressButton({ payload: 'canc:basura' });
+  assert.equal(basura.updates.length, 0);
+  assert.equal(basura.modelCalls, 1, 'sin formato válido, el mensaje sigue el camino normal');
+});
+
+// ── Plantillas del catálogo (tenant_templates + worker/plantillas.js) ─────────
+
+test('provision plantillas/<kind>: crea, somete a aprobación y registra en tenant_templates', async () => {
+  const TID = '00000000-0000-4000-8000-0000000000d1';
+  const env0 = { SECRETS_KEK: TEST_KEK };
+  const enc = await encryptSecret(env0, TID, 'a1b2c3d4e5f60718293a4b5c6d7e8f90');
+  const tenantRow = { id: TID, slug: 'conf', name: 'Clínica Conf', twilio_subaccount_sid: 'AC' + 's'.repeat(32), twilio_auth_token_enc: enc };
+  const inserts = [];
+  let templateRow = null;
+  const db = { prepare: (sql) => ({ bind: (...args) => ({
+    first: async () => {
+      if (/FROM tenants WHERE id=\?/.test(sql)) return tenantRow;
+      if (/FROM tenant_templates/.test(sql)) return templateRow;
+      return null;
+    },
+    all: async () => ({ results: [] }),
+    run: async () => {
+      if (/INSERT INTO tenant_templates/.test(sql)) { inserts.push(args); templateRow = { sid: args[2], status: 'pending' }; return { meta: { changes: 1 } }; }
+      return { meta: { changes: 1 } };
+    },
+  }) }), batch: async () => [] };
+  const env = { DB: db, KV: mapKV(), SECRETS_KEK: TEST_KEK };
+  const ctx = { waitUntil() {} };
+  const twilioCalls = [];
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = async (url, init) => {
+    const u = String(url);
+    if (u === 'https://content.twilio.com/v1/Content') { twilioCalls.push(JSON.parse(String(init.body))); return new Response(JSON.stringify({ sid: 'HX' + 'c'.repeat(32) }), { status: 201 }); }
+    if (u.includes('/ApprovalRequests/whatsapp')) { twilioCalls.push(JSON.parse(String(init.body))); return new Response('{}', { status: 201 }); }
+    return new Response('{}', { status: 200 });
+  };
+  const path = `/api/admin/tenants/${TID}/provision/plantillas/recordatorio_cita`;
+  const call = (scope) => testing.adminRouter(adminReq(path, { method: 'POST' }), env, ctx, path, new URL('https://x' + path), {}, scope);
+  try {
+    const res = await call(VELAI);
+    assert.equal(res.status, 201);
+    const out = await res.json();
+    assert.deepEqual([out.kind, out.status], ['recordatorio_cita', 'pending']);
+    assert.equal(inserts.length, 1);
+    assert.equal(inserts[0][1], 'recordatorio_cita');
+    // La definición sale del catálogo: quick-reply con los payloads que parsea el webhook.
+    const content = twilioCalls[0];
+    assert.ok(content.types['twilio/quick-reply'], 'los botones son twilio/quick-reply');
+    assert.deepEqual(content.types['twilio/quick-reply'].actions.map((a) => a.id), ['conf:{{6}}', 'canc:{{6}}']);
+    const approval = twilioCalls[1];
+    assert.deepEqual([approval.name, approval.category], ['recordatorio_cita_conf', 'UTILITY']);
+    // Segunda vez: la fila ya existe → 409, sin volver a crear nada en Twilio.
+    await assert.rejects(call(VELAI), (e) => e.code === 'already_provisioned');
+    assert.equal(twilioCalls.length, 2);
+    // Un kind fuera del catálogo (incluidas claves del prototipo) es 404.
+    for (const kind of ['inventada', 'constructor']) {
+      const bad = `/api/admin/tenants/${TID}/provision/plantillas/${kind}`;
+      await assert.rejects(testing.adminRouter(adminReq(bad, { method: 'POST' }), env, ctx, bad, new URL('https://x' + bad), {}, VELAI),
+        (e) => e.code === 'unknown_template_kind' || e.code === 'not_found', kind);
+    }
+    // El rol cliente no llega ni al handler: clienteAllowed no abre provision.
+    await assert.rejects(call(CLIENTE), (e) => e.status === 403);
+  } finally { globalThis.fetch = realFetch; }
+});
+
+test('el cron marca approved/rejected las plantillas del catálogo y avisa', async () => {
+  const env0 = { SECRETS_KEK: TEST_KEK };
+  const enc = await encryptSecret(env0, 't-conf', 'a1b2c3d4e5f60718293a4b5c6d7e8f90');
+  const updates = [];
+  // El SELECT del sondeo va sin bind (no tiene parámetros): el stub responde a ambos.
+  const db = { prepare: (sql) => {
+    const stmt = (args = []) => ({
+      bind: (...a) => stmt(a),
+      all: async () => ({ results: /FROM tenant_templates tt/.test(sql) ? [{
+        kind: 'recordatorio_cita', sid: 'HX' + 'c'.repeat(32), id: 't-conf', slug: 'conf', name: 'Clínica Conf',
+        twilio_subaccount_sid: 'AC' + 's'.repeat(32), twilio_auth_token_enc: enc,
+      }] : [] }),
+      first: async () => null,
+      run: async () => { if (/UPDATE tenant_templates/.test(sql)) updates.push(args); return { meta: { changes: 1 } }; },
+    });
+    return stmt();
+  }, batch: async () => [] };
+  const env = { DB: db, SECRETS_KEK: TEST_KEK, TELEGRAM_TOKEN: 'bot', TELEGRAM_CHAT_ID: '-1' };
+  const telegramSends = [];
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = async (url, init) => {
+    const u = String(url);
+    if (u.includes('/ApprovalRequests')) return new Response(JSON.stringify({ whatsapp: { status: 'approved' } }), { status: 200 });
+    if (u.includes('api.telegram.org')) { telegramSends.push(JSON.parse(String(init.body))); return new Response(JSON.stringify({ ok: true }), { status: 200 }); }
+    return new Response('{}', { status: 200 });
+  };
+  try {
+    await testing.pollTemplateApprovals(env);
+    assert.equal(updates.length, 1);
+    assert.deepEqual([updates[0][0], updates[0][2], updates[0][3]], ['approved', 't-conf', 'recordatorio_cita']);
+    assert.equal(telegramSends.length, 1);
+    assert.ok(String(telegramSends[0].text).includes('aprobada'));
+  } finally { globalThis.fetch = realFetch; }
+});
+
+test('samePhone: iguala con y sin prefijo de país, sin casar por sufijos cortos', () => {
+  assert.ok(testing.samePhone('+34612345678', '612345678'));
+  assert.ok(testing.samePhone('612345678', '+34612345678'));
+  assert.ok(testing.samePhone('+34 612 345 678', '612345678'));
+  assert.ok(!testing.samePhone('+34612345678', '345678'), 'seis dígitos sueltos no identifican a nadie');
+  assert.ok(!testing.samePhone('+34612345678', '+34699999999'));
+  assert.ok(!testing.samePhone('', '+34612345678'));
+});

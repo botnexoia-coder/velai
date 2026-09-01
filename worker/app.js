@@ -14,8 +14,9 @@ import { conexiones as rutasConexiones } from './routes/conexiones.js';
 import { calendario as rutasCalendario } from './routes/calendario.js';
 import { encryptSecret, decryptSecret } from './crypto.js';
 import { cloudflareConfigured, syncTurnstileDomains, syncAccessGroup, syncAdminGroup, verifyCfToken } from './cloudflare.js';
-import { createSubaccount, fetchSubaccount, findSubaccountByName, createLeadTemplate, submitTemplateApproval, fetchApprovalStatus, createWhatsAppSender, verifySender, fetchSenderStatus, listWhatsAppSenders, updateSenderWebhook, updateSenderProfile, fetchSender } from './twilio.js';
-import { CALENDAR_TOOLS, CALENDAR_GUARDRAILS, DEFAULT_BUSINESS_HOURS, freeSlots, localToUtcMs, localDateStr, localWeekday, googleAuthUrl, exchangeGoogleCode, refreshGoogleToken, revokeGoogleToken, googleBusy, createGoogleEvent } from './calendar.js';
+import { createSubaccount, fetchSubaccount, findSubaccountByName, createLeadTemplate, createContentTemplate, submitTemplateApproval, fetchApprovalStatus, createWhatsAppSender, verifySender, fetchSenderStatus, listWhatsAppSenders, updateSenderWebhook, updateSenderProfile, fetchSender } from './twilio.js';
+import { CALENDAR_TOOLS, CALENDAR_GUARDRAILS, DEFAULT_BUSINESS_HOURS, freeSlots, localToUtcMs, localDateStr, localWeekday, utcToLocalHHMM, googleAuthUrl, exchangeGoogleCode, refreshGoogleToken, revokeGoogleToken, googleBusy, createGoogleEvent, deleteGoogleEvent } from './calendar.js';
+import { templateKind } from './plantillas.js';
 
 const JSON_HEADERS = { 'Content-Type': 'application/json; charset=utf-8' };
 // URL pública del worker: webhook de Twilio (senders) y de Telegram apuntan aquí.
@@ -1775,6 +1776,283 @@ function calendarExecutor(env, tenant, cal, meta) {
   };
 }
 
+// ── Confirmaciones (SPEC-CONFIRMACIONES F1): recordatorio de cita por WhatsApp ─
+// Recordatorio 24 h antes de cada cita, por la subcuenta del tenant y SIN modelo
+// (nada de esto pasa por aiBudgetGuard). Mismo molde que lead_notifications:
+// sembrar ledger → entregar con reintentos y backoff, en el reloj de 5 min.
+export const REMINDER_KIND = 'previo_24h';
+const REMINDER_MAX_ATTEMPTS = 5;
+const REMINDER_BATCH = 10; // presupuesto D1 del cron acotado (plan gratuito: 50 consultas/tick)
+
+// Antelación del tenant: reminder_hours es CSV por si un día se amplía, pero la
+// decisión vigente es 24 h única — se lee el primer valor y se acota a [1, 24]
+// (la ventana del SQL de siembra es de 24 h: un valor mayor nunca vencería).
+export function reminderHoursFor(tenant) {
+  const first = Number(String((tenant && tenant.reminder_hours) || '24').split(',')[0]);
+  return Number.isFinite(first) && first >= 1 && first <= 24 ? first : 24;
+}
+
+// Un mismo teléfono puede vivir con o sin prefijo de país según el canal que lo
+// capturó ('+34612…' del From de WhatsApp, '612…' tecleado en el chat web): se
+// comparan los dígitos y se acepta el sufijo solo cuando la parte corta es un número
+// nacional completo (≥9 dígitos) — nunca menos, para no casar por 6 dígitos sueltos.
+export function samePhone(a, b) {
+  const da = String(a || '').replace(/\D/g, '');
+  const db = String(b || '').replace(/\D/g, '');
+  if (!da || !db) return false;
+  if (da === db) return true;
+  const [longer, shorter] = da.length >= db.length ? [da, db] : [db, da];
+  return shorter.length >= 9 && longer.endsWith(shorter);
+}
+
+// Fecha y hora de la cita EN LA ZONA DEL NEGOCIO (appointments.timezone): el cliente
+// final lee «jueves, 4 de septiembre a las 10:00», nunca UTC.
+function reminderWhen(appt) {
+  const tz = appt.timezone || 'Europe/Madrid';
+  const start = new Date(appt.starts_at);
+  return {
+    fecha: new Intl.DateTimeFormat('es-ES', { timeZone: tz, weekday: 'long', day: 'numeric', month: 'long' }).format(start),
+    hora: new Intl.DateTimeFormat('es-ES', { timeZone: tz, hour: '2-digit', minute: '2-digit', hour12: false }).format(start),
+  };
+}
+
+// CONTRATO con la plantilla recordatorio_cita (worker/plantillas.js): 1 nombre,
+// 2 negocio, 3 fecha local, 4 hora local, 5 motivo, 6 id de la cita (el payload de
+// los botones). Si cambias la plantilla, cambia esto en el mismo commit.
+export function reminderTemplateVariables(tenant, appt) {
+  const { fecha, hora } = reminderWhen(appt);
+  return JSON.stringify({
+    1: templateVar(appt.customer_name, 'Hola'),
+    2: templateVar(tenant.brand_name || tenant.name, 'el negocio'),
+    3: templateVar(fecha, 'próximamente'),
+    4: templateVar(hora, 'la hora acordada'),
+    5: templateVar(appt.reason, 'tu cita'),
+    6: appt.id,
+  });
+}
+
+// Estado de UNA plantilla del catálogo para este tenant (tenant_templates, 0030).
+// try/catch por si la tabla aún no existe (deploy antes de migrar): sin fila no hay
+// plantilla, y el resto del sistema lo trata como no configurado — nunca revienta.
+export async function tenantTemplate(env, tenantId, kind) {
+  try {
+    return await env.DB.prepare('SELECT sid, status FROM tenant_templates WHERE tenant_id=? AND kind=?')
+      .bind(tenantId, kind).first();
+  } catch (_) { return null; }
+}
+
+// Envía UN recordatorio. Regla de oro de deliver(): los recursos de una subcuenta se
+// operan con SUS credenciales, y un mensaje iniciado por el negocio va SIEMPRE con
+// plantilla aprobada (63016). Mismo contrato de resultado que deliver:
+// {ok} | {skipped, error} | {error}.
+async function deliverReminder(env, tenant, template, appt) {
+  if (!Number(tenant.reminders_enabled)) return { skipped: true, error: 'reminders_disabled' };
+  if (!template || !template.sid) return { skipped: true, error: 'template_not_configured' };
+  if (template.status !== 'approved') return { skipped: true, error: 'template_not_approved' };
+  const sub = tenant.twilio_subaccount_sid;
+  const fromAddress = tenant.twilio_from || (sub ? null : env.TWILIO_FROM);
+  if (!fromAddress || !env.TWILIO_ACCOUNT_SID || !env.TWILIO_AUTH_TOKEN) return { skipped: true, error: 'not_configured' };
+  const sendAccountSid = sub || env.TWILIO_ACCOUNT_SID;
+  const sendToken = sub ? await twilioAuthTokenFor(env, tenant) : env.TWILIO_AUTH_TOKEN;
+  if (!sendToken) return { skipped: true, error: 'not_configured' };
+  const phone = String(appt.customer_phone || '').replace(/\s/g, '');
+  if (!/^\+?\d{6,15}$/.test(phone)) return { skipped: true, error: 'invalid_customer_phone' };
+  const response = await fetch(`https://api.twilio.com/2010-04-01/Accounts/${sendAccountSid}/Messages.json`, {
+    method: 'POST',
+    headers: { Authorization: `Basic ${btoa(`${sendAccountSid}:${sendToken}`)}`, 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({
+      From: fromAddress,
+      To: `whatsapp:${phone.startsWith('+') ? phone : `+${phone}`}`,
+      ContentSid: template.sid,
+      ContentVariables: reminderTemplateVariables(tenant, appt),
+    }),
+    signal: AbortSignal.timeout(8000),
+  });
+  return response.ok ? { ok: true } : { error: `twilio_${response.status}` };
+}
+
+// Siembra el ledger: citas confirmadas que entran en la ventana de antelación y aún no
+// tienen fila. La cita creada YA dentro de la ventana nace 'skipped' con motivo: el
+// cliente acaba de hablar con Vai y recordarle lo recién agendado sería ruido.
+async function seedReminders(env, nowMs) {
+  const now = new Date(nowMs).toISOString();
+  const max = new Date(nowMs + 24 * 3600000).toISOString();
+  let rows = [];
+  try {
+    rows = (await env.DB.prepare(`
+      SELECT a.id, a.starts_at, a.created_at, t.reminder_hours
+      FROM appointments a
+      JOIN tenants t ON t.id = a.tenant_id
+      JOIN tenant_templates tt ON tt.tenant_id = t.id AND tt.kind = 'recordatorio_cita'
+        AND tt.status = 'approved' AND tt.sid IS NOT NULL
+      WHERE t.active = 1 AND t.reminders_enabled = 1
+        AND a.status = 'confirmed' AND a.starts_at > ? AND a.starts_at <= ?
+        AND NOT EXISTS (SELECT 1 FROM appointment_reminders r WHERE r.appointment_id = a.id AND r.kind = ?)
+      ORDER BY a.starts_at ASC LIMIT ?`).bind(now, max, REMINDER_KIND, REMINDER_BATCH).all()).results || [];
+  } catch (_) { return; } // tabla aún sin migrar: el cron no revienta
+  for (const appt of rows) {
+    const dueMs = Date.parse(appt.starts_at) - reminderHoursFor(appt) * 3600000;
+    if (dueMs > nowMs) continue; // antelación menor que 24 h: aún no vence
+    const recien = Date.parse(appt.created_at) >= dueMs;
+    try {
+      await env.DB.prepare(`INSERT INTO appointment_reminders (appointment_id,kind,status,attempts,last_error,updated_at)
+        VALUES (?,?,?,0,?,?) ON CONFLICT(appointment_id,kind) DO NOTHING`)
+        .bind(appt.id, REMINDER_KIND, recien ? 'skipped' : 'pending', recien ? 'creada_dentro_de_ventana' : null, now).run();
+    } catch (_) { /* carrera entre ticks: el UNIQUE siembra una sola vez */ }
+  }
+}
+
+// Entrega lo sembrado con los reintentos del molde de lead_notifications (backoff
+// attempts²·5 min, 5 intentos). 'skipped' aquí es terminal a propósito: la ventana de
+// un recordatorio es corta y revisitarlo tras arreglar la config llegaría tarde.
+async function sendDueReminders(env, nowMs) {
+  const now = new Date(nowMs).toISOString();
+  let jobs = [];
+  try {
+    jobs = (await env.DB.prepare(`
+      SELECT r.id AS reminder_id, r.attempts AS reminder_attempts,
+             a.id, a.tenant_id, a.customer_name, a.customer_phone, a.reason,
+             a.starts_at, a.timezone, a.status
+      FROM appointment_reminders r
+      JOIN appointments a ON a.id = r.appointment_id
+      WHERE r.status IN ('pending','failed') AND r.attempts < ?
+        AND (r.next_attempt_at IS NULL OR r.next_attempt_at <= ?)
+      ORDER BY r.updated_at ASC LIMIT ?`).bind(REMINDER_MAX_ATTEMPTS, now, REMINDER_BATCH).all()).results || [];
+  } catch (_) { return; }
+  for (const job of jobs) {
+    const tenant = await env.DB.prepare('SELECT * FROM tenants WHERE id = ?').bind(job.tenant_id).first();
+    let outcome;
+    if (!tenant) outcome = { skipped: true, error: 'tenant_missing' };
+    else if (job.status !== 'confirmed') outcome = { skipped: true, error: 'cita_no_confirmada' };
+    else if (Date.parse(job.starts_at) <= nowMs) outcome = { skipped: true, error: 'cita_pasada' };
+    else {
+      const template = await tenantTemplate(env, job.tenant_id, 'recordatorio_cita');
+      try { outcome = await deliverReminder(env, tenant, template, job); }
+      catch (error) { outcome = { error: error.name === 'TimeoutError' ? 'timeout' : 'network_error' }; }
+    }
+    const attempts = outcome.skipped ? job.reminder_attempts : job.reminder_attempts + 1;
+    const status = outcome.ok ? 'sent' : outcome.skipped ? 'skipped' : 'failed';
+    const next = status === 'failed' && attempts < REMINDER_MAX_ATTEMPTS
+      ? new Date(nowMs + attempts * attempts * 5 * 60000).toISOString() : null;
+    await env.DB.prepare('UPDATE appointment_reminders SET status=?, attempts=?, next_attempt_at=?, last_error=?, sent_at=?, updated_at=? WHERE id=?')
+      .bind(status, attempts, next, outcome.error || null, outcome.ok ? now : null, now, job.reminder_id).run();
+    // Log sin PII: código + tenant + intento, jamás nombres ni teléfonos.
+    console.log(JSON.stringify({
+      level: status === 'failed' ? 'error' : 'info',
+      code: status === 'sent' ? 'reminder_sent' : status === 'failed' ? 'reminder_failed' : 'reminder_skipped',
+      tenant: tenant ? tenant.slug : null, attempts, error: outcome.error || undefined,
+    }));
+  }
+}
+
+export async function processReminders(env, nowMs = Date.now()) {
+  await seedReminders(env, nowMs);
+  await sendDueReminders(env, nowMs);
+}
+
+// ── Confirmaciones: qué hizo el cliente con su cita ──────────────────────────
+
+// Borra el evento de Google de una cita cancelada. Best-effort y NUNCA lanza: sin
+// conexión de calendario o con el proveedor caído la cita queda cancelada igual —
+// el hueco de Google se limpia a mano y el log lo cuenta.
+async function removeAppointmentEvent(env, tenant, appt) {
+  if (!appt.provider_event_id) return;
+  try {
+    const cal = await tenantCalendar(env, tenant);
+    if (!cal) return;
+    const token = await calendarAccessToken(env, cal);
+    await deleteGoogleEvent(env, token, cal.calendar_id, appt.provider_event_id);
+  } catch (error) {
+    console.log(JSON.stringify({ level: 'warn', code: 'appointment_event_not_removed', tenant: tenant.slug, error: clean(String(error.message || error), 60) }));
+  }
+}
+
+// Aviso al negocio (molde del aviso de leads: Telegram a SU chat, con su bot si es
+// marca blanca; sin chat vinculado, skip VISIBLE — nunca el fallback de Velai).
+// Nunca lanza: el aviso no puede tumbar la respuesta al cliente final.
+async function notifyAppointmentChange(env, tenant, appt, action) {
+  try {
+    if (!tenant.telegram_chat_id) {
+      console.log(JSON.stringify({ level: 'info', code: 'appointment_notice_skipped', tenant: tenant.slug, error: 'telegram_not_configured' }));
+      return;
+    }
+    const { fecha, hora } = reminderWhen(appt);
+    const verbo = action === 'confirmada' ? '✅ confirmó' : '❌ canceló';
+    const texto = `📅 <b>${escapeHtml(tenant.name)}</b>: ${escapeHtml(appt.customer_name)} ${verbo} su cita del ${escapeHtml(fecha)} a las ${escapeHtml(hora)}${appt.reason ? ` (${escapeHtml(appt.reason)})` : ''}.`;
+    const botToken = await tenantTelegramToken(env, tenant);
+    const outcome = await sendTelegramText(env, texto, tenant.telegram_chat_id, { allowFallback: false, botToken });
+    if (!outcome.ok) console.log(JSON.stringify({ level: 'warn', code: 'appointment_notice_failed', tenant: tenant.slug, error: outcome.error || 'skipped' }));
+  } catch (error) {
+    console.log(JSON.stringify({ level: 'warn', code: 'appointment_notice_failed', tenant: tenant.slug, error: clean(String(error.message || error), 60) }));
+  }
+}
+
+// Los efectos que acompañan al cambio de estado (Google + aviso al negocio), aparte
+// de la escritura en D1: el webhook los difiere con waitUntil (Twilio corta a ~15 s)
+// y las tools del bucle los esperan inline. Nunca lanza.
+async function settleAppointmentSideEffects(env, tenant, appt, action) {
+  if (action === 'cancelada') await removeAppointmentEvent(env, tenant, appt);
+  await notifyAppointmentChange(env, tenant, appt, action);
+}
+
+// Escrituras idempotentes y SIEMPRE ancladas al tenant: un segundo botón (o un
+// reintento del bucle de tools) no repite efectos — changes=0 y el llamante lo sabe.
+async function markAppointmentCancelled(env, tenant, appt) {
+  const res = await env.DB.prepare("UPDATE appointments SET status='cancelled', cancelled_by='customer' WHERE id=? AND tenant_id=? AND status='confirmed'")
+    .bind(appt.id, tenant.id).run();
+  const changed = Boolean(res.meta && res.meta.changes);
+  if (changed) console.log(JSON.stringify({ level: 'info', code: 'appointment_cancelled_by_customer', tenant: tenant.slug }));
+  return changed;
+}
+
+async function markAppointmentConfirmed(env, tenant, appt) {
+  const res = await env.DB.prepare("UPDATE appointments SET customer_confirmed_at=? WHERE id=? AND tenant_id=? AND status='confirmed' AND customer_confirmed_at IS NULL")
+    .bind(new Date().toISOString(), appt.id, tenant.id).run();
+  const changed = Boolean(res.meta && res.meta.changes);
+  if (changed) console.log(JSON.stringify({ level: 'info', code: 'appointment_confirmed_by_customer', tenant: tenant.slug }));
+  return changed;
+}
+
+// Botones del recordatorio: camino DETERMINISTA antes de Vai, sin modelo. El payload
+// viaja por WhatsApp y puede forjarse, así que se valida TODO: la cita existe, es DEL
+// TENANT enrutado por To (aislamiento — un payload con la cita de otro cliente es un
+// no-op logueado) y el From es el teléfono de la cita. Un rechazo responde TwiML
+// vacío: ni confirma ni niega que esa cita exista.
+async function handleReminderButton(env, ctx, tenant, from, to, action, apptId, buttonText) {
+  const empty = () => new Response(EMPTY_TWIML, { headers: { 'Content-Type': 'text/xml; charset=utf-8' } });
+  const appt = await env.DB.prepare('SELECT * FROM appointments WHERE id=? AND tenant_id=?').bind(apptId, tenant.id).first();
+  if (!appt || !samePhone(from.replace(/^(whatsapp|messenger):/i, ''), appt.customer_phone)) {
+    console.log(JSON.stringify({ level: 'warn', code: 'reminder_button_rejected', tenant: tenant.slug, reason: appt ? 'from_mismatch' : 'appointment_unknown' }));
+    return empty();
+  }
+  let reply;
+  if (action === 'conf') {
+    const changed = await markAppointmentConfirmed(env, tenant, appt);
+    if (changed) ctx.waitUntil(settleAppointmentSideEffects(env, tenant, appt, 'confirmada').catch(() => {}));
+    const { fecha, hora } = reminderWhen(appt);
+    reply = appt.status === 'confirmed'
+      ? `¡Gracias, ${appt.customer_name}! Tu cita del ${fecha} a las ${hora} queda confirmada. Hasta entonces.`
+      : 'Esa cita ya estaba cancelada. Si quieres otra, dímelo por aquí y te propongo huecos.';
+  } else {
+    const changed = await markAppointmentCancelled(env, tenant, appt);
+    if (changed) ctx.waitUntil(settleAppointmentSideEffects(env, tenant, appt, 'cancelada').catch(() => {}));
+    // Enlace natural con la fase 2: la siguiente respuesta del cliente ya es texto
+    // libre (su ventana de 24 h está abierta) y Vai reagenda con las tools de siempre.
+    reply = 'Hecho: tu cita queda cancelada. Si quieres buscar otro momento, dímelo por aquí mismo y te propongo huecos.';
+  }
+  // El intercambio queda en el historial para que Vai tenga el contexto del botón si
+  // el cliente sigue escribiendo. Best-effort: un fallo aquí no rompe la respuesta.
+  try {
+    const channel = from.startsWith('messenger:') ? 'messenger' : 'whatsapp';
+    const conv = await convLoad(env, tenant, channel, from, to);
+    await convAppend(env, conv, [
+      { role: 'user', content: buttonText || (action === 'conf' ? 'Confirmo' : 'Cancelar') },
+      { role: 'assistant', content: reply },
+    ]);
+  } catch (_) {}
+  return new Response(`<?xml version="1.0" encoding="UTF-8"?><Response><Message>${escapeHtml(waBody(reply))}</Message></Response>`, { headers: { 'Content-Type': 'text/xml; charset=utf-8' } });
+}
+
 // La vuelta del canal web (migración 0026). El widget pregunta por lo nuevo SOLO cuando la
 // conversación no la lleva el bot: con la IA atendiendo —el 99% del tráfico— no hay ni una
 // petición extra, y eso es lo que hace que esto no se coma el plan gratuito de Workers.
@@ -2350,6 +2628,13 @@ export async function handleTwilio(request, env, ctx, config) {
   const from = clean(params.get('From'), 80);
   const message = clean(params.get('Body'), 2000);
   if (!from) throw new HttpError(400, 'invalid_twilio_payload');
+  // Botón del recordatorio de cita (SPEC-CONFIRMACIONES F1): camino determinista
+  // ANTES de Vai — ni modelo ni estado de conversación deciden aquí. Solo con el
+  // formato exacto conf:/canc: + UUID; cualquier otro ButtonPayload sigue como texto.
+  const buttonMatch = /^(conf|canc):([0-9a-f-]{36})$/i.exec(clean(params.get('ButtonPayload'), 60));
+  if (buttonMatch && UUID_RE.test(buttonMatch[2])) {
+    return handleReminderButton(env, ctx, tenant, from, to, buttonMatch[1].toLowerCase(), buttonMatch[2], message);
+  }
   // Messenger manda adjuntos (stickers, fotos) sin Body: 200 con TwiML vacío en vez
   // de 400, para no llenar los logs de Twilio de errores por cada sticker.
   if (!message) {
@@ -2824,6 +3109,32 @@ async function runProvisionStep(request, env, ctx, tenant, tenantId, step, actor
     return json({ ok: true, sid: contentSid, status: 'pending' }, 201, NO_STORE);
   }
 
+  // Plantillas del CATÁLOGO (worker/plantillas.js), genérico por kind: crear en Twilio,
+  // someter a aprobación y fila en tenant_templates. El cron (pollTemplateApprovals) la
+  // vigila igual de genérico — la plantilla nº 3 es solo una entrada nueva del catálogo.
+  const plantillaStep = /^plantillas\/([a-z0-9_]{1,40})$/.exec(step);
+  if (plantillaStep) {
+    const def = templateKind(plantillaStep[1]);
+    if (!def) throw new HttpError(404, 'unknown_template_kind');
+    const existing = await tenantTemplate(env, tenantId, def.kind);
+    if (existing && (existing.sid || existing.status)) throw new HttpError(409, 'already_provisioned');
+    const { contentSid } = await createContentTemplate(credentials, def.content(tenant.slug, tenant.name));
+    try {
+      await submitTemplateApproval(credentials, contentSid, def.approvalName(tenant.slug), def.categoria);
+      // La idempotencia la impone D1 (la PK tenant_id+kind), no el cerrojo de KV: dos
+      // clics simultáneos no crean dos filas — el segundo es un orphan visible.
+      const res = await env.DB.prepare(`INSERT INTO tenant_templates (tenant_id,kind,sid,status,created_at,updated_at)
+        VALUES (?,?,?,'pending',?,?) ON CONFLICT(tenant_id,kind) DO NOTHING`)
+        .bind(tenantId, def.kind, contentSid, now, now).run();
+      if (!res.meta.changes) await provisionOrphan(env, ctx, tenant, `plantilla ${def.kind} (carrera)`, contentSid, new Error('already_provisioned'));
+    } catch (error) {
+      if (error instanceof HttpError) throw error;
+      await provisionOrphan(env, ctx, tenant, `plantilla ${def.kind}`, contentSid, error);
+    }
+    await provisionAudit(env, ctx, tenant, actor, `plantilla ${def.approvalName(tenant.slug)} (${contentSid}) enviada a aprobación ${def.categoria}`);
+    return json({ ok: true, kind: def.kind, sid: contentSid, status: 'pending' }, 201, NO_STORE);
+  }
+
   // Perfil de negocio del sender: la MISMA marca de la ficha (logo, descripción, web)
   // pasa a ser la foto y los datos que ve el cliente final en WhatsApp. Un solo sitio de
   // configuración para todos los canales (pedido de Juan, 2026-08-22).
@@ -3098,6 +3409,41 @@ async function pollProvisioning(env) {
   }
 }
 
+// Plantillas del CATÁLOGO pendientes de aprobación (tenant_templates, 0030): genérico
+// por kind — la plantilla nº 3 solo añade su entrada en worker/plantillas.js y este
+// sondeo la vigila sin tocarlo. Mismo ciclo que la plantilla de leads (que sigue en sus
+// columnas históricas y la sondea pollProvisioning: unificarla es un paso aparte).
+async function pollTemplateApprovals(env) {
+  let rows = [];
+  try {
+    rows = (await env.DB.prepare(`SELECT tt.kind, tt.sid, t.id, t.slug, t.name, t.twilio_subaccount_sid, t.twilio_auth_token_enc
+      FROM tenant_templates tt JOIN tenants t ON t.id = tt.tenant_id
+      WHERE tt.status = 'pending' AND tt.sid IS NOT NULL
+      ORDER BY tt.updated_at ASC LIMIT 10`).all()).results || [];
+  } catch (_) { return; } // tabla aún sin migrar: el cron no revienta
+  for (const row of rows) {
+    try {
+      const token = await twilioAuthTokenFor(env, row);
+      if (!token || !row.twilio_subaccount_sid) continue;
+      const approval = await fetchApprovalStatus({ sid: row.twilio_subaccount_sid, token }, row.sid);
+      if (!['approved', 'rejected', 'pending', 'received'].includes(approval.status)) {
+        console.log(JSON.stringify({ level: 'warn', code: 'template_status_unknown', tenant: row.slug, kind: row.kind,
+          status: approval.status, keys: Object.keys(approval.raw || {}).slice(0, 8).join(',') }));
+      }
+      if (approval.status !== 'approved' && approval.status !== 'rejected') continue;
+      await env.DB.prepare('UPDATE tenant_templates SET status=?, updated_at=? WHERE tenant_id=? AND kind=?')
+        .bind(approval.status, new Date().toISOString(), row.id, row.kind).run();
+      await sendTelegramText(env, approval.status === 'approved'
+        ? `✅ <b>Velai</b>: la plantilla <b>${escapeHtml(row.kind)}</b> de <b>${escapeHtml(row.name)}</b> ya está aprobada.`
+        : `❌ <b>Velai</b>: Meta rechazó la plantilla <b>${escapeHtml(row.kind)}</b> de <b>${escapeHtml(row.name)}</b>${approval.reason ? `: ${escapeHtml(approval.reason)}` : ''}.`);
+    } catch (error) {
+      // Nunca en silencio (lección del catch mudo de pollProvisioning, 2026-08-24).
+      console.log(JSON.stringify({ level: 'error', code: 'template_poll_failed', tenant: row.slug, kind: row.kind,
+        error: clean(error.message, 80) }));
+    }
+  }
+}
+
 // ── Informe semanal al canal del cliente (H1 §2, migración 0022) ─────────────
 // El hueco más grande del análisis competitivo: NI UN SOLO proveedor español o
 // latinoamericano manda un resumen periódico automático, y los pocos que lo mandan (solo
@@ -3312,6 +3658,14 @@ async function scheduled(env, cron) {
   }
   await drainQueuedLeads(env);
   try { await pollProvisioning(env); } catch (_) {}
+  try { await pollTemplateApprovals(env); } catch (error) {
+    console.log(JSON.stringify({ level: 'error', code: 'template_poll_failed', error: clean(String(error.message || error), 80) }));
+  }
+  // Confirmaciones (F1): sembrar y entregar recordatorios de cita. Nunca lanza hacia
+  // fuera: un fallo aquí no puede impedir que se entreguen los avisos de leads.
+  try { await processReminders(env); } catch (error) {
+    console.log(JSON.stringify({ level: 'error', code: 'reminders_cron_failed', error: clean(String(error.message || error), 80) }));
+  }
   // Dos consultas con ORDER BY: lo entregable (pending/failed) tiene prioridad y las
   // filas 'skipped' perpetuas no pueden acaparar la ventana del cron (inanición).
   // Red por si el reloj de cada minuto no llegara a dispararse: es idempotente, así que
@@ -3444,4 +3798,4 @@ export function createWorker(config) {
   };
 }
 
-export const testing = { scheduled, MINUTE_CRON, waitedMin, QUEUE_MAX_MIN, QUEUE_WAIT_TEXT, canAttend, velaiTenantId, handleChatPoll, VISITOR_AWAY_MS, expireTakeovers, NO_ADVISOR_TEXT, graceExpired, systemWithHandoff, HANDOFF_ON, HANDOFF_OFF, supportWindows, withinSupportHours, advisorAvailable, CONV_STATES, TAKEOVER_GRACE_MIN, settleReply, TRUNCATED_CLOSING, trimToSentence, waBody, replyWindow, reportPeriod, reportMetric, weeklyReportText, weeklyStats, sendWeeklyReports, convLoad, convAppend, convLinkLead, convFilters, convRetentionDays, UNANSWERED_RE, CONV_WINDOW, cloudflareUsage, CF_FREE_LIMITS, recordConversation, aiCost, recordAiUsage, rateLimited, memLimited, applySenderProfile, pushSenderProfile, clean, persistLead, leadAlertStatus, captureWhatsAppLead, leadFromSummary, leadCaptureDone, errorResponseParts, tenantByAddress, syncPrimaryChannel, assertChannelFree, normalizePhone, extractPhone, safeUtm, publicCors, validTwilioSignature, callAnthropic, callAnthropicRaw, runToolLoop, calendarExecutor, calendarSystem, tenantCalendar, validCalendarDate, availableSlots, handleCalendarCallback, calendarCallbackFor, sendTwilioText, timingSafeEqual, telegramBotUsername, telegramSetWebhook, telegramWebhookInfo, handleTelegramWebhook, sendTelegramText, tenantTelegramToken, telegramThreadFor, registerTelegramTopic, csvCell, expiryDate, leadFilters, isDemoKey, templateVar, leadTemplateVariables, readJson, deliver, drainQueuedLeads, verifyTurnstile, systemFor, validateTenant, invalidateTenantCache, tenantWriteError, assertNotActivePending, tenantChannelSummary, channelsForScope, handleProvision, pollProvisioning, fillSeries, resolveScope, scopeClause, assertOwnTenant, clienteAllowed, adminRouter, recordAuthFailure, handleAdmin, handleWidgetBoot, allowedOrigins, envOrigins, syncPanelGate, envAdmins, syncAdminGate, getSetting, setSetting, withCfToken };
+export const testing = { scheduled, MINUTE_CRON, processReminders, reminderHoursFor, reminderTemplateVariables, samePhone, tenantTemplate, pollTemplateApprovals, REMINDER_KIND, waitedMin, QUEUE_MAX_MIN, QUEUE_WAIT_TEXT, canAttend, velaiTenantId, handleChatPoll, VISITOR_AWAY_MS, expireTakeovers, NO_ADVISOR_TEXT, graceExpired, systemWithHandoff, HANDOFF_ON, HANDOFF_OFF, supportWindows, withinSupportHours, advisorAvailable, CONV_STATES, TAKEOVER_GRACE_MIN, settleReply, TRUNCATED_CLOSING, trimToSentence, waBody, replyWindow, reportPeriod, reportMetric, weeklyReportText, weeklyStats, sendWeeklyReports, convLoad, convAppend, convLinkLead, convFilters, convRetentionDays, UNANSWERED_RE, CONV_WINDOW, cloudflareUsage, CF_FREE_LIMITS, recordConversation, aiCost, recordAiUsage, rateLimited, memLimited, applySenderProfile, pushSenderProfile, clean, persistLead, leadAlertStatus, captureWhatsAppLead, leadFromSummary, leadCaptureDone, errorResponseParts, tenantByAddress, syncPrimaryChannel, assertChannelFree, normalizePhone, extractPhone, safeUtm, publicCors, validTwilioSignature, callAnthropic, callAnthropicRaw, runToolLoop, calendarExecutor, calendarSystem, tenantCalendar, validCalendarDate, availableSlots, handleCalendarCallback, calendarCallbackFor, sendTwilioText, timingSafeEqual, telegramBotUsername, telegramSetWebhook, telegramWebhookInfo, handleTelegramWebhook, sendTelegramText, tenantTelegramToken, telegramThreadFor, registerTelegramTopic, csvCell, expiryDate, leadFilters, isDemoKey, templateVar, leadTemplateVariables, readJson, deliver, drainQueuedLeads, verifyTurnstile, systemFor, validateTenant, invalidateTenantCache, tenantWriteError, assertNotActivePending, tenantChannelSummary, channelsForScope, handleProvision, pollProvisioning, fillSeries, resolveScope, scopeClause, assertOwnTenant, clienteAllowed, adminRouter, recordAuthFailure, handleAdmin, handleWidgetBoot, allowedOrigins, envOrigins, syncPanelGate, envAdmins, syncAdminGate, getSetting, setSetting, withCfToken };

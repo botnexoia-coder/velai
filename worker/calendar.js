@@ -205,6 +205,17 @@ export async function googleBusy(env, accessToken, calendarId, timeMinIso, timeM
     }));
 }
 
+// Borra el evento de una cita cancelada (SPEC-CONFIRMACIONES: el hueco queda libre
+// para consultar_disponibilidad, que relee la ocupación real de Google). 404/410 =
+// ya no existe: para el llamante es el mismo resultado, no un error.
+export async function deleteGoogleEvent(env, accessToken, calendarId, eventId) {
+  const response = await fetch(
+    `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(calendarId || 'primary')}/events/${encodeURIComponent(eventId)}`,
+    { method: 'DELETE', headers: { Authorization: `Bearer ${accessToken}` }, signal: AbortSignal.timeout(5000) },
+  );
+  if (!response.ok && response.status !== 404 && response.status !== 410) throw new Error(`calendar_provider_${response.status}`);
+}
+
 export async function createGoogleEvent(env, accessToken, calendarId, { summary, description, startIso, endIso, timezone }) {
   const response = await fetch(
     `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(calendarId || 'primary')}/events`,
