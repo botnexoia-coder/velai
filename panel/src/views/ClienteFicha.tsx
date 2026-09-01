@@ -9,6 +9,7 @@
 //  - bloqueo optimista con expected_updated_at → el 409 stale_tenant se explica;
 //  - nada sensible en el DOM.
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { confirmar } from '../components/Confirmar';
 import { api } from '../api/client';
 import { traducir } from '../api/errors';
 import { useToast } from '../components/Toasts';
@@ -154,8 +155,9 @@ export function ClienteFicha({ id, onClose }: { id: string | null; onClose: () =
   const markDirty = (p: Pane) => setDirty((s) => (s.has(p) ? s : new Set(s).add(p)));
   const set = (k: TFKey) => (v: string) => setForm((f) => ({ ...f, [k]: v }));
 
-  function confirmDiscard(): boolean {
-    return !isDirty || window.confirm('Hay cambios sin guardar en esta ficha. ¿Cerrar y descartarlos?');
+  async function confirmDiscard(): Promise<boolean> {
+    if (!isDirty) return true;
+    return confirmar({ titulo: '¿Cerrar sin guardar?', cuerpo: 'Hay cambios sin guardar en esta ficha. Si cierras, se descartan.', accion: 'Cerrar y descartar', cancelar: 'Seguir editando', peligro: true });
   }
 
   async function saveTenant(): Promise<boolean> {
@@ -192,7 +194,10 @@ export function ClienteFicha({ id, onClose }: { id: string | null; onClose: () =
 
   return (
     <dialog ref={dialogRef} className="tenant-modal" onClose={onClose} onCancel={(e) => {
-      if (!confirmDiscard()) e.preventDefault();
+      // preventDefault debe ser síncrono y la confirmación ya no lo es: se bloquea el
+      // cierre SIEMPRE y, si la persona confirma en nuestro diálogo, se cierra por código.
+      e.preventDefault();
+      void confirmDiscard().then((ok) => { if (ok) dialogRef.current?.close(); });
     }} aria-label="Ficha del cliente">
       <div className="modal-top">
         <div className="modal-h">
@@ -215,8 +220,8 @@ export function ClienteFicha({ id, onClose }: { id: string | null; onClose: () =
             <button
               className="btn alt"
               type="button"
-              onClick={() => {
-                if (confirmDiscard()) dialogRef.current?.close();
+              onClick={async () => {
+                if (await confirmDiscard()) dialogRef.current?.close();
               }}
             >
               Cerrar
@@ -893,10 +898,10 @@ function UsersPane({
                     href="#"
                     data-tip="Quitar acceso. Deja de entrar al panel de este cliente."
                     aria-label={`Quitar acceso a ${u.email}`}
-                    onClick={(e) => {
+                    onClick={async (e) => {
                       e.preventDefault();
                       // Quitar al último se permite (a veces es lo que se quiere) pero avisando.
-                      if (users.length === 1 && !window.confirm('Es el ÚNICO usuario: este cliente se queda sin acceso al panel. ¿Quitarlo igualmente?')) return;
+                      if (users.length === 1 && !(await confirmar({ titulo: '¿Quitar al único usuario?', cuerpo: 'Este cliente se queda sin acceso a su panel hasta que des de alta otro correo.', accion: 'Quitarlo igualmente', peligro: true }))) return;
                       setFieldErrs({});
                       del.mutate(
                         { id: tenantId, email: u.email },
@@ -989,8 +994,8 @@ function HistorialPane({ tenantId }: { tenantId: string }) {
                   className="btn alt btnsm"
                   type="button"
                   disabled={restore.isPending}
-                  onClick={() => {
-                    if (!window.confirm('¿Restaurar esta versión del contexto? Se crea una versión nueva (reversible).')) return;
+                  onClick={async () => {
+                    if (!(await confirmar({ titulo: '¿Restaurar esta versión del contexto?', cuerpo: 'Se crea una versión nueva con este contenido — el historial no se pierde y restaurar es reversible.', accion: 'Restaurar' }))) return;
                     restore.mutate(
                       { id: tenantId, versionId: v.id },
                       {

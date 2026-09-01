@@ -435,6 +435,14 @@ body.cliente .velai-only{display:none}
 .meter i{display:block;height:100%;background:linear-gradient(90deg,var(--orange),var(--orange2));border-radius:3px}
 /* ── Ficha del cliente: pestañas con un solo Guardar; punto ámbar = cambios sin guardar ── */
 dialog.tenant-modal{width:min(1120px,calc(100% - 24px))}
+/* Confirmaciones propias (Confirmar.tsx) — sustituyen a window.confirm/prompt. Más
+   estrechas que los modales de contenido: son una pregunta, no una ficha. */
+dialog.cfm{width:min(460px,calc(100% - 24px));padding:20px 22px}
+.cfm-titulo{display:block;font-family:var(--font-d);font-weight:900;font-size:18px;line-height:1.3}
+.cfm-cuerpo{margin:10px 0 0;color:var(--muted);font-size:13.5px;line-height:1.55}
+.cfm-input{width:100%;margin-top:12px;background:var(--bg3);color:var(--white);border:1px solid var(--border2);border-radius:var(--r-sm);padding:9px 12px;font:inherit}
+.cfm-input:focus{outline:2px solid var(--orange);outline-offset:1px;border-color:transparent}
+.cfm-acciones{display:flex;justify-content:flex-end;gap:10px;margin-top:18px}
 .modal-top{position:sticky;top:0;z-index:5;background:var(--bg2)}
 .modal-top .modal-h{border-bottom:0;position:static}
 .mh-r{display:flex;gap:10px;align-items:center;flex:1;justify-content:flex-end;min-width:0}

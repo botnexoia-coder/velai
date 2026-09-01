@@ -3,6 +3,7 @@
 // modal. El cliente abre SU calendario; Velai abre el del tenant velai con selector
 // para saltar al de cualquier cliente.
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { confirmar } from '../components/Confirmar';
 import { useNavigate, useSearchParams } from 'react-router';
 import { traducir } from '../api/errors';
 import { HoursGrid } from '../components/HoursGrid';
@@ -210,8 +211,8 @@ function CalendarConnected({
             className="btn alt btnsm"
             type="button"
             disabled={disconnect.isPending}
-            onClick={() => {
-              if (!window.confirm('¿Desconectar el calendario? Vai dejará de consultar huecos y agendar citas para este cliente.')) return;
+            onClick={async () => {
+              if (!(await confirmar({ titulo: '¿Desconectar el calendario?', cuerpo: 'Vai dejará de consultar huecos y de agendar citas para este cliente hasta que se vuelva a conectar.', accion: 'Desconectar', peligro: true }))) return;
               disconnect.mutate(
                 { id: tenantId },
                 {

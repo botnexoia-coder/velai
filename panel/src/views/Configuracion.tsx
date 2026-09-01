@@ -2,6 +2,7 @@
 // lo de integraciones/token/webhook es SOLO para admins raíz — el servidor decide con
 // 403 root_only y el panel solo pinta el aviso.
 import { useState, type ReactNode } from 'react';
+import { confirmar } from '../components/Confirmar';
 import { ApiError } from '../api/client';
 import { traducir } from '../api/errors';
 import { useToast } from '../components/Toasts';
@@ -101,9 +102,9 @@ function Admins() {
                     href="#"
                     data-tip="Quitar admin. Pierde el acceso al panel y sale de la puerta de Access."
                     aria-label={`Quitar a ${a.email}`}
-                    onClick={(e) => {
+                    onClick={async (e) => {
                       e.preventDefault();
-                      if (!window.confirm(`¿Quitar el acceso de ADMIN de ${a.email}?`)) return;
+                      if (!(await confirmar({ titulo: `¿Quitar el acceso de admin de ${a.email}?`, cuerpo: 'Deja de ver el panel y sale de la puerta de Cloudflare Access.', accion: 'Quitar acceso', peligro: true }))) return;
                       del.mutate(a.email, {
                         onSuccess: (r) => {
                           if (r.gate === 'pendiente') {
@@ -138,10 +139,10 @@ function Admins() {
         <button
           className="btn alt"
           type="button"
-          onClick={() => {
+          onClick={async () => {
             const v = email.trim();
             if (!v) return;
-            if (!window.confirm(`Un ADMIN ve TODOS los clientes y TODOS los leads, y puede gestionar usuarios. ¿Dar acceso total a ${v}?`)) return;
+            if (!(await confirmar({ titulo: `¿Dar acceso total a ${v}?`, cuerpo: 'Un admin ve TODOS los clientes y TODOS los leads, y puede gestionar usuarios.', accion: 'Dar acceso de admin' }))) return;
             add.mutate(v, {
               onSuccess: (r) => {
                 setEmail('');
@@ -295,10 +296,10 @@ function TokenCard({ state, label, source }: { state: 'ok' | 'warn' | 'bad'; lab
         <button
           className="btn alt"
           type="button"
-          onClick={() => {
+          onClick={async () => {
             const v = token.trim();
             if (!v) return;
-            if (!window.confirm('El token se validará contra Cloudflare y pasará a usarse para TODAS las sincronizaciones (Turnstile y puertas de Access). ¿Continuar?')) return;
+            if (!(await confirmar({ titulo: '¿Guardar este token?', cuerpo: 'Se validará contra Cloudflare y pasará a usarse para TODAS las sincronizaciones (Turnstile y puertas de Access).', accion: 'Validar y guardar' }))) return;
             save.mutate(v, {
               onSuccess: (r) => {
                 setToken('');
@@ -313,8 +314,8 @@ function TokenCard({ state, label, source }: { state: 'ok' | 'warn' | 'bad'; lab
         <button
           className="btn alt"
           type="button"
-          onClick={() => {
-            if (!window.confirm('¿Retirar el token del panel y volver al secret del worker?')) return;
+          onClick={async () => {
+            if (!(await confirmar({ titulo: '¿Retirar el token del panel?', cuerpo: 'Se vuelve al secret del worker. Si tampoco lo hay, las sincronizaciones con Cloudflare quedan en manual.', accion: 'Retirar', peligro: true }))) return;
             clear.mutate(undefined, {
               onSuccess: (r) =>
                 toast(

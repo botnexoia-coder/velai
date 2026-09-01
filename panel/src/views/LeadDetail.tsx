@@ -2,6 +2,7 @@
 // SOLO las tarjetas con dato, cambio de estado, notas y actividad. Cada acción confirma
 // con toast — un fallo invisible hace creer que se guardó.
 import { useEffect, useRef, useState } from 'react';
+import { confirmar } from '../components/Confirmar';
 import { ST_LABEL, traducir } from '../api/errors';
 import { StatusPill, TenantChip } from '../components/Pills';
 import { useToast } from '../components/Toasts';
@@ -140,8 +141,8 @@ export function LeadDetailModal({ id, onClose }: { id: string; onClose: () => vo
                   <button
                     className="btn bad"
                     type="button"
-                    onClick={() => {
-                      if (!window.confirm('¿Borrar definitivamente este lead y todos sus datos?')) return;
+                    onClick={async () => {
+                      if (!(await confirmar({ titulo: '¿Borrar este lead?', cuerpo: 'Se borra definitivamente con todos sus datos: notas, actividad y avisos. Es el borrado RGPD — no hay papelera.', accion: 'Borrar definitivamente', peligro: true }))) return;
                       del.mutate(id, {
                         onSuccess: () => {
                           toast('Lead borrado ✓');

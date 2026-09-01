@@ -11,6 +11,7 @@ import { Calendario } from './views/Calendario';
 import { Conexiones } from './views/Conexiones';
 import { Clientes } from './views/Clientes';
 import { TipHost } from './components/Tip';
+import { ConfirmarHost } from './components/Confirmar';
 
 export function App() {
   return (
@@ -29,6 +30,7 @@ export function App() {
         </Route>
       </Routes>
       <TipHost />
+      <ConfirmarHost />
     </>
   );
 }

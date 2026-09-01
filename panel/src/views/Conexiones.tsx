@@ -2,6 +2,7 @@
 // cada aviso. El cliente abre SU tarjeta; Velai elige tenant con el selector de la
 // cabecera. Tira de estado de canales arriba y dos columnas que fluyen por su cuenta.
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { confirmar, pedirTexto } from '../components/Confirmar';
 import { traducir } from '../api/errors';
 import { ChIcon } from '../components/icons';
 import { IcoPen, IcoTick, IcoX } from '../components/icons';
@@ -156,7 +157,9 @@ function TelegramWizard({ tenantId, isVelai, info }: { tenantId: string; isVelai
 
   const wiz = wizState(info, manual, requested);
   const goto = (id: WizId | null) => setRequested(id);
-  const confirm = (paso: string) => {
+  // «confirmarPaso», no «confirm»: sombreaba a window.confirm y en la revisión de los
+  // diálogos nativos hubo que pararse a distinguirla. Un nombre que no pisa globales.
+  const confirmarPaso = (paso: string) => {
     setManual((m) => ({ ...m, [paso]: true }));
     setRequested(null);
   };
@@ -175,9 +178,9 @@ function TelegramWizard({ tenantId, isVelai, info }: { tenantId: string; isVelai
               className="btn alt btnsm"
               type="button"
               disabled={wl.isPending}
-              onClick={() => {
+              onClick={async () => {
                 const enable = !info.whitelabel;
-                if (!enable && !window.confirm('¿Desactivar la marca blanca? Si el cliente tiene bot propio, se retira y se desvincula su chat.')) return;
+                if (!enable && !(await confirmar({ titulo: '¿Desactivar la marca blanca?', cuerpo: 'Si el cliente tiene bot propio, se retira y se desvincula su chat. Los avisos volverán a salir por el bot de Velai cuando se vuelva a vincular.', accion: 'Desactivar', peligro: true }))) return;
                 wl.mutate(
                   { id: tenantId, enable },
                   {
@@ -275,8 +278,8 @@ function TelegramWizard({ tenantId, isVelai, info }: { tenantId: string; isVelai
                     className="btn alt"
                     type="button"
                     disabled={botDel.isPending}
-                    onClick={() => {
-                      if (!window.confirm('¿Quitar el bot propio? Se desvincula el chat y los avisos volverán a salir por el bot de Velai cuando se vuelva a vincular.')) return;
+                    onClick={async () => {
+                      if (!(await confirmar({ titulo: '¿Quitar el bot propio?', cuerpo: 'Se desvincula el chat y los avisos volverán a salir por el bot de Velai cuando se vuelva a vincular.', accion: 'Quitar bot', peligro: true }))) return;
                       botDel.mutate(
                         { id: tenantId },
                         {
@@ -296,7 +299,7 @@ function TelegramWizard({ tenantId, isVelai, info }: { tenantId: string; isVelai
             </div>
             <div className="tgnav">
               <span />
-              <button className="btn alt" type="button" onClick={() => confirm('1')}>
+              <button className="btn alt" type="button" onClick={() => confirmarPaso('1')}>
                 Prefiero usar el bot de Velai →
               </button>
             </div>
@@ -330,7 +333,7 @@ function TelegramWizard({ tenantId, isVelai, info }: { tenantId: string; isVelai
               <button className="btn alt" type="button" onClick={() => goto('tgs1')}>
                 ← Anterior
               </button>
-              <button className="btn" type="button" onClick={() => confirm('2')}>
+              <button className="btn" type="button" onClick={() => confirmarPaso('2')}>
                 Ya tengo el grupo →
               </button>
             </div>
@@ -376,8 +379,8 @@ function TelegramWizard({ tenantId, isVelai, info }: { tenantId: string; isVelai
                     className="btn alt"
                     type="button"
                     disabled={unlink.isPending}
-                    onClick={() => {
-                      if (!window.confirm('¿Desvincular el Telegram? Los avisos de leads dejarán de llegar a ese chat.')) return;
+                    onClick={async () => {
+                      if (!(await confirmar({ titulo: '¿Desvincular el Telegram?', cuerpo: 'Los avisos de leads dejarán de llegar a ese chat hasta que se vuelva a vincular.', accion: 'Desvincular', peligro: true }))) return;
                       unlink.mutate(
                         { id: tenantId },
                         {
@@ -449,7 +452,7 @@ function TelegramWizard({ tenantId, isVelai, info }: { tenantId: string; isVelai
               <button className="btn alt" type="button" onClick={() => goto('tgs3')}>
                 ← Anterior
               </button>
-              <button className="btn" type="button" onClick={() => confirm('4')}>
+              <button className="btn" type="button" onClick={() => confirmarPaso('4')}>
                 Ya lo activé →
               </button>
             </div>
@@ -514,8 +517,17 @@ function TelegramWizard({ tenantId, isVelai, info }: { tenantId: string; isVelai
                           type="button"
                           data-tip="Editar la descripción. Es lo que Vai usa para decidir qué lead va a este tema."
                           aria-label={`Editar la descripción de ${tp.name}`}
-                          onClick={() => {
-                            const description = (window.prompt('Descripción del tema (lo que Vai usará para clasificar):') ?? '').trim();
+                          onClick={async () => {
+                            // Cancelar es NO TOCAR NADA. Con el prompt nativo, cancelar
+                            // colaba una descripción vacía y borraba la que hubiera.
+                            const description = await pedirTexto({
+                              titulo: `Descripción de «${tp.name}»`,
+                              cuerpo: 'Es lo que Vai usa para decidir qué lead va a este tema. Vacía = el tema deja de describirse.',
+                              placeholder: 'p. ej. clientes que piden precio o cotización',
+                              inicial: tp.description ?? '',
+                              accion: 'Guardar',
+                            });
+                            if (description === null) return;
                             topicPatch.mutate(
                               { id: tenantId, threadId: tp.thread_id, description },
                               {
@@ -532,8 +544,8 @@ function TelegramWizard({ tenantId, isVelai, info }: { tenantId: string; isVelai
                           type="button"
                           data-tip="Quitar del enrutado. El tema sigue en Telegram; solo deja de recibir leads."
                           aria-label={`Quitar ${tp.name} del enrutado`}
-                          onClick={() => {
-                            if (!window.confirm('¿Quitar este tema del enrutado? El tema sigue en Telegram, pero los leads dejarán de clasificarse hacia él.')) return;
+                          onClick={async () => {
+                            if (!(await confirmar({ titulo: `¿Quitar «${tp.name}» del enrutado?`, cuerpo: 'El tema sigue existiendo en Telegram, pero los leads dejarán de clasificarse hacia él.', accion: 'Quitar del enrutado', peligro: true }))) return;
                             topicDel.mutate(
                               { id: tenantId, threadId: tp.thread_id },
                               {
