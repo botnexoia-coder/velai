@@ -5156,11 +5156,12 @@ test('el cron marca approved/rejected las plantillas del catálogo y avisa', asy
     const stmt = (args = []) => ({
       bind: (...a) => stmt(a),
       all: async () => ({ results: /FROM tenant_templates tt/.test(sql) ? [{
-        kind: 'recordatorio_cita', sid: 'HX' + 'c'.repeat(32), id: 't-conf', slug: 'conf', name: 'Clínica Conf',
+        kind: 'recordatorio_cita', sid: 'HX' + 'c'.repeat(32), template_status: 'pending', categoria: null,
+        id: 't-conf', slug: 'conf', name: 'Clínica Conf',
         twilio_subaccount_sid: 'AC' + 's'.repeat(32), twilio_auth_token_enc: enc,
       }] : [] }),
       first: async () => null,
-      run: async () => { if (/UPDATE tenant_templates/.test(sql)) updates.push(args); return { meta: { changes: 1 } }; },
+      run: async () => { if (/UPDATE tenant_templates/.test(sql)) updates.push({ sql, args }); return { meta: { changes: 1 } }; },
     });
     return stmt();
   }, batch: async () => [] };
@@ -5169,16 +5170,90 @@ test('el cron marca approved/rejected las plantillas del catálogo y avisa', asy
   const realFetch = globalThis.fetch;
   globalThis.fetch = async (url, init) => {
     const u = String(url);
-    if (u.includes('/ApprovalRequests')) return new Response(JSON.stringify({ whatsapp: { status: 'approved' } }), { status: 200 });
+    if (u.includes('/ApprovalRequests')) return new Response(JSON.stringify({ whatsapp: { status: 'approved', category: 'UTILITY' } }), { status: 200 });
     if (u.includes('api.telegram.org')) { telegramSends.push(JSON.parse(String(init.body))); return new Response(JSON.stringify({ ok: true }), { status: 200 }); }
     return new Response('{}', { status: 200 });
   };
   try {
     await testing.pollTemplateApprovals(env);
-    assert.equal(updates.length, 1);
-    assert.deepEqual([updates[0][0], updates[0][2], updates[0][3]], ['approved', 't-conf', 'recordatorio_cita']);
+    // Dos escrituras: la categoría REAL de Twilio y el estado de aprobación.
+    const cat = updates.find((u) => u.sql.includes('categoria=?'));
+    assert.deepEqual([cat.args[0], cat.args[2], cat.args[3]], ['UTILITY', 't-conf', 'recordatorio_cita']);
+    const st = updates.find((u) => u.sql.includes('SET status=?'));
+    assert.deepEqual([st.args[0], st.args[2], st.args[3]], ['approved', 't-conf', 'recordatorio_cita']);
     assert.equal(telegramSends.length, 1);
     assert.ok(String(telegramSends[0].text).includes('aprobada'));
+    assert.ok(String(telegramSends[0].text).includes('UTILITY'), 'el aviso dice la categoría real');
+  } finally { globalThis.fetch = realFetch; }
+});
+
+test('backfill autocurativo de categoría: la approved con categoría NULL se cura sin re-avisar', async () => {
+  const enc = await encryptSecret({ SECRETS_KEK: TEST_KEK }, 't-conf', 'a1b2c3d4e5f60718293a4b5c6d7e8f90');
+  const updates = [];
+  const db = { prepare: (sql) => {
+    const stmt = (args = []) => ({
+      bind: (...a) => stmt(a),
+      all: async () => ({ results: /FROM tenant_templates tt/.test(sql) ? [{
+        // Ya resuelta (approved) pero sin categoría: el caso gogestion.
+        kind: 'recordatorio_cita', sid: 'HX' + 'c'.repeat(32), template_status: 'approved', categoria: null,
+        id: 't-conf', slug: 'conf', name: 'Clínica Conf',
+        twilio_subaccount_sid: 'AC' + 's'.repeat(32), twilio_auth_token_enc: enc,
+      }] : [] }),
+      first: async () => null,
+      run: async () => { if (/UPDATE tenant_templates/.test(sql)) updates.push({ sql, args }); return { meta: { changes: 1 } }; },
+    });
+    return stmt();
+  }, batch: async () => [] };
+  const env = { DB: db, SECRETS_KEK: TEST_KEK, TELEGRAM_TOKEN: 'bot', TELEGRAM_CHAT_ID: '-1' };
+  let telegramSends = 0;
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = async (url) => {
+    const u = String(url);
+    if (u.includes('/ApprovalRequests')) return new Response(JSON.stringify({ whatsapp: { status: 'approved', category: 'MARKETING' } }), { status: 200 });
+    if (u.includes('api.telegram.org')) { telegramSends++; return new Response(JSON.stringify({ ok: true }), { status: 200 }); }
+    return new Response('{}', { status: 200 });
+  };
+  try {
+    await testing.pollTemplateApprovals(env);
+    assert.equal(updates.length, 1, 'SOLO la categoría: el estado ya estaba resuelto');
+    assert.ok(updates[0].sql.includes('categoria=?'));
+    assert.equal(updates[0].args[0], 'MARKETING');
+    assert.equal(telegramSends, 0, 'el backfill no re-avisa por Telegram');
+  } finally { globalThis.fetch = realFetch; }
+});
+
+test('la legacy de leads también se cura: lead_template_category se rellena desde Twilio', async () => {
+  const TID = 't-lead';
+  const enc = await encryptSecret({ SECRETS_KEK: TEST_KEK }, TID, 'a1b2c3d4e5f60718293a4b5c6d7e8f90');
+  const updates = [];
+  // gogestion: plantilla de leads YA approved, categoría sin leer (NULL).
+  const tenant = { id: TID, slug: 'gogestion', name: 'GOgestión', twilio_subaccount_sid: 'AC' + 's'.repeat(32),
+    twilio_auth_token_enc: enc, lead_template_sid: 'HX' + 'l'.repeat(32), lead_template_status: 'approved',
+    lead_template_category: null, sender_sid: null, sender_status: null };
+  const db = { prepare: (sql) => {
+    const stmt = (args = []) => ({
+      bind: (...a) => stmt(a),
+      all: async () => ({ results: /FROM tenants/.test(sql) ? [tenant] : [] }),
+      first: async () => null,
+      run: async () => { if (/UPDATE tenants/.test(sql)) updates.push({ sql, args }); return { meta: { changes: 1 } }; },
+    });
+    return stmt();
+  }, batch: async () => [] };
+  const env = { DB: db, KV: mapKV(), SECRETS_KEK: TEST_KEK, TELEGRAM_TOKEN: 'bot', TELEGRAM_CHAT_ID: '-1' };
+  let telegramSends = 0;
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = async (url) => {
+    const u = String(url);
+    if (u.includes('/ApprovalRequests')) return new Response(JSON.stringify({ whatsapp: { status: 'approved', category: 'MARKETING' } }), { status: 200 });
+    if (u.includes('api.telegram.org')) { telegramSends++; return new Response(JSON.stringify({ ok: true }), { status: 200 }); }
+    return new Response('{}', { status: 200 });
+  };
+  try {
+    await testing.pollProvisioning(env);
+    const cat = updates.find((u) => u.sql.includes('lead_template_category=?'));
+    assert.equal(cat.args[0], 'MARKETING', 'la categoría REAL de Twilio queda en la fila');
+    assert.ok(!updates.some((u) => u.sql.includes("lead_template_status=")), 'el estado approved no se toca');
+    assert.equal(telegramSends, 0, 'el backfill no re-avisa');
   } finally { globalThis.fetch = realFetch; }
 });
 
@@ -5313,11 +5388,11 @@ test('GET calendar lleva el bloque de confirmaciones y el PATCH del addon es sol
 test('GET /plantillas por rol: velai la matriz global con opciones; el cliente SOLO su fila y sin sids', async () => {
   const TENANTS = [
     { id: 't-b', slug: 'beta', name: 'Beta', active: 0, lead_template_sid: null, lead_template_status: null },
-    { id: 't-mio', slug: 'alfa', name: 'Alfa', active: 1, lead_template_sid: 'HX' + 'l'.repeat(32), lead_template_status: 'pending' },
+    { id: 't-mio', slug: 'alfa', name: 'Alfa', active: 1, lead_template_sid: 'HX' + 'l'.repeat(32), lead_template_status: 'pending', lead_template_category: 'MARKETING' },
   ];
   const OPCIONES = JSON.stringify({ botones: 'si_voy_no_puedo', textos: { confirmar: 'Sí, voy', cancelar: 'No puedo ir' } });
   const REGISTRO = [
-    { tenant_id: 't-mio', kind: 'recordatorio_cita', sid: 'HX' + 'r'.repeat(32), status: 'approved', opciones: OPCIONES, updated_at: '2026-09-01T10:00:00Z' },
+    { tenant_id: 't-mio', kind: 'recordatorio_cita', sid: 'HX' + 'r'.repeat(32), status: 'approved', opciones: OPCIONES, categoria: 'UTILITY', updated_at: '2026-09-01T10:00:00Z' },
     // kind retirado del catálogo y clave del prototipo: NUNCA se pintan
     { tenant_id: 't-mio', kind: 'retirada', sid: 'HX' + 'x'.repeat(32), status: 'approved', opciones: null, updated_at: null },
     { tenant_id: 't-b', kind: 'constructor', sid: 'HX' + 'y'.repeat(32), status: 'approved', opciones: 'basura{', updated_at: null },
@@ -5352,8 +5427,11 @@ test('GET /plantillas por rol: velai la matriz global con opciones; el cliente S
   assert.deepEqual(alfa.plantillas.recordatorio_cita, {
     sid: 'HX' + 'r'.repeat(32), status: 'approved', updated_at: '2026-09-01T10:00:00Z',
     opciones: { botones: 'si_voy_no_puedo', textos: { confirmar: 'Sí, voy', cancelar: 'No puedo ir' } },
+    categoria: 'UTILITY',
   });
-  assert.deepEqual(alfa.plantillas.aviso_lead, { sid: 'HX' + 'l'.repeat(32), status: 'pending', updated_at: null, opciones: null });
+  // La categoría de la celda es la REAL de Twilio (la de gogestion es Marketing aunque
+  // el catálogo la sometiera como Utility) — la legacy la trae de tenants.
+  assert.deepEqual(alfa.plantillas.aviso_lead, { sid: 'HX' + 'l'.repeat(32), status: 'pending', updated_at: null, opciones: null, categoria: 'MARKETING' });
   assert.equal(alfa.plantillas.retirada, undefined, 'un kind fuera del catálogo no viaja');
   const beta = out.tenants.find((t) => t.slug === 'beta');
   assert.deepEqual(beta.plantillas, {}, 'sin plantillas = objeto vacío (la celda pinta «sin crear»)');

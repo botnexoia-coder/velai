@@ -3462,17 +3462,30 @@ async function drainQueuedLeads(env) {
 // El sistema avisa cuándo un cliente quedó listo, en vez de tener que entrar a mirar:
 // sondea las plantillas pendientes de aprobación y los senders que aún no están ONLINE.
 async function pollProvisioning(env) {
-  const rows = (await env.DB.prepare(`SELECT * FROM tenants
-    WHERE (lead_template_status = 'pending' AND lead_template_sid IS NOT NULL)
-       OR (sender_sid IS NOT NULL AND (sender_status IS NULL OR sender_status != 'ONLINE'))
-    ORDER BY updated_at ASC LIMIT 10`).all()).results;
+  // La plantilla LEGACY de leads entra también al backfill de categoría real: con sid
+  // y lead_template_category NULL se sondea aunque esté approved (así gogestion queda
+  // bien sin tocar nada a mano). Pre-0032 la columna no existe: cae a la consulta previa.
+  let rows;
+  try {
+    rows = (await env.DB.prepare(`SELECT * FROM tenants
+      WHERE (lead_template_status = 'pending' AND lead_template_sid IS NOT NULL)
+         OR (lead_template_sid IS NOT NULL AND lead_template_category IS NULL)
+         OR (sender_sid IS NOT NULL AND (sender_status IS NULL OR sender_status != 'ONLINE'))
+      ORDER BY updated_at ASC LIMIT 10`).all()).results;
+  } catch (_) {
+    rows = (await env.DB.prepare(`SELECT * FROM tenants
+      WHERE (lead_template_status = 'pending' AND lead_template_sid IS NOT NULL)
+         OR (sender_sid IS NOT NULL AND (sender_status IS NULL OR sender_status != 'ONLINE'))
+      ORDER BY updated_at ASC LIMIT 10`).all()).results;
+  }
   for (const tenant of rows) {
     try {
       const token = await twilioAuthTokenFor(env, tenant);
       if (!token || !tenant.twilio_subaccount_sid) continue;
       const credentials = { sid: tenant.twilio_subaccount_sid, token };
       const now = new Date().toISOString();
-      if (tenant.lead_template_status === 'pending' && tenant.lead_template_sid) {
+      const sinCategoria = Boolean(tenant.lead_template_sid) && !tenant.lead_template_category;
+      if (tenant.lead_template_sid && (tenant.lead_template_status === 'pending' || sinCategoria)) {
         const approval = await fetchApprovalStatus(credentials, tenant.lead_template_sid);
         // 'unknown' = Twilio contestó pero sin el estado donde lo buscamos. Sin este log la
         // fila se queda 'pending' eternamente y parece que Meta va lenta.
@@ -3480,11 +3493,23 @@ async function pollProvisioning(env) {
           console.log(JSON.stringify({ level: 'warn', code: 'template_status_unknown', tenant: tenant.slug,
             status: approval.status, keys: Object.keys(approval.raw || {}).slice(0, 8).join(',') }));
         }
-        if (approval.status === 'approved') {
+        // Categoría real a la fila SIEMPRE que Twilio la traiga (backfill autocurativo);
+        // en try/catch propio: pre-0032 la columna falta y el resto debe seguir.
+        if (approval.categoria && approval.categoria !== tenant.lead_template_category) {
+          try {
+            await env.DB.prepare('UPDATE tenants SET lead_template_category=?, updated_at=? WHERE id=?')
+              .bind(approval.categoria, now, tenant.id).run();
+            await invalidateTenantCache(env, [tenant]);
+            console.log(JSON.stringify({ level: 'info', code: 'lead_template_category_synced', tenant: tenant.slug, categoria: approval.categoria }));
+          } catch (_) {}
+        }
+        // El ciclo de aprobación solo se aplica a las PENDIENTES: una fila approved que
+        // entró por el backfill no cambia de estado ni re-avisa por Telegram.
+        if (tenant.lead_template_status === 'pending' && approval.status === 'approved') {
           await env.DB.prepare("UPDATE tenants SET lead_template_status='approved', updated_at=? WHERE id=?").bind(now, tenant.id).run();
           await invalidateTenantCache(env, [tenant]);
           await sendTelegramText(env, `✅ <b>Velai</b>: la plantilla de <b>${escapeHtml(tenant.name)}</b> ya está aprobada — los avisos salen por la suya.`);
-        } else if (approval.status === 'rejected') {
+        } else if (tenant.lead_template_status === 'pending' && approval.status === 'rejected') {
           await env.DB.prepare("UPDATE tenants SET lead_template_status='rejected', updated_at=? WHERE id=?").bind(now, tenant.id).run();
           await invalidateTenantCache(env, [tenant]);
           await sendTelegramText(env, `❌ <b>Velai</b>: Meta rechazó la plantilla de <b>${escapeHtml(tenant.name)}</b>${approval.reason ? `: ${escapeHtml(approval.reason)}` : ''}.`);
@@ -3514,12 +3539,23 @@ async function pollProvisioning(env) {
 // columnas históricas y la sondea pollProvisioning: unificarla es un paso aparte).
 async function pollTemplateApprovals(env) {
   let rows = [];
+  // Entran las pendientes Y las que tienen sid con categoría NULL aunque ya estén
+  // approved: backfill AUTOCURATIVO de la categoría real (cazada de Juan: la de lead
+  // de gogestion es Marketing en Twilio y el panel pintaba la intención del catálogo).
+  // Si la columna categoria aún no existe (0032 sin aplicar), cae a la consulta previa.
   try {
-    rows = (await env.DB.prepare(`SELECT tt.kind, tt.sid, t.id, t.slug, t.name, t.twilio_subaccount_sid, t.twilio_auth_token_enc
+    rows = (await env.DB.prepare(`SELECT tt.kind, tt.sid, tt.status AS template_status, tt.categoria, t.id, t.slug, t.name, t.twilio_subaccount_sid, t.twilio_auth_token_enc
       FROM tenant_templates tt JOIN tenants t ON t.id = tt.tenant_id
-      WHERE tt.status = 'pending' AND tt.sid IS NOT NULL
+      WHERE (tt.status = 'pending' AND tt.sid IS NOT NULL) OR (tt.sid IS NOT NULL AND tt.categoria IS NULL)
       ORDER BY tt.updated_at ASC LIMIT 10`).all()).results || [];
-  } catch (_) { return; } // tabla aún sin migrar: el cron no revienta
+  } catch (_) {
+    try {
+      rows = (await env.DB.prepare(`SELECT tt.kind, tt.sid, tt.status AS template_status, t.id, t.slug, t.name, t.twilio_subaccount_sid, t.twilio_auth_token_enc
+        FROM tenant_templates tt JOIN tenants t ON t.id = tt.tenant_id
+        WHERE tt.status = 'pending' AND tt.sid IS NOT NULL
+        ORDER BY tt.updated_at ASC LIMIT 10`).all()).results || [];
+    } catch (_) { return; } // tabla aún sin migrar: el cron no revienta
+  }
   for (const row of rows) {
     try {
       const token = await twilioAuthTokenFor(env, row);
@@ -3529,11 +3565,25 @@ async function pollTemplateApprovals(env) {
         console.log(JSON.stringify({ level: 'warn', code: 'template_status_unknown', tenant: row.slug, kind: row.kind,
           status: approval.status, keys: Object.keys(approval.raw || {}).slice(0, 8).join(',') }));
       }
+      const now = new Date().toISOString();
+      // La categoría se persiste SIEMPRE que Twilio la traiga y difiera de la guardada
+      // — también en filas ya resueltas (ese es el backfill). Nunca lanza hacia fuera:
+      // pre-0032 la columna no existe y el resto del sondeo debe seguir.
+      if (approval.categoria && approval.categoria !== row.categoria) {
+        try {
+          await env.DB.prepare('UPDATE tenant_templates SET categoria=?, updated_at=? WHERE tenant_id=? AND kind=?')
+            .bind(approval.categoria, now, row.id, row.kind).run();
+          console.log(JSON.stringify({ level: 'info', code: 'template_category_synced', tenant: row.slug, kind: row.kind, categoria: approval.categoria }));
+        } catch (_) {}
+      }
+      // El ciclo de aprobación solo toca filas PENDIENTES: una fila ya resuelta que
+      // entró por el backfill de categoría no cambia de estado ni re-avisa.
+      if (row.template_status !== 'pending') continue;
       if (approval.status !== 'approved' && approval.status !== 'rejected') continue;
       await env.DB.prepare('UPDATE tenant_templates SET status=?, updated_at=? WHERE tenant_id=? AND kind=?')
-        .bind(approval.status, new Date().toISOString(), row.id, row.kind).run();
+        .bind(approval.status, now, row.id, row.kind).run();
       await sendTelegramText(env, approval.status === 'approved'
-        ? `✅ <b>Velai</b>: la plantilla <b>${escapeHtml(row.kind)}</b> de <b>${escapeHtml(row.name)}</b> ya está aprobada.`
+        ? `✅ <b>Velai</b>: la plantilla <b>${escapeHtml(row.kind)}</b> de <b>${escapeHtml(row.name)}</b> ya está aprobada${approval.categoria ? ` (categoría ${escapeHtml(approval.categoria)})` : ''}.`
         : `❌ <b>Velai</b>: Meta rechazó la plantilla <b>${escapeHtml(row.kind)}</b> de <b>${escapeHtml(row.name)}</b>${approval.reason ? `: ${escapeHtml(approval.reason)}` : ''}.`);
     } catch (error) {
       // Nunca en silencio (lección del catch mudo de pollProvisioning, 2026-08-24).

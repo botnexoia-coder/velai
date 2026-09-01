@@ -66,30 +66,37 @@ function plantillasDe(t, registroRows, { sinSid = false } = {}) {
     plantillas[r.kind] = {
       ...(sinSid ? {} : { sid: r.sid || null }),
       status: r.status || null, updated_at: r.updated_at || null, opciones: parseOpciones(r.opciones),
+      // La categoría REAL leída de Twilio por el poll (0032); null = aún no leída y el
+      // panel enseña «—» — JAMÁS la intención del catálogo como si fuera un hecho.
+      categoria: r.categoria || null,
     };
   }
   if (t.lead_template_sid || t.lead_template_status) {
     plantillas.aviso_lead = {
       ...(sinSid ? {} : { sid: t.lead_template_sid || null }),
       status: t.lead_template_status || null, updated_at: null, opciones: null,
+      categoria: t.lead_template_category || null,
     };
   }
   return { id: t.id, slug: t.slug, name: t.name, active: t.active, plantillas };
 }
 
-// tenant_templates puede ir por detrás de las migraciones (0030/0031): primero con
-// `opciones`, si la columna falta sin ella, y si la tabla falta, vacío — la vista
-// sale igualmente con lo que viva en columnas.
+// tenant_templates puede ir por detrás de las migraciones (0030/0031/0032): primero
+// con `categoria` y `opciones`, luego sin las columnas que falten, y si la tabla
+// falta, vacío — la vista sale igualmente con lo que viva en columnas.
 async function leerRegistro(env, tenantId) {
   const where = tenantId ? ' WHERE tenant_id = ?' : '';
   const args = tenantId ? [tenantId] : [];
-  try {
-    return (await env.DB.prepare(`SELECT tenant_id, kind, sid, status, opciones, updated_at FROM tenant_templates${where}`).bind(...args).all()).results || [];
-  } catch (_) {
+  for (const cols of [
+    'tenant_id, kind, sid, status, opciones, categoria, updated_at',
+    'tenant_id, kind, sid, status, opciones, updated_at',
+    'tenant_id, kind, sid, status, updated_at',
+  ]) {
     try {
-      return (await env.DB.prepare(`SELECT tenant_id, kind, sid, status, updated_at FROM tenant_templates${where}`).bind(...args).all()).results || [];
-    } catch (_) { return []; }
+      return (await env.DB.prepare(`SELECT ${cols} FROM tenant_templates${where}`).bind(...args).all()).results || [];
+    } catch (_) { /* columna o tabla aún sin migrar: siguiente forma */ }
   }
+  return [];
 }
 
 tenants.get('/api/admin/plantillas', async (c) => {
@@ -99,14 +106,14 @@ tenants.get('/api/admin/plantillas', async (c) => {
   // OJO: no citar aquí el patrón literal del bind — check-aislamiento lee texto plano
   // y un comentario que lo nombre le taparía una consulta sin puerta de verdad.
   if (scope.role !== 'velai') {
-    const propio = await env.DB.prepare('SELECT id, slug, name, active, lead_template_sid, lead_template_status FROM tenants WHERE id = ?').bind(scope.tenantId).first();
+    const propio = await env.DB.prepare('SELECT id, slug, name, active, lead_template_sid, lead_template_status, lead_template_category FROM tenants WHERE id = ?').bind(scope.tenantId).first();
     if (!propio) throw new HttpError(404, 'not_found');
     const registro = await leerRegistro(env, scope.tenantId);
     return json({ kinds: catalogKinds(), tenants: [plantillasDe(propio, registro, { sinSid: true })] }, 200, NO_STORE);
   }
   // Velai: la matriz GLOBAL — filas de TODOS los clientes, sin scope a propósito
   // (la rama del cliente ya retornó arriba: estas consultas no son alcanzables por él).
-  const rows = (await env.DB.prepare(`SELECT id, slug, name, active, lead_template_sid, lead_template_status
+  const rows = (await env.DB.prepare(`SELECT id, slug, name, active, lead_template_sid, lead_template_status, lead_template_category
     FROM tenants ORDER BY active DESC, name ASC`).all()).results || [];
   const registro = await leerRegistro(env, null);
   const porTenant = new Map();

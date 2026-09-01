@@ -73,7 +73,15 @@ export async function submitTemplateApproval(credentials, contentSid, name, cate
 export async function fetchApprovalStatus(credentials, contentSid) {
   const data = await twilioRequest(`https://content.twilio.com/v1/Content/${contentSid}/ApprovalRequests`, credentials, { method: 'GET' });
   const wa = data.whatsapp || {};
-  return { status: String(wa.status || 'unknown').toLowerCase(), reason: wa.rejection_reason || null, raw: data };
+  return {
+    status: String(wa.status || 'unknown').toLowerCase(),
+    reason: wa.rejection_reason || null,
+    // La categoría REAL que Meta le asignó (cazada de Juan: la de lead de gogestion es
+    // MARKETING aunque se sometiera como Utility). Normalizada a mayúsculas; null si
+    // Twilio no la trae — el panel enseña «—», jamás la intención del catálogo como real.
+    categoria: wa.category ? String(wa.category).toUpperCase().slice(0, 40) : null,
+    raw: data,
+  };
 }
 
 export async function createWhatsAppSender(credentials, { phone, wabaId, callbackUrl }) {
