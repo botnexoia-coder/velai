@@ -32,6 +32,31 @@ export const CALENDAR_TOOLS = [
       required: ['fecha_hora', 'nombre', 'telefono'],
     },
   },
+  // SPEC-CONFIRMACIONES F2: el camino de texto libre («no puedo ir», «sí que voy»).
+  // El executor localiza la cita SOLO por el teléfono del remitente + tenant actual —
+  // jamás por un id que aporte el modelo (input hostil, como en agendar_cita).
+  {
+    name: 'cancelar_cita',
+    description: 'Cancela una cita futura del cliente que está hablando. Úsala cuando diga que no puede ir o pida cancelar. La cita se localiza por su teléfono; si tiene varias, la herramienta devuelve la lista para preguntar cuál.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        telefono: { type: 'string', description: 'Teléfono del cliente. Solo hace falta en el chat web; en WhatsApp se usa el número del remitente.' },
+        fecha_hora: { type: 'string', description: 'Inicio de la cita a cancelar (YYYY-MM-DDTHH:MM, hora local del negocio). Solo cuando hay varias citas y el cliente ya aclaró cuál.' },
+      },
+    },
+  },
+  {
+    name: 'confirmar_cita',
+    description: 'Marca una cita futura como confirmada por el cliente que está hablando (p. ej. si responde por texto que sí asistirá). Se localiza por su teléfono, como cancelar_cita.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        telefono: { type: 'string', description: 'Teléfono del cliente. Solo hace falta en el chat web; en WhatsApp se usa el número del remitente.' },
+        fecha_hora: { type: 'string', description: 'Inicio de la cita a confirmar (YYYY-MM-DDTHH:MM, hora local del negocio). Solo cuando hay varias citas.' },
+      },
+    },
+  },
 ];
 
 // Guardrails de citas: en CÓDIGO y concatenados al bloque estable del system —
@@ -42,6 +67,9 @@ export const CALENDAR_GUARDRAILS = [
   '- Antes de usar agendar_cita necesitas SIEMPRE: nombre y teléfono del cliente, y su confirmación de la fecha y hora exactas.',
   '- Tras agendar con éxito, confirma en una frase el día, la hora y el nombre. Si la herramienta devuelve hueco_ocupado, ofrece las alternativas que trae.',
   '- Todas las horas son hora local del negocio. No agendes en el pasado ni a más de 60 días.',
+  '- Si el cliente dice que no puede ir o quiere anular, usa cancelar_cita; si confirma por texto que asistirá, usa confirmar_cita. Ambas localizan la cita por su teléfono: nunca pidas ni inventes identificadores de cita.',
+  '- Si la herramienta devuelve varias_citas, pregunta cuál de la lista es y repite la llamada con fecha_hora.',
+  '- Tras cancelar una cita, ofrece reagendar ahí mismo: consulta huecos con consultar_disponibilidad y agenda con agendar_cita si el cliente quiere.',
 ].join('\n');
 
 // Horario por defecto cuando el tenant no configuró el suyo: L-V 9:00-19:00.

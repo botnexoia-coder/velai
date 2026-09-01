@@ -5190,3 +5190,82 @@ test('samePhone: iguala con y sin prefijo de país, sin casar por sufijos cortos
   assert.ok(!testing.samePhone('+34612345678', '+34699999999'));
   assert.ok(!testing.samePhone('', '+34612345678'));
 });
+
+// ── F2: cancelar_cita / confirmar_cita (texto libre, sin botón) ────────────────
+
+function citasDb(citas, updates) {
+  return { prepare: (sql) => ({ bind: (...args) => ({
+    all: async () => {
+      if (/FROM appointments WHERE tenant_id=\? AND status='confirmed' AND starts_at > \?/.test(sql.replace(/\s+/g, ' '))) {
+        return { results: citas.filter((a) => a.tenant_id === args[0] && a.status === 'confirmed' && a.starts_at > args[1]).map((a) => ({ ...a })) };
+      }
+      return { results: [] };
+    },
+    first: async () => null,
+    run: async () => {
+      if (/UPDATE appointments/.test(sql)) {
+        updates.push({ sql, args });
+        const target = citas.find((a) => a.id === (sql.includes('customer_confirmed_at') ? args[1] : args[0]));
+        if (target && sql.includes("status='cancelled'")) target.status = 'cancelled';
+        return { meta: { changes: target ? 1 : 0 } };
+      }
+      return { meta: { changes: 1 } };
+    },
+  }) }), batch: async () => [] };
+}
+
+test('cancelar_cita: el teléfono del remitente MANDA, la ambigüedad lista y el id jamás viene del modelo', async () => {
+  const { localToUtcMs } = await import('../worker/calendar.js');
+  const day = nextWorkday();
+  const iso = (hhmm) => new Date(localToUtcMs('Europe/Madrid', day, hhmm)).toISOString();
+  const citas = [
+    { id: '00000000-0000-4000-8000-0000000000c1', tenant_id: 't-cal', status: 'confirmed', customer_name: 'Marta', customer_phone: '+34600000000', reason: 'corte', starts_at: iso('10:00'), timezone: 'Europe/Madrid', provider_event_id: null },
+    { id: '00000000-0000-4000-8000-0000000000c2', tenant_id: 't-cal', status: 'confirmed', customer_name: 'Marta', customer_phone: '+34600000000', reason: null, starts_at: iso('12:00'), timezone: 'Europe/Madrid', provider_event_id: null },
+    { id: '00000000-0000-4000-8000-0000000000c3', tenant_id: 't-cal', status: 'confirmed', customer_name: 'Otro', customer_phone: '+34699999999', reason: null, starts_at: iso('13:00'), timezone: 'Europe/Madrid', provider_event_id: null },
+  ];
+  const updates = [];
+  const env = { DB: citasDb(citas, updates) };
+  const cal = { tenant_id: 't-cal', calendar_id: 'primary', timezone: 'Europe/Madrid', slot_minutes: 30, business_hours: null };
+  const tenant = { id: 't-cal', slug: 'uno', name: 'Uno', telegram_chat_id: null };
+  const exec = testing.calendarExecutor(env, tenant, cal, { channel: 'whatsapp', conversationKey: 'whatsapp:+34600000000', defaultPhone: '+34600000000' });
+
+  // El modelo intenta apuntar al teléfono de OTRO: en WhatsApp se ignora y salen LAS SUYAS.
+  const varias = JSON.parse(await exec('cancelar_cita', { telefono: '+34699999999' }));
+  assert.equal(varias.error, 'varias_citas', 'dos citas → la tool devuelve la lista y Vai pregunta');
+  assert.equal(varias.citas.length, 2);
+  assert.deepEqual(varias.citas.map((c) => c.hora), ['10:00', '12:00']);
+  assert.equal(updates.length, 0, 'con ambigüedad no se toca nada');
+
+  // Desambiguada con fecha_hora: cancela LA SUYA, anclada al tenant del closure.
+  const ok = JSON.parse(await exec('cancelar_cita', { fecha_hora: `${day}T10:00` }));
+  assert.deepEqual([ok.ok, ok.cancelada.hora], [true, '10:00']);
+  const upd = updates.find((u) => u.sql.includes("status='cancelled'"));
+  assert.ok(upd.sql.includes("cancelled_by='customer'"));
+  assert.deepEqual(upd.args, ['00000000-0000-4000-8000-0000000000c1', 't-cal']);
+
+  // Queda una sola cita suya: sin fecha_hora ya no hay ambigüedad — confirmar por texto.
+  const conf = JSON.parse(await exec('confirmar_cita', {}));
+  assert.deepEqual([conf.ok, conf.confirmada.hora], [true, '12:00']);
+  const updConf = updates.find((u) => u.sql.includes('customer_confirmed_at=?'));
+  assert.deepEqual([updConf.args[1], updConf.args[2]], ['00000000-0000-4000-8000-0000000000c2', 't-cal']);
+
+  // Input hostil restante: basura en fecha_hora con una sola cita no rompe nada.
+  const basura = JSON.parse(await exec('cancelar_cita', { fecha_hora: 'DROP TABLE' }));
+  assert.equal(basura.ok, true, 'con una sola cita, fecha_hora inválida se ignora');
+});
+
+test('cancelar_cita en el chat web: sin teléfono pide el teléfono; con uno ajeno no hay citas', async () => {
+  const { localToUtcMs } = await import('../worker/calendar.js');
+  const day = nextWorkday();
+  const citas = [{ id: '00000000-0000-4000-8000-0000000000c4', tenant_id: 't-cal', status: 'confirmed', customer_name: 'Ana', customer_phone: '612345678', reason: null, starts_at: new Date(localToUtcMs('Europe/Madrid', day, '10:00')).toISOString(), timezone: 'Europe/Madrid', provider_event_id: null }];
+  const updates = [];
+  const env = { DB: citasDb(citas, updates) };
+  const cal = { tenant_id: 't-cal', calendar_id: 'primary', timezone: 'Europe/Madrid', slot_minutes: 30, business_hours: null };
+  const exec = testing.calendarExecutor(env, { id: 't-cal', slug: 'uno', name: 'Uno' }, cal, { channel: 'web', conversationKey: 'c1', defaultPhone: '' });
+  assert.equal(JSON.parse(await exec('cancelar_cita', {})).error, 'telefono_requerido');
+  assert.equal(JSON.parse(await exec('cancelar_cita', { telefono: '+34699999999' })).error, 'sin_citas_futuras');
+  assert.equal(updates.length, 0);
+  // El teléfono guardado sin prefijo casa con el mismo número con +34 (samePhone).
+  const ok = JSON.parse(await exec('cancelar_cita', { telefono: '+34612345678' }));
+  assert.equal(ok.ok, true);
+});

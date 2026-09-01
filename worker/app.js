@@ -1772,6 +1772,48 @@ function calendarExecutor(env, tenant, cal, meta) {
       // La fecha vuelve YA formateada en local: el modelo no debe recalcularla.
       return JSON.stringify({ ok: true, fecha, hora: hhmm, nombre, duracion_min: Number(cal.slot_minutes) || 30 });
     }
+    // SPEC-CONFIRMACIONES F2: cancelar/confirmar por texto libre. MISMO contrato de
+    // seguridad que agendar_cita: el input del modelo es hostil. La cita se localiza
+    // SOLO por teléfono del remitente + tenant del closure — jamás por un id del
+    // modelo — y solo entre citas FUTURAS confirmadas. En WhatsApp el teléfono es el
+    // From del canal y lo que diga el modelo SE IGNORA; en web no hay remitente y se
+    // acepta el que el cliente dio en conversación (mismo nivel de confianza que
+    // agendar_cita, que también lo recibe del modelo).
+    if (name === 'cancelar_cita' || name === 'confirmar_cita') {
+      const telefono = meta.defaultPhone || normalizePhone(clean(input.telefono, 40));
+      if (!telefono) return JSON.stringify({ error: 'telefono_requerido', nota: 'pide al cliente el teléfono con el que agendó' });
+      const rows = (await env.DB.prepare(`SELECT id, tenant_id, starts_at, timezone, reason, customer_name, customer_phone, provider_event_id, status
+        FROM appointments WHERE tenant_id=? AND status='confirmed' AND starts_at > ? ORDER BY starts_at ASC LIMIT 20`)
+        .bind(cal.tenant_id, new Date().toISOString()).all()).results || [];
+      const mias = rows.filter((a) => samePhone(a.customer_phone, telefono));
+      if (!mias.length) return JSON.stringify({ error: 'sin_citas_futuras', nota: 'no hay ninguna cita futura con ese teléfono' });
+      const etiqueta = (a) => {
+        const tz = a.timezone || cal.timezone || 'Europe/Madrid';
+        const ms = Date.parse(a.starts_at);
+        return { fecha: localDateStr(tz, ms), hora: utcToLocalHHMM(tz, ms), ...(a.reason ? { motivo: a.reason } : {}) };
+      };
+      let cita = mias[0];
+      if (mias.length > 1) {
+        // Ambigüedad: la tool devuelve la lista y Vai pregunta cuál (guardrail).
+        const fechaHora = clean(input.fecha_hora, 16);
+        const elegida = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(fechaHora)
+          ? mias.find((a) => Date.parse(a.starts_at) === localToUtcMs(a.timezone || cal.timezone || 'Europe/Madrid', ...fechaHora.split('T')))
+          : null;
+        if (!elegida) return JSON.stringify({ error: 'varias_citas', citas: mias.slice(0, 5).map(etiqueta), nota: 'pregunta cuál y repite con fecha_hora' });
+        cita = elegida;
+      }
+      // El ancla del UPDATE es el tenant del CLOSURE (cal.tenant_id, el mismo que
+      // filtró el SELECT); tenant.id puede faltar en algún llamador antiguo.
+      const owner = tenant && tenant.id ? tenant : { ...tenant, id: cal.tenant_id };
+      if (name === 'confirmar_cita') {
+        const confirmada = await markAppointmentConfirmed(env, owner, cita);
+        if (confirmada) await settleAppointmentSideEffects(env, owner, cita, 'confirmada');
+        return JSON.stringify({ ok: true, confirmada: etiqueta(cita) });
+      }
+      const changed = await markAppointmentCancelled(env, owner, cita);
+      if (changed) await settleAppointmentSideEffects(env, owner, cita, 'cancelada');
+      return JSON.stringify({ ok: true, cancelada: etiqueta(cita), nota: 'ofrece reagendar: consulta huecos y agenda si el cliente quiere' });
+    }
     return JSON.stringify({ error: 'tool_desconocida' });
   };
 }
