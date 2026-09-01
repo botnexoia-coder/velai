@@ -547,13 +547,17 @@ export function useCalendarDisconnect() {
     onSettled: (_d, _e, { id }) => void client.invalidateQueries({ queryKey: ['tenant-calendar', id] }),
   });
 }
-/** Interruptor del addon Confirmaciones (PATCH /reminders): SOLO velai — el worker
- *  responde 403 al rol cliente. Recarga el calendario, que trae el bloque. */
+/** Config del addon Confirmaciones (PATCH /reminders): interruptor y/o antelación
+ *  (lista curada — cambiar la antelación NO exige nueva aprobación de la plantilla).
+ *  SOLO velai — el worker responde 403 al rol cliente. Recarga el calendario. */
 export function useRemindersPatch() {
   const client = useQueryClient();
   return useMutation({
-    mutationFn: ({ id, enabled }: { id: string; enabled: boolean }) =>
-      apiPatch<{ ok: true; enabled: boolean }>(`/api/admin/tenants/${id}/reminders`, { enabled }),
+    mutationFn: ({ id, enabled, hours }: { id: string; enabled?: boolean; hours?: number }) =>
+      apiPatch<{ ok: true; enabled?: boolean; hours?: number }>(`/api/admin/tenants/${id}/reminders`, {
+        ...(enabled === undefined ? {} : { enabled }),
+        ...(hours === undefined ? {} : { hours }),
+      }),
     onSettled: (_d, _e, { id }) => void client.invalidateQueries({ queryKey: ['tenant-calendar', id] }),
   });
 }
@@ -566,8 +570,10 @@ export function useRemindersPatch() {
 export function useTemplateCreate() {
   const client = useQueryClient();
   return useMutation({
-    mutationFn: ({ id, kind }: { id: string; kind: string }) =>
-      apiPost<{ ok: true; kind: string; sid: string; status: string }>(`/api/admin/tenants/${id}/provision/plantillas/${kind}`),
+    // opciones: {botones: <id de pareja curada>, antelacion: 12|24|48} — el worker las
+    // valida contra el catálogo; sin opciones aplica los defaults (retrocompatible).
+    mutationFn: ({ id, kind, opciones }: { id: string; kind: string; opciones?: { botones?: string; antelacion?: number } }) =>
+      apiPost<{ ok: true; kind: string; sid: string; status: string }>(`/api/admin/tenants/${id}/provision/plantillas/${kind}`, opciones ?? {}),
     onSettled: (_d, _e, { id }) => {
       void client.invalidateQueries({ queryKey: ['tenant-calendar', id] });
       // La matriz de la vista Plantillas enseña la misma celda: se recarga también.

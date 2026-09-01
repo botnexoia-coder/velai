@@ -187,6 +187,20 @@ body.dark .plchip.bad{color:var(--bad)}
 .plpill{display:inline-flex;align-items:center;gap:7px;border:1px solid var(--border2);background:var(--bg2);color:var(--white);border-radius:999px;padding:7px 14px;font-size:12.5px;cursor:pointer;font-family:inherit}
 .plpill b{font-family:var(--font-d);font-weight:900}
 .plpill.on{background:var(--orange);border-color:var(--orange);color:#fff}
+
+/* ── Diálogo de alta de plantilla (CrearPlantilla): bloques, tarjetas-radio de las
+   parejas de botones y vista previa estilo WhatsApp ── */
+.crp-bloque{margin-bottom:18px}
+.crp-bloque>b{display:block;font-size:13.5px;margin-bottom:2px}
+.crp-parejas{display:flex;flex-wrap:wrap;gap:10px;margin-top:8px}
+.crp-pareja{display:inline-flex;align-items:center;gap:8px;padding:10px 14px;border:1px solid var(--border2);border-radius:var(--r-sm);background:var(--bg3);cursor:pointer}
+.crp-pareja.on{border-color:var(--orange);box-shadow:0 0 0 1px var(--orange)}
+.crp-pareja input{accent-color:var(--orange)}
+/* preview de los dos botones dentro de la tarjeta-radio: mismas píldoras que el mensaje */
+.crp-btnprev,.wapre-btns span{display:inline-block;border-radius:999px;border:1px solid rgba(57,135,229,.35);color:var(--stt-new);background:rgba(57,135,229,.08);padding:5px 12px;font-size:12px;font-weight:500;white-space:nowrap}
+.wapre{max-width:420px;background:var(--bg3);border:1px solid var(--line);border-radius:var(--r-sm);padding:12px 14px}
+.wapre-body{font-size:13px;line-height:1.45;white-space:pre-wrap}
+.wapre-btns{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px;padding-top:10px;border-top:1px solid var(--line);justify-content:center}
 /* Saldo de IA (solo cliente) */
 .saldo{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;margin-top:6px}
 .saldo .n{font-family:var(--font-d);font-weight:900;font-size:30px;letter-spacing:-.02em}

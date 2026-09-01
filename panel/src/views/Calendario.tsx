@@ -10,6 +10,7 @@ import { HoursGrid } from '../components/HoursGrid';
 import { useToast } from '../components/Toasts';
 import { apptsByDay, calTzHm, calTzDay, dayKey, estadoConfirmacion, ledgerRecordatorio, monthRange, monthShape } from '../lib/calendario';
 import { gridFromHours, hoursFromGrid, copyMonday, gridVacio, type Grid } from '../lib/horario';
+import { CrearPlantilla } from '../components/CrearPlantilla';
 import {
   useAppointments,
   useCalendar,
@@ -17,8 +18,8 @@ import {
   useCalendarDisconnect,
   useCalendarPatch,
   useMe,
+  usePlantillas,
   useRemindersPatch,
-  useTemplateCreate,
   useTenants,
 } from '../hooks/queries';
 import type { Appointment, CalendarRow, Confirmaciones, WeekHours } from '../api/types';
@@ -352,7 +353,13 @@ function DayModal({ day, appts, tz, onClose }: { day: string; appts: Appointment
 function ConfirmacionesCard({ tenantId, conf, isCliente, sinCalendario = false }: { tenantId: string; conf: Confirmaciones | null; isCliente: boolean; sinCalendario?: boolean }) {
   const toast = useToast();
   const patch = useRemindersPatch();
-  const crear = useTemplateCreate();
+  // El catálogo (kinds + config del diálogo de alta) solo hace falta para Velai: el
+  // cliente ni crea plantillas ni edita la antelación. La query se cachea con la de
+  // la vista Plantillas.
+  const { data: catalogo } = usePlantillas(!isCliente);
+  const kindRecordatorio = catalogo?.kinds.find((k) => k.kind === 'recordatorio_cita') ?? null;
+  const nombreTenant = catalogo?.tenants.find((t) => t.id === tenantId)?.name ?? 'este cliente';
+  const [crearAbierto, setCrearAbierto] = useState(false);
   // Worker sin la migración 0030: el bloque no viaja y la card no se inventa nada.
   if (!conf) return null;
   const tpl = conf.template;
@@ -373,8 +380,8 @@ function ConfirmacionesCard({ tenantId, conf, isCliente, sinCalendario = false }
         </p>
       ) : null}
       <p className="muted mt6">
-        Recordatorio automático por WhatsApp <b>{conf.hours} h antes</b> de cada cita, con botones «Confirmo» y
-        «Cancelar». Si el cliente cancela, Vai le ofrece huecos y reagenda en la misma conversación.
+        Recordatorio automático por WhatsApp <b>{conf.hours} h antes</b> de cada cita, con botones para confirmar o
+        cancelar. Si el cliente cancela, Vai le ofrece huecos y reagenda en la misma conversación.
       </p>
       <div className="mt6">
         {/* .flag.ok es la clase real del sistema (.flag.on no existe y pintaba ámbar). */}
@@ -383,6 +390,35 @@ function ConfirmacionesCard({ tenantId, conf, isCliente, sinCalendario = false }
           <span className="muted">Este módulo lo activa el equipo de Velai: escríbenos si quieres cambiarlo.</span>
         ) : null}
       </div>
+      {/* La antelación es config del ADDON (no de la plantilla): editable sin nueva
+          aprobación de Meta. Las opciones curadas vienen del catálogo del worker. */}
+      {!isCliente && kindRecordatorio?.config?.antelaciones?.length ? (
+        <div className="mt6">
+          <span className="sel">
+            <select
+              value={conf.hours}
+              disabled={patch.isPending}
+              aria-label="Antelación del recordatorio"
+              onChange={(e) =>
+                patch.mutate(
+                  { id: tenantId, hours: Number(e.target.value) },
+                  {
+                    onSuccess: (d) => toast(`Antelación cambiada a ${d.hours} h ✓ (sin nueva aprobación)`),
+                    onError: (err) => toast(`No se pudo cambiar la antelación: ${traducir(err)}`, false),
+                  },
+                )
+              }
+            >
+              {kindRecordatorio.config.antelaciones.map((h) => (
+                <option key={h} value={h}>
+                  Recordar {h} h antes
+                </option>
+              ))}
+            </select>
+          </span>{' '}
+          <span className="muted">Se puede cambiar sin nueva aprobación de la plantilla.</span>
+        </div>
+      ) : null}
       <div className="mt6 muted">{tplEstado}</div>
       {!isCliente ? (
         <div className="actions actions0">
@@ -412,25 +448,17 @@ function ConfirmacionesCard({ tenantId, conf, isCliente, sinCalendario = false }
           >
             {conf.enabled ? 'Desactivar' : 'Activar Confirmaciones'}
           </button>
-          {!tpl.status ? (
-            <button
-              className="btn btnsm"
-              type="button"
-              disabled={crear.isPending}
-              onClick={() =>
-                crear.mutate(
-                  { id: tenantId, kind: 'recordatorio_cita' },
-                  {
-                    onSuccess: () => toast('Plantilla creada y enviada a aprobación de Meta ✓'),
-                    onError: (e) => toast(`No se pudo crear la plantilla: ${traducir(e)}`, false),
-                  },
-                )
-              }
-            >
+          {!tpl.status && kindRecordatorio ? (
+            // Abre el diálogo de alta configurable (antelación + botones + preview):
+            // el mismo que usa la vista Plantillas — un solo camino de creación.
+            <button className="btn btnsm" type="button" onClick={() => setCrearAbierto(true)}>
               Crear plantilla de recordatorios
             </button>
           ) : null}
         </div>
+      ) : null}
+      {crearAbierto && kindRecordatorio ? (
+        <CrearPlantilla tenantId={tenantId} tenantName={nombreTenant} kind={kindRecordatorio} onClose={() => setCrearAbierto(false)} />
       ) : null}
     </div>
   );

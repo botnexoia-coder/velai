@@ -716,6 +716,22 @@ export interface PlantillaCelda {
   status: string | null;
   updated_at: string | null;
 }
+/** Una pareja de botones CURADA del catálogo (nunca texto libre — decisión de Juan). */
+export interface ParejaBotones {
+  id: string;
+  confirmar: string;
+  cancelar: string;
+}
+/** La config del diálogo de alta de un kind creable: preview renderizada y las listas
+ *  curadas. Solo la traen los kinds con `content` (los legacy-columnas no se crean así). */
+export interface PlantillaConfig {
+  /** El cuerpo REAL de la plantilla con los valores de ejemplo ya sustituidos. */
+  preview: string | null;
+  antelaciones?: number[];
+  antelacionDefault?: number;
+  botones?: ParejaBotones[];
+  botonesDefault?: string;
+}
 /** Un kind del catálogo (worker/plantillas.js): TODO lo que la vista pinta viene de
  *  aquí — nada por kind se hardcodea en el panel. */
 export interface PlantillaKind {
@@ -725,6 +741,7 @@ export interface PlantillaKind {
   /** Categoría de Meta (Utility/Marketing…). Opcionales: un worker anterior no los manda. */
   categoria?: string;
   descripcion?: string;
+  config?: PlantillaConfig;
 }
 /** GET /api/admin/plantillas — clientes × kinds del catálogo (worker/plantillas.js). */
 export interface PlantillasResponse {

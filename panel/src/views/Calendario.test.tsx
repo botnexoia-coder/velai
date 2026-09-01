@@ -2,6 +2,7 @@
 // y la vista con conexión, rejilla y citas.
 import { QueryClientProvider } from '@tanstack/react-query';
 import { render, screen, waitFor } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createQueryClient } from '../api/queryClient';
@@ -256,20 +257,42 @@ describe('Confirmaciones (SPEC-CONFIRMACIONES)', () => {
     await waitFor(() => expect(screen.getByText(/✅/)).toBeInTheDocument());
   });
 
-  it('velai: interruptor del addon y botón de crear la plantilla cuando no existe', async () => {
+  it('velai: interruptor, antelación editable (PATCH curado) y el alta abre el diálogo configurable', async () => {
+    const user = userEvent.setup();
     const tid = tenants.tenants[0]!.id;
-    vi.stubGlobal(
-      'fetch',
-      mockFetch({
-        '/api/admin/me': meVelai,
-        '/api/admin/tenants': tenants,
-        [`/api/admin/tenants/${tid}/calendar`]: {
-          calendar: calRow,
-          confirmaciones: { enabled: false, hours: 24, template: { sid: null, status: null } },
+    // El catálogo alimenta el select de antelación y el diálogo de alta: viene del
+    // endpoint de Plantillas — nada hardcodeado por kind en el panel.
+    const catalogo = {
+      kinds: [{
+        kind: 'recordatorio_cita', label: 'Recordatorio de cita (Confirmaciones)', fuente: 'registro',
+        categoria: 'UTILITY', descripcion: 'Recuerda la cita.',
+        config: {
+          preview: 'Hola María, te escribimos de Clínica Ejemplo para recordarte tu cita.',
+          antelaciones: [12, 24, 48], antelacionDefault: 24,
+          botones: [{ id: 'confirmo_cancelar', confirmar: 'Confirmo', cancelar: 'Cancelar' }],
+          botonesDefault: 'confirmo_cancelar',
         },
-        '/api/admin/appointments': { appointments: [] },
-      }),
-    );
+      }],
+      tenants: [{ id: tid, slug: 'barberia-lopez', name: 'Barbería López', active: 1, plantillas: {} }],
+    };
+    const patches: unknown[] = [];
+    const base = mockFetch({
+      '/api/admin/me': meVelai,
+      '/api/admin/tenants': tenants,
+      '/api/admin/plantillas': catalogo,
+      [`/api/admin/tenants/${tid}/calendar`]: {
+        calendar: calRow,
+        confirmaciones: { enabled: false, hours: 24, template: { sid: null, status: null } },
+      },
+      '/api/admin/appointments': { appointments: [] },
+    });
+    vi.stubGlobal('fetch', (async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (init?.method === 'PATCH') {
+        patches.push(JSON.parse(String(init.body)));
+        return new Response(JSON.stringify({ ok: true, hours: 12 }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      }
+      return base(input as string, init);
+    }) as typeof fetch);
     render(
       <QueryClientProvider client={createQueryClient()}>
         <ToastProvider>
@@ -282,7 +305,14 @@ describe('Confirmaciones (SPEC-CONFIRMACIONES)', () => {
     await waitFor(() => expect(screen.getByText('Confirmaciones')).toBeInTheDocument());
     expect(screen.getByText('Desactivado')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Activar Confirmaciones' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Crear plantilla de recordatorios' })).toBeInTheDocument();
     expect(screen.getByText(/sin ella no puede salir ningún recordatorio/)).toBeInTheDocument();
+    // La antelación deja de ser texto fijo: select curado que hace PATCH (sin plantilla).
+    const sel = await screen.findByLabelText('Antelación del recordatorio');
+    await user.selectOptions(sel, '12');
+    await waitFor(() => expect(patches).toEqual([{ hours: 12 }]));
+    // «Crear plantilla» abre el diálogo configurable en vez de un confirmar a ciegas.
+    await user.click(screen.getByRole('button', { name: 'Crear plantilla de recordatorios' }));
+    expect(await screen.findByRole('button', { name: 'Enviar a aprobación' })).toBeInTheDocument();
+    expect(screen.getByText(/Hola María, te escribimos de Clínica Ejemplo/)).toBeInTheDocument();
   });
 });

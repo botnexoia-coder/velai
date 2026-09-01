@@ -15,6 +15,7 @@
 // plantilla se crea en el paso 2 del aprovisionamiento de la ficha del cliente.
 import { useState } from 'react';
 import { confirmar } from '../components/Confirmar';
+import { CrearPlantilla } from '../components/CrearPlantilla';
 import { traducir } from '../api/errors';
 import { useToast } from '../components/Toasts';
 import { IcoClock, IcoTick, IcoX } from '../components/icons';
@@ -139,6 +140,7 @@ function KindCard({
 function Chip({ c, kind }: { c: ChipCliente; kind: PlantillaKind }) {
   const toast = useToast();
   const crear = useTemplateCreate();
+  const [abierto, setAbierto] = useState(false);
   if (c.estado !== 'sin') {
     const p = CHIP[c.estado];
     return (
@@ -149,7 +151,9 @@ function Chip({ c, kind }: { c: ChipCliente; kind: PlantillaKind }) {
     );
   }
   // Sin crear: borde discontinuo. La legacy de columnas remite a su paso; las del
-  // registro llevan el botón «Crear» dentro del chip.
+  // registro llevan el botón «Crear» dentro del chip. Con config, «Crear» abre el
+  // diálogo de alta (antelación + botones + vista previa, envío explícito); un kind
+  // creable sin config (worker viejo) conserva el confirmar simple de antes.
   return (
     <span className="plchip sin">
       {c.name}
@@ -161,6 +165,10 @@ function Chip({ c, kind }: { c: ChipCliente; kind: PlantillaKind }) {
           type="button"
           disabled={crear.isPending}
           onClick={async () => {
+            if (kind.config) {
+              setAbierto(true);
+              return;
+            }
             if (
               !(await confirmar({
                 titulo: `¿Crear la plantilla «${kind.label}» para ${c.name}?`,
@@ -181,6 +189,7 @@ function Chip({ c, kind }: { c: ChipCliente; kind: PlantillaKind }) {
           Crear
         </button>
       )}
+      {abierto ? <CrearPlantilla tenantId={c.id} tenantName={c.name} kind={kind} onClose={() => setAbierto(false)} /> : null}
     </span>
   );
 }

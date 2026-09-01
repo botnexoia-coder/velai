@@ -20,7 +20,17 @@ const RESP: PlantillasResponse = {
       label: 'Recordatorio de cita (Confirmaciones)',
       fuente: 'registro',
       categoria: 'UTILITY',
-      descripcion: 'Recuerda la cita al cliente final 24 h antes.',
+      descripcion: 'Recuerda la cita al cliente final con antelación.',
+      config: {
+        preview: 'Hola María, te escribimos de Clínica Ejemplo para recordarte tu cita.',
+        antelaciones: [12, 24, 48],
+        antelacionDefault: 24,
+        botones: [
+          { id: 'confirmo_cancelar', confirmar: 'Confirmo', cancelar: 'Cancelar' },
+          { id: 'si_voy_no_puedo', confirmar: 'Sí, voy', cancelar: 'No puedo ir' },
+        ],
+        botonesDefault: 'confirmo_cancelar',
+      },
     },
     { kind: 'aviso_lead', label: 'Aviso de lead', fuente: 'columnas', categoria: 'UTILITY', descripcion: 'Avisa al equipo del negocio.' },
   ],
@@ -120,7 +130,7 @@ describe('vista Plantillas (rediseño por plantilla)', () => {
     await waitFor(() => expect(screen.getByText('Recordatorio de cita (Confirmaciones)')).toBeInTheDocument());
     expect(screen.getByText('Aviso de lead')).toBeInTheDocument();
     expect(screen.getAllByText('UTILITY').length).toBe(2);
-    expect(screen.getByText('Recuerda la cita al cliente final 24 h antes.')).toBeInTheDocument();
+    expect(screen.getByText('Recuerda la cita al cliente final con antelación.')).toBeInTheDocument();
     expect(screen.getByText('1 pendiente · 1 rechazada · 1 sin crear')).toBeInTheDocument();
     expect(screen.getByText('1 aprobada · 2 sin crear')).toBeInTheDocument();
     // Chips por estado con su clase de color.
@@ -177,5 +187,17 @@ describe('vista Plantillas (rediseño por plantilla)', () => {
     expect(botones[0]?.closest('.plchip')?.className).toContain('sin');
     // Las celdas sin crear de aviso_lead (columnas) NO llevan botón: remiten al paso 2.
     expect(screen.getAllByText('paso 2 del aprovisionamiento').length).toBe(2);
+  });
+
+  it('«Crear» abre el diálogo configurable (antelación + botones + preview), no un confirmar a ciegas', async () => {
+    const user = userEvent.setup();
+    renderVista();
+    await waitFor(() => expect(screen.getAllByRole('button', { name: 'Crear' }).length).toBe(1));
+    await user.click(screen.getByRole('button', { name: 'Crear' }));
+    // Los tres bloques del diálogo, con lo curado que viene del catálogo del endpoint.
+    expect(await screen.findByRole('button', { name: 'Enviar a aprobación' })).toBeInTheDocument();
+    expect(screen.getByLabelText('Antelación del recordatorio')).toBeInTheDocument();
+    expect(screen.getAllByRole('radio').length).toBe(2);
+    expect(screen.getByText(/Hola María, te escribimos de Clínica Ejemplo/)).toBeInTheDocument();
   });
 });
