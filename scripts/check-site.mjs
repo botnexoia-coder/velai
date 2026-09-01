@@ -2,10 +2,13 @@ import { readFile, readdir, stat, access } from 'node:fs/promises';
 import path from 'node:path';
 import vm from 'node:vm';
 
-const root = process.cwd();
-// Carpetas que NO son el sitio publicado: el panel v2 (app de Vite con su node_modules
-// y su dist), los worktrees de agentes bajo .claude/, y artefactos. Sin esto, el check
-// valida el index.html de Vite como si fuera una landing y falla por cosas que no aplican.
+// La raíz del sitio es site/ (PLAN-SITE.md): ahí vive todo lo que Pages publica.
+// Acepta otra raíz por argumento (p. ej. `node scripts/check-site.mjs .` para validar
+// la copia de la raíz del repo durante la convivencia).
+const root = path.resolve(process.argv[2] ?? 'site');
+// Cinturón por si dentro de la raíz aparecen carpetas que no son el sitio publicado
+// (node_modules, artefactos, worktrees de agentes bajo .claude/). Sin esto, el check
+// validaría un index.html de Vite como si fuera una landing y fallaría por cosas que no aplican.
 const EXCLUIR = new Set(['node_modules', 'panel', '.claude', '.git', '.wrangler', 'dist']);
 async function walk(dir) {
   const out = [];

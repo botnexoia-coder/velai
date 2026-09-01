@@ -394,8 +394,8 @@ test('un prospecto pending: no puede activarse y el webhook tiene rate limit por
 });
 
 test('el widget y el formulario envían el tenant en el payload', async () => {
-  const widget = await readFile(new URL('../assets/vai-widget.js', import.meta.url), 'utf8');
-  const form = await readFile(new URL('../assets/leadform.js', import.meta.url), 'utf8');
+  const widget = await readFile(new URL('../site/assets/vai-widget.js', import.meta.url), 'utf8');
+  const form = await readFile(new URL('../site/assets/leadform.js', import.meta.url), 'utf8');
   assert.match(widget, /payload\.tenant\s*=\s*window\.VELAI_TENANT/);
   assert.match(form, /payload\.tenant\s*=\s*window\.VELAI_TENANT/);
 });
@@ -1136,7 +1136,7 @@ test('usuarios B4.6: el 403 desconocido queda registrado y a la 3ª en una hora 
 
 // ── Widget de clientes: autosuficiencia (PR A) y marca por tenant (PR B) ──
 test('el widget es autosuficiente: Turnstile propio sin funnel.js y sitekey por defecto', async () => {
-  const widget = await readFile(new URL('../assets/vai-widget.js', import.meta.url), 'utf8');
+  const widget = await readFile(new URL('../site/assets/vai-widget.js', import.meta.url), 'utf8');
   // (a) sin VELAI_HUMAN, el widget carga y ejecuta Turnstile él mismo
   assert.match(widget, /challenges\.cloudflare\.com\/turnstile\/v0\/api\.js\?render=explicit/);
   assert.match(widget, /SITEKEY_FALLBACK = '0x4AAAAAAESkAwvlDVJD9Z1l'/);
@@ -1147,7 +1147,7 @@ test('el widget es autosuficiente: Turnstile propio sin funnel.js y sitekey por 
 });
 
 test('el widget pinta la marca del tenant desde /widget/boot, no la de Velai', async () => {
-  const widget = await readFile(new URL('../assets/vai-widget.js', import.meta.url), 'utf8');
+  const widget = await readFile(new URL('../site/assets/vai-widget.js', import.meta.url), 'utf8');
   assert.match(widget, /\/widget\/boot/);
   // colores por variables CSS aplicadas por CSSOM, nunca style="" (lección de la CSP del panel)
   assert.match(widget, /setProperty\('--vai-c1'/);
@@ -4137,7 +4137,7 @@ test('el widget viejo no rompe: sin la bandera live, el worker no cede el turno'
   assert.match(src, /const live = body\.live === true && !conv\.demo;/);
   assert.match(src, /const hayAsesor = live && await advisorAvailable/);
   // Y el widget nuevo la manda.
-  const w = await readFile(new URL('../assets/vai-widget.js', import.meta.url), 'utf8');
+  const w = await readFile(new URL('../site/assets/vai-widget.js', import.meta.url), 'utf8');
   assert.match(w, /payload\.live = true;/);
   assert.match(w, /v9/, 'la versión sube: /*.js va con caché inmutable de un año');
 });
@@ -4359,7 +4359,7 @@ test('el widget pinta TODO lo nuevo del sondeo, no solo lo de una persona', asyn
   // las había pintado quien las pidió — cierto para las síncronas, FALSO para las que manda
   // el servidor solo: los avisos de cola son 'assistant'. El cursor lastId es lo que evita
   // duplicados, no el rol.
-  const w = await readFile(new URL('../assets/vai-widget.js', import.meta.url), 'utf8');
+  const w = await readFile(new URL('../site/assets/vai-widget.js', import.meta.url), 'utf8');
   const codigo = w.replace(/\/\/[^\n]*/g, '').replace(/\/\*[\s\S]*?\*\//g, '');
   assert.ok(!/m\.role !== 'agent'\) continue/.test(codigo), 'ya no se descarta lo del bot');
   assert.match(codigo, /var kind = m\.role === 'agent' \? 'agent' : 'bot';/);
@@ -4439,7 +4439,7 @@ test('el aviso se guarda ANTES de cambiar el estado: si no, el widget deja de es
   const rel = convSrc.slice(convSrc.indexOf('MISMO orden que en la cola'));
   assert.ok(rel.indexOf('convAppend') < rel.indexOf("state='bot'"), 'igual al devolver el control');
   // Red de seguridad en el widget: un último sondeo al volver a bot.
-  const w = await readFile(new URL('../assets/vai-widget.js', import.meta.url), 'utf8');
+  const w = await readFile(new URL('../site/assets/vai-widget.js', import.meta.url), 'utf8');
   assert.match(w, /setTimeout\(pollOnce, 2500\)/);
 });
 
