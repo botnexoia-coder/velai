@@ -228,6 +228,35 @@ en tres horizontes: [`PLAN-PANEL.md`](./PLAN-PANEL.md) es el mapa y las decision
 
 ---
 
+## 🔵 Confirmaciones de cita (implementado 2026-09-01 — pasos de activación)
+
+El código está en `main` (ver IMPLEMENTADO.md §Confirmaciones); nada sale hasta
+completar esto, EN ESTE ORDEN:
+
+- [ ] **Aplicar la migración**: `npx wrangler d1 migrations apply vai-leads --remote`
+      (la `0030_confirmaciones.sql` está solo como fichero) y desplegar el worker
+      DESPUÉS de migrar.
+- [ ] **Crear la plantilla de recordatorios** del tenant de prueba: panel →
+      Calendario → card «Confirmaciones» → «Crear plantilla de recordatorios»
+      (necesita subcuenta de Twilio con token). El cron avisa por Telegram cuando
+      Meta la apruebe.
+- [ ] **Activar el addon** al tenant de prueba (misma card, botón «Activar
+      Confirmaciones») cuando la plantilla esté aprobada.
+- [ ] **Prueba real**: agendar una cita con Vai a >24 h vista, esperar el
+      recordatorio y pulsar los dos botones (Confirmo y Cancelar → reagendado).
+- [ ] **Decisión de precio**: ¿incluido en el plan Profesional o addon con precio
+      propio? (referencia de mercado: 12–31 USD/mes por volumen de citas; cada
+      recordatorio es una conversación Utility de Meta — verificar tarifa ES/CO).
+
+Futuras (de la spec, no implementadas): **F3** autoagenda pública por enlace
+(`/reserva/<slug>` con availableSlots — decidir si aporta o dispersa: el chat ya
+agenda) y **F4** métricas de confirmación/cancelación/no-show en dashboard e informe
+semanal (el no-show exige marcarlo a mano en el panel). Técnica pendiente: unificar
+la plantilla de LEADS (columnas `lead_template_*` de tenants) en `tenant_templates`,
+migrando datos y lectores a la vez.
+
+---
+
 ## 🟢 Decisiones de negocio pendientes
 
 - [ ] **Colombia**: cuándo replicar el funnel (precios USD/COP, copy localizado). Hoy todo está en España (€).

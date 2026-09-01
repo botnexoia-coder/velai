@@ -12,6 +12,40 @@
 
 ---
 
+## Confirmaciones — recordatorio y confirmación de citas por WhatsApp (2026-09-01)
+
+SPEC-CONFIRMACIONES F1+F2 implementadas juntas (decisión de Juan). Addon que VELAI
+habilita por cliente (interruptor solo-Velai; el cliente lo ve), antelación única de
+24 h, nombre «Confirmaciones» dentro de la vista Calendario.
+
+- **F1**: migración `0030` (ledger `appointment_reminders` con el molde de
+  lead_notifications; `appointments.customer_confirmed_at/cancelled_by`;
+  `tenants.reminders_enabled/reminder_hours`). Cron de 5 min: siembra y envía por la
+  subcuenta del tenant, sin modelo; cita creada ya dentro de la ventana → `skipped`
+  (no se recuerda lo recién agendado); reintentos con backoff. Plantilla Utility con
+  botones quick-reply «Confirmo»/«Cancelar» (payloads `conf:<id>`/`canc:<id>`); el
+  webhook los resuelve por un camino DETERMINISTA con triple validación (cita existe
+  + del tenant enrutado por To + From = teléfono de la cita — validado por mutación).
+  Cancelar borra el evento de Google (`deleteGoogleEvent`) y todo avisa al negocio
+  por su Telegram.
+- **F2**: tools `cancelar_cita`/`confirmar_cita` en el bucle de calendario, mismo
+  contrato hostil que `agendar_cita` (cita SOLO por teléfono del remitente + tenant
+  del closure, jamás por id del modelo; ambigüedad → lista y Vai pregunta). Tras
+  cancelar, Vai reagenda con `consultar_disponibilidad` + `agendar_cita`.
+- **Registro genérico de plantillas** (decisión de Juan del mismo día): tabla
+  `tenant_templates` (tenant_id, kind) + catálogo EN CÓDIGO en `worker/plantillas.js`
+  (una plantilla es un contrato con el código que la envía). Aprovisionamiento
+  genérico `POST /provision/plantillas/<kind>` y `pollTemplateApprovals` vigila la
+  aprobación por kind. La plantilla de LEADS sigue en sus columnas históricas.
+- **Panel v2.1.0**: card «Confirmaciones» en Calendario (addon + plantilla +
+  antelación), chips por cita (❌ cancelada por el cliente > ✅ confirmada > ⏳
+  recordada) y ledger del recordatorio en el modal del día.
+
+Pendiente del dueño en TAREAS-PENDIENTES.md (aplicar la 0030, crear/aprobar la
+plantilla y activar el addon a un tenant de prueba). Fases 3 (autoagenda pública) y 4
+(métricas de no-show) quedaron ahí como futuras, con la unificación de la plantilla
+de leads en tenant_templates.
+
 ## Marketing consolidado en site/ — la raíz del repo queda limpia (2026-09-01)
 
 Pedido de Juan («no quiero ver más carpetas y carpetas de HTML»). Ejecutado el plan de
