@@ -117,6 +117,7 @@ function CalendarBody({ tenantId, isCliente }: { tenantId: string; isCliente: bo
   if (!data) return null;
   if (!connected) {
     return (
+      <>
       <div className="card">
         <b>Conectar Google Calendar</b>
         <p className="muted mt6">
@@ -147,6 +148,10 @@ function CalendarBody({ tenantId, isCliente }: { tenantId: string; isCliente: bo
           </button>
         </div>
       </div>
+      {/* La card del addon se ve TAMBIÉN sin calendario: se puede activar y crear su
+          plantilla antes de conectar — solo los envíos dependen de que haya citas. */}
+      <ConfirmacionesCard tenantId={tenantId} conf={data.confirmaciones ?? null} isCliente={isCliente} sinCalendario />
+      </>
     );
   }
   return (
@@ -344,7 +349,7 @@ function DayModal({ day, appts, tz, onClose }: { day: string; appts: Appointment
 // cliente VE el estado en texto. La plantilla se crea con el paso genérico de
 // aprovisionamiento (plantillas/recordatorio_cita) y la aprueba Meta — el cron del
 // worker vigila la aprobación y este bloque solo pinta el estado.
-function ConfirmacionesCard({ tenantId, conf, isCliente }: { tenantId: string; conf: Confirmaciones | null; isCliente: boolean }) {
+function ConfirmacionesCard({ tenantId, conf, isCliente, sinCalendario = false }: { tenantId: string; conf: Confirmaciones | null; isCliente: boolean; sinCalendario?: boolean }) {
   const toast = useToast();
   const patch = useRemindersPatch();
   const crear = useTemplateCreate();
@@ -361,6 +366,12 @@ function ConfirmacionesCard({ tenantId, conf, isCliente }: { tenantId: string; c
   return (
     <div className="card mt12">
       <b>Confirmaciones</b>
+      {sinCalendario ? (
+        <p className="muted mt6">
+          Los recordatorios salen de las citas del calendario: hasta que Google esté conectado, el addon queda listo
+          pero sin nada que recordar.
+        </p>
+      ) : null}
       <p className="muted mt6">
         Recordatorio automático por WhatsApp <b>{conf.hours} h antes</b> de cada cita, con botones «Confirmo» y
         «Cancelar». Si el cliente cancela, Vai le ofrece huecos y reagenda en la misma conversación.

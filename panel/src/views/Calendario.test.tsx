@@ -111,6 +111,34 @@ describe('vista Calendario', () => {
     expect(screen.getByRole('button', { name: 'Conectar Google' })).toBeInTheDocument();
   });
 
+  it('la card de Confirmaciones se ve TAMBIÉN sin calendario conectado (el addon no puede ser invisible)', async () => {
+    // Regresión del 2026-09-01: el return temprano de «conectar Google» se comía la card
+    // y en staging (donde Google no se puede conectar) el addon entero era invisible.
+    vi.stubGlobal(
+      'fetch',
+      mockFetch({
+        '/api/admin/me': meCliente,
+        [`/api/admin/tenants/${meCliente.tenantId}/calendar`]: {
+          calendar: null,
+          confirmaciones: { enabled: false, hours: [24], template: { sid: null, status: null } },
+        },
+      }),
+    );
+    render(
+      <QueryClientProvider client={createQueryClient()}>
+        <ToastProvider>
+          <MemoryRouter>
+            <Calendario />
+          </MemoryRouter>
+        </ToastProvider>
+      </QueryClientProvider>,
+    );
+    await waitFor(() => expect(screen.getByText('Confirmaciones')).toBeInTheDocument());
+    expect(screen.getByText(/sin nada que recordar/)).toBeInTheDocument();
+    // y la de conectar sigue ahí: conviven
+    expect(screen.getByText('Conectar Google Calendar')).toBeInTheDocument();
+  });
+
   it('conectado: quién, la rejilla del mes y la configuración de citas', async () => {
     const hoy = new Date();
     const cita: Appointment = {
