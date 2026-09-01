@@ -145,8 +145,13 @@ function analizar(archivo, rutas, texto, lineaBase) {
     // puerta que llega tarde no protege nada.
     const hastaLinea = texto.indexOf('\n', m.index);
     const conLinea = texto.slice(0, hastaLinea < 0 ? texto.length : hastaLinea);
-    const puerta = PUERTAS.some((p) => conLinea.includes(p))
-      || DESDE_EL_SCOPE.some((p) => conLinea.includes(p))
+    // Las puertas de CÓDIGO se buscan con los comentarios FUERA: un comentario que cite
+    // el patrón en prosa («aquí va .bind(scope.tenantId…») satisfacía al guardián — lo
+    // encontró la mutación de la vista de cliente (2026-09-01). El único patrón legítimo
+    // EN comentario es el escape «scope-ok:», que se busca sobre el texto crudo.
+    const soloCodigo = conLinea.replace(/\/\/[^\n]*/g, '');
+    const puerta = PUERTAS.some((p) => (p === '// scope-ok:' || p === 'scope-ok:' ? conLinea : soloCodigo).includes(p))
+      || DESDE_EL_SCOPE.some((p) => soloCodigo.includes(p))
       || vetadoACliente
       || (soloHijas ? yaFiltrado : puertaConCierre);
     if (puerta) { conPuerta++; continue; }
