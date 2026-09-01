@@ -43,8 +43,8 @@ import { clienteAllowed } from '../worker/middleware.js';
 
 const DIRECTAS = ['leads', 'conversations', 'conv_daily', 'appointments', 'agent_presence',
   'ai_usage', 'tenant_channels', 'tenant_calendars', 'tenant_reports', 'tenant_versions',
-  'tenant_users', 'tenants', 'settings'];
-const HIJAS = ['conv_messages', 'lead_notes', 'lead_events', 'lead_notifications'];
+  'tenant_users', 'tenants', 'settings', 'tenant_templates'];
+const HIJAS = ['conv_messages', 'lead_notes', 'lead_events', 'lead_notifications', 'appointment_reminders'];
 // Interpolaciones que SON el filtro de tenant (scopeClause y sus dos variantes locales).
 const CLAUSULAS = ['sc.sql', 'scc.sql', 'leadW', "tenant_id = ?", 'tenant_id=?'];
 const PUERTAS = ['assertOwnTenant(', 'canAttend(', 'scope-ok:'];

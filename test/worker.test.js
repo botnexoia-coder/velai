@@ -5269,3 +5269,41 @@ test('cancelar_cita en el chat web: sin teléfono pide el teléfono; con uno aje
   const ok = JSON.parse(await exec('cancelar_cita', { telefono: '+34612345678' }));
   assert.equal(ok.ok, true);
 });
+
+// ── Confirmaciones en el panel: bloque del GET del calendario + interruptor solo-Velai ──
+
+test('GET calendar lleva el bloque de confirmaciones y el PATCH del addon es solo-Velai', async () => {
+  const TID = '00000000-0000-4000-8000-0000000000c1';
+  const OWN = { role: 'cliente', tenantId: TID, email: 'cliente@x.com' };
+  const updates = [];
+  const db = { prepare: (sql) => ({ bind: (...args) => ({
+    first: async () => {
+      if (/FROM tenants WHERE id=\?/.test(sql)) {
+        return { id: TID, slug: 'mio', name: 'Mi Negocio', channel_address: 'web:mio', reminders_enabled: 1, reminder_hours: '24' };
+      }
+      if (/FROM tenant_templates/.test(sql)) return { sid: 'HX' + 'a'.repeat(32), status: 'pending' };
+      return null;
+    },
+    all: async () => ({ results: [] }),
+    run: async () => { if (/UPDATE tenants SET reminders_enabled/.test(sql)) updates.push(args); return { meta: { changes: 1 } }; },
+  }) }), batch: async () => [] };
+  const env = { DB: db, KV: mapKV() };
+  const ctx = { waitUntil() {} };
+  const calPath = `/api/admin/tenants/${TID}/calendar`;
+  const got = await (await testing.adminRouter(adminReq(calPath), env, ctx, calPath, new URL('https://x' + calPath), {}, OWN)).json();
+  assert.deepEqual(got.confirmaciones, {
+    enabled: true, hours: 24, template: { sid: 'HX' + 'a'.repeat(32), status: 'pending' },
+  }, 'el cliente VE el estado del addon y de la plantilla');
+
+  // El interruptor: Velai sí; el cliente recibe 403 ANTES de tocar datos (clienteGate).
+  const remPath = `/api/admin/tenants/${TID}/reminders`;
+  const patch = (scope, body) => testing.adminRouter(
+    adminReq(remPath, { method: 'PATCH', body: JSON.stringify(body), headers: { 'content-type': 'application/json' } }),
+    env, ctx, remPath, new URL('https://x' + remPath), {}, scope);
+  const ok = await (await patch(VELAI, { enabled: false })).json();
+  assert.deepEqual(ok, { ok: true, enabled: false });
+  assert.equal(updates.length, 1);
+  assert.equal(updates[0][0], 0);
+  await assert.rejects(patch(OWN, { enabled: true }), (e) => e.status === 403, 'el addon lo habilita Velai');
+  await assert.rejects(patch(VELAI, { enabled: 'si' }), (e) => e.code === 'invalid_enabled');
+});

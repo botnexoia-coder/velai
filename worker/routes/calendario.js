@@ -6,7 +6,7 @@ import { Hono } from 'hono';
 import { partesAdmin, scopeClause, assertOwnTenant, adminOrigin } from '../middleware.js';
 import { googleAuthUrl, revokeGoogleToken } from '../calendar.js';
 import { decryptSecret } from '../crypto.js';
-import { HttpError, json, NO_STORE, clean, readJson, UUID_RE } from '../app.js';
+import { HttpError, json, NO_STORE, clean, readJson, UUID_RE, reminderHoursFor, tenantTemplate, invalidateTenantCache } from '../app.js';
 
 export const calendario = new Hono();
 
@@ -25,7 +25,10 @@ calendario.get('/api/admin/appointments', async (c) => {
   if (toIso) { clauses.push('l.starts_at < ?'); values.push(toIso); }
   const hasRange = Boolean(fromIso || toIso);
   const limit = Math.min(hasRange ? 500 : 100, Math.max(1, Number(url.searchParams.get('limit')) || (hasRange ? 500 : 50)));
-  const rows = (await env.DB.prepare(`SELECT l.id,l.tenant_id,t.name AS tenant_name,l.channel,l.customer_name,l.customer_phone,l.reason,l.starts_at,l.ends_at,l.timezone,l.status,l.created_at FROM appointments l LEFT JOIN tenants t ON t.id=l.tenant_id WHERE ${clauses.join(' AND ')}${sc.sql} ORDER BY l.starts_at ${hasRange ? 'ASC' : 'DESC'} LIMIT ?`)
+  // Confirmaciones (0030): qué hizo el cliente con su cita + el ledger del recordatorio
+  // (para los chips y el detalle del día). appointment_reminders es tabla hija: entra por
+  // el JOIN de esta MISMA consulta ya filtrada por scopeClause.
+  const rows = (await env.DB.prepare(`SELECT l.id,l.tenant_id,t.name AS tenant_name,l.channel,l.customer_name,l.customer_phone,l.reason,l.starts_at,l.ends_at,l.timezone,l.status,l.created_at,l.customer_confirmed_at,l.cancelled_by,r.status AS reminder_status,r.sent_at AS reminder_sent_at,r.attempts AS reminder_attempts,r.last_error AS reminder_error FROM appointments l LEFT JOIN tenants t ON t.id=l.tenant_id LEFT JOIN appointment_reminders r ON r.appointment_id=l.id AND r.kind='previo_24h' WHERE ${clauses.join(' AND ')}${sc.sql} ORDER BY l.starts_at ${hasRange ? 'ASC' : 'DESC'} LIMIT ?`)
     .bind(...values, ...sc.args, limit).all()).results;
   if (scope.role !== 'velai') for (const row of rows) { delete row.tenant_name; delete row.tenant_id; }
   return json({ appointments: rows }, 200, NO_STORE);
@@ -56,7 +59,20 @@ const grupoCalendar = async (c) => {
     // Columnas explícitas, NUNCA SELECT * : refresh_token_enc no sale del worker.
     let row = null;
     try { row = await env.DB.prepare('SELECT provider,account_email,calendar_id,timezone,slot_minutes,business_hours,status,last_error,connected_at,updated_at FROM tenant_calendars WHERE tenant_id=?').bind(tenantId).first(); } catch (_) {}
-    return json({ calendar: row || null }, 200, NO_STORE);
+    // Bloque de Confirmaciones (SPEC-CONFIRMACIONES): el cliente VE el estado del addon
+    // (lo habilita Velai) y de su plantilla. Consultas en try/catch: un deploy antes de
+    // aplicar la migración 0030 sirve el calendario igual, con el bloque en su default.
+    let conf = null;
+    try { conf = await env.DB.prepare('SELECT reminders_enabled, reminder_hours FROM tenants WHERE id=?').bind(tenantId).first(); } catch (_) {}
+    const template = await tenantTemplate(env, tenantId, 'recordatorio_cita');
+    return json({
+      calendar: row || null,
+      confirmaciones: {
+        enabled: Boolean(conf && conf.reminders_enabled),
+        hours: reminderHoursFor(conf || {}),
+        template: { sid: (template && template.sid) || null, status: (template && template.status) || null },
+      },
+    }, 200, NO_STORE);
   }
   if (!sub && request.method === 'PATCH') {
     const body = await readJson(request, 4000);
@@ -125,3 +141,32 @@ const grupoCalendar = async (c) => {
 };
 calendario.all('/api/admin/tenants/:id/calendar', grupoCalendar);
 calendario.all('/api/admin/tenants/:id/calendar/:sub{connect}', grupoCalendar);
+
+// ── Confirmaciones: interruptor del addon, SOLO Velai (SPEC-CONFIRMACIONES) ───
+// clienteAllowed no abre esta ruta (clienteGate responde 403 antes de tocar datos) y
+// el handler la veta ADEMÁS en código: es un addon que habilita Velai — el cliente
+// solo lo VE, en el bloque `confirmaciones` del GET del calendario. La plantilla se
+// crea con el paso genérico /provision/plantillas/recordatorio_cita (routes/tenants.js).
+const grupoReminders = async (c) => {
+  const { request, env, ctx, scope, actor } = partesAdmin(c);
+  if (scope.role !== 'velai') throw new HttpError(403, 'not_authorized');
+  const tenantId = c.req.param('id');
+  if (!UUID_RE.test(tenantId)) throw new HttpError(404, 'not_found');
+  if (request.method !== 'PATCH') throw new HttpError(405, 'method_not_allowed');
+  const body = await readJson(request, 2000);
+  if (typeof body.enabled !== 'boolean') throw new HttpError(400, 'invalid_enabled');
+  const previous = await env.DB.prepare('SELECT id, slug, name, channel_address, reminders_enabled FROM tenants WHERE id=?').bind(tenantId).first();
+  if (!previous) throw new HttpError(404, 'not_found');
+  const enabled = body.enabled ? 1 : 0;
+  const now = new Date().toISOString();
+  await env.DB.prepare('UPDATE tenants SET reminders_enabled=?, updated_at=? WHERE id=?').bind(enabled, now, tenantId).run();
+  // La fila del tenant vive cacheada en KV (30 min): sin invalidar, los canales
+  // seguirían viendo el valor viejo hasta que caducara.
+  await invalidateTenantCache(env, [previous]);
+  ctx.waitUntil(env.DB.prepare('INSERT INTO tenant_versions (tenant_id,actor_email,field,previous_value,note,created_at) VALUES (?,?,?,?,?,?)')
+    .bind(tenantId, actor, 'config', JSON.stringify({ reminders_enabled: previous.reminders_enabled }),
+      enabled ? 'confirmaciones: addon activado' : 'confirmaciones: addon desactivado', now).run().catch(() => {}));
+  console.log(JSON.stringify({ level: 'info', code: 'reminders_toggled', tenant: previous.slug, enabled: Boolean(enabled) }));
+  return json({ ok: true, enabled: Boolean(enabled) }, 200, NO_STORE);
+};
+calendario.all('/api/admin/tenants/:id/reminders', grupoReminders);
