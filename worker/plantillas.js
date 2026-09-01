@@ -19,15 +19,36 @@
 // y su cuerpo en twilio.js (createLeadTemplate) — unificarla en tenant_templates exige
 // migrar datos y lectores a la vez y sigue siendo un paso aparte.
 
+// Parejas de botones CURADAS del recordatorio (decisión de Juan, 2026-09-01: NUNCA
+// texto libre hacia Twilio — un catálogo cerrado no puede colar inyección ni pasarse
+// del límite de 25 caracteres por botón de WhatsApp). El TEXTO es lo único que varía:
+// los payloads conf:/canc: son contrato con handleReminderButton y no cambian jamás.
+// Cambiar los botones de una plantilla YA creada exige plantilla nueva + otra revisión
+// de Meta (por eso el panel lo advierte); la antelación NO — esa es config del addon.
+const PAREJAS_RECORDATORIO = [
+  { id: 'confirmo_cancelar', confirmar: 'Confirmo', cancelar: 'Cancelar' },
+  { id: 'si_voy_no_puedo', confirmar: 'Sí, voy', cancelar: 'No puedo ir' },
+  { id: 'confirmar_cita_cancelar', confirmar: 'Confirmar cita', cancelar: 'Cancelar cita' },
+  { id: 'asistire_no_asistire', confirmar: 'Asistiré', cancelar: 'No asistiré' },
+];
+
 export const TEMPLATE_CATALOG = {
   recordatorio_cita: {
     kind: 'recordatorio_cita',
     nombre: 'Recordatorio de cita (Confirmaciones)',
     // Descripción PARA PERSONAS (la pinta la vista Plantillas del panel): qué hace y
     // quién la envía, sin jerga de columnas ni de crons internos.
-    descripcion: 'Recuerda la cita al cliente final 24 h antes, con botones «Confirmo» y «Cancelar».',
+    descripcion: 'Recuerda la cita al cliente final con antelación, con botones para confirmar o cancelar.',
     fuente: 'registro', // estado en tenant_templates; se crea con el POST genérico plantillas/<kind>
     categoria: 'UTILITY', // mensaje iniciado por el negocio: SIEMPRE plantilla aprobada (63016)
+    // Antelación CURADA (12/24/48, default 24). Es config del ADDON, no de la
+    // plantilla: vive en tenants.reminder_hours y se cambia después sin nueva
+    // aprobación — por eso el CUERPO de abajo es NEUTRO respecto al tiempo (nada de
+    // «mañana»: la fecha y la hora van en variables).
+    antelaciones: [12, 24, 48],
+    antelacionDefault: 24,
+    botones: PAREJAS_RECORDATORIO,
+    botonesDefault: 'confirmo_cancelar',
     // Nombre con el que se somete a aprobación en Meta (exige minúsculas/0-9/_).
     approvalName: (slug) => `recordatorio_cita_${slug}`.toLowerCase().replace(/[^a-z0-9_]/g, '_'),
     // CONTRATO de variables: 1 nombre, 2 negocio, 3 fecha local, 4 hora local, 5 motivo,
@@ -36,25 +57,29 @@ export const TEMPLATE_CATALOG = {
     // los parsea handleReminderButton en el webhook de Twilio. Si cambias algo aquí,
     // cambia allí EN EL MISMO COMMIT.
     // Quién la envía: processReminders (cron de 5 min, worker/app.js) — sin modelo.
-    content: (slug, businessName) => ({
-      friendly_name: `recordatorio_cita_${slug}`.replace(/[^a-z0-9_]/g, '_'),
-      language: 'es',
-      variables: {
-        1: 'María', 2: businessName || 'el negocio', 3: 'jueves, 4 de septiembre',
-        4: '10:00', 5: 'consulta', 6: '00000000-0000-4000-8000-000000000000',
-      },
-      types: {
-        // quick-reply: los botones de respuesta rápida de WhatsApp. La respuesta del
-        // cliente abre su ventana de 24 h — las contestaciones no necesitan plantilla.
-        'twilio/quick-reply': {
-          body: 'Hola {{1}}, te escribimos de {{2}} para recordarte tu cita del {{3}} a las {{4}} ({{5}}). ¿Podrás venir?',
-          actions: [
-            { title: 'Confirmo', id: 'conf:{{6}}' },
-            { title: 'Cancelar', id: 'canc:{{6}}' },
-          ],
+    // `pareja` llega YA validada contra PAREJAS_RECORDATORIO (templateOptions).
+    content: (slug, businessName, pareja = null) => {
+      const textos = pareja || PAREJAS_RECORDATORIO[0];
+      return {
+        friendly_name: `recordatorio_cita_${slug}`.replace(/[^a-z0-9_]/g, '_'),
+        language: 'es',
+        variables: {
+          1: 'María', 2: businessName || 'el negocio', 3: 'jueves, 4 de septiembre',
+          4: '10:00', 5: 'consulta', 6: '00000000-0000-4000-8000-000000000000',
         },
-      },
-    }),
+        types: {
+          // quick-reply: los botones de respuesta rápida de WhatsApp. La respuesta del
+          // cliente abre su ventana de 24 h — las contestaciones no necesitan plantilla.
+          'twilio/quick-reply': {
+            body: 'Hola {{1}}, te escribimos de {{2}} para recordarte tu cita del {{3}} a las {{4}} ({{5}}). ¿Podrás venir?',
+            actions: [
+              { title: textos.confirmar, id: 'conf:{{6}}' },
+              { title: textos.cancelar, id: 'canc:{{6}}' },
+            ],
+          },
+        },
+      };
+    },
   },
   // LEGACY-COLUMNAS: entrada solo descriptiva — SIN `content`, así el paso genérico de
   // aprovisionamiento la rechaza (template_kind_not_creatable). Se crea en el paso 2
@@ -79,12 +104,54 @@ export function templateKind(kind) {
     ? TEMPLATE_CATALOG[kind] : null;
 }
 
+// Valida las OPCIONES del diálogo de alta contra el catálogo. La pareja se busca por
+// id en la lista curada (un id hostil — 'constructor', texto arbitrario — simplemente
+// no está: array find, sin lookup por clave) y la antelación contra la lista curada.
+// Sin body u opción ausente → los defaults del catálogo: el alta sin opciones (flujo
+// anterior y llamadores viejos) sigue valiendo tal cual.
+// Devuelve { error } si algo no casa: el llamante responde 400 SIN tocar Twilio.
+export function templateOptions(def, body = {}) {
+  const raw = body && typeof body === 'object' && !Array.isArray(body) ? body : {};
+  let pareja = null;
+  if (raw.botones !== undefined) {
+    pareja = typeof raw.botones === 'string' ? (def.botones || []).find((b) => b.id === raw.botones) || null : null;
+    if (!pareja) return { error: 'invalid_botones' };
+  } else if (def.botonesDefault) {
+    pareja = (def.botones || []).find((b) => b.id === def.botonesDefault) || null;
+  }
+  let antelacion = def.antelacionDefault ?? null;
+  if (raw.antelacion !== undefined) {
+    const n = Number(raw.antelacion);
+    if (!(def.antelaciones || []).includes(n)) return { error: 'invalid_antelacion' };
+    antelacion = n;
+  }
+  return { pareja, antelacion };
+}
+
+// Vista previa REAL del mensaje: el cuerpo de la plantilla con sus valores de ejemplo
+// sustituidos. UNA sola fuente de verdad (este catálogo): el panel pinta lo que llega,
+// sin duplicar ni un literal del cuerpo.
+function renderPreview(def) {
+  if (typeof def.content !== 'function') return null;
+  const c = def.content('ejemplo', 'Clínica Ejemplo');
+  const tipo = c.types['twilio/quick-reply'] || c.types['twilio/text'];
+  if (!tipo || !tipo.body) return null;
+  return tipo.body.replace(/\{\{(\d+)\}\}/g, (_, n) => String((c.variables && c.variables[n]) ?? ''));
+}
+
 // La lista del catálogo para la vista «Plantillas» del panel: solo lo descriptivo
-// (los cuerpos y sample values no viajan — son contrato del worker, no dato de UI).
-// categoria y descripcion viajan para que el panel no tenga NADA hardcodeado por kind:
-// la tarjeta del kind nº 3 se pinta sola con lo que declare su entrada del catálogo.
+// (los cuerpos crudos y sample values no viajan — son contrato del worker; la preview
+// ya va renderizada). categoria/descripcion/config viajan para que el panel no tenga
+// NADA hardcodeado por kind: el diálogo de alta se monta con lo que declare el catálogo.
 export function catalogKinds() {
   return Object.values(TEMPLATE_CATALOG).map((d) => ({
     kind: d.kind, label: d.nombre, fuente: d.fuente, categoria: d.categoria, descripcion: d.descripcion || '',
+    ...(typeof d.content === 'function' ? {
+      config: {
+        preview: renderPreview(d),
+        ...(d.antelaciones ? { antelaciones: d.antelaciones, antelacionDefault: d.antelacionDefault } : {}),
+        ...(d.botones ? { botones: d.botones, botonesDefault: d.botonesDefault } : {}),
+      },
+    } : {}),
   }));
 }

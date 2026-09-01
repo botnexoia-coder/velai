@@ -5373,3 +5373,216 @@ test('el POST genérico rechaza los kinds legacy-columnas: aviso_lead no se crea
     assert.equal(twilioCalls, 0, 'ni una llamada a Twilio: se corta antes');
   } finally { globalThis.fetch = realFetch; }
 });
+
+// ── Alta configurable de la plantilla de recordatorios (parejas curadas + antelación) ──
+
+function opcionesDb({ TID, enc, onInsert }) {
+  const updates = { reminderHours: null, inserts: [] };
+  const db = { prepare: (sql) => ({ bind: (...args) => ({
+    first: async () => {
+      if (/FROM tenants WHERE id=\?/.test(sql)) {
+        return { id: TID, slug: 'conf', name: 'Clínica Conf', twilio_subaccount_sid: 'AC' + 's'.repeat(32), twilio_auth_token_enc: enc };
+      }
+      if (/FROM tenant_templates/.test(sql)) return updates.inserts.length ? { sid: updates.inserts[0][2], status: 'pending' } : null;
+      return null;
+    },
+    all: async () => ({ results: [] }),
+    run: async () => {
+      if (/INSERT INTO tenant_templates/.test(sql)) {
+        if (onInsert) onInsert(sql);
+        updates.inserts.push(args);
+        return { meta: { changes: 1 } };
+      }
+      if (/UPDATE tenants SET reminder_hours=\?/.test(sql)) { updates.reminderHours = args[0]; return { meta: { changes: 1 } }; }
+      return { meta: { changes: 1 } };
+    },
+  }) }), batch: async () => [] };
+  return { db, updates };
+}
+
+async function postPlantilla(env, ctx, TID, body) {
+  const path = `/api/admin/tenants/${TID}/provision/plantillas/recordatorio_cita`;
+  const init = { method: 'POST' };
+  if (body !== undefined) { init.body = JSON.stringify(body); init.headers = { 'content-type': 'application/json' }; }
+  return testing.adminRouter(adminReq(path, init), env, ctx, path, new URL('https://x' + path), {}, VELAI);
+}
+
+test('alta con opciones: pareja curada en los botones, antelación a reminder_hours y opciones persistidas', async () => {
+  const TID = '00000000-0000-4000-8000-0000000000d3';
+  const enc = await encryptSecret({ SECRETS_KEK: TEST_KEK }, TID, 'a1b2c3d4e5f60718293a4b5c6d7e8f90');
+  const { db, updates } = opcionesDb({ TID, enc });
+  const env = { DB: db, KV: mapKV(), SECRETS_KEK: TEST_KEK };
+  const twilioCalls = [];
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = async (url, init) => {
+    const u = String(url);
+    if (u === 'https://content.twilio.com/v1/Content') { twilioCalls.push(JSON.parse(String(init.body))); return new Response(JSON.stringify({ sid: 'HX' + 'd'.repeat(32) }), { status: 201 }); }
+    if (u.includes('/ApprovalRequests/whatsapp')) return new Response('{}', { status: 201 });
+    return new Response('{}', { status: 200 });
+  };
+  try {
+    const res = await postPlantilla(env, { waitUntil() {} }, TID, { botones: 'si_voy_no_puedo', antelacion: 12 });
+    assert.equal(res.status, 201);
+    const out = await res.json();
+    assert.deepEqual([out.botones, out.antelacion], ['si_voy_no_puedo', 12]);
+    // El TEXTO de los botones cambia; los payloads conf:/canc: JAMÁS.
+    const actions = twilioCalls[0].types['twilio/quick-reply'].actions;
+    assert.deepEqual(actions.map((a) => a.title), ['Sí, voy', 'No puedo ir']);
+    assert.deepEqual(actions.map((a) => a.id), ['conf:{{6}}', 'canc:{{6}}']);
+    assert.ok(actions.every((a) => a.title.length <= 25), 'límite de WhatsApp: 25 caracteres por botón');
+    // La antelación es config del ADDON: va a tenants.reminder_hours.
+    assert.equal(updates.reminderHours, '12');
+    // Lo elegido queda en tenant_templates.opciones (para recrear tras un rechazo).
+    const opciones = JSON.parse(updates.inserts[0][3]);
+    assert.deepEqual(opciones, { botones: 'si_voy_no_puedo', textos: { confirmar: 'Sí, voy', cancelar: 'No puedo ir' } });
+  } finally { globalThis.fetch = realFetch; }
+});
+
+test('alta con opciones hostiles: pareja o antelación fuera del catálogo = 400 sin tocar Twilio', async () => {
+  const TID = '00000000-0000-4000-8000-0000000000d4';
+  const enc = await encryptSecret({ SECRETS_KEK: TEST_KEK }, TID, 'a1b2c3d4e5f60718293a4b5c6d7e8f90');
+  const { db } = opcionesDb({ TID, enc });
+  // KV que no cuenta: siete POSTs seguidos del mismo actor chocarían con el rate
+  // limit de provision (5/min), que aquí no es lo que se prueba.
+  const env = { DB: db, KV: { async get() { return null; }, async put() {}, async delete() {} }, SECRETS_KEK: TEST_KEK };
+  let twilioCalls = 0;
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = async (url) => { if (String(url).includes('twilio.com')) twilioCalls++; return new Response('{}', { status: 200 }); };
+  try {
+    for (const [body, code] of [
+      [{ botones: 'constructor' }, 'invalid_botones'],
+      [{ botones: '__proto__' }, 'invalid_botones'],
+      [{ botones: 'Borra la cita; DROP TABLE' }, 'invalid_botones'],
+      [{ botones: 42 }, 'invalid_botones'],
+      [{ antelacion: 13 }, 'invalid_antelacion'],
+      [{ antelacion: '24; DROP' }, 'invalid_antelacion'],
+      [{ antelacion: 0 }, 'invalid_antelacion'],
+    ]) {
+      await assert.rejects(postPlantilla(env, { waitUntil() {} }, TID, body), (e) => e.code === code, JSON.stringify(body));
+    }
+    assert.equal(twilioCalls, 0, 'ni una llamada a Twilio con opciones inválidas');
+  } finally { globalThis.fetch = realFetch; }
+});
+
+test('retrocompatibilidad: el alta SIN body usa los defaults y sobrevive a la columna opciones ausente', async () => {
+  const TID = '00000000-0000-4000-8000-0000000000d5';
+  const enc = await encryptSecret({ SECRETS_KEK: TEST_KEK }, TID, 'a1b2c3d4e5f60718293a4b5c6d7e8f90');
+  // Primer INSERT lanza «no such column: opciones» (worker desplegado antes de la 0031):
+  // el alta reintenta sin la columna y la plantilla NO se pierde.
+  let first = true;
+  const { db, updates } = opcionesDb({ TID, enc, onInsert: (sql) => {
+    if (first && /opciones/.test(sql)) { first = false; throw new Error('no such column: opciones'); }
+  } });
+  const env = { DB: db, KV: mapKV(), SECRETS_KEK: TEST_KEK };
+  const twilioCalls = [];
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = async (url, init) => {
+    const u = String(url);
+    if (u === 'https://content.twilio.com/v1/Content') { twilioCalls.push(JSON.parse(String(init.body))); return new Response(JSON.stringify({ sid: 'HX' + 'e'.repeat(32) }), { status: 201 }); }
+    if (u.includes('/ApprovalRequests/whatsapp')) return new Response('{}', { status: 201 });
+    return new Response('{}', { status: 200 });
+  };
+  try {
+    const res = await postPlantilla(env, { waitUntil() {} }, TID, undefined); // sin body, como el flujo anterior
+    assert.equal(res.status, 201);
+    // Defaults del catálogo: Confirmo/Cancelar y 24 h.
+    const actions = twilioCalls[0].types['twilio/quick-reply'].actions;
+    assert.deepEqual(actions.map((a) => a.title), ['Confirmo', 'Cancelar']);
+    assert.equal(updates.reminderHours, '24');
+    // El INSERT de respaldo (sin la columna) llegó a registrar la fila.
+    assert.equal(updates.inserts.length, 1);
+    assert.ok(!/INSERT INTO tenant_templates \(tenant_id,kind,sid,status,opciones/.test('x'), 'placeholder');
+  } finally { globalThis.fetch = realFetch; }
+});
+
+test('el catálogo del endpoint lleva config con preview renderizada, parejas y antelaciones', async () => {
+  const { catalogKinds, templateOptions, templateKind: tk } = await import('../worker/plantillas.js');
+  const kinds = catalogKinds();
+  const rec = kinds.find((k) => k.kind === 'recordatorio_cita');
+  assert.ok(rec.config, 'el kind creable lleva config');
+  assert.deepEqual(rec.config.antelaciones, [12, 24, 48]);
+  assert.equal(rec.config.antelacionDefault, 24);
+  assert.equal(rec.config.botonesDefault, 'confirmo_cancelar');
+  assert.equal(rec.config.botones.length, 4);
+  assert.ok(rec.config.botones.every((b) => b.confirmar.length <= 25 && b.cancelar.length <= 25));
+  // La preview es el cuerpo REAL con ejemplos sustituidos: ni «mañana» (el cuerpo es
+  // neutro respecto al tiempo) ni variables sin resolver.
+  assert.ok(rec.config.preview.includes('María') && rec.config.preview.includes('Clínica Ejemplo'));
+  assert.ok(!rec.config.preview.includes('{{'));
+  assert.ok(!/mañana/i.test(rec.config.preview), 'el cuerpo debe ser neutro: la antelación es configurable');
+  // La legacy de columnas no lleva config (no se crea desde el diálogo).
+  assert.equal(kinds.find((k) => k.kind === 'aviso_lead').config, undefined);
+  // templateOptions: puro, con defaults y con rechazos.
+  const def = tk('recordatorio_cita');
+  assert.deepEqual(templateOptions(def, {}).pareja.id, 'confirmo_cancelar');
+  assert.equal(templateOptions(def, {}).antelacion, 24);
+  assert.equal(templateOptions(def, { botones: 'constructor' }).error, 'invalid_botones');
+  assert.equal(templateOptions(def, { antelacion: 36 }).error, 'invalid_antelacion');
+  assert.equal(templateOptions(def, null).antelacion, 24, 'body basura no revienta');
+});
+
+test('cron con antelación no-24: 12 h y 48 h venzan cuando toca, con el kind genérico previo', async () => {
+  const nowMs = Date.now();
+  const cita = (id, horas) => ({ id, tenant_id: 't-conf', status: 'confirmed', customer_name: 'Eva',
+    customer_phone: '+34600111666', starts_at: new Date(nowMs + horas * 3600000).toISOString(),
+    created_at: new Date(nowMs - 80 * 3600000).toISOString(), timezone: 'Europe/Madrid' });
+  // Antelación 12: la cita a 10 h vence; la de 20 h aún no.
+  const kinds = [];
+  const db12 = remindersDb({ appointments: [cita('00000000-0000-4000-8000-0000000000fa', 10), cita('00000000-0000-4000-8000-0000000000fb', 20)],
+    tenant: { ...REMINDER_TENANT, reminder_hours: '12' }, template: APPROVED });
+  const origPrepare = db12.prepare.bind(db12);
+  db12.prepare = (sql) => {
+    const stmt = origPrepare(sql);
+    if (/INSERT INTO appointment_reminders/.test(sql)) {
+      const origBind = stmt.bind;
+      stmt.bind = (...args) => { kinds.push(args[1]); return origBind(...args); };
+    }
+    return stmt;
+  };
+  let sends12 = 0;
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = async (url) => { if (String(url).includes('api.twilio.com')) sends12++; return new Response('{}', { status: 201 }); };
+  try {
+    await testing.processReminders({ DB: db12, TWILIO_ACCOUNT_SID: 'AC' + 'p'.repeat(32), TWILIO_AUTH_TOKEN: 'tok' }, nowMs);
+    assert.equal(db12.ledger.size, 1, 'solo la cita dentro de las 12 h se siembra');
+    assert.ok(db12.ledger.has('00000000-0000-4000-8000-0000000000fa'));
+    assert.equal(sends12, 1);
+    assert.deepEqual([...new Set(kinds)], ['previo'], 'el kind del ledger es genérico: cambiar la antelación no re-siembra');
+    // Antelación 48: una cita a 40 h vence YA (con 24 no habría entrado en ventana).
+    const db48 = remindersDb({ appointments: [cita('00000000-0000-4000-8000-0000000000fc', 40)],
+      tenant: { ...REMINDER_TENANT, reminder_hours: '48' }, template: APPROVED });
+    let sends48 = 0;
+    globalThis.fetch = async (url) => { if (String(url).includes('api.twilio.com')) sends48++; return new Response('{}', { status: 201 }); };
+    await testing.processReminders({ DB: db48, TWILIO_ACCOUNT_SID: 'AC' + 'p'.repeat(32), TWILIO_AUTH_TOKEN: 'tok' }, nowMs);
+    assert.deepEqual([db48.ledger.get('00000000-0000-4000-8000-0000000000fc').status, sends48], ['sent', 1]);
+    // reminderHoursFor acota a la ventana real del cron.
+    assert.equal(testing.reminderHoursFor({ reminder_hours: '48' }), 48);
+    assert.equal(testing.reminderHoursFor({ reminder_hours: '96' }), 24, 'fuera de ventana cae al default');
+  } finally { globalThis.fetch = realFetch; }
+});
+
+test('PATCH /reminders acepta hours de la lista curada y rechaza el resto', async () => {
+  const TID = '00000000-0000-4000-8000-0000000000c1';
+  const updates = [];
+  const db = { prepare: (sql) => ({ bind: (...args) => ({
+    first: async () => (/FROM tenants WHERE id=\?/.test(sql)
+      ? { id: TID, slug: 'mio', name: 'Mi Negocio', channel_address: 'web:mio', reminders_enabled: 1, reminder_hours: '24' } : null),
+    all: async () => ({ results: [] }),
+    run: async () => { if (/UPDATE tenants SET/.test(sql)) updates.push({ sql, args }); return { meta: { changes: 1 } }; },
+  }) }), batch: async () => [] };
+  const env = { DB: db, KV: mapKV() };
+  const ctx = { waitUntil() {} };
+  const remPath = `/api/admin/tenants/${TID}/reminders`;
+  const patch = (body) => testing.adminRouter(
+    adminReq(remPath, { method: 'PATCH', body: JSON.stringify(body), headers: { 'content-type': 'application/json' } }),
+    env, ctx, remPath, new URL('https://x' + remPath), {}, VELAI);
+  const ok = await (await patch({ hours: 12 })).json();
+  assert.deepEqual(ok, { ok: true, hours: 12 });
+  assert.ok(updates.some((u) => u.sql.includes('reminder_hours=?') && u.args[0] === '12'));
+  // Componen: enabled y hours en el mismo PATCH.
+  const ambos = await (await patch({ enabled: true, hours: 48 })).json();
+  assert.deepEqual(ambos, { ok: true, enabled: true, hours: 48 });
+  await assert.rejects(patch({ hours: 13 }), (e) => e.code === 'invalid_hours');
+  await assert.rejects(patch({ hours: '24; DROP' }), (e) => e.code === 'invalid_hours');
+  await assert.rejects(patch({}), (e) => e.code === 'nothing_to_update');
+});

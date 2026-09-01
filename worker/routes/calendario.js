@@ -7,6 +7,7 @@ import { partesAdmin, scopeClause, assertOwnTenant, adminOrigin } from '../middl
 import { googleAuthUrl, revokeGoogleToken } from '../calendar.js';
 import { decryptSecret } from '../crypto.js';
 import { HttpError, json, NO_STORE, clean, readJson, UUID_RE, reminderHoursFor, tenantTemplate, invalidateTenantCache } from '../app.js';
+import { templateKind } from '../plantillas.js';
 
 export const calendario = new Hono();
 
@@ -28,7 +29,7 @@ calendario.get('/api/admin/appointments', async (c) => {
   // Confirmaciones (0030): qué hizo el cliente con su cita + el ledger del recordatorio
   // (para los chips y el detalle del día). appointment_reminders es tabla hija: entra por
   // el JOIN de esta MISMA consulta ya filtrada por scopeClause.
-  const rows = (await env.DB.prepare(`SELECT l.id,l.tenant_id,t.name AS tenant_name,l.channel,l.customer_name,l.customer_phone,l.reason,l.starts_at,l.ends_at,l.timezone,l.status,l.created_at,l.customer_confirmed_at,l.cancelled_by,r.status AS reminder_status,r.sent_at AS reminder_sent_at,r.attempts AS reminder_attempts,r.last_error AS reminder_error FROM appointments l LEFT JOIN tenants t ON t.id=l.tenant_id LEFT JOIN appointment_reminders r ON r.appointment_id=l.id AND r.kind='previo_24h' WHERE ${clauses.join(' AND ')}${sc.sql} ORDER BY l.starts_at ${hasRange ? 'ASC' : 'DESC'} LIMIT ?`)
+  const rows = (await env.DB.prepare(`SELECT l.id,l.tenant_id,t.name AS tenant_name,l.channel,l.customer_name,l.customer_phone,l.reason,l.starts_at,l.ends_at,l.timezone,l.status,l.created_at,l.customer_confirmed_at,l.cancelled_by,r.status AS reminder_status,r.sent_at AS reminder_sent_at,r.attempts AS reminder_attempts,r.last_error AS reminder_error FROM appointments l LEFT JOIN tenants t ON t.id=l.tenant_id LEFT JOIN appointment_reminders r ON r.appointment_id=l.id AND r.kind='previo' WHERE ${clauses.join(' AND ')}${sc.sql} ORDER BY l.starts_at ${hasRange ? 'ASC' : 'DESC'} LIMIT ?`)
     .bind(...values, ...sc.args, limit).all()).results;
   if (scope.role !== 'velai') for (const row of rows) { delete row.tenant_name; delete row.tenant_id; }
   return json({ appointments: rows }, 200, NO_STORE);
@@ -154,19 +155,37 @@ const grupoReminders = async (c) => {
   if (!UUID_RE.test(tenantId)) throw new HttpError(404, 'not_found');
   if (request.method !== 'PATCH') throw new HttpError(405, 'method_not_allowed');
   const body = await readJson(request, 2000);
-  if (typeof body.enabled !== 'boolean') throw new HttpError(400, 'invalid_enabled');
-  const previous = await env.DB.prepare('SELECT id, slug, name, channel_address, reminders_enabled FROM tenants WHERE id=?').bind(tenantId).first();
+  const previous = await env.DB.prepare('SELECT id, slug, name, channel_address, reminders_enabled, reminder_hours FROM tenants WHERE id=?').bind(tenantId).first();
   if (!previous) throw new HttpError(404, 'not_found');
-  const enabled = body.enabled ? 1 : 0;
+  const sets = []; const args = []; const cambios = [];
+  let enabled = null;
+  if (body.enabled !== undefined) {
+    if (typeof body.enabled !== 'boolean') throw new HttpError(400, 'invalid_enabled');
+    enabled = body.enabled ? 1 : 0;
+    sets.push('reminders_enabled=?'); args.push(enabled);
+    cambios.push(enabled ? 'addon activado' : 'addon desactivado');
+  }
+  // Antelación EDITABLE sin nueva aprobación (es config del addon, no de la plantilla).
+  // Solo valores de la lista curada del catálogo: nada arbitrario en reminder_hours.
+  let hours = null;
+  if (body.hours !== undefined) {
+    const def = templateKind('recordatorio_cita');
+    const n = Number(body.hours);
+    if (!def || !Array.isArray(def.antelaciones) || !def.antelaciones.includes(n)) throw new HttpError(400, 'invalid_hours');
+    hours = n;
+    sets.push('reminder_hours=?'); args.push(String(n));
+    cambios.push(`antelación ${n} h`);
+  }
+  if (!sets.length) throw new HttpError(400, 'nothing_to_update');
   const now = new Date().toISOString();
-  await env.DB.prepare('UPDATE tenants SET reminders_enabled=?, updated_at=? WHERE id=?').bind(enabled, now, tenantId).run();
+  await env.DB.prepare(`UPDATE tenants SET ${sets.join(',')}, updated_at=? WHERE id=?`).bind(...args, now, tenantId).run();
   // La fila del tenant vive cacheada en KV (30 min): sin invalidar, los canales
   // seguirían viendo el valor viejo hasta que caducara.
   await invalidateTenantCache(env, [previous]);
   ctx.waitUntil(env.DB.prepare('INSERT INTO tenant_versions (tenant_id,actor_email,field,previous_value,note,created_at) VALUES (?,?,?,?,?,?)')
-    .bind(tenantId, actor, 'config', JSON.stringify({ reminders_enabled: previous.reminders_enabled }),
-      enabled ? 'confirmaciones: addon activado' : 'confirmaciones: addon desactivado', now).run().catch(() => {}));
-  console.log(JSON.stringify({ level: 'info', code: 'reminders_toggled', tenant: previous.slug, enabled: Boolean(enabled) }));
-  return json({ ok: true, enabled: Boolean(enabled) }, 200, NO_STORE);
+    .bind(tenantId, actor, 'config', JSON.stringify({ reminders_enabled: previous.reminders_enabled, reminder_hours: previous.reminder_hours }),
+      `confirmaciones: ${cambios.join(', ')}`, now).run().catch(() => {}));
+  console.log(JSON.stringify({ level: 'info', code: 'reminders_toggled', tenant: previous.slug, enabled: enabled === null ? undefined : Boolean(enabled), hours: hours ?? undefined }));
+  return json({ ok: true, ...(enabled === null ? {} : { enabled: Boolean(enabled) }), ...(hours === null ? {} : { hours }) }, 200, NO_STORE);
 };
 calendario.all('/api/admin/tenants/:id/reminders', grupoReminders);

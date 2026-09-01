@@ -16,7 +16,7 @@ import { encryptSecret, decryptSecret } from './crypto.js';
 import { cloudflareConfigured, syncTurnstileDomains, syncAccessGroup, syncAdminGroup, verifyCfToken } from './cloudflare.js';
 import { createSubaccount, fetchSubaccount, findSubaccountByName, createLeadTemplate, createContentTemplate, submitTemplateApproval, fetchApprovalStatus, createWhatsAppSender, verifySender, fetchSenderStatus, listWhatsAppSenders, updateSenderWebhook, updateSenderProfile, fetchSender } from './twilio.js';
 import { CALENDAR_TOOLS, CALENDAR_GUARDRAILS, DEFAULT_BUSINESS_HOURS, freeSlots, localToUtcMs, localDateStr, localWeekday, utcToLocalHHMM, googleAuthUrl, exchangeGoogleCode, refreshGoogleToken, revokeGoogleToken, googleBusy, createGoogleEvent, deleteGoogleEvent } from './calendar.js';
-import { templateKind } from './plantillas.js';
+import { templateKind, templateOptions } from './plantillas.js';
 
 const JSON_HEADERS = { 'Content-Type': 'application/json; charset=utf-8' };
 // URL pública del worker: webhook de Twilio (senders) y de Telegram apuntan aquí.
@@ -1822,16 +1822,25 @@ function calendarExecutor(env, tenant, cal, meta) {
 // Recordatorio 24 h antes de cada cita, por la subcuenta del tenant y SIN modelo
 // (nada de esto pasa por aiBudgetGuard). Mismo molde que lead_notifications:
 // sembrar ledger → entregar con reintentos y backoff, en el reloj de 5 min.
-export const REMINDER_KIND = 'previo_24h';
+// Slot GENÉRICO del ledger (0031): UN recordatorio previo por cita, tenga la
+// antelación que tenga. Si el kind llevara las horas en el nombre, cambiar la
+// antelación de un tenant re-sembraría sus citas ya recordadas (el NOT EXISTS de la
+// siembra busca por kind) y saldría un segundo recordatorio.
+export const REMINDER_KIND = 'previo';
 const REMINDER_MAX_ATTEMPTS = 5;
 const REMINDER_BATCH = 10; // presupuesto D1 del cron acotado (plan gratuito: 50 consultas/tick)
+// La mayor antelación curada del catálogo (12/24/48): fija la ventana del SQL de
+// siembra — un valor por encima nunca vencería dentro de ella.
+const REMINDER_MAX_HOURS = 48;
 
-// Antelación del tenant: reminder_hours es CSV por si un día se amplía, pero la
-// decisión vigente es 24 h única — se lee el primer valor y se acota a [1, 24]
-// (la ventana del SQL de siembra es de 24 h: un valor mayor nunca vencería).
+// Antelación del tenant: curada 12/24/48 con default 24 (evolución del 2026-09-01;
+// se elige en el diálogo de alta de la plantilla y se edita después sin nueva
+// aprobación — es config del addon, no de la plantilla). reminder_hours sigue siendo
+// CSV por si un día hay varios recordatorios: se lee el primer valor, acotado a
+// [1, REMINDER_MAX_HOURS] para no prometer antelaciones fuera de la ventana del cron.
 export function reminderHoursFor(tenant) {
   const first = Number(String((tenant && tenant.reminder_hours) || '24').split(',')[0]);
-  return Number.isFinite(first) && first >= 1 && first <= 24 ? first : 24;
+  return Number.isFinite(first) && first >= 1 && first <= REMINDER_MAX_HOURS ? first : 24;
 }
 
 // Un mismo teléfono puede vivir con o sin prefijo de país según el canal que lo
@@ -1918,7 +1927,10 @@ async function deliverReminder(env, tenant, template, appt) {
 // cliente acaba de hablar con Vai y recordarle lo recién agendado sería ruido.
 async function seedReminders(env, nowMs) {
   const now = new Date(nowMs).toISOString();
-  const max = new Date(nowMs + 24 * 3600000).toISOString();
+  // Ventana = la mayor antelación curada. Las citas aún no vencidas (antelación menor)
+  // se refetchean cada tick hasta vencer: el ORDER BY starts_at ASC pone primero las
+  // más cercanas — las que de verdad tocan — así que no se produce inanición.
+  const max = new Date(nowMs + REMINDER_MAX_HOURS * 3600000).toISOString();
   let rows = [];
   try {
     rows = (await env.DB.prepare(`
@@ -3161,23 +3173,62 @@ async function runProvisionStep(request, env, ctx, tenant, tenantId, step, actor
     // Las entradas legacy-columnas (aviso_lead) son descriptivas: no tienen `content` y
     // NO se crean por aquí — su alta sigue siendo el paso `template` del aprovisionamiento.
     if (typeof def.content !== 'function') throw new HttpError(400, 'template_kind_not_creatable');
+    // Opciones del diálogo de alta (SPEC-CONFIRMACIONES, evolución 2026-09-01): pareja
+    // de botones curada y antelación. El body es OPCIONAL — el alta sin opciones (el
+    // flujo anterior y cualquier llamador viejo) sigue valiendo con los defaults del
+    // catálogo. La VALIDACIÓN se hace ANTES de tocar Twilio: una pareja desconocida o
+    // una antelación fuera de la lista curada es 400 — jamás texto arbitrario a Meta.
+    let body = {};
+    if ((request.headers.get('Content-Type') || '').includes('application/json')) {
+      body = await readJson(request, 2000);
+    }
+    const opciones = templateOptions(def, body);
+    if (opciones.error) throw new HttpError(400, opciones.error);
     const existing = await tenantTemplate(env, tenantId, def.kind);
     if (existing && (existing.sid || existing.status)) throw new HttpError(409, 'already_provisioned');
-    const { contentSid } = await createContentTemplate(credentials, def.content(tenant.slug, tenant.name));
+    const { contentSid } = await createContentTemplate(credentials, def.content(tenant.slug, tenant.name, opciones.pareja));
+    // Lo elegido se persiste (0031): para enseñarlo y para recrear tras un rechazo.
+    const opcionesJson = opciones.pareja
+      ? JSON.stringify({ botones: opciones.pareja.id, textos: { confirmar: opciones.pareja.confirmar, cancelar: opciones.pareja.cancelar } })
+      : null;
     try {
       await submitTemplateApproval(credentials, contentSid, def.approvalName(tenant.slug), def.categoria);
       // La idempotencia la impone D1 (la PK tenant_id+kind), no el cerrojo de KV: dos
       // clics simultáneos no crean dos filas — el segundo es un orphan visible.
-      const res = await env.DB.prepare(`INSERT INTO tenant_templates (tenant_id,kind,sid,status,created_at,updated_at)
-        VALUES (?,?,?,'pending',?,?) ON CONFLICT(tenant_id,kind) DO NOTHING`)
-        .bind(tenantId, def.kind, contentSid, now, now).run();
+      let res;
+      try {
+        res = await env.DB.prepare(`INSERT INTO tenant_templates (tenant_id,kind,sid,status,opciones,created_at,updated_at)
+          VALUES (?,?,?,'pending',?,?,?) ON CONFLICT(tenant_id,kind) DO NOTHING`)
+          .bind(tenantId, def.kind, contentSid, opcionesJson, now, now).run();
+      } catch (e) {
+        // Worker desplegado antes de aplicar la 0031: la columna opciones no existe
+        // aún. La plantilla YA vive en Twilio — perderla por una columna sería un
+        // orphan evitable: se registra sin opciones y el resto sigue idéntico.
+        if (!/no such column/i.test(String(e.message || e))) throw e;
+        res = await env.DB.prepare(`INSERT INTO tenant_templates (tenant_id,kind,sid,status,created_at,updated_at)
+          VALUES (?,?,?,'pending',?,?) ON CONFLICT(tenant_id,kind) DO NOTHING`)
+          .bind(tenantId, def.kind, contentSid, now, now).run();
+      }
       if (!res.meta.changes) await provisionOrphan(env, ctx, tenant, `plantilla ${def.kind} (carrera)`, contentSid, new Error('already_provisioned'));
     } catch (error) {
       if (error instanceof HttpError) throw error;
       await provisionOrphan(env, ctx, tenant, `plantilla ${def.kind}`, contentSid, error);
     }
-    await provisionAudit(env, ctx, tenant, actor, `plantilla ${def.approvalName(tenant.slug)} (${contentSid}) enviada a aprobación ${def.categoria}`);
-    return json({ ok: true, kind: def.kind, sid: contentSid, status: 'pending' }, 201, NO_STORE);
+    // La antelación es config del ADDON (tenants.reminder_hours), no de la plantilla:
+    // se guarda la elegida (o el default) en el mismo alta, y cambiarla después no
+    // exige nueva aprobación. Best-effort: un fallo aquí no invalida la plantilla.
+    if (opciones.antelacion) {
+      try {
+        await env.DB.prepare('UPDATE tenants SET reminder_hours=?, updated_at=? WHERE id=?')
+          .bind(String(opciones.antelacion), now, tenantId).run();
+        await invalidateTenantCache(env, [tenant]);
+      } catch (error) {
+        console.log(JSON.stringify({ level: 'warn', code: 'reminder_hours_not_saved', tenant: tenant.slug, error: clean(String(error.message || error), 60) }));
+      }
+    }
+    await provisionAudit(env, ctx, tenant, actor, `plantilla ${def.approvalName(tenant.slug)} (${contentSid}) enviada a aprobación ${def.categoria}`
+      + `${opciones.pareja ? ` — botones «${opciones.pareja.confirmar}»/«${opciones.pareja.cancelar}»` : ''}${opciones.antelacion ? `, antelación ${opciones.antelacion} h` : ''}`);
+    return json({ ok: true, kind: def.kind, sid: contentSid, status: 'pending', ...(opciones.pareja ? { botones: opciones.pareja.id } : {}), ...(opciones.antelacion ? { antelacion: opciones.antelacion } : {}) }, 201, NO_STORE);
   }
 
   // Perfil de negocio del sender: la MISMA marca de la ficha (logo, descripción, web)
