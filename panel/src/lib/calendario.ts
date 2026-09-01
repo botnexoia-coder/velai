@@ -32,6 +32,25 @@ export function apptsByDay(appts: Appointment[], tz: string): Map<string, Appoin
   return byDay;
 }
 
+/** Chip de Confirmaciones de una cita: qué hizo el cliente final (SPEC-CONFIRMACIONES).
+ *  Prioridad: cancelada por el cliente > confirmada > recordada (recordatorio enviado). */
+export function estadoConfirmacion(a: Appointment): { emoji: string; label: string } | null {
+  if (a.status === 'cancelled' && a.cancelled_by === 'customer') return { emoji: '❌', label: 'cancelada por el cliente' };
+  if (a.customer_confirmed_at) return { emoji: '✅', label: 'confirmada por el cliente' };
+  if (a.reminder_status === 'sent') return { emoji: '⏳', label: 'recordada' };
+  return null;
+}
+
+/** Línea del ledger del recordatorio para el detalle del día. Null = sin fila (aún no
+ *  tocaba, o el addon está apagado): no se pinta nada, que es lo honesto. */
+export function ledgerRecordatorio(a: Appointment, tz: string): string | null {
+  if (!a.reminder_status) return null;
+  if (a.reminder_status === 'sent') return `Recordatorio enviado${a.reminder_sent_at ? ` el ${calTzDay(a.reminder_sent_at, tz)} a las ${calTzHm(a.reminder_sent_at, tz)}` : ''}`;
+  if (a.reminder_status === 'pending') return 'Recordatorio pendiente de envío';
+  if (a.reminder_status === 'failed') return `Recordatorio fallido (${a.reminder_attempts ?? 0} intentos${a.reminder_error ? `: ${a.reminder_error}` : ''})`;
+  return `Recordatorio omitido${a.reminder_error === 'creada_dentro_de_ventana' ? ' (cita agendada con menos de 24 h)' : a.reminder_error ? ` (${a.reminder_error})` : ''}`;
+}
+
 export interface MonthShape {
   /** Celdas vacías delante (la semana empieza en lunes). */
   lead: number;

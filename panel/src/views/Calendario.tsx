@@ -8,7 +8,7 @@ import { useNavigate, useSearchParams } from 'react-router';
 import { traducir } from '../api/errors';
 import { HoursGrid } from '../components/HoursGrid';
 import { useToast } from '../components/Toasts';
-import { apptsByDay, calTzHm, calTzDay, dayKey, monthRange, monthShape } from '../lib/calendario';
+import { apptsByDay, calTzHm, calTzDay, dayKey, estadoConfirmacion, ledgerRecordatorio, monthRange, monthShape } from '../lib/calendario';
 import { gridFromHours, hoursFromGrid, copyMonday, gridVacio, type Grid } from '../lib/horario';
 import {
   useAppointments,
@@ -17,9 +17,11 @@ import {
   useCalendarDisconnect,
   useCalendarPatch,
   useMe,
+  useRemindersPatch,
+  useTemplateCreate,
   useTenants,
 } from '../hooks/queries';
-import type { Appointment, CalendarRow, WeekHours } from '../api/types';
+import type { Appointment, CalendarRow, Confirmaciones, WeekHours } from '../api/types';
 
 export function Calendario() {
   const { data: me } = useMe();
@@ -147,17 +149,27 @@ function CalendarBody({ tenantId, isCliente }: { tenantId: string; isCliente: bo
       </div>
     );
   }
-  return <CalendarConnected tenantId={tenantId} cal={cal as CalendarRow} isCliente={isCliente} onReconnect={startOAuth} />;
+  return (
+    <CalendarConnected
+      tenantId={tenantId}
+      cal={cal as CalendarRow}
+      conf={data.confirmaciones ?? null}
+      isCliente={isCliente}
+      onReconnect={startOAuth}
+    />
+  );
 }
 
 function CalendarConnected({
   tenantId,
   cal,
+  conf,
   isCliente,
   onReconnect,
 }: {
   tenantId: string;
   cal: CalendarRow;
+  conf: Confirmaciones | null;
   isCliente: boolean;
   onReconnect: () => void;
 }) {
@@ -241,11 +253,15 @@ function CalendarConnected({
             return (
               <div key={k} className={`calcell${k === today ? ' today' : ''}`} onClick={() => setOpenDay(k)} role="button" tabIndex={0} aria-label={`Día ${day}`}>
                 <span className="dnum">{day}</span>
-                {list.slice(0, 3).map((a) => (
-                  <span key={a.id} className="calchip">
-                    {calTzHm(a.starts_at, tz)} {a.customer_name}
-                  </span>
-                ))}
+                {list.slice(0, 3).map((a) => {
+                  const estado = estadoConfirmacion(a);
+                  return (
+                    <span key={a.id} className="calchip" title={estado ? `Cita ${estado.label}` : undefined}>
+                      {estado ? `${estado.emoji} ` : ''}
+                      {calTzHm(a.starts_at, tz)} {a.customer_name}
+                    </span>
+                  );
+                })}
                 {list.length > 3 ? <span className="calmore">+{list.length - 3} más</span> : null}
               </div>
             );
@@ -260,6 +276,7 @@ function CalendarConnected({
             : 'Sin citas este mes. Vai las creará aquí (y en el Google Calendar del negocio) cuando las agende por chat o WhatsApp.'}
         </div>
       </div>
+      <ConfirmacionesCard tenantId={tenantId} conf={conf} isCliente={isCliente} />
       <CalendarConfig tenantId={tenantId} cal={cal} />
       {openDay ? <DayModal day={openDay} appts={byDay.get(openDay) ?? []} tz={tz} onClose={() => setOpenDay(null)} /> : null}
     </div>
@@ -283,24 +300,127 @@ function DayModal({ day, appts, tz, onClose }: { day: string; appts: Appointment
       </div>
       <div className="modal-b caldaylist">
         {appts.length ? (
-          appts.map((a) => (
-            <div key={a.id}>
-              <b>
-                {calTzHm(a.starts_at, tz)}–{calTzHm(a.ends_at, tz)}
-              </b>{' '}
-              · <b>{a.customer_name}</b>
-              <br />
-              <span className="muted">
-                {a.customer_phone}
-                {a.reason ? ` · ${a.reason}` : ''} · {a.channel}
-              </span>
-            </div>
-          ))
+          appts.map((a) => {
+            const estado = estadoConfirmacion(a);
+            const ledger = ledgerRecordatorio(a, tz);
+            return (
+              <div key={a.id}>
+                <b>
+                  {calTzHm(a.starts_at, tz)}–{calTzHm(a.ends_at, tz)}
+                </b>{' '}
+                · <b>{a.customer_name}</b>
+                {estado ? (
+                  <>
+                    {' '}
+                    <span title={`Cita ${estado.label}`}>
+                      {estado.emoji} {estado.label}
+                    </span>
+                  </>
+                ) : null}
+                <br />
+                <span className="muted">
+                  {a.customer_phone}
+                  {a.reason ? ` · ${a.reason}` : ''} · {a.channel}
+                </span>
+                {ledger ? (
+                  <>
+                    <br />
+                    <span className="muted">{ledger}</span>
+                  </>
+                ) : null}
+              </div>
+            );
+          })
         ) : (
           <div className="muted">Sin citas ese día. Vai las agenda desde el chat web y WhatsApp.</div>
         )}
       </div>
     </dialog>
+  );
+}
+
+// ── Confirmaciones (SPEC-CONFIRMACIONES): addon de recordatorio + confirmación ─
+// El interruptor es SOLO de Velai (el worker responde 403 al rol cliente); el
+// cliente VE el estado en texto. La plantilla se crea con el paso genérico de
+// aprovisionamiento (plantillas/recordatorio_cita) y la aprueba Meta — el cron del
+// worker vigila la aprobación y este bloque solo pinta el estado.
+function ConfirmacionesCard({ tenantId, conf, isCliente }: { tenantId: string; conf: Confirmaciones | null; isCliente: boolean }) {
+  const toast = useToast();
+  const patch = useRemindersPatch();
+  const crear = useTemplateCreate();
+  // Worker sin la migración 0030: el bloque no viaja y la card no se inventa nada.
+  if (!conf) return null;
+  const tpl = conf.template;
+  const tplEstado = !tpl.status
+    ? 'Aún no hay plantilla de recordatorios: sin ella no puede salir ningún recordatorio.'
+    : tpl.status === 'approved'
+      ? 'Plantilla de recordatorios aprobada por Meta ✓'
+      : tpl.status === 'rejected'
+        ? 'Meta rechazó la plantilla de recordatorios: revisar en Twilio.'
+        : 'Plantilla enviada a Meta: esperando aprobación (el estado se actualiza solo).';
+  return (
+    <div className="card mt12">
+      <b>Confirmaciones</b>
+      <p className="muted mt6">
+        Recordatorio automático por WhatsApp <b>{conf.hours} h antes</b> de cada cita, con botones «Confirmo» y
+        «Cancelar». Si el cliente cancela, Vai le ofrece huecos y reagenda en la misma conversación.
+      </p>
+      <div className="mt6">
+        {conf.enabled ? <span className="flag on">Activado</span> : <span className="flag off">Desactivado</span>}{' '}
+        {isCliente ? (
+          <span className="muted">Este módulo lo activa el equipo de Velai: escríbenos si quieres cambiarlo.</span>
+        ) : null}
+      </div>
+      <div className="mt6 muted">{tplEstado}</div>
+      {!isCliente ? (
+        <div className="actions actions0">
+          <button
+            className="btn alt btnsm"
+            type="button"
+            disabled={patch.isPending}
+            onClick={async () => {
+              if (
+                conf.enabled &&
+                !(await confirmar({
+                  titulo: '¿Desactivar Confirmaciones?',
+                  cuerpo: 'Dejarán de salir recordatorios de cita para este cliente hasta volver a activarlo.',
+                  accion: 'Desactivar',
+                  peligro: true,
+                }))
+              )
+                return;
+              patch.mutate(
+                { id: tenantId, enabled: !conf.enabled },
+                {
+                  onSuccess: (d) => toast(d.enabled ? 'Confirmaciones activadas ✓' : 'Confirmaciones desactivadas'),
+                  onError: (e) => toast(`No se pudo cambiar el addon: ${traducir(e)}`, false),
+                },
+              );
+            }}
+          >
+            {conf.enabled ? 'Desactivar' : 'Activar Confirmaciones'}
+          </button>
+          {!tpl.status ? (
+            <button
+              className="btn btnsm"
+              type="button"
+              disabled={crear.isPending}
+              onClick={() =>
+                crear.mutate(
+                  { id: tenantId, kind: 'recordatorio_cita' },
+                  {
+                    onSuccess: () => toast('Plantilla creada y enviada a aprobación de Meta ✓'),
+                    onError: (e) => toast(`No se pudo crear la plantilla: ${traducir(e)}`, false),
+                  },
+                )
+              }
+            >
+              Crear plantilla de recordatorios
+            </button>
+          ) : null}
+        </div>
+      ) : null}
+    </div>
   );
 }
 

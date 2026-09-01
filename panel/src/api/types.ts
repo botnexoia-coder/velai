@@ -660,8 +660,19 @@ export interface CalendarRow {
   connected_at: string | null;
   updated_at: string | null;
 }
+/** Bloque de Confirmaciones (SPEC-CONFIRMACIONES): addon que habilita Velai; el
+ *  cliente lo VE. El estado de la plantilla sale de tenant_templates (kind
+ *  recordatorio_cita) — el catálogo de plantillas vive en worker/plantillas.js. */
+export interface Confirmaciones {
+  enabled: boolean;
+  /** Antelación en horas (decisión vigente: 24 única). */
+  hours: number;
+  template: { sid: string | null; status: string | null };
+}
 export interface CalendarResponse {
   calendar: CalendarRow | null;
+  /** Ausente solo si el worker corre sin la migración 0030. */
+  confirmaciones?: Confirmaciones;
 }
 /** POST /api/admin/tenants/:id/calendar/connect */
 export interface CalendarConnectResponse {
@@ -681,6 +692,14 @@ export interface Appointment {
   timezone: string | null;
   status: string;
   created_at: string;
+  /** Confirmaciones (0030): qué hizo el cliente final con su cita. */
+  customer_confirmed_at?: string | null;
+  cancelled_by?: string | null;
+  /** Ledger del recordatorio previo_24h (LEFT JOIN: null = sin recordatorio). */
+  reminder_status?: NotificationStatus | null;
+  reminder_sent_at?: string | null;
+  reminder_attempts?: number | null;
+  reminder_error?: string | null;
 }
 export interface AppointmentsResponse {
   appointments: Appointment[];

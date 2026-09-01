@@ -546,6 +546,30 @@ export function useCalendarDisconnect() {
     onSettled: (_d, _e, { id }) => void client.invalidateQueries({ queryKey: ['tenant-calendar', id] }),
   });
 }
+/** Interruptor del addon Confirmaciones (PATCH /reminders): SOLO velai — el worker
+ *  responde 403 al rol cliente. Recarga el calendario, que trae el bloque. */
+export function useRemindersPatch() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, enabled }: { id: string; enabled: boolean }) =>
+      apiPatch<{ ok: true; enabled: boolean }>(`/api/admin/tenants/${id}/reminders`, { enabled }),
+    onSettled: (_d, _e, { id }) => void client.invalidateQueries({ queryKey: ['tenant-calendar', id] }),
+  });
+}
+/**
+ * Crea una plantilla del CATÁLOGO (worker/plantillas.js) vía el paso genérico de
+ * aprovisionamiento /provision/plantillas/<kind> (solo velai). Hoy la usa la card de
+ * Confirmaciones con kind 'recordatorio_cita'; una futura vista de catálogo puede
+ * reutilizar este mismo hook con otros kinds (ver panel/TODO.md).
+ */
+export function useTemplateCreate() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, kind }: { id: string; kind: string }) =>
+      apiPost<{ ok: true; kind: string; sid: string; status: string }>(`/api/admin/tenants/${id}/provision/plantillas/${kind}`),
+    onSettled: (_d, _e, { id }) => void client.invalidateQueries({ queryKey: ['tenant-calendar', id] }),
+  });
+}
 export function useAppointments(tenant: string | null, from: string, to: string, isCliente: boolean) {
   return useQuery({
     queryKey: ['appointments', tenant, from, to],

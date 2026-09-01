@@ -6,9 +6,9 @@ import { MemoryRouter } from 'react-router';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createQueryClient } from '../api/queryClient';
 import { ToastProvider } from '../components/Toasts';
-import { apptsByDay, calTzDay, dayKey, monthRange, monthShape } from '../lib/calendario';
+import { apptsByDay, calTzDay, dayKey, estadoConfirmacion, ledgerRecordatorio, monthRange, monthShape } from '../lib/calendario';
 import { gridFromHours, hoursFromGrid, gridVacio, copyMonday, setDay, shSummary } from '../lib/horario';
-import { meCliente, mockFetch } from '../test/fixtures';
+import { meCliente, meVelai, mockFetch, tenants } from '../test/fixtures';
 import { Calendario } from './Calendario';
 import type { Appointment, CalendarRow } from '../api/types';
 
@@ -150,5 +150,111 @@ describe('vista Calendario', () => {
     expect(screen.getByRole('button', { name: 'Desconectar' })).toBeInTheDocument();
     // El toggle de días no aparece aquí (variant plain): el interruptor es de Conexiones.
     expect(screen.queryByRole('switch', { name: 'Lunes' })).toBeNull();
+  });
+});
+
+describe('Confirmaciones (SPEC-CONFIRMACIONES)', () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  const calRow: CalendarRow = {
+    provider: 'google',
+    account_email: 'negocio@gmail.com',
+    calendar_id: 'primary',
+    timezone: 'Europe/Madrid',
+    slot_minutes: 30,
+    business_hours: null,
+    status: 'connected',
+    last_error: null,
+    connected_at: '2026-08-01T00:00:00.000Z',
+    updated_at: null,
+  };
+  const hoy = new Date();
+  const cita = (over: Partial<Appointment>): Appointment => ({
+    id: 'a1',
+    channel: 'whatsapp',
+    customer_name: 'Marta',
+    customer_phone: '+34600111222',
+    reason: null,
+    starts_at: new Date(hoy.getFullYear(), hoy.getMonth(), 15, 10, 0).toISOString(),
+    ends_at: new Date(hoy.getFullYear(), hoy.getMonth(), 15, 10, 30).toISOString(),
+    timezone: 'Europe/Madrid',
+    status: 'confirmed',
+    created_at: hoy.toISOString(),
+    ...over,
+  });
+
+  it('el chip prioriza cancelada > confirmada > recordada, y el ledger habla claro', () => {
+    expect(estadoConfirmacion(cita({}))).toBeNull();
+    expect(estadoConfirmacion(cita({ reminder_status: 'sent' }))?.emoji).toBe('⏳');
+    expect(estadoConfirmacion(cita({ reminder_status: 'sent', customer_confirmed_at: '2026-09-01T00:00:00Z' }))?.emoji).toBe('✅');
+    expect(estadoConfirmacion(cita({ status: 'cancelled', cancelled_by: 'customer', customer_confirmed_at: '2026-09-01T00:00:00Z' }))?.emoji).toBe('❌');
+    // Cancelada por el negocio NO es el chip del cliente.
+    expect(estadoConfirmacion(cita({ status: 'cancelled', cancelled_by: 'business' }))).toBeNull();
+    expect(ledgerRecordatorio(cita({}), 'Europe/Madrid')).toBeNull();
+    expect(ledgerRecordatorio(cita({ reminder_status: 'sent', reminder_sent_at: '2026-09-14T08:00:00Z' }), 'Europe/Madrid')).toMatch(/enviado el 2026-09-14 a las 10:00/);
+    expect(ledgerRecordatorio(cita({ reminder_status: 'failed', reminder_attempts: 3, reminder_error: 'twilio_500' }), 'Europe/Madrid')).toMatch(/fallido \(3 intentos: twilio_500\)/);
+    expect(ledgerRecordatorio(cita({ reminder_status: 'skipped', reminder_error: 'creada_dentro_de_ventana' }), 'Europe/Madrid')).toMatch(/menos de 24 h/);
+  });
+
+  it('cliente: ve el estado del addon en texto (sin interruptor) y el chip en la cita', async () => {
+    vi.stubGlobal(
+      'fetch',
+      mockFetch({
+        '/api/admin/me': meCliente,
+        [`/api/admin/tenants/${meCliente.tenantId}/calendar`]: {
+          calendar: calRow,
+          confirmaciones: { enabled: true, hours: 24, template: { sid: 'HX1', status: 'approved' } },
+        },
+        '/api/admin/appointments': { appointments: [cita({ customer_confirmed_at: '2026-09-01T00:00:00Z' })] },
+      }),
+    );
+    render(
+      <QueryClientProvider client={createQueryClient()}>
+        <ToastProvider>
+          <MemoryRouter>
+            <Calendario />
+          </MemoryRouter>
+        </ToastProvider>
+      </QueryClientProvider>,
+    );
+    await waitFor(() => expect(screen.getByText('Confirmaciones')).toBeInTheDocument());
+    expect(screen.getByText('Activado')).toBeInTheDocument();
+    expect(screen.getByText(/lo activa el equipo de Velai/)).toBeInTheDocument();
+    expect(screen.getByText(/aprobada por Meta/)).toBeInTheDocument();
+    // Sin botones: el interruptor y la plantilla son solo de Velai.
+    expect(screen.queryByRole('button', { name: /Activar Confirmaciones|Desactivar/ })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Crear plantilla de recordatorios' })).toBeNull();
+    // El chip de la cita confirmada por el cliente.
+    await waitFor(() => expect(screen.getByText(/✅/)).toBeInTheDocument());
+  });
+
+  it('velai: interruptor del addon y botón de crear la plantilla cuando no existe', async () => {
+    const tid = tenants.tenants[0]!.id;
+    vi.stubGlobal(
+      'fetch',
+      mockFetch({
+        '/api/admin/me': meVelai,
+        '/api/admin/tenants': tenants,
+        [`/api/admin/tenants/${tid}/calendar`]: {
+          calendar: calRow,
+          confirmaciones: { enabled: false, hours: 24, template: { sid: null, status: null } },
+        },
+        '/api/admin/appointments': { appointments: [] },
+      }),
+    );
+    render(
+      <QueryClientProvider client={createQueryClient()}>
+        <ToastProvider>
+          <MemoryRouter>
+            <Calendario />
+          </MemoryRouter>
+        </ToastProvider>
+      </QueryClientProvider>,
+    );
+    await waitFor(() => expect(screen.getByText('Confirmaciones')).toBeInTheDocument());
+    expect(screen.getByText('Desactivado')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Activar Confirmaciones' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Crear plantilla de recordatorios' })).toBeInTheDocument();
+    expect(screen.getByText(/sin ella no puede salir ningún recordatorio/)).toBeInTheDocument();
   });
 });
