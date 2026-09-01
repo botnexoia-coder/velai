@@ -716,9 +716,19 @@ export interface PlantillaCelda {
   status: string | null;
   updated_at: string | null;
 }
-/** GET /api/admin/plantillas — matriz clientes × kinds del catálogo (worker/plantillas.js). */
+/** Un kind del catálogo (worker/plantillas.js): TODO lo que la vista pinta viene de
+ *  aquí — nada por kind se hardcodea en el panel. */
+export interface PlantillaKind {
+  kind: string;
+  label: string;
+  fuente: 'registro' | 'columnas';
+  /** Categoría de Meta (Utility/Marketing…). Opcionales: un worker anterior no los manda. */
+  categoria?: string;
+  descripcion?: string;
+}
+/** GET /api/admin/plantillas — clientes × kinds del catálogo (worker/plantillas.js). */
 export interface PlantillasResponse {
-  kinds: { kind: string; label: string; fuente: 'registro' | 'columnas' }[];
+  kinds: PlantillaKind[];
   /** Activos primero (orden del SQL). `plantillas` solo trae los kinds que existen. */
   tenants: {
     id: string;

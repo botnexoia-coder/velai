@@ -23,6 +23,9 @@ export const TEMPLATE_CATALOG = {
   recordatorio_cita: {
     kind: 'recordatorio_cita',
     nombre: 'Recordatorio de cita (Confirmaciones)',
+    // Descripción PARA PERSONAS (la pinta la vista Plantillas del panel): qué hace y
+    // quién la envía, sin jerga de columnas ni de crons internos.
+    descripcion: 'Recuerda la cita al cliente final 24 h antes, con botones «Confirmo» y «Cancelar».',
     fuente: 'registro', // estado en tenant_templates; se crea con el POST genérico plantillas/<kind>
     categoria: 'UTILITY', // mensaje iniciado por el negocio: SIEMPRE plantilla aprobada (63016)
     // Nombre con el que se somete a aprobación en Meta (exige minúsculas/0-9/_).
@@ -61,6 +64,7 @@ export const TEMPLATE_CATALOG = {
   aviso_lead: {
     kind: 'aviso_lead',
     nombre: 'Aviso de lead',
+    descripcion: 'Avisa al equipo del negocio por WhatsApp cuando entra un lead nuevo.',
     fuente: 'columnas',
     categoria: 'UTILITY',
     approvalName: (slug) => `nuevo_lead_${slug}`.toLowerCase().replace(/[^a-z0-9_]/g, '_'),
@@ -77,6 +81,10 @@ export function templateKind(kind) {
 
 // La lista del catálogo para la vista «Plantillas» del panel: solo lo descriptivo
 // (los cuerpos y sample values no viajan — son contrato del worker, no dato de UI).
+// categoria y descripcion viajan para que el panel no tenga NADA hardcodeado por kind:
+// la tarjeta del kind nº 3 se pinta sola con lo que declare su entrada del catálogo.
 export function catalogKinds() {
-  return Object.values(TEMPLATE_CATALOG).map((d) => ({ kind: d.kind, label: d.nombre, fuente: d.fuente }));
+  return Object.values(TEMPLATE_CATALOG).map((d) => ({
+    kind: d.kind, label: d.nombre, fuente: d.fuente, categoria: d.categoria, descripcion: d.descripcion || '',
+  }));
 }
