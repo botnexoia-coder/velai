@@ -37,8 +37,8 @@ caza la fuga) y SIN sids; entra en clienteAllowed con su caso en el barrido. El
 cuerpo del aviso de lead se MUDÓ al catálogo (aviso_lead.content, única fuente: el
 paso `template` del aprovisionamiento lo lee de ahí y createLeadTemplate se retiró)
 para poder previsualizarlo también. Endpoint
-`GET /api/admin/plantillas` (403 al rol cliente, fuera de clienteAllowed): une el
-registro `tenant_templates` con la plantilla de LEADS de las columnas históricas,
+`GET /api/admin/plantillas` consciente del rol (cliente permitido, siempre atado al
+tenant del scope): une el registro `tenant_templates` con la plantilla de LEADS de las columnas históricas,
 presentada como kind `aviso_lead` fuente 'columnas' — unificación de LECTURA; su
 almacenamiento y su alta (paso 2 del aprovisionamiento) no cambian, y el POST
 genérico la rechaza (`template_kind_not_creatable`). El catálogo es desde aquí LA
@@ -114,8 +114,8 @@ opciones siguen válidas.
   antelación), chips por cita (❌ cancelada por el cliente > ✅ confirmada > ⏳
   recordada) y ledger del recordatorio en el modal del día.
 
-Pendiente del dueño en TAREAS-PENDIENTES.md (aplicar la 0030, crear/aprobar la
-plantilla y activar el addon a un tenant de prueba). Fases 3 (autoagenda pública) y 4
+Pendiente operativo en TAREAS-PENDIENTES.md (confirmar que el CD aplicó la 0030,
+crear/aprobar la plantilla y activar el addon a un tenant de prueba). Fases 3 (autoagenda pública) y 4
 (métricas de no-show) quedaron ahí como futuras, con la unificación de la plantilla
 de leads en tenant_templates.
 
@@ -180,8 +180,9 @@ colgando de assets y la comprobación de dominios de check-entornos pasó EN VAC
 Recolocada tras `routes` y check-entornos endurecido para fallar si producción «no tiene»
 admin.hirevai.com.
 
-**Estado al cierre**: 188 tests + 53 del panel, todo verde; staging desplegado con Hono y
-panel v2; producción SIN tocar (pendiente de push, decisión de Juan).
+**Estado al cierre de aquella fase**: 188 tests + 53 del panel, todo verde; staging
+desplegado con Hono y panel v2; producción aún sin tocar. Ese estado histórico fue
+superado por el cutover en producción registrado arriba, también el 2026-09-01.
 
 ## El webhook de Telegram llevaba 10 días roto por el charset del secreto (2026-08-31)
 

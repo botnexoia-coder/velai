@@ -35,6 +35,13 @@ configuracion.get('/api/admin/stats', async (c) => {
   const t = scope.tenantId;
   const leadW = t ? ' AND tenant_id = ?' : '';
   const leadArgs = t ? [t] : [];
+  // La ventana real es la intersección entre «últimos 30 días» y el periodo en el que
+  // existe el enlace conversación→lead. Se calcula una vez y se bindea: numerador y
+  // denominador no pueden desplazarse ni un milisegundo entre consultas.
+  const thirtyDaysAgo = Date.now() - 30 * 86400000;
+  const trackingSince = Date.parse(`${CONV_TRACKING_SINCE}T00:00:00.000Z`);
+  const captureFrom = new Date(Math.max(thirtyDaysAgo, trackingSince)).toISOString();
+  const captureComplete = thirtyDaysAgo >= trackingSince;
   const statements = [
     env.DB.prepare(`SELECT COUNT(*) AS n FROM leads WHERE created_at >= datetime('now','-30 days')${leadW}`).bind(...leadArgs),
     env.DB.prepare(`SELECT COUNT(*) AS n, MIN(created_at) AS oldest FROM leads WHERE status = 'new'${leadW}`).bind(...leadArgs),
@@ -47,8 +54,15 @@ configuracion.get('/api/admin/stats', async (c) => {
     env.DB.prepare(`SELECT date(created_at) AS d, source, COUNT(*) AS n FROM leads WHERE created_at >= datetime('now','-14 days')${leadW} GROUP BY d, source ORDER BY d`).bind(...leadArgs),
     // Leads por canal: el dato ya estaba en la fila (source) y no se veía en ninguna parte.
     env.DB.prepare(`SELECT source, COUNT(*) AS n FROM leads WHERE created_at >= datetime('now','-30 days')${leadW} GROUP BY source ORDER BY n DESC`).bind(...leadArgs),
-    // Denominador de la tasa de captura: conversaciones atendidas en el mismo periodo.
-    env.DB.prepare(`SELECT channel, SUM(convs) AS n FROM conv_daily WHERE day >= date('now','-30 days')${t ? ' AND tenant_id = ?' : ''} GROUP BY channel`).bind(...leadArgs),
+    // Tasa de captura conversacional: una única fuente para las dos magnitudes. Un
+    // formulario web es un lead, pero no una conversación, y por tanto no entra aquí;
+    // sigue apareciendo en porCanal. `lead_id IS NOT NULL` evita depender de `source`
+    // (texto libre) y conserva Messenger como canal propio.
+    env.DB.prepare(`SELECT channel, COUNT(*) AS convs,
+             SUM(CASE WHEN lead_id IS NOT NULL THEN 1 ELSE 0 END) AS leads
+      FROM conversations
+      WHERE demo = '' AND datetime(started_at) >= datetime(?)${t ? ' AND tenant_id = ?' : ''}
+      GROUP BY channel ORDER BY channel`).bind(captureFrom, ...leadArgs),
     // Valores para el desplegable de «Fuente» del filtro de leads. Salen de los DATOS y
     // no de una lista en código porque `source` es TEXTO LIBRE: /lead acepta el `fuente`
     // que mande la página (app.js, clean(body.fuente, 80)), así que una lista fija dejaría
@@ -87,13 +101,18 @@ configuracion.get('/api/admin/stats', async (c) => {
     })(),
     porCanal: (canalRows.results || []).map((r) => ({ canal: r.source || 'sin canal', n: r.n })),
     fuentes: (fuentesRows.results || []).map((r) => r.source).filter(Boolean),
-    // Tasa de captura por canal Y total. Solo cuenta desde que el registro existe
-    // (2026-08-25): las conversaciones anteriores no se guardaron, y una tasa
-    // calculada con un denominador incompleto sería mentira — el panel lo advierte.
+    // Tasa de captura por canal Y total. Numerador y denominador salen de las mismas
+    // filas, de modo que un porcentaje >100 revela una regresión en vez de maquillarse.
     captura: {
-      conversaciones: (convRows.results || []).reduce((s, r) => s + (r.n || 0), 0),
-      porCanal: (convRows.results || []).map((r) => ({ canal: r.channel, convs: r.n || 0 })),
-      desde: CONV_TRACKING_SINCE,
+      conversaciones: (convRows.results || []).reduce((s, r) => s + Number(r.convs || 0), 0),
+      leads: (convRows.results || []).reduce((s, r) => s + Number(r.leads || 0), 0),
+      porCanal: (convRows.results || []).map((r) => ({
+        canal: r.channel,
+        convs: Number(r.convs || 0),
+        leads: Number(r.leads || 0),
+      })),
+      desde: captureFrom.slice(0, 10),
+      periodoCompleto: captureComplete,
     },
   }, 200, NO_STORE);
 });

@@ -109,9 +109,12 @@ export interface Stats {
   fuentes: string[];
   captura: {
     conversaciones: number;
-    porCanal: { canal: string; convs: number }[];
-    /** Fecha desde la que se cuentan conversaciones (antes, el denominador mentiría). */
+    leads: number;
+    porCanal: { canal: string; convs: number; leads: number }[];
+    /** Inicio efectivo de la ventana comparable. */
     desde: string;
+    /** False durante los primeros 30 días desde que existe el enlace conversación→lead. */
+    periodoCompleto: boolean;
   };
 }
 
@@ -373,11 +376,13 @@ export interface TenantDetail {
  * crudo; para el cliente, channelsForScope lo colapsa a su vocabulario (on/paused/
  * preparing/off) — dos vocabularios a propósito: el cliente nunca lee un diagnóstico.
  */
-export type TenantChannelState = 'live' | 'inactive' | 'unrouted' | 'off' | 'on' | 'paused' | 'preparing';
+export type TenantChannelState = 'live' | 'inactive' | 'unrouted' | 'from_mismatch' | 'off' | 'on' | 'paused' | 'preparing';
 export interface TenantChannel {
   kind: 'web' | 'whatsapp' | 'telegram' | 'messenger';
   address: string | null;
   state: TenantChannelState;
+  /** Perfil técnico que conserva el enrutado de un alias heredado. */
+  managed_by?: string | null;
 }
 
 export interface TenantDetailResponse {

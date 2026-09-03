@@ -152,18 +152,20 @@ async function loadStats(){try{const s=await api('/api/admin/stats');
  // Leads por canal: barra horizontal proporcional al canal que más aporta.
  const cmax=Math.max(1,...(s.porCanal||[]).map(x=>x.n));
  $('#canalRows').innerHTML=(s.porCanal||[]).length?s.porCanal.map(x=>bar(x.canal,x.n,Math.round(x.n/cmax*100),x.n+' leads')).join(''):'<span class="muted">Sin leads en el periodo.</span>';
- // Tasa de captura: leads / conversaciones atendidas. El denominador solo existe desde
- // que se registran conversaciones — si el periodo lo cruza, se advierte en vez de dar
- // un porcentaje inflado.
+ // Tasa de captura conversacional: numerador y denominador llegan agregados sobre las
+ // mismas filas. Los formularios siguen en «Leads por canal», no se hacen pasar por chat.
  const cap=s.captura||{},convs=cap.conversaciones||0;
+ $('#capTitle').textContent='Tasa de captura · '+(cap.periodoCompleto?'30 días':('desde '+(cap.desde||'el inicio del registro')));
  $('#capConv').textContent=miles(convs);
- const pct=convs?Math.round(s.total30/convs*100):null;
- $('#capPct').textContent=pct===null?'—':pct+'%';
- $('#capSub').textContent=convs?(s.total30+' de '+convs+' conversaciones'):'Aún no hay conversaciones contadas';
- const desde=cap.desde||'';
- $('#capRows').innerHTML=(cap.porCanal||[]).map(x=>{const l=(s.porCanal||[]).find(c=>String(c.canal).toLowerCase().includes(x.canal))||{n:0};
-   const p=x.convs?Math.round(l.n/x.convs*100):0;return bar(x.canal,p,Math.min(100,p),l.n+'/'+x.convs+' · '+p+'%')}).join('')
-  +(desde?'<small class="muted">Conversaciones contadas desde el '+esc(desde)+'.</small>':'');
+ const incoherente=(cap.leads||0)<0||(cap.leads||0)>convs||(cap.porCanal||[]).some(x=>(x.leads||0)<0||(x.leads||0)>x.convs);
+ if(incoherente){$('#capPct').textContent='—';$('#capSub').textContent='Datos de captura incoherentes';
+  $('#capRows').innerHTML='<span class="error">Revisa la agregación antes de interpretar esta métrica.</span>'}
+ else{const pct=convs?Math.round((cap.leads||0)/convs*100):null;
+  $('#capPct').textContent=pct===null?'—':pct+'%';
+  $('#capSub').textContent=convs?((cap.leads||0)+' de '+convs+' conversaciones'):'Aún no hay conversaciones contadas';
+  $('#capRows').innerHTML=(cap.porCanal||[]).map(x=>{const p=x.convs?Math.round((x.leads||0)/x.convs*100):0;
+    return bar(x.canal,p,p,(x.leads||0)+'/'+x.convs+' · '+p+'%')}).join('')
+   +'<small class="muted">Solo conversaciones enlazadas a un lead; los formularios se muestran en «Leads por canal».</small>'}
  paint($('#canalRows'));paint($('#capRows'))}
  catch(e){/* las métricas no bloquean el listado */}}
 // Gasto de IA por cliente (solo Velai): reutiliza el componente de barras del

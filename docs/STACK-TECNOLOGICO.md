@@ -13,8 +13,10 @@ Sitio **estático multipágina** servido desde **Cloudflare Pages**, con un úni
 leads y el panel admin. El Worker está dividido en: `vai-worker.js` (entrypoint +
 prompts `SYSTEM`/`DEMOS`/`SUMMARY_PROMPT`) → `worker/app.js` (app de Hono 4 +
 helpers) + `worker/middleware.js` (perímetro del panel) + `worker/routes/*.js`
-(rutas por dominio) + `worker/admin-page.js` (HTML del panel). No hay framework de frontend ni build
-pesado: HTML + CSS + JavaScript vanilla, optimizado para SEO/GEO y velocidad.
+(rutas por dominio). El marketing es HTML + CSS + JavaScript vanilla, sin build
+obligatorio y optimizado para SEO/GEO; el panel v2 es React + TypeScript + Vite,
+compilado a `panel/dist` y servido por el mismo Worker. El panel v1 serializado se
+conserva temporalmente como rollback en `worker/admin-page.js`.
 
 ```
 Navegador ──► Cloudflare Pages (HTML/CSS/JS estáticos)
@@ -38,6 +40,7 @@ Navegador ──► Cloudflare Pages (HTML/CSS/JS estáticos)
 | **CSS3** | Estilos. Custom properties (CSS vars) en `:root`, mayoría inline en cada HTML. |
 | **SCSS** | `site/assets/styles.scss` → se compila a `site/assets/styles.css`. Compilar con: `npx sass --no-source-map --style=compressed site/assets/styles.scss site/assets/styles.css`. |
 | **JavaScript vanilla (ES5/ES6)** | Sin frameworks. IIFE con `'use strict'`. Scripts en `site/assets/`. |
+| **React + TypeScript + Vite** | Panel administrativo v2 en `panel/`; el Worker sirve el build de `panel/dist`. |
 | **Web fonts self-hosted** | Cabinet Grotesk + Satoshi en `.woff2` (`site/fonts/fonts.css`), con `font-display: swap`. |
 
 ### Scripts de frontend
@@ -132,16 +135,23 @@ panel) y `LEAD_RETENTION_MONTHS` (purga RGPD).
   COOP y CSP base con `frame-ancestors`).
 - **Git** — control de versiones (rama `main`).
 - **Entornos** — `producción` (`vai-worker`, D1 `vai-leads`) y `staging`
-  (`vai-worker-staging`, D1 `vai-leads-staging`, sin clientes). Cada push a `main`
-  ensaya en staging y solo después toca producción. Detalle y reglas:
+  (`vai-worker-staging`, D1 `vai-leads-staging`, sin clientes). Cada push no documental
+  de `main` ensaya en staging tras CI verde y solo después toca producción. Detalle y reglas:
   `docs/OPERATIONS.md` §Staging.
-- **Tooling** — una sola dependencia (Hono 4, con lockfile; `npm ci` en CI): `npm run check` = `node --check`
+- **Tooling** — Node **20.19.x o >=22.12** (rango de Vite 7; CI usa el mínimo). El Worker tiene una
+  sola dependencia de runtime (Hono 4, con lockfile; `npm ci` en CI): `npm run check` = `node --check`
   de los JS + `scripts/check-site.mjs` (valida las 27 páginas, JSON-LD, recursos
   internos y marcadores sin sustituir) + `scripts/check-aislamiento.mjs` (ninguna
   consulta del panel sin filtro de tenant ni puerta) + `scripts/check-entornos.mjs`
   (staging y producción no comparten recursos ni se desincronizan) + `node --test`
-  (`test/worker.test.js` y `test/aislamiento.test.js`).
-  CI en `.github/workflows/ci.yml` ejecuta `npm run check` en cada push.
+  (`test/worker.test.js` y `test/aislamiento.test.js`). El catálogo se pasa de forma
+  explícita a `node --test`, portable entre Node 20 y 24 (Node 20 no interpreta el glob
+  `"test/**/*.test.js"` y el autodiscovery alcanza también el subproyecto React), y
+  `check-test-catalog.mjs` falla si aparece un test backend no enumerado. CI añade los
+  tests, typecheck/build y la base de smoke Playwright del panel con API interceptada:
+  no necesita Access ni credenciales, bloquea la red y solo permite GET. El CD solo se
+  dispara tras CI verde y consume su mismo `panel/dist`; el smoke queda pendiente de su
+  primera validación en el runner de GitHub Actions.
 - **Migraciones D1** — `migrations/` (aplicar con `wrangler d1 migrations apply`).
 - El runbook operativo completo (puesta en marcha, deploy, rollback) vive en
   `docs/OPERATIONS.md`. Para implementar Workers o endpoints nuevos, la guía de

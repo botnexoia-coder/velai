@@ -1,7 +1,7 @@
 # Estructura del repo — mapa y reglas
 
 > Fuente de verdad de **qué es cada carpeta y por qué está donde está**.
-> Última revisión: 2026-09-01.
+> Última revisión: 2026-09-03.
 
 ---
 
@@ -55,10 +55,10 @@ El proyecto Pages `velai` (dominio `hirevai.com`) despliega en cada push a
 
 | Elemento | Qué es |
 |---|---|
-| `scripts/` | `check-site.mjs` (valida las 27 páginas de `site/`), `check-aislamiento.mjs`, `check-entornos.mjs`, `check-bundle.mjs` (panel contra bundle real), `render-panel.mjs` (render a PNG) |
+| `scripts/` | `check-site.mjs` (valida las 27 páginas de `site/`), `check-aislamiento.mjs`, `check-entornos.mjs`, `check-test-catalog.mjs` (ningún test backend omitido), `deploy-scope.mjs` (manifiesto y frescura CI→CD), `check-bundle.mjs` (panel contra bundle real), `render-panel.mjs` (render a PNG) |
 | `test/` | `node --test`, sin dependencias |
-| `package.json` | Solo scripts (`npm run check`), sin deps aún |
-| `.github/workflows/` | `ci.yml` (npm run check en cada push), `deploy-worker.yml` (staging → producción) |
+| `package.json` | Scripts (`npm run check`) y Hono; Node 20.19.x o >=22.12 |
+| `.github/workflows/` | `ci.yml` (checks + panel + smoke y artefacto), `deploy-worker.yml` (solo tras CI verde: staging → producción) |
 | `.gitignore` | Ver comentarios dentro; recordar el punto 3 de arriba |
 
 ### (d) Datos y configuración versionados
@@ -102,8 +102,8 @@ modulares** — `routes/` (HTTP), `services/` (lógica de negocio) y adaptadores
 
 ```
 site/              el marketing publicado por Pages (27 páginas + assets/fonts/_headers…)
-worker/            backend: routes/ + services/ + adaptadores (Hono; en curso)
-panel/             panel admin como app React autocontenida (en curso)
+worker/            backend: routes/ + services/ + adaptadores sobre Hono
+panel/             panel admin v2 React, compilado y servido por el Worker
 migrations/        esquema D1
 docs/              documentación
 test/              tests node --test
@@ -129,7 +129,7 @@ dashboard, que es del dueño — pasos restantes y verificación en
 | [`IMPLEMENTADO.md`](./IMPLEMENTADO.md) | Registro consolidado de specs cerradas (el texto íntegro vive en el historial de git) |
 | [`TAREAS-PENDIENTES.md`](./TAREAS-PENDIENTES.md) | Pasos manuales pendientes de Juan (cuentas, IDs, terceros) |
 | [`CONTEXTOS-AMPLIOS.md`](./CONTEXTOS-AMPLIOS.md) | Fases 2–4 de contextos (fase 1 consolidada en IMPLEMENTADO.md) |
-| [`PLAN-PANEL.md`](./PLAN-PANEL.md) + [`H1-PANEL.md`](./H1-PANEL.md)/[`H2-PANEL.md`](./H2-PANEL.md)/[`H3-PANEL.md`](./H3-PANEL.md)/[`H2-BANDEJA.md`](./H2-BANDEJA.md)/[`H2-HANDOFF.md`](./H2-HANDOFF.md) | Plan por hitos del panel (vivos: `panel/` está en construcción) |
+| [`PLAN-PANEL.md`](./PLAN-PANEL.md) + [`H1-PANEL.md`](./H1-PANEL.md)/[`H2-PANEL.md`](./H2-PANEL.md)/[`H3-PANEL.md`](./H3-PANEL.md)/[`H2-BANDEJA.md`](./H2-BANDEJA.md)/[`H2-HANDOFF.md`](./H2-HANDOFF.md) | Especificaciones e historial por hitos del panel; el estado pendiente vigente se consolida en `TAREAS-PENDIENTES.md` |
 | [`ALTACLIENTE.md`](./ALTACLIENTE.md) | Proceso de alta de un cliente nuevo |
 | [`PARA-JOHAN-widget-en-webs-cliente.md`](./PARA-JOHAN-widget-en-webs-cliente.md) | Instrucciones de integración del widget para terceros |
 | [`VOLUMEN-Y-ALMACENAMIENTO.md`](./VOLUMEN-Y-ALMACENAMIENTO.md) | Estimaciones de volumen y límites de almacenamiento |
@@ -139,6 +139,7 @@ dashboard, que es del dueño — pasos restantes y verificación en
 Regla del flujo de specs: al terminar el trabajo de un MD, se borra el MD, el
 resumen va a `IMPLEMENTADO.md` y lo que quede pendiente a `TAREAS-PENDIENTES.md`.
 
-Coherencia verificada el 2026-09-01: todos los enlaces relativos entre docs
-resuelven; no queda ningún doc que `IMPLEMENTADO.md` dé por consolidado y siga
-suelto (los H*-PANEL/PLAN-PANEL siguen vivos porque `panel/` está en curso).
+Coherencia revisada el 2026-09-03: `IMPLEMENTADO.md` registra lo desplegado,
+`TAREAS-PENDIENTES.md` decide qué trabajo sigue activo y los documentos H*-PANEL/
+PLAN-PANEL quedan como especificaciones e historial, no como indicador del estado del
+despliegue.

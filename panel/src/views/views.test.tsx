@@ -21,12 +21,13 @@ import {
 } from '../test/fixtures';
 import { Leads } from './Leads';
 import { Conversaciones } from './Conversaciones';
+import { Dashboard } from './Dashboard';
 
-function providers(children: ReactNode) {
+function providers(children: ReactNode, initialEntry = '/') {
   return (
     <QueryClientProvider client={createQueryClient()}>
       <ToastProvider>
-        <MemoryRouter>{children}</MemoryRouter>
+        <MemoryRouter initialEntries={[initialEntry]}>{children}</MemoryRouter>
       </ToastProvider>
     </QueryClientProvider>
   );
@@ -41,6 +42,79 @@ const baseRoutes = {
 };
 
 afterEach(() => vi.unstubAllGlobals());
+
+describe('vista Dashboard', () => {
+  it('calcula captura con conversaciones enlazadas, sin mezclar formularios ni ocultar un 115% con clamp', async () => {
+    const audited = {
+      ...stats,
+      total30: 138, // el cálculo antiguo habría pintado 115% sobre 120 conversaciones
+      porCanal: [
+        { canal: 'chat web', n: 17 },
+        { canal: 'formulario web', n: 79 },
+        { canal: 'whatsapp', n: 42 },
+      ],
+      captura: {
+        conversaciones: 120,
+        leads: 42,
+        porCanal: [
+          { canal: 'messenger', convs: 10, leads: 4 },
+          { canal: 'web', convs: 70, leads: 18 },
+          { canal: 'whatsapp', convs: 40, leads: 20 },
+        ],
+        desde: '2026-08-26',
+        periodoCompleto: false,
+      },
+    };
+    vi.stubGlobal('fetch', mockFetch({
+      '/api/admin/me': meVelai,
+      '/api/admin/stats': audited,
+      '/api/admin/ai-usage': { days: 30, total: { cost: 0, calls: 0, tokens: 0 }, clientes: [], porDia: [], moneda: 'USD' },
+    }));
+    render(providers(<Dashboard />));
+
+    expect(await screen.findByText('42 de 120 conversaciones')).toBeInTheDocument();
+    expect(screen.getByText('4/10 · 40%')).toBeInTheDocument();
+    expect(screen.getByText('18/70 · 26%')).toBeInTheDocument();
+    expect(screen.getByText('20/40 · 50%')).toBeInTheDocument();
+    expect(screen.queryByText('115%')).not.toBeInTheDocument();
+    expect(screen.getByText(/los formularios se muestran en «Leads por canal»/)).toBeInTheDocument();
+  });
+
+  it('señala una captura incoherente en vez de convertirla en 100%', async () => {
+    vi.stubGlobal('fetch', mockFetch({
+      '/api/admin/me': meVelai,
+      '/api/admin/stats': {
+        ...stats,
+        captura: {
+          conversaciones: 100,
+          leads: 115,
+          porCanal: [{ canal: 'whatsapp', convs: 100, leads: 115 }],
+          desde: '2026-08-26',
+          periodoCompleto: false,
+        },
+      },
+      '/api/admin/ai-usage': { days: 30, total: { cost: 0, calls: 0, tokens: 0 }, clientes: [], porDia: [], moneda: 'USD' },
+    }));
+    render(providers(<Dashboard />));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('Datos de captura incoherentes');
+    expect(screen.queryByText('100%')).not.toBeInTheDocument();
+  });
+
+  it('no rompe si una respuesta antigua todavía no trae el bloque de captura', async () => {
+    const antigua = { ...stats } as Partial<typeof stats>;
+    delete antigua.captura;
+    vi.stubGlobal('fetch', mockFetch({
+      '/api/admin/me': meVelai,
+      '/api/admin/stats': antigua,
+      '/api/admin/ai-usage': { days: 30, total: { cost: 0, calls: 0, tokens: 0 }, clientes: [], porDia: [], moneda: 'USD' },
+    }));
+    render(providers(<Dashboard />));
+
+    expect(await screen.findByText('Tasa de captura · desde el inicio del registro')).toBeInTheDocument();
+    expect(screen.getAllByText('—').length).toBeGreaterThan(0);
+  });
+});
 
 describe('vista Leads', () => {
   it('pinta la tabla con estado, avisos y cliente, y pagina por cursor', async () => {
@@ -129,5 +203,29 @@ describe('vista Conversaciones', () => {
     expect(screen.getByText('El visitante está en la página.')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /devolver a vai/i })).toBeInTheDocument();
     expect(screen.getByPlaceholderText('Escribe tu respuesta…')).toBeInTheDocument();
+  });
+
+  it('abre directamente el hilo enlazado desde un aviso de Messenger', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        const path = url.split('?')[0] ?? url;
+        if (path === '/api/admin/inbox') {
+          const body = url.includes(`conversation=${inboxConThread.thread?.conversation.id}`) ? inboxConThread : inbox;
+          return new Response(JSON.stringify(body), { status: 200, headers: { 'Content-Type': 'application/json' } });
+        }
+        const routes: Record<string, unknown> = baseRoutes;
+        return new Response(JSON.stringify(routes[path] ?? { error: 'not_found' }), {
+          status: path in routes ? 200 : 404,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }),
+    );
+    const conversationId = inboxConThread.thread!.conversation.id;
+    render(providers(<Conversaciones />, `/conversaciones?conversation=${conversationId}`));
+
+    expect(await screen.findByText('¡Claro! ¿Por la mañana o por la tarde?')).toBeInTheDocument();
+    expect(screen.getByText('Tienes el control')).toBeInTheDocument();
   });
 });

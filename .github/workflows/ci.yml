@@ -9,18 +9,90 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          # deploy-scope compara todo el push, aunque contenga varios commits.
+          fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
-          node-version: 24
+          node-version: '20.19'
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            panel/package-lock.json
       # Desde la migración a Hono el repo tiene dependencias (y lockfile): sin
       # instalar, los tests fallan en el primer `import 'hono'`.
+      - name: calcular alcance del despliegue
+        if: github.event_name == 'push'
+        shell: bash
+        env:
+          DEPLOY_BEFORE: ${{ github.event.before }}
+          DEPLOY_SHA: ${{ github.sha }}
+          DEPLOY_CI_RUN_ID: ${{ github.run_id }}
+          DEPLOY_METADATA_PATH: deploy-metadata.json
+        run: |
+          set -euo pipefail
+          ZERO_SHA=0000000000000000000000000000000000000000
+          if [[ "$DEPLOY_BEFORE" == "$ZERO_SHA" ]]; then
+            node scripts/deploy-scope.mjs metadata </dev/null
+          elif ! git cat-file -e "${DEPLOY_BEFORE}^{commit}" 2>/dev/null; then
+            echo "::warning title=Base de diff inalcanzable::El commit $DEPLOY_BEFORE no está disponible; se fuerza alcance initial_push para no omitir un despliegue."
+            DEPLOY_BEFORE="$ZERO_SHA" node scripts/deploy-scope.mjs metadata </dev/null
+          else
+            git diff --name-only --no-renames "${DEPLOY_BEFORE}..${DEPLOY_SHA}" -- \
+              | node scripts/deploy-scope.mjs metadata
+          fi
       - run: npm ci
       - run: npm run check
-      # Panel v2: sus tests y su build (incluye tsc --noEmit). Proyecto npm aparte
-      # dentro de panel/ — un error de tipos del panel pone CI en rojo, a propósito.
-      - name: panel v2 · tests y build
+      # Panel v2: proyecto npm aparte. El E2E de abajo hace el único build y prueba
+      # exactamente ese dist; aquí fallan antes los unitarios y el typecheck.
+      - name: panel v2 · tests y typecheck
         working-directory: panel
         run: |
           npm ci
           npm test -- --run
-          npm run build
+          npm run typecheck
+      - name: panel v2 · caché del navegador Playwright
+        id: playwright-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: ${{ runner.os }}-playwright-${{ hashFiles('panel/package-lock.json') }}
+      - name: panel v2 · instalar Chromium y dependencias
+        if: steps.playwright-cache.outputs.cache-hit != 'true'
+        working-directory: panel
+        run: npx playwright install --with-deps chromium
+      - name: panel v2 · validar dependencias del Chromium cacheado
+        if: steps.playwright-cache.outputs.cache-hit == 'true'
+        working-directory: panel
+        run: npx playwright install-deps chromium
+      - name: panel v2 · smoke E2E sin credenciales
+        working-directory: panel
+        run: npm run test:e2e
+      - name: panel v2 · diagnóstico Playwright
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report-${{ github.run_id }}
+          path: |
+            panel/playwright-report/
+            panel/test-results/
+          if-no-files-found: ignore
+          retention-days: 7
+      # El CD descarga este mismo dist solo si TODO el workflow quedó verde.
+      - name: panel v2 · artefacto probado
+        uses: actions/upload-artifact@v4
+        with:
+          name: panel-dist
+          path: panel/dist/
+          if-no-files-found: error
+          retention-days: 7
+      # La vía automática y workflow_dispatch consumen esta decisión; no vuelven a
+      # implementar filtros de paths por separado.
+      - name: manifiesto de despliegue validado
+        if: github.event_name == 'push'
+        uses: actions/upload-artifact@v4
+        with:
+          name: deploy-metadata
+          path: deploy-metadata.json
+          if-no-files-found: error
+          retention-days: 7

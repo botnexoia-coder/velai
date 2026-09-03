@@ -1,11 +1,71 @@
-# Tareas pendientes — por tu parte (Juan)
+# Backlog de Velai — pendientes por responsable
 
-> Cosas que el código **no puede hacer solo** y dependen de ti (cuentas, IDs,
-> despliegues, datos reales). Marca las casillas a medida que las completes.
-> Última actualización: 2026-08-17.
+> Inventario reconciliado el **2026-09-03** contra `main` en
+> `5b1dfb35b1ed92376f5526089428eefe8c859dd0`. No se consultó ni modificó producción
+> durante esta revisión: cuando el repositorio prueba el código pero falta evidencia
+> del entorno, el pendiente se clasifica como **OPERACIÓN**, no vuelve a abrirse como
+> trabajo de código.
 
 > Las specs ya implementadas están consolidadas en
 > [`IMPLEMENTADO.md`](./IMPLEMENTADO.md) (texto íntegro en el historial de git).
+
+## Resumen activo por tipo (fuente de verdad)
+
+Las secciones históricas de abajo conservan contexto y pasos concretos. Esta lista
+decide quién puede cerrar cada cosa:
+
+### CÓDIGO
+
+- [ ] Contextos amplios fases 2–4 (`tenant_docs`, consulta indexada y, solo a escala,
+      Vectorize); no recortar prompts como sustituto.
+- [ ] Informe semanal por WhatsApp e Instagram cuando se decida activar esos canales.
+- [ ] Canales múltiples fase 2: alta de secundarios, salida por el canal de llegada y
+      fusión de datos del alias `velai-messenger`. La auditoría de 2026-09-02 ya hace
+      que Conexiones muestre ese alias atendido y quién lo gestiona, sin migrarlo.
+- [ ] Exponer `ai_daily_limit`, retirar `.vai-fab`, completar CSP en Report-Only y los
+      acabados de Google Calendar (página de integración y botón oficial).
+- [ ] Confirmaciones F3/F4 y unificación de la plantilla legacy de leads, solo cuando
+      negocio priorice esas fases.
+
+### OPERACIÓN (código ya disponible; requiere entorno o una persona)
+
+- [ ] Completar y verificar staging: clave Anthropic propia, primer job de CD y login
+      con rol cliente. Staging seguirá sin Twilio/Telegram por seguridad.
+- [ ] Vincular los Telegram de clientes, pegar tokens de subcuentas, fijar topes de
+      gasto y completar las pruebas vivas de chat, historial, informes y Messenger.
+- [ ] Revisar logs/cupos, WAF y Access; purgar cachés/snippets antiguos; retirar workers
+      legacy solo después de comprobar equivalencia.
+- [ ] Confirmar en el job de CD de `main` que las migraciones 0030–0032 y el Worker
+      quedaron aplicados. El proceso ya es automático staging→producción; no ejecutar
+      migraciones manuales en paralelo.
+- [ ] Confirmar el primer CI verde del smoke Playwright y que `deploy-worker` solo nace
+      después; si falla, descargar el artifact `playwright-report-*` para ver la traza.
+- [ ] Activar Confirmaciones en un tenant de prueba después de que su plantilla esté
+      aprobada y hacer el recorrido real de ambos botones.
+
+### TERCEROS
+
+- [ ] Meta/Twilio: verificaciones de negocio, categorías/aprobaciones de plantillas,
+      Embedded Signup/Tech Provider y cualquier ticket por plantillas ausentes.
+- [ ] Si el equipo necesita un enlace clicable también en el aviso WhatsApp de un lead
+      Messenger, crear y aprobar una plantilla nueva: la actual tiene cuatro variables
+      fijas. Telegram ya enlaza de forma segura al hilo del panel.
+- [ ] Google: enviar la verificación OAuth, esperar aprobación y reactivar protecciones
+      de borde después; validación legal de privacidad/LSSI.
+- [ ] Cambios en webs de clientes, bots de BotFather y logos que deben aportar sus
+      propietarios; R2 es opcional y operativo.
+
+### DECISIONES DE NEGOCIO
+
+- [ ] Presupuesto/canal de campañas, precio del addon Confirmaciones, supuestos de
+      ahorro, política al agotar IA, Colombia y futuras demos/nurturing.
+
+### LISTO EN ESTE WORKTREE, AÚN NO DESPLEGADO
+
+- [x] Auditoría técnica: tasa de captura con población/ventana única, estado coherente
+      de Messenger, soporte Node 20.19+, tests `act` limpios y base E2E sin credenciales.
+      El smoke no se declara validado hasta su primer CI verde. Requiere revisión y el
+      CD normal; este trabajo no hace commit ni deploy.
 
 ---
 
@@ -228,17 +288,16 @@ en tres horizontes: [`PLAN-PANEL.md`](./PLAN-PANEL.md) es el mapa y las decision
 
 ---
 
-## 🔵 Confirmaciones de cita (implementado 2026-09-01 — pasos de activación)
+## 🔵 Confirmaciones de cita (código en `main` desde 2026-09-01 — activación operativa)
 
 El código está en `main` (ver IMPLEMENTADO.md §Confirmaciones); nada sale hasta
-completar esto, EN ESTE ORDEN:
+completar esto, EN ESTE ORDEN. La aplicación de migraciones pertenece al CD automático,
+no a una segunda ejecución manual:
 
-- [ ] **Aplicar las migraciones**: `npx wrangler d1 migrations apply vai-leads --remote`
-      (la `0030_confirmaciones.sql`, la `0031_plantilla_opciones.sql` y la
-      `0032_solicitudes_y_categoria.sql` están solo como fichero) y desplegar el
-      worker DESPUÉS de migrar — la 0031 pasa el kind del ledger a 'previo' y el
-      worker nuevo escribe ese kind; la 0032 trae las solicitudes de cliente y la
-      categoría real (el backfill de gogestion sale solo con el cron).
+- [ ] **Verificar el job de CD de `main`** que contiene las migraciones 0030, 0031 y
+      0032: debe mostrar migraciones+deploy+humo verdes primero en staging y después en
+      producción. Si no hay evidencia, se reejecuta/repara el job; no se lanzan las
+      migraciones a mano mientras el estado sea incierto.
 - [ ] **Crear la plantilla de recordatorios** del tenant de prueba: panel →
       Calendario → card «Confirmaciones» → «Crear plantilla de recordatorios»
       (necesita subcuenta de Twilio con token). Se abre el diálogo de configuración:

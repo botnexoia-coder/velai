@@ -823,7 +823,7 @@ Para volver a entrar te pedirá otro código por correo."><svg viewBox="0 0 24 2
 <div class="chartcard"><b>Leads por día · 14 días</b><div id="chart"></div><div class="chartlabels"><span id="chartFrom"></span><span id="chartTo"></span></div></div>
 <div class="grid2 mt12">
 <div class="chartcard"><b>Leads por canal · 30 días</b><div id="canalRows" class="mt6 muted">—</div></div>
-<div class="chartcard"><b>Tasa de captura · 30 días</b><div class="metrics mt6"><div class="stat"><b>Conversaciones</b><span class="n" id="capConv">—</span></div><div class="stat"><b>Acaban en lead</b><span class="n" id="capPct">—</span><small id="capSub"></small></div></div><div id="capRows" class="mt6 muted"></div></div>
+<div class="chartcard"><b id="capTitle">Tasa de captura</b><div class="metrics mt6"><div class="stat"><b>Conversaciones</b><span class="n" id="capConv">—</span></div><div class="stat"><b>Acaban en lead</b><span class="n" id="capPct">—</span><small id="capSub"></small></div></div><div id="capRows" class="mt6 muted"></div></div>
 </div>
 <div class="chartcard velai-only mt12" id="aiCard"><div class="aihead"><b>Gasto de IA</b><span class="sel"><select id="aiDays"><option value="7">7 días</option><option value="30" selected>30 días</option><option value="90">90 días</option></select></span></div>
 <div class="metrics mt6"><div class="stat"><b>Coste del periodo</b><span class="n" id="aiCost">—</span><small id="aiCostSub"></small></div>

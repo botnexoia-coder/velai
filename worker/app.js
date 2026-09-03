@@ -22,9 +22,10 @@ import { templateKind, templateOptions } from './plantillas.js';
 const JSON_HEADERS = { 'Content-Type': 'application/json; charset=utf-8' };
 // URL pública del worker: webhook de Twilio (senders) y de Telegram apuntan aquí.
 const WORKER_PUBLIC_URL = 'https://vai-worker.botnexo-ia.workers.dev';
-// Desde cuándo se cuentan conversaciones (migración 0020): antes de esta fecha no hay
-// denominador y la tasa de captura no se puede calcular sin engañar.
-export const CONV_TRACKING_SINCE = '2026-08-25';
+// Desde cuándo existe `conversations.lead_id` (migración 0021). La tasa de captura
+// usa esas mismas filas para numerador y denominador; `conv_daily` empezó un día antes,
+// pero no permite saber qué conversación concreta acabó en lead.
+export const CONV_TRACKING_SINCE = '2026-08-26';
 export const PUBLIC_MEDIA_BASE = 'https://api.hirevai.com'; // dominio propio: no lo cortan los adblock
 export const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 export const STATUSES = new Set(['new', 'contacted', 'qualified', 'won', 'lost', 'spam']);
@@ -820,20 +821,56 @@ export async function tenantTokenColumn(env, tenantId, body) {
 // WhatsApp no está enrutado eso es trabajo pendiente NUESTRO, no un problema que él pueda
 // accionar — se le dice que lo estamos dejando listo, no «404 unknown_tenant». Velai, en
 // la misma vista, sigue viendo el estado crudo: ahí el diagnóstico sí sirve.
-const CLIENT_STATE = { live: 'on', inactive: 'paused', unrouted: 'preparing', off: 'off' };
+const CLIENT_STATE = { live: 'on', inactive: 'paused', unrouted: 'preparing', from_mismatch: 'preparing', off: 'off' };
 export function channelsForScope(scope, channels) {
   if (scope.role === 'velai') return channels;
   return channels.map((c) => ({ ...c, state: CLIENT_STATE[c.state] || 'off' }));
 }
 
+// Alias técnicos heredados. `velai-messenger` nació antes de que `tenant_channels`
+// soportara varios canales por cliente y sigue siendo dueño del enrutado/histórico.
+// Se declara, no se infiere por prefijos: un slug parecido de otro cliente no puede
+// mezclarse por accidente. Conexiones lo presenta bajo el negocio principal y dice
+// qué perfil lo gestiona; Canales conserva la fila física.
+const LEGACY_CHANNEL_ALIASES = { velai: ['velai-messenger'] };
+
+/** Una sola interpretación del estado de una fila enrutada para Canales y Conexiones. */
+export function routingChannelState(row) {
+  if (!row.slug) return 'orphan';
+  if (!row.active) return 'inactive';
+  if (row.kind === 'whatsapp' && row.twilio_from && row.twilio_from !== row.address) return 'from_mismatch';
+  return 'live';
+}
+
 export async function tenantChannelSummary(env, tenant) {
-  const rows = (await env.DB.prepare('SELECT address, kind FROM tenant_channels WHERE tenant_id=?').bind(tenant.id).all()).results || [];
-  const byKind = {};
-  for (const r of rows) byKind[r.kind] = r.address;
+  // Object.hasOwn evita que slugs válidos como "constructor" hereden propiedades del
+  // prototipo. Los alias solo prestan Messenger: nunca WhatsApp ni futuros kinds.
+  const aliases = Object.hasOwn(LEGACY_CHANNEL_ALIASES, tenant.slug) ? LEGACY_CHANNEL_ALIASES[tenant.slug] : [];
+  const aliasSql = aliases.length ? ` OR (t.slug IN (${aliases.map(() => '?').join(',')}) AND c.kind='messenger')` : '';
+  const rawRows = (await env.DB.prepare(`SELECT c.address, c.kind, c.tenant_id,
+           t.slug, t.name, t.active, t.twilio_from
+    FROM tenant_channels c JOIN tenants t ON t.id = c.tenant_id
+    WHERE c.tenant_id=?${aliasSql}`).bind(tenant.id, ...aliases).all()).results || [];
+  const byKind = Object.create(null);
+  for (const raw of rawRows) {
+    // Compatibilidad con el fallback y con D1 antiguo: si una fila propia no trae las
+    // columnas del JOIN, el tenant ya leído contiene la misma verdad.
+    const r = raw.tenant_id ? raw : { ...tenant, ...raw, tenant_id: tenant.id };
+    if (r.tenant_id !== tenant.id && r.kind !== 'messenger') continue;
+    if (!byKind[r.kind] || r.tenant_id === tenant.id) byKind[r.kind] = r;
+  }
   const primary = /^(whatsapp|messenger):/.exec(String(tenant.channel_address || ''));
-  if (primary && !byKind[primary[1]]) byKind[primary[1]] = tenant.channel_address; // enruta por el fallback
+  if (primary && !byKind[primary[1]]) {
+    // Enruta por el fallback histórico aunque aún no exista el espejo en la tabla.
+    byKind[primary[1]] = { ...tenant, tenant_id: tenant.id, kind: primary[1], address: tenant.channel_address };
+  }
   const off = (kind) => ({ kind, address: null, state: 'off' });
-  const on = (kind, address) => ({ kind, address, state: tenant.active ? 'live' : 'inactive' });
+  const routed = (kind, row) => ({
+    kind,
+    address: row.address,
+    state: routingChannelState(row),
+    ...(row.tenant_id !== tenant.id ? { managed_by: row.name || row.slug } : {}),
+  });
   // Direcciones LEGIBLES: el dominio del cliente en vez del slug y el nombre del grupo en
   // vez del chat_id. Un `-100123456789` no le dice nada a nadie, y menos al cliente.
   let web = tenant.slug;
@@ -841,11 +878,13 @@ export async function tenantChannelSummary(env, tenant) {
   const channels = [{ kind: 'web', address: web, state: tenant.active ? 'live' : 'inactive' }];
   // `unrouted` es el caso gogestion: sender propio en Twilio y ninguna fila que lo
   // enrute. Aquí se ve en la ficha, no solo en la vista global de Canales.
-  if (byKind.whatsapp) channels.push(on('whatsapp', byKind.whatsapp));
+  if (byKind.whatsapp) channels.push(routed('whatsapp', byKind.whatsapp));
   else if (tenant.sender_sid && tenant.twilio_from) channels.push({ kind: 'whatsapp', address: tenant.twilio_from, state: 'unrouted' });
   else channels.push(off('whatsapp'));
-  channels.push(tenant.telegram_chat_id ? on('telegram', tenant.telegram_chat_title || String(tenant.telegram_chat_id)) : off('telegram'));
-  channels.push(byKind.messenger ? on('messenger', byKind.messenger) : off('messenger'));
+  channels.push(tenant.telegram_chat_id
+    ? { kind: 'telegram', address: tenant.telegram_chat_title || String(tenant.telegram_chat_id), state: tenant.active ? 'live' : 'inactive' }
+    : off('telegram'));
+  channels.push(byKind.messenger ? routed('messenger', byKind.messenger) : off('messenger'));
   return channels;
 }
 
@@ -1261,7 +1300,16 @@ export function escapeHtml(value) {
 // El título lleva el NOMBRE del cliente dueño del lead (pedido de Juan, 2026-08-22:
 // el primer lead real de Diálogos llegó como «VELAI»); sin tenant (leads de la web
 // propia), Velai.
-function notificationText(lead, tenant) {
+function messengerThreadUrl(env, lead) {
+  if (lead.source !== 'messenger' || lead.whatsapp || !UUID_RE.test(String(lead.conversation_id || ''))) return '';
+  try {
+    const origin = new URL(env.ADMIN_ORIGIN);
+    if (origin.protocol !== 'https:' && origin.protocol !== 'http:') return '';
+    return `${origin.origin}/conversaciones?conversation=${encodeURIComponent(lead.conversation_id)}`;
+  } catch (_) { return ''; }
+}
+
+function notificationText(env, lead, tenant) {
   const owner = (tenant && tenant.name) ? String(tenant.name).toUpperCase() : 'VELAI';
   let text = `📨 <b>NUEVO LEAD — ${escapeHtml(owner)} (${escapeHtml(lead.source)})</b>\n\n`;
   if (lead.name) text += `👤 Nombre: ${escapeHtml(lead.name)}\n`;
@@ -1271,6 +1319,8 @@ function notificationText(lead, tenant) {
   if (lead.channel) text += `📡 Canal: ${escapeHtml(lead.channel)}\n`;
   if (lead.need) text += `🎯 Necesidad: ${escapeHtml(lead.need)}\n`;
   if (lead.note) text += `📝 ${escapeHtml(lead.note)}\n`;
+  const threadUrl = messengerThreadUrl(env, lead);
+  if (threadUrl) text += `💬 <a href="${escapeHtml(threadUrl)}">Abrir conversación en el panel</a>\n`;
   return text + '\n⚡ <b>Contactar hoy mismo</b>';
 }
 
@@ -1349,7 +1399,7 @@ async function deliver(env, channel, lead, tenant) {
         const opsKey = `opsping:${dedupeId}`;
         if (!dedupeId || !env.KV || !(await env.KV.get(opsKey))) {
           if (dedupeId && env.KV) await env.KV.put(opsKey, '1', { expirationTtl: 30 * 86400 });
-          await sendTelegramText(env, notificationText(lead, tenant), env.TELEGRAM_CHAT_ID);
+          await sendTelegramText(env, notificationText(env, lead, tenant), env.TELEGRAM_CHAT_ID);
         }
       } catch (_) { /* la copia de Velai jamás decide el estado del aviso del cliente */ }
     }
@@ -1358,10 +1408,10 @@ async function deliver(env, channel, lead, tenant) {
     // grupo tiene Temas registrados, Vai clasifica el lead hacia el que encaje.
     const botToken = tenant ? await tenantTelegramToken(env, tenant) : null;
     const threadId = tenant ? await telegramThreadFor(env, tenant, lead) : null;
-    let outcome = await sendTelegramText(env, notificationText(lead, tenant), chatId, { allowFallback: false, botToken, threadId });
+    let outcome = await sendTelegramText(env, notificationText(env, lead, tenant), chatId, { allowFallback: false, botToken, threadId });
     if (!outcome.ok && threadId) {
       // Tema borrado o hilo cerrado: el aviso cae al chat General, nunca se pierde.
-      outcome = await sendTelegramText(env, notificationText(lead, tenant), chatId, { allowFallback: false, botToken });
+      outcome = await sendTelegramText(env, notificationText(env, lead, tenant), chatId, { allowFallback: false, botToken });
     }
     return outcome;
   }
@@ -1442,7 +1492,7 @@ function inputToNotifiable(input) {
   return {
     source: input.source, name: input.name, whatsapp: input.whatsapp, whatsapp_normalized: input.phone,
     sector: input.sector, messages_per_day: input.messagesPerDay, channel: input.channel,
-    need: input.need, note: input.note,
+    need: input.need, note: input.note, conversation_id: input.conversationId,
   };
 }
 
@@ -1565,6 +1615,26 @@ function leadCaptureDone(env, tenant, fields, userTurns) {
   return true;
 }
 
+// Las marcas nuevas guardan el leadId, pero durante 30 días pueden sobrevivir marcas
+// antiguas con valor "1". En ese caso se resuelve por request_id, siempre dentro del
+// tenant. Así una sesión nueva de 72 h queda enlazada al mismo lead sin volver a avisar.
+async function linkMarkedCapture(env, tenant, requestId, markerValue, convId, currentLeadId = null) {
+  // convLoad ya leyó este dato con el resto de la sesión. Si existe, no hace falta
+  // buscar el lead antiguo ni escribir de nuevo la misma FK.
+  if (!convId || currentLeadId) return;
+  let leadId = UUID_RE.test(String(markerValue || '')) ? String(markerValue) : '';
+  if (!leadId && env.DB) {
+    try {
+      const existing = await env.DB.prepare('SELECT id FROM leads WHERE tenant_id=? AND request_id=? LIMIT 1')
+        .bind(tenant.id, requestId).first();
+      leadId = existing && existing.id ? String(existing.id) : '';
+    } catch (error) {
+      console.log(JSON.stringify({ level: 'warn', code: 'marked_lead_lookup_failed', tenant: tenant.slug, error: clean(String(error.message || error), 60) }));
+    }
+  }
+  if (leadId) await convLinkLead(env, convId, leadId);
+}
+
 async function captureChatLead(config, env, ctx, tenant, body, phone, messages, convId) {
   // Mismas guardas que el canal WhatsApp: una captura por conversación (marca en KV),
   // mínimo 2 turnos del usuario. Claves namespaceadas por tenant: dos clientes con el
@@ -1588,14 +1658,20 @@ async function captureChatLead(config, env, ctx, tenant, body, phone, messages, 
   if (result.ok && env.KV && leadCaptureDone(env, tenant, fields, userTurns)) await env.KV.put(mark, '1', { expirationTtl: 30 * 86400 });
 }
 
-// El canal WhatsApp también captura leads (regresión corregida): el teléfono es el
-// From de Twilio — el cliente no tiene que escribir su número — y se captura una
-// sola vez por remitente (marca en KV + request_id idempotente `wa:<phone>`).
+// Los canales de Twilio también capturan leads: WhatsApp conserva el teléfono y
+// Messenger conserva únicamente su PSID en el request_id (nunca en campos de teléfono).
+// Se captura una sola vez por remitente mediante marca en KV + request_id idempotente.
 // Se dispara con intención comercial mínima: ≥2 turnos del cliente y un resumen
 // de Haiku que detecte negocio o necesidad.
-async function captureWhatsAppLead(config, env, ctx, tenant, from, phone, messages, convId, options = {}) {
-  const mark = `lead:wa:${tenant.id}:${from}`;
-  if (env.KV && await env.KV.get(mark)) return;
+async function captureWhatsAppLead(config, env, ctx, tenant, from, contactId, messages, convId, options = {}) {
+  const source = from.startsWith('messenger:') ? 'messenger' : 'whatsapp';
+  const mark = `lead:${source === 'messenger' ? 'messenger' : 'wa'}:${tenant.id}:${from}`;
+  const requestId = `${source === 'messenger' ? 'messenger' : 'wa'}:${tenant.id}:${contactId}`;
+  const marked = env.KV ? await env.KV.get(mark) : null;
+  if (marked) {
+    await linkMarkedCapture(env, tenant, requestId, marked, convId, options.currentLeadId);
+    return;
+  }
   const userTurns = messages.filter((m) => m.role === 'user').length;
   // Con force (pidió una persona y no había nadie) basta UN turno: el lead es lo único que
   // le queda al negocio de esa petición, y perderlo por la guarda de dos turnos sería peor.
@@ -1605,12 +1681,18 @@ async function captureWhatsAppLead(config, env, ctx, tenant, from, phone, messag
   if (!options.force && !fields.need && !fields.sector) return;
   if (options.force && !fields.need) fields.need = 'Pidió hablar con una persona del equipo';
   const result = await storeLead(env, ctx, {
-    requestId: `wa:${tenant.id}:${phone}`, source: 'whatsapp',
+    requestId, conversationId: convId, source,
     tenantId: tenant.id, tenantIsDefault: tenant.slug === defaultTenantSlug(env),
-    whatsapp: from.replace(/^whatsapp:/i, ''), phone, ...fields, score: null,
+    // Un PSID de Messenger no es un teléfono: no se mete en las columnas WhatsApp.
+    // El hilo queda enlazado por convLinkLead y el request_id conserva la idempotencia.
+    whatsapp: source === 'whatsapp' ? contactId : null,
+    phone: source === 'whatsapp' ? contactId : null,
+    ...fields, score: null,
   });
   if (result.ok) await convLinkLead(env, convId, result.leadId);
-  if (result.ok && env.KV && leadCaptureDone(env, tenant, fields, userTurns)) await env.KV.put(mark, '1', { expirationTtl: 30 * 86400 });
+  if (result.ok && env.KV && leadCaptureDone(env, tenant, fields, userTurns)) {
+    await env.KV.put(mark, result.leadId || '1', { expirationTtl: 30 * 86400 });
+  }
 }
 
 // ── Calendario por tenant (SPEC-CALENDARIO fase 1, solo Google) ──────────────
@@ -2270,11 +2352,11 @@ const UNANSWERED_RE = /no (?:lo )?sé(?![a-z])|no tengo (?:esa|esta|la) informac
 // rechazada no debe dejar fila.
 async function convLoad(env, tenant, channel, externalId, inbox = null) {
   const since = new Date(Date.now() - CONV_SESSION_HOURS * 3600000).toISOString();
-  const row = await env.DB.prepare(`SELECT id, demo, msgs, state, state_at, agent_email FROM conversations
+  const row = await env.DB.prepare(`SELECT id, demo, msgs, state, state_at, agent_email, lead_id FROM conversations
      WHERE tenant_id=? AND channel=? AND external_id=? AND last_at > ?
      ORDER BY last_at DESC LIMIT 1`).bind(tenant.id, channel, externalId, since).first();
   const base = { tenant: tenant.id, channel, externalId, inbox };
-  if (!row) return { ...base, id: crypto.randomUUID(), demo: '', msgs: 0, isNew: true, messages: [], state: 'bot', stateAt: null };
+  if (!row) return { ...base, id: crypto.randomUUID(), demo: '', msgs: 0, isNew: true, messages: [], state: 'bot', stateAt: null, leadId: null };
   // DESC + LIMIT + reverse: leer la cola de una conversación larga por el índice, no
   // barrer la conversación entera para quedarse con el final.
   const rows = (await env.DB.prepare('SELECT role, text FROM conv_messages WHERE conversation_id=? ORDER BY id DESC LIMIT ?')
@@ -2282,6 +2364,7 @@ async function convLoad(env, tenant, channel, externalId, inbox = null) {
   return {
     ...base, id: row.id, demo: row.demo || '', msgs: Number(row.msgs) || 0, isNew: false,
     state: row.state || 'bot', stateAt: row.state_at || null, agentEmail: row.agent_email || null,
+    leadId: row.lead_id || null,
     // 'agent' se le presenta al modelo como 'assistant': la API solo conoce user y
     // assistant, y el modelo TIENE que ver lo que dijo la persona del equipo — si no, al
     // expirar la pausa retomaría la conversación contradiciéndola.
@@ -2598,12 +2681,18 @@ async function settleTwilioReply(config, env, ctx, tenant, from, message, conv, 
   if (reply) turns.push({ role: 'assistant', content: reply });
   const trail = [...conv.messages, ...turns].slice(-CONV_WINDOW);
   await convAppend(env, conv, turns);
-  const phone = normalizePhone(from.replace(/^whatsapp:/i, ''));
-  if (phone) {
+  // Messenger usa un PSID de hasta 25 dígitos, no un E.164: pasarlo por
+  // normalizePhone lo descartaba a partir de 16 y hacía inalcanzable su captura.
+  const contactId = from.startsWith('messenger:')
+    ? (/^messenger:\d{5,25}$/i.test(from) ? from.slice('messenger:'.length) : '')
+    : normalizePhone(from.replace(/^whatsapp:/i, ''));
+  if (contactId) {
     // Pedir hablar con una persona ES intención comercial suficiente: si nadie pudo
     // atender, el lead se fuerza en vez de esperar a que el resumen traiga sector o
     // necesidad. Es lo único que queda del handoff cuando no hay asesores.
-    ctx.waitUntil(captureWhatsAppLead(config, env, ctx, tenant, from, phone, trail, conv.id, { force: wantsHuman }).catch((error) => {
+    ctx.waitUntil(captureWhatsAppLead(config, env, ctx, tenant, from, contactId, trail, conv.id, {
+      force: wantsHuman, currentLeadId: conv.leadId,
+    }).catch((error) => {
       console.log(JSON.stringify({ level: 'error', code: 'wa_lead_capture_failed', tenant: tenant.slug, error: error.name }));
     }));
   }
@@ -2705,12 +2794,9 @@ export async function handleTwilio(request, env, ctx, config) {
   // `to` es la dirección del tenant a la que escribió el cliente final: es por la que
   // hay que responder desde el panel, no por tenants.twilio_from (migración 0023).
   const conv = await convLoad(env, tenant, channel, from, to);
-  // OJO: el CONTADOR sigue diciendo 'whatsapp' también para Messenger, aunque la
-  // conversación se guarde con su canal real. No es descuido: el panel cruza este
-  // denominador con `leads.source`, y captureWhatsAppLead escribe 'whatsapp' para los dos
-  // canales. Un 'messenger' aquí dejaría a Messenger con 0 leads sobre N conversaciones y
-  // le inflaría la tasa a WhatsApp. Se separan cuando se separe también el origen del lead.
-  if (conv.isNew) ctx.waitUntil(recordConversation(env, tenant, 'whatsapp'));
+  // El agregado histórico conserva su utilidad para informes, pero ya no mezcla
+  // Messenger con WhatsApp: la fuente del lead y la conversación usan el canal real.
+  if (conv.isNew) ctx.waitUntil(recordConversation(env, tenant, channel));
   const history = [...conv.messages, { role: 'user', content: message }].slice(-CONV_WINDOW);
   // La cuenta atrás de la toma de control vence AQUÍ además de en el cron: el cron corre
   // cada 5 min, así que si la persona vuelve a escribir y el plazo ya pasó, la IA le
@@ -3980,4 +4066,4 @@ export function createWorker(config) {
   };
 }
 
-export const testing = { scheduled, MINUTE_CRON, processReminders, reminderHoursFor, reminderTemplateVariables, samePhone, tenantTemplate, pollTemplateApprovals, REMINDER_KIND, waitedMin, QUEUE_MAX_MIN, QUEUE_WAIT_TEXT, canAttend, velaiTenantId, handleChatPoll, VISITOR_AWAY_MS, expireTakeovers, NO_ADVISOR_TEXT, graceExpired, systemWithHandoff, HANDOFF_ON, HANDOFF_OFF, supportWindows, withinSupportHours, advisorAvailable, CONV_STATES, TAKEOVER_GRACE_MIN, settleReply, TRUNCATED_CLOSING, trimToSentence, waBody, replyWindow, reportPeriod, reportMetric, weeklyReportText, weeklyStats, sendWeeklyReports, convLoad, convAppend, convLinkLead, convFilters, convRetentionDays, UNANSWERED_RE, CONV_WINDOW, cloudflareUsage, CF_FREE_LIMITS, recordConversation, aiCost, recordAiUsage, rateLimited, memLimited, applySenderProfile, pushSenderProfile, clean, persistLead, leadAlertStatus, captureWhatsAppLead, leadFromSummary, leadCaptureDone, errorResponseParts, tenantByAddress, syncPrimaryChannel, assertChannelFree, normalizePhone, extractPhone, safeUtm, publicCors, validTwilioSignature, callAnthropic, callAnthropicRaw, runToolLoop, calendarExecutor, calendarSystem, tenantCalendar, validCalendarDate, availableSlots, handleCalendarCallback, calendarCallbackFor, sendTwilioText, timingSafeEqual, telegramBotUsername, telegramSetWebhook, telegramWebhookInfo, handleTelegramWebhook, sendTelegramText, tenantTelegramToken, telegramThreadFor, registerTelegramTopic, csvCell, expiryDate, leadFilters, isDemoKey, templateVar, leadTemplateVariables, readJson, deliver, drainQueuedLeads, verifyTurnstile, systemFor, validateTenant, invalidateTenantCache, tenantWriteError, assertNotActivePending, tenantChannelSummary, channelsForScope, handleProvision, pollProvisioning, fillSeries, resolveScope, scopeClause, assertOwnTenant, clienteAllowed, adminRouter, recordAuthFailure, handleAdmin, handleWidgetBoot, allowedOrigins, envOrigins, syncPanelGate, envAdmins, syncAdminGate, getSetting, setSetting, withCfToken };
+export const testing = { scheduled, MINUTE_CRON, processReminders, reminderHoursFor, reminderTemplateVariables, samePhone, tenantTemplate, pollTemplateApprovals, REMINDER_KIND, waitedMin, QUEUE_MAX_MIN, QUEUE_WAIT_TEXT, canAttend, velaiTenantId, handleChatPoll, VISITOR_AWAY_MS, expireTakeovers, NO_ADVISOR_TEXT, graceExpired, systemWithHandoff, HANDOFF_ON, HANDOFF_OFF, supportWindows, withinSupportHours, advisorAvailable, CONV_STATES, TAKEOVER_GRACE_MIN, settleReply, TRUNCATED_CLOSING, trimToSentence, waBody, replyWindow, reportPeriod, reportMetric, weeklyReportText, weeklyStats, sendWeeklyReports, convLoad, convAppend, convLinkLead, convFilters, convRetentionDays, UNANSWERED_RE, CONV_WINDOW, cloudflareUsage, CF_FREE_LIMITS, recordConversation, aiCost, recordAiUsage, rateLimited, memLimited, applySenderProfile, pushSenderProfile, clean, persistLead, leadAlertStatus, captureWhatsAppLead, leadFromSummary, leadCaptureDone, notificationText, errorResponseParts, tenantByAddress, syncPrimaryChannel, assertChannelFree, normalizePhone, extractPhone, safeUtm, publicCors, validTwilioSignature, callAnthropic, callAnthropicRaw, runToolLoop, calendarExecutor, calendarSystem, tenantCalendar, validCalendarDate, availableSlots, handleCalendarCallback, calendarCallbackFor, sendTwilioText, timingSafeEqual, telegramBotUsername, telegramSetWebhook, telegramWebhookInfo, handleTelegramWebhook, sendTelegramText, tenantTelegramToken, telegramThreadFor, registerTelegramTopic, csvCell, expiryDate, leadFilters, isDemoKey, templateVar, leadTemplateVariables, readJson, deliver, drainQueuedLeads, verifyTurnstile, systemFor, validateTenant, invalidateTenantCache, tenantWriteError, assertNotActivePending, tenantChannelSummary, channelsForScope, routingChannelState, handleProvision, pollProvisioning, fillSeries, resolveScope, scopeClause, assertOwnTenant, clienteAllowed, adminRouter, recordAuthFailure, handleAdmin, handleWidgetBoot, allowedOrigins, envOrigins, syncPanelGate, envAdmins, syncAdminGate, getSetting, setSetting, withCfToken };

@@ -39,8 +39,9 @@ estado y obliga a decidir cuál manda cuando discrepan — el mismo patrón que 
 
 ### Migración `0021_conversaciones_historial.sql`
 
-`conv_daily` (0020) es un contador agregado y se queda como está — es el denominador de
-la tasa de captura. Esto es aparte:
+`conv_daily` (0020) es un contador agregado y se conserva para informes históricos.
+Desde la auditoría del 2026-09-02 ya no es el denominador de la tasa de captura:
+`conversations` aporta a la vez la conversación y su `lead_id`, sin cruzar poblaciones.
 
 ```sql
 CREATE TABLE IF NOT EXISTS conversations (
@@ -125,18 +126,12 @@ conversación por resuelta — el mismo que adopta `PLAN-PANEL.md`. De rebote ac
 crece una fila y hace que el panel enseñe conversaciones discretas en vez de un hilo
 infinito por teléfono.
 
-**Efecto en la tasa de captura**: antes el canal WhatsApp contaba una conversación cada
-vez que el historial de KV había caducado (24 h); ahora cada 72 h. El denominador baja un
-poco y los dos canales pasan a contar con el MISMO criterio, que antes no ocurría. No
-rompe series históricas: `conv_daily` arrancó el 2026-08-25 y el panel ya advierte de
-que solo cuenta desde entonces.
-
-Y una trampa esquivada: la conversación se **guarda** con su canal real (`messenger` ya no
-se disfraza de `whatsapp`), pero el **contador** de `conv_daily` sigue diciendo `whatsapp`
-para los dos. El panel cruza ese denominador con `leads.source`, y la captura de leads de
-WhatsApp escribe `whatsapp` también para Messenger: separar solo el denominador le habría
-dado a Messenger 0 leads sobre N conversaciones e inflado la tasa de WhatsApp. Se separan
-los dos a la vez, o ninguno.
+**Efecto en la tasa de captura**: una conversación es una sesión de 72 h y cuenta una
+vez. El numerador es `lead_id IS NOT NULL` sobre esas mismas filas; un formulario web
+sigue siendo un lead en «Leads por canal», pero no se hace pasar por conversación. La
+ventana efectiva es `max(ahora - 30 días, 2026-08-26)`, cuando empezó el enlace. Web,
+WhatsApp y Messenger se agrupan por `conversations.channel`; no hay búsquedas parciales
+de `leads.source`, y los nuevos leads de Messenger conservan ese origen también.
 
 ### Retención: 90 días — decidido el 2026-08-26
 
@@ -273,8 +268,8 @@ desplazada — `created_at >= datetime('now','-60 days') AND created_at < dateti
 y la respuesta devuelve `{ valor, anterior }` por métrica. Es literalmente un `WHERE`
 desplazado; el `batch()` ya existe y absorbe las sentencias nuevas.
 
-**Trampa a evitar:** `captura.desde` es `CONV_TRACKING_SINCE` (2026-08-25). Hasta finales
-de septiembre la ventana anterior **no tiene denominador**, y una comparación con cero
+**Trampa a evitar:** `captura.desde` parte de `CONV_TRACKING_SINCE` (2026-08-26). Hasta finales
+de septiembre la ventana anterior **no tiene población comparable**, y una comparación con cero
 pintaría un -100% falso. Cuando `desde` cae dentro del periodo anterior, la tarjeta
 enseña «—» y el motivo, no un porcentaje. El panel ya advierte de esto en la tasa de
 captura; misma honestidad aquí.
