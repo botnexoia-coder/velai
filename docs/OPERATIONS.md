@@ -16,14 +16,16 @@
 4. Sustituir `REPLACE_WITH_TURNSTILE_SITE_KEY` en los 26 HTML por la site key pública. `npm run check` falla mientras quede algún marcador (en CI de ramas puede saltarse con `CHECK_ALLOW_PLACEHOLDERS=1`; el deploy real nunca). *(Hecho.)*
 5. Guardar `TURNSTILE_SECRET_KEY`, `ANTHROPIC_API_KEY`, `TELEGRAM_TOKEN`, `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN` y `TELEGRAM_CHAT_ID` como secrets (`npx wrangler secret put <NOMBRE>`). *(Hechos.)*
 6. Configurar `TEAM_WHATSAPP`, `TWILIO_FROM` y `TWILIO_LEAD_TEMPLATE_SID` (formato `whatsapp:+E164`; el SID es de la plantilla aprobada `velai_nuevo_lead`). *(Hechos.)* **El aviso por WhatsApp va SIEMPRE por plantilla** (`ContentSid`) — texto libre fuera de la ventana de 24 h devuelve `Undelivered 63016`, que es lo que tuvo el canal roto desde junio (ver `docs/IMPLEMENTADO.md` §FASE0). Pendiente: duplicar la plantilla en categoría **Utility** y actualizar el SID.
-7. Desplegar el Worker: **automático desde 2026-08-20** — el push a `main` que toque
-   `vai-worker.js`, `worker/**`, `migrations/**`, `wrangler.toml`, `test/**` o
-   `package.json` dispara `.github/workflows/deploy-worker.yml`, que corre los checks,
-   aplica las migraciones D1 (**antes** del deploy, ver §esquema) y hace `wrangler deploy`
+7. Desplegar el Worker: cada push a `main` ejecuta CI; solo una conclusión verde con
+   cambios no documentales autoriza `.github/workflows/deploy-worker.yml`. El CD fija el
+   SHA del workflow exitoso, exige que siga siendo HEAD, descarga su `panel/dist` ya probado, aplica las migraciones
+   D1 (**antes** del deploy, ver §esquema) y hace `wrangler deploy`
    con smoke test del preflight de `/chat`. Requiere el secret de GitHub Actions
    `CLOUDFLARE_API_TOKEN` (permisos mínimos: Workers Scripts Edit + D1 Edit +
    Workers Routes Edit en la zona `hirevai.com`; NO es el `CF_API_TOKEN` del worker).
-   El deploy manual `npx wrangler deploy` sigue funcionando como respaldo.
+   Para reintentar de forma manual, lanzar `workflow_dispatch` desde `main` con el SHA
+   completo: la puerta exige el CI de push verde y sus artefactos vigentes (7 días).
+   `npx wrangler deploy` queda como respaldo excepcional del runbook, no como atajo a CI.
    **Caveat**: Pages y este workflow corren en paralelo — para cambios de contrato
    worker↔frontend sigue valiendo la disciplina de dos commits (primero worker, luego sitio).
    Verificar en **Workers → vai-worker → Settings → Triggers** que el cron `*/5 * * * *` sigue registrado. *(Hecho.)*
@@ -50,7 +52,13 @@ No desplegar con el UUID D1 de ceros ni con el marcador de Turnstile. **No quita
 
 ### Orden de despliegue Pages ↔ Worker
 
-Pages despliega **automáticamente** al hacer push a `main`; el Worker se despliega **a mano** con wrangler. El `POST /` JSON antiguo devuelve 410, así que el HTML/JS nuevo y el Worker nuevo deben ir juntos: primero deja el Worker listo (pasos 1–7), después mergea el sitio. Los previews de rama (`https://<rama>.velai-dey.pages.dev`) solo funcionan contra el Worker si su origen exacto está en `ALLOWED_WEB_ORIGINS` (`wrangler.toml`) **y** en los hostnames del widget Turnstile — no hay comodín `*.pages.dev` a propósito.
+Pages despliega **automáticamente** al hacer push a `main`; el Worker se despliega por
+CD únicamente después de que CI —incluido el smoke del panel— termine verde. El deploy
+manual con Wrangler es solo respaldo operativo. El `POST /` JSON antiguo devuelve 410,
+así que los cambios de contrato entre sitio y Worker se secuencian de forma compatible.
+Los previews de rama (`https://<rama>.velai-dey.pages.dev`) solo funcionan contra el
+Worker si su origen exacto está en `ALLOWED_WEB_ORIGINS` (`wrangler.toml`) **y** en los
+hostnames del widget Turnstile — no hay comodín `*.pages.dev` a propósito.
 
 ## Panel administrativo — OPERATIVO en `admin.hirevai.com`
 
@@ -101,9 +109,14 @@ de los clientes. Los tres parches que costó ese agujero (`check-bundle.mjs`,
 | Tope IA | 2.000/día | 100/día |
 | App de Access | `admin` · aud `d5ea5814…` | `admin staging` · aud `29b2c9b0…` |
 
-**Se despliega solo.** `deploy-worker.yml` en cada push a `main` hace:
+**Se despliega solo, después de CI.** Un `workflow_run` exitoso de `CI` sobre un push a
+`main` entrega un manifiesto de alcance, el SHA y el `panel/dist` ya probado a
+`deploy-worker.yml`. Los Markdown se omiten; cualquier otro fichero se considera
+desplegable por defecto para no olvidar componentes nuevos. El CD hace:
 migraciones y deploy en staging → prueba de humo → migraciones y deploy en producción.
-Si algo de staging falla, producción ni se roza. A mano:
+Si CI, el smoke o staging fallan, producción ni se roza. Si `main` avanza antes de
+empezar o durante staging, los pasos posteriores se omiten limpiamente y el resumen
+indica ambos SHA. Para pruebas operativas directas de staging:
 
 ```bash
 npx wrangler@4 d1 migrations apply vai-leads-staging --remote --env staging
@@ -128,6 +141,14 @@ npx wrangler@4 d1 execute vai-leads-staging --remote --env staging --file seed/s
 `npm run check:entornos` verifica las tres en cada `npm run check`, y además que las
 variables de los dos entornos no se desincronicen (wrangler no hereda `vars`: hay que
 repetirlas, y lo que se repite a mano se pudre solo).
+
+### Control predeploy de `from_mismatch`
+
+`npm run check` cubre localmente que una fila WhatsApp activa cuya `address` no coincide
+con `twilio_from` sea `from_mismatch` en Canales y se presente como `preparing` al cliente
+en Conexiones. Esa regresión forma parte de CI y, por tanto, de la puerta predeploy. No se
+consulta D1 de producción para demostrarlo; cualquier comprobación con datos reales se
+hace primero en staging y requiere una decisión operativa explícita.
 
 ### Acceso al panel de staging (configurado el 2026-08-31)
 

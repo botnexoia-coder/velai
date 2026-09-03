@@ -8,6 +8,7 @@
 //    escribieran a mano aquí, un día dirían cosas distintas que el worker);
 //  - presencia del visitante web.
 import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
+import { useSearchParams } from 'react-router';
 import { traducir } from '../api/errors';
 import { ChIcon, CH_LABEL, IcoBack, IcoChat, IcoChevronDown, IcoDownload, IcoSearch, IcoSend, IcoSliders } from '../components/icons';
 import { useToast } from '../components/Toasts';
@@ -31,8 +32,10 @@ import type { Availability, ConvChannel, InboxCount, InboxRow, InboxThread } fro
 // nada TAMBIÉN se pintan, a 0 y apagados: esconderlos dejaba la duda de si el canal
 // existe, y el filtro por ese canal devuelve vacío de verdad, no «todo».
 const CH_ORDER: ConvChannel[] = ['whatsapp', 'web', 'messenger', 'instagram'];
+const CONVERSATION_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 export function Conversaciones() {
+  const [searchParams] = useSearchParams();
   const { data: me } = useMe();
   const isVelai = me?.role === 'velai';
   const { data: tenants } = useTenants(isVelai === true);
@@ -48,7 +51,10 @@ export function Conversaciones() {
 
   const [channel, setChannel] = useState('');
   const [pop, setPop] = useState<ConvFilters>({});
-  const [openId, setOpenId] = useState<string | null>(null);
+  const [openId, setOpenId] = useState<string | null>(() => {
+    const linked = searchParams.get('conversation');
+    return linked && CONVERSATION_ID_RE.test(linked) ? linked : null;
+  });
   const [popOpen, setPopOpen] = useState<'' | 'filtros' | 'avail'>('');
 
   const filters = useMemo<ConvFilters>(() => {

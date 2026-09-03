@@ -48,5 +48,7 @@ export default defineConfig({
     globals: true,
     setupFiles: ['./src/test/setup.ts'],
     css: false,
+    // Los smoke de navegador los descubre Playwright; Vitest no debe importar su DSL.
+    exclude: ['e2e/**', 'node_modules/**', 'dist/**'],
   },
 });

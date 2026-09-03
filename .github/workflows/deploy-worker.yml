@@ -1,113 +1,202 @@
-# CD del worker: en push a main ENSAYA en staging y luego despliega producción.
-# Antes el deploy era manual (npx wrangler deploy) y main podía quedar verde con
-# un worker viejo o una migración sin aplicar en producción (ya pasó: resolveScope
-# lleva un try/catch por código desplegado antes de su migración).
-#
-# El ensayo en staging (2026-08-31) cierra el agujero que quedaba: hasta ahora la PRIMERA
-# ejecución real de cualquier cambio era en producción, con los clientes dentro — los tests
-# corren contra mocks y `migrations apply --remote` iba directo a la base con sus leads.
-# Ahora todo pasa antes por vai-worker-staging, que tiene su propia D1 y su propio KV y
-# ningún cliente detrás. Lo que rompa, rompe ahí.
-#
-# Semántica de fallo a mitad:
-#  - falla `npm run check`        → no se toca nada, main queda rojo.
-#  - falla cualquier paso de STAGING → producción NI SE ROZA. Es el punto del ensayo.
-#  - falla `migrations apply` de prod → el worker no se despliega; producción intacta.
-#  - migraciones OK, falla deploy → worker viejo + esquema nuevo ADITIVO = estado seguro
-#    (regla de OPERATIONS.md: migración primero, deploy después). Relanzar el job:
-#    `migrations apply` es idempotente (tabla d1_migrations) y el deploy se reintenta.
-#
-# Requiere el secret de GitHub Actions CLOUDFLARE_API_TOKEN con permisos mínimos:
-# Account→Workers Scripts→Edit, Account→D1→Edit, Zone(hirevai.com)→Workers Routes→Edit
-# (por el custom_domain admin.hirevai.com). NO reutilizar el CF_API_TOKEN del worker:
-# tiene otros scopes (Turnstile/Access).
+# CD del worker: CI decide una sola vez si el push contiene cambios desplegables y
+# publica los artefactos. Esta workflow solo acepta un CI verde del SHA actual de main.
+# workflow_dispatch sirve para reintentar ese mismo artefacto validado, nunca para
+# saltarse CI ni construir código introducido a mano.
 name: Deploy worker
 on:
-  push:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
     branches: [main]
-    # Un push de solo-HTML/blog no despliega el worker (Pages ya se autodespliega).
-    # test/** entra a propósito: un cambio de tests puede poner esto rojo y debe bloquear.
-    paths:
-      - 'vai-worker.js'
-      - 'worker/**'
-      - 'migrations/**'
-      - 'wrangler.toml'
-      - 'test/**'
-      - 'scripts/**'
-      - 'panel/**'
-      - 'seed/**'
-      - 'package.json'
-      - '.github/workflows/deploy-worker.yml'
+  workflow_dispatch:
+    inputs:
+      sha:
+        description: SHA completo de main con un CI de push verde y artefactos vigentes
+        required: true
+        type: string
+
 permissions:
   contents: read
-# Dos pushes seguidos a main no se solapan: el segundo espera al primero
-# (cancelar un deploy a medias es peor que encolarlo).
+  actions: read
+
+# Dos despliegues no se solapan. Al salir de la cola se vuelve a comprobar main; un
+# candidato superado termina verde con sus pasos omitidos, no como un fallo operativo.
 concurrency:
   group: deploy-worker
   cancel-in-progress: false
+
 jobs:
+  gate:
+    if: github.event_name != 'workflow_dispatch' || github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    outputs:
+      deploy: ${{ steps.verify.outputs.deploy }}
+      sha: ${{ steps.verify.outputs.sha }}
+      ci_run_id: ${{ steps.verify.outputs.ci_run_id }}
+    steps:
+      - name: resolver CI verde candidato
+        id: candidate
+        uses: actions/github-script@v7
+        env:
+          REQUESTED_SHA: ${{ inputs.sha }}
+        with:
+          script: |
+            const reject = async (message) => {
+              core.setOutput('accepted', 'false');
+              await core.summary.addHeading('Despliegue omitido limpiamente', 3).addRaw(message).write();
+            };
+            let sha;
+            let runId;
+            if (context.eventName === 'workflow_run') {
+              const run = context.payload.workflow_run;
+              const valid = run.conclusion === 'success' && run.event === 'push'
+                && run.head_branch === 'main'
+                && run.head_repository.full_name === `${context.repo.owner}/${context.repo.repo}`;
+              if (!valid) {
+                await reject('El workflow de CI no corresponde a un push verde de `main`; no se ejecutará CD.');
+                return;
+              }
+              sha = run.head_sha;
+              runId = String(run.id);
+            } else {
+              sha = String(process.env.REQUESTED_SHA || '').trim().toLowerCase();
+              if (!/^[0-9a-f]{40}$/.test(sha)) {
+                await reject('`workflow_dispatch` exige un SHA completo de 40 caracteres hexadecimales.');
+                return;
+              }
+              const response = await github.rest.actions.listWorkflowRuns({
+                ...context.repo,
+                workflow_id: 'ci.yml',
+                branch: 'main',
+                event: 'push',
+                status: 'completed',
+                head_sha: sha,
+                per_page: 20,
+              });
+              const run = response.data.workflow_runs.find((item) => item.head_sha === sha && item.conclusion === 'success');
+              if (!run) {
+                await reject(`No existe un CI de push verde para \`${sha}\`; el SHA no es desplegable.`);
+                return;
+              }
+              runId = String(run.id);
+            }
+            const branch = await github.rest.repos.getBranch({ ...context.repo, branch: 'main' });
+            if (branch.data.commit.sha !== sha) {
+              await reject(`El SHA verde \`${sha}\` fue superado por \`${branch.data.commit.sha}\`; no se descargarán artefactos ni se ejecutará CD.`);
+              return;
+            }
+            core.setOutput('accepted', 'true');
+            core.setOutput('sha', sha);
+            core.setOutput('run_id', runId);
+
+      # El verificador se ejecuta desde el propio SHA que pasó CI. Así una carrera en
+      # la que main avance no permite ejecutar código todavía no validado por esa run.
+      - uses: actions/checkout@v4
+        if: steps.candidate.outputs.accepted == 'true'
+        with:
+          ref: ${{ steps.candidate.outputs.sha }}
+      - name: descargar manifiesto producido por ese CI
+        if: steps.candidate.outputs.accepted == 'true'
+        uses: actions/download-artifact@v4
+        with:
+          name: deploy-metadata
+          path: .deploy-gate
+          github-token: ${{ github.token }}
+          run-id: ${{ steps.candidate.outputs.run_id }}
+      - name: leer HEAD actual de main
+        if: steps.candidate.outputs.accepted == 'true'
+        id: current
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const branch = await github.rest.repos.getBranch({ ...context.repo, branch: 'main' });
+            core.setOutput('sha', branch.data.commit.sha);
+      - name: verificar frescura, CI y alcance
+        if: steps.candidate.outputs.accepted == 'true'
+        id: verify
+        env:
+          DEPLOY_SHA: ${{ steps.candidate.outputs.sha }}
+          DEPLOY_CURRENT_SHA: ${{ steps.current.outputs.sha }}
+          DEPLOY_CI_RUN_ID: ${{ steps.candidate.outputs.run_id }}
+          DEPLOY_METADATA_PATH: .deploy-gate/deploy-metadata.json
+        run: node scripts/deploy-scope.mjs verify
+
   deploy:
+    needs: gate
+    if: needs.gate.outputs.deploy == 'true'
     runs-on: ubuntu-latest
     env:
+      DEPLOY_SHA: ${{ needs.gate.outputs.sha }}
+      DEPLOY_CI_RUN_ID: ${{ needs.gate.outputs.ci_run_id }}
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       # Público: es el mismo CF_ACCOUNT_ID de wrangler.toml [vars].
       CLOUDFLARE_ACCOUNT_ID: 6a5877b5637ec5fa28d05af46e894542
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
         with:
-          node-version: 24
-      # El job es hermético: repite el check aunque ci.yml también lo corra.
-      # `npm ci` porque desde la migración a Hono hay dependencias con lockfile
-      # (y wrangler las bundlea en el deploy: sin node_modules no hay bundle).
-      - run: npm ci
-      - run: npm run check
-      # Migraciones ANTES del deploy (OPERATIONS.md §esquema): son aditivas y el
-      # worker viejo convive con el esquema nuevo. Wrangler pineado a major (@4)
-      # porque el repo no tiene lockfile; subir de major será un cambio consciente.
-      # El panel viaja serializado con toString() y los tests sin bundlear no ven
-      # los artefactos de esbuild (incidente __name, 2026-08-20): se valida el
-      # arranque del panel CONTRA EL BUNDLE REAL antes de tocar producción.
-      # El panel v2 se compila ANTES de cualquier wrangler: con [assets] declarado,
-      # el deploy (y el dry-run) exigen que panel/dist exista.
-      - name: panel v2 · build
-        working-directory: panel
+          ref: ${{ needs.gate.outputs.sha }}
+      - name: comprobar frescura al empezar
+        id: fresh_start
         run: |
-          npm ci
-          npm run build
-      - run: npx wrangler@4 deploy --dry-run --outdir /tmp/dist && node scripts/check-bundle.mjs /tmp/dist/vai-worker.js
+          git fetch --no-tags --depth=1 origin main
+          DEPLOY_CURRENT_SHA="$(git rev-parse FETCH_HEAD)" node scripts/deploy-scope.mjs freshness
+      - uses: actions/setup-node@v4
+        if: steps.fresh_start.outputs.fresh == 'true'
+        with:
+          node-version: '20.19'
+          cache: npm
+      # CI ya ejecutó todos los checks. Wrangler solo necesita las dependencias de
+      # runtime y el panel/dist exacto que pasó el smoke en aquel run.
+      - if: steps.fresh_start.outputs.fresh == 'true'
+        run: npm ci
+      - name: panel v2 · descargar artefacto probado
+        if: steps.fresh_start.outputs.fresh == 'true'
+        uses: actions/download-artifact@v4
+        with:
+          name: panel-dist
+          path: panel/dist
+          github-token: ${{ github.token }}
+          run-id: ${{ needs.gate.outputs.ci_run_id }}
+      - if: steps.fresh_start.outputs.fresh == 'true'
+        run: npx wrangler@4 deploy --dry-run --outdir /tmp/dist && node scripts/check-bundle.mjs /tmp/dist/vai-worker.js
 
-      # ── ENSAYO EN STAGING ───────────────────────────────────────────────────
-      # Mismo código, otra D1, otro KV, ningún cliente. Si la migración está mal o el
-      # worker no arranca, se ve aquí y producción no llega a enterarse.
+      # ── ENSAYO EN STAGING ─────────────────────────────────────────────────────────────────────
       - name: staging · migraciones
+        if: steps.fresh_start.outputs.fresh == 'true'
         run: npx wrangler@4 d1 migrations apply vai-leads-staging --remote --env staging
       - name: staging · deploy
+        if: steps.fresh_start.outputs.fresh == 'true'
         run: npx wrangler@4 deploy --env staging
       - name: staging · humo
+        if: steps.fresh_start.outputs.fresh == 'true'
         run: |
           base=https://vai-worker-staging.botnexo-ia.workers.dev
-          # 1. el worker arranca y responde CORS
           pre=$(curl -s -o /dev/null -w '%{http_code}' -X OPTIONS \
             -H 'Origin: http://localhost:8080' -H 'Access-Control-Request-Method: POST' $base/chat)
-          # 2. el binding de D1 vive: un tenant sembrado responde
           boot=$(curl -s -o /dev/null -w '%{http_code}' "$base/widget/boot?tenant=demo-staging")
-          # 3. el panel NUNCA responde 200 sin autenticar. Dos cierres válidos:
-          #    302 = Cloudflare Access delante (lo normal desde 2026-08-31)
-          #    401 = el worker rechazando por su cuenta si Access no estuviera
-          #    Lo que jamás puede salir de aquí es un 2xx.
           panel=$(curl -s -o /dev/null -w '%{http_code}' https://admin-staging.hirevai.com/api/admin/leads)
           echo "staging → preflight $pre · boot $boot · panel $panel"
           test "$pre" = "204" && test "$boot" = "200" \
             && { test "$panel" = "302" || test "$panel" = "401"; }
 
-      # ── PRODUCCIÓN ──────────────────────────────────────────────────────────
+      # ── PRODUCCIÓN ─────────────────────────────────────────────────────────────────────────
+      # Una segunda comprobación evita promover a producción si main avanzó durante
+      # el ensayo. Staging puede quedar actualizado; producción no se toca.
+      - name: comprobar frescura antes de producción
+        if: steps.fresh_start.outputs.fresh == 'true'
+        id: fresh_production
+        run: |
+          git fetch --no-tags --depth=1 origin main
+          DEPLOY_CURRENT_SHA="$(git rev-parse FETCH_HEAD)" node scripts/deploy-scope.mjs freshness
       - name: producción · migraciones
+        if: steps.fresh_production.outputs.fresh == 'true'
         run: npx wrangler@4 d1 migrations apply vai-leads --remote
       - name: producción · deploy
+        if: steps.fresh_production.outputs.fresh == 'true'
         run: npx wrangler@4 deploy
-      # Humo: el worker vivo responde el preflight CORS de /chat para un origen permitido.
-      - run: |
+      - name: producción · humo
+        if: steps.fresh_production.outputs.fresh == 'true'
+        run: |
           code=$(curl -s -o /dev/null -w '%{http_code}' -X OPTIONS \
             -H 'Origin: https://hirevai.com' \
             -H 'Access-Control-Request-Method: POST' \

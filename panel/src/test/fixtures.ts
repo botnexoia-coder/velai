@@ -36,11 +36,13 @@ export const stats: Stats = {
   fuentes: ['hirevai.com', 'landing-clinicas'],
   captura: {
     conversaciones: 120,
+    leads: 42,
     porCanal: [
-      { canal: 'web', convs: 80 },
-      { canal: 'whatsapp', convs: 40 },
+      { canal: 'web', convs: 80, leads: 17 },
+      { canal: 'whatsapp', convs: 40, leads: 25 },
     ],
-    desde: '2026-08-25',
+    desde: '2026-08-26',
+    periodoCompleto: false,
   },
 };
 

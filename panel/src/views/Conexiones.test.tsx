@@ -72,6 +72,8 @@ describe('la tira de canales (dos vocabularios)', () => {
     expect(tiles[4]).toMatchObject({ stateLabel: 'Sin activar', address: 'Canal todavía no disponible', off: true });
     // Velai ve el diagnóstico crudo si el worker lo manda sin colapsar.
     expect(cxTiles([{ kind: 'whatsapp', address: 'whatsapp:+34', state: 'unrouted' }])[1]?.stateLabel).toBe('Sin enrutar');
+    expect(cxTiles([{ kind: 'messenger', address: 'messenger:1077804955422697', state: 'live', managed_by: 'Velai (Messenger)' }])[3])
+      .toMatchObject({ address: '1077804955422697', stateLabel: 'Atendido', managedBy: 'Velai (Messenger)' });
   });
 });
 

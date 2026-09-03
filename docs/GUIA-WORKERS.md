@@ -172,7 +172,7 @@ una ruta al rol cliente sin añadirla ahí pone CI en rojo a propósito.
 cp .dev.vars.example .dev.vars   # NUNCA se commitea (.gitignore)
 npx wrangler dev                 # worker local :8787 con D1/KV locales
 npm run check                    # sintaxis + validación del sitio + tests — SIEMPRE antes de push
-npx wrangler deploy              # manual; Pages se despliega solo al push a main
+npx wrangler deploy              # solo respaldo excepcional; seguir OPERATIONS.md
 ```
 
 - **Orden**: si un cambio rompe compatibilidad de API, primero el Worker, inmediatamente
@@ -180,7 +180,9 @@ npx wrangler deploy              # manual; Pages se despliega solo al push a mai
 - Tras el deploy: probar el flujo real, revisar que los triggers (cron/domains) siguen
   listados en la salida de wrangler, y mirar los logs (`npx wrangler tail`) — recuerda:
   logs con códigos, no con datos.
-- CI (`.github/workflows/ci.yml`) corre `npm run check` en cada push; los marcadores
+- CI (`.github/workflows/ci.yml`) corre todos los checks en cada push. Un CI verde con
+  cambios no documentales habilita el CD staging→producción; `workflow_dispatch` solo
+  reintenta el SHA actual con aquel mismo CI y artefactos. Los marcadores
   `REPLACE_WITH_*` bloquean el check (escape solo en ramas: `CHECK_ALLOW_PLACEHOLDERS=1`).
 
 ## 8. Checklist para un endpoint nuevo

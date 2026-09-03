@@ -9,6 +9,7 @@ import { encryptSecret } from '../crypto.js';
 import {
   HttpError, json, NO_STORE, clean, readJson, rateLimited, sendTelegramText,
   escapeHtml, invalidateTenantCache, tenantChannelSummary, channelsForScope,
+  routingChannelState,
   leadAlertStatus, pushSenderProfile, mediaPut, PUBLIC_MEDIA_BASE, validateTenant,
   assertTeamNotFrom, weeklyStats, weeklyReportText, tenantTelegramToken,
   telegramSetWebhook, telegramBotUsername, createTelegramTopic,
@@ -100,13 +101,11 @@ conexiones.get('/api/admin/channels', async (c) => {
   // (UTC sin marca) y syncPrimaryChannel escribe ISO con Z. Sin normalizar, el panel
   // pinta las viejas como hora local y se van 2 h.
   const isoish = (v) => (/^\d{4}-\d\d-\d\d \d\d:\d\d:\d\d$/.test(String(v || '')) ? `${String(v).replace(' ', 'T')}Z` : v);
-  const channels = rows.map((r) => {
-    let state = 'live';
-    if (!r.slug) state = 'orphan';                                                            // fila apuntando a un tenant borrado
-    else if (!r.active) state = 'inactive';                                                   // tenantByAddress exige active = 1
-    else if (r.kind === 'whatsapp' && r.twilio_from && r.twilio_from !== r.address) state = 'from_mismatch'; // entra por aquí, responde por otro
-    return { ...r, created_at: isoish(r.created_at), state };
-  });
+  const channels = rows.map((r) => ({
+    ...r,
+    created_at: isoish(r.created_at),
+    state: routingChannelState(r),
+  }));
   // El caso gogestion al revés: sender de WhatsApp vivo en Twilio y NINGUNA fila que
   // lo enrute. El webhook responde 404 unknown_tenant y el bot calla, en verde.
   // COALESCE: un channel_address nulo no puede esconder el hueco (NULL <> x es NULL).

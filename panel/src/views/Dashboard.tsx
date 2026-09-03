@@ -60,8 +60,8 @@ export function Dashboard() {
           </div>
         </div>
         <div className="chartcard">
-          <b>Tasa de captura · 30 días</b>
-          {stats ? <Captura stats={stats} /> : <p className="muted mt6">—</p>}
+          <b>Tasa de captura · {stats?.captura?.periodoCompleto ? '30 días' : `desde ${stats?.captura?.desde ?? 'el inicio del registro'}`}</b>
+          {stats?.captura ? <Captura stats={stats} /> : <p className="muted mt6">—</p>}
         </div>
       </div>
       {isVelai ? <GastoIa /> : null}
@@ -111,12 +111,21 @@ function CanalRows({ stats }: { stats: Stats }) {
   );
 }
 
-// Tasa de captura: leads / conversaciones atendidas. El denominador solo existe desde
-// que se registran conversaciones — si el periodo lo cruza, se advierte en vez de dar
-// un porcentaje inflado.
+// Tasa de captura conversacional: conversaciones enlazadas a lead / conversaciones.
+// Ambos números y el canal vienen ya agregados por el worker sobre las mismas filas.
 function Captura({ stats }: { stats: Stats }) {
   const convs = stats.captura.conversaciones;
-  const pct = convs ? Math.round((stats.total30 / convs) * 100) : null;
+  const leads = stats.captura.leads;
+  const porCanal = stats.captura?.porCanal ?? [];
+  const incoherente = leads < 0 || leads > convs || porCanal.some((x) => x.leads < 0 || x.leads > x.convs);
+  if (incoherente) {
+    return (
+      <p className="error mt6" role="alert">
+        Datos de captura incoherentes: revisa la agregación antes de interpretar esta métrica.
+      </p>
+    );
+  }
+  const pct = convs ? Math.round((leads / convs) * 100) : null;
   return (
     <>
       <div className="metrics mt6">
@@ -127,16 +136,17 @@ function Captura({ stats }: { stats: Stats }) {
         <div className="stat">
           <b>Acaban en lead</b>
           <span className="n">{pct === null ? '—' : `${pct}%`}</span>
-          <small>{convs ? `${stats.total30} de ${convs} conversaciones` : 'Aún no hay conversaciones contadas'}</small>
+          <small>{convs ? `${leads} de ${convs} conversaciones` : 'Aún no hay conversaciones contadas'}</small>
         </div>
       </div>
       <div className="mt6">
-        {stats.captura.porCanal.map((x) => {
-          const l = stats.porCanal.find((c) => String(c.canal).toLowerCase().includes(x.canal)) ?? { n: 0 };
-          const p = x.convs ? Math.round((l.n / x.convs) * 100) : 0;
-          return <Brow key={x.canal} label={x.canal} pct={Math.min(100, p)} right={`${l.n}/${x.convs} · ${p}%`} />;
+        {porCanal.map((x) => {
+          const p = x.convs ? Math.round((x.leads / x.convs) * 100) : 0;
+          return <Brow key={x.canal} label={x.canal} pct={p} right={`${x.leads}/${x.convs} · ${p}%`} />;
         })}
-        {stats.captura.desde ? <small className="muted">Conversaciones contadas desde el {stats.captura.desde}.</small> : null}
+        <small className="muted">
+          Solo conversaciones que acaban enlazadas a un lead; los formularios se muestran en «Leads por canal».
+        </small>
       </div>
     </>
   );

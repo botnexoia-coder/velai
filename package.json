@@ -3,13 +3,17 @@
   "version": "1.0.0",
   "private": true,
   "type": "module",
+  "engines": {
+    "node": "^20.19.0 || >=22.12.0"
+  },
   "scripts": {
     "check": "npm run check:js && npm run check:site && npm run check:aislamiento && npm run check:entornos && npm test",
-    "check:js": "node --check vai-worker.js && node --check worker/app.js && node --check worker/plantillas.js && node --check worker/middleware.js && node --check worker/routes/publico.js && node --check worker/routes/leads.js && node --check worker/routes/conversaciones.js && node --check worker/routes/tenants.js && node --check worker/routes/config.js && node --check worker/routes/conexiones.js && node --check worker/routes/calendario.js && node --check worker/routes/solicitudes.js && node --check worker/admin-page.js && node --check worker/admin-panel.js && node --check site/assets/funnel.js && node --check site/assets/leadform.js && node --check site/assets/vai-widget.js && node --check scripts/check-aislamiento.mjs && node --check scripts/check-entornos.mjs",
+    "check:js": "node --check vai-worker.js && node --check worker/app.js && node --check worker/plantillas.js && node --check worker/middleware.js && node --check worker/routes/publico.js && node --check worker/routes/leads.js && node --check worker/routes/conversaciones.js && node --check worker/routes/tenants.js && node --check worker/routes/config.js && node --check worker/routes/conexiones.js && node --check worker/routes/calendario.js && node --check worker/routes/solicitudes.js && node --check worker/admin-page.js && node --check worker/admin-panel.js && node --check site/assets/funnel.js && node --check site/assets/leadform.js && node --check site/assets/vai-widget.js && node --check scripts/check-aislamiento.mjs && node --check scripts/check-entornos.mjs && node --check scripts/check-test-catalog.mjs && node --check scripts/deploy-scope.mjs",
     "check:site": "node scripts/check-site.mjs",
     "check:aislamiento": "node scripts/check-aislamiento.mjs",
     "check:entornos": "node scripts/check-entornos.mjs",
-    "test": "node --test \"test/**/*.test.js\"",
+    "test": "node scripts/check-test-catalog.mjs && npm run test:backend",
+    "test:backend": "node --test test/worker.test.js test/aislamiento.test.js",
     "test:panel": "cd panel && npm test -- --run"
   },
   "dependencies": {

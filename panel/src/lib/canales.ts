@@ -69,6 +69,7 @@ const CXST: Record<string, [string, string]> = {
   live: ['on', 'Atendido'],
   preparing: ['wait', 'Lo estamos dejando listo'],
   unrouted: ['bad', 'Sin enrutar'],
+  from_mismatch: ['wait', 'Responde con otro número'],
   paused: ['', 'En pausa'],
   inactive: ['', 'Cliente inactivo'],
   off: ['', 'Sin conectar'],
@@ -83,6 +84,7 @@ export interface CxTile {
   stateCls: string;
   stateLabel: string;
   off: boolean;
+  managedBy: string | null;
 }
 
 export function cxTiles(channels: TenantChannel[]): CxTile[] {
@@ -95,6 +97,7 @@ export function cxTiles(channels: TenantChannel[]): CxTile[] {
       : CX_SOON[kind]
         ? 'Canal todavía no disponible'
         : 'Sin configurar';
-    return { kind, label, address, stateCls: st[0], stateLabel: st[1], off: !st[0] };
+    const managedBy = 'managed_by' in c ? c.managed_by ?? null : null;
+    return { kind, label, address, stateCls: st[0], stateLabel: st[1], off: !st[0], managedBy };
   });
 }

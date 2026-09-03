@@ -101,6 +101,7 @@ function ConexionesBody({ tenantId, isVelai, isCliente }: { tenantId: string; is
               <span className="cxtm">
                 <span className="cxtn">{t.label}</span>
                 <span className="cxta">{t.address}</span>
+                {t.managedBy ? <span className="cxta">Gestionado como {t.managedBy}</span> : null}
                 <span className={`cxts ${t.stateCls}`}>
                   <i />
                   {t.stateLabel}

@@ -3,8 +3,45 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { createWorker, testing } from '../worker/app.js';
 import { encryptSecret, decryptSecret } from '../worker/crypto.js';
+import { deploymentDecision, deploymentScope, deploymentScopeForPush } from '../scripts/deploy-scope.mjs';
 
 const TEST_KEK = btoa(String.fromCharCode(...new Uint8Array(32).map((_, i) => i + 1)));
+
+test('el alcance de CD omite documentación y la frescura termina limpia sin autorizar otro SHA', () => {
+  assert.deepEqual(deploymentScope(['README.md', 'docs/arquitectura.png', 'docs/OPERATIONS.md', 'panel/INTEGRACION.md']), {
+    deploy: false,
+    reason: 'documentation_only',
+    changedFiles: ['README.md', 'docs/OPERATIONS.md', 'docs/arquitectura.png', 'panel/INTEGRACION.md'],
+    deployFiles: [],
+  });
+  assert.deepEqual(deploymentScope(['docs/OPERATIONS.md', 'worker/app.js']).deployFiles, ['worker/app.js']);
+  const candidateSha = 'a'.repeat(40); const currentSha = 'b'.repeat(40); const ciRunId = '123';
+  const metadata = { version: 1, sha: candidateSha, ciRunId, deploy: true, reason: 'deployable_changes' };
+  assert.deepEqual(deploymentDecision({ candidateSha, currentSha, ciRunId, metadata }), {
+    deploy: false, reason: 'superseded',
+  });
+  assert.equal(deploymentDecision({ candidateSha, currentSha: candidateSha, ciRunId, metadata }).deploy, true);
+  assert.throws(() => deploymentDecision({
+    candidateSha, currentSha: candidateSha, ciRunId: 'otro-run', metadata,
+  }), /invalid_ci_metadata/, 'workflow_dispatch no puede reutilizar un manifiesto de otro CI');
+});
+
+test('CI nunca convierte un fallo de git o una base inalcanzable en omisión silenciosa', async () => {
+  const workflow = await readFile(new URL('../.github/workflows/ci.yml', import.meta.url), 'utf8');
+  const start = workflow.indexOf('- name: calcular alcance del despliegue');
+  const end = workflow.indexOf('- run: npm ci', start);
+  assert.ok(start >= 0 && end > start, 'se localiza el step de alcance');
+  const step = workflow.slice(start, end);
+  assert.match(step, /shell: bash/);
+  assert.match(step, /set -euo pipefail/, 'un git diff fallido hace fallar el pipeline');
+  assert.match(step, /git cat-file -e "\$\{DEPLOY_BEFORE\}\^\{commit\}"/);
+  assert.match(step, /::warning title=Base de diff inalcanzable::/);
+  assert.match(step, /DEPLOY_BEFORE="\$ZERO_SHA" node scripts\/deploy-scope\.mjs metadata <\/dev\/null/);
+  assert.doesNotMatch(step, /--diff-filter/, 'los cambios de tipo T llegan al cálculo');
+  assert.deepEqual(deploymentScopeForPush('0'.repeat(40), []), {
+    deploy: true, reason: 'initial_push', changedFiles: [], deployFiles: [],
+  }, 'la ruta conservadora nunca genera deploy:false por stdin vacío');
+});
 
 // El system viaja como array de bloques con cache_control (caché de prompt);
 // este helper extrae el texto y verifica el contrato del caché de paso.
@@ -224,9 +261,20 @@ test('el prompt efectivo incluye siempre los guardrails, con fallback si el seed
   }
 });
 
-test('las variables de plantilla usan el teléfono E.164 normalizado', () => {
+test('las variables de plantilla usan E.164 y el aviso Messenger enlaza su hilo de forma segura', () => {
   const vars = JSON.parse(testing.leadTemplateVariables({ whatsapp: '602 608 940', whatsapp_normalized: '+34602608940', name: 'Ana' }));
   assert.equal(vars[1], '+34602608940');
+  const conversationId = 'bbbbbbbb-0000-4000-8000-000000000001';
+  const notice = testing.notificationText(
+    { ADMIN_ORIGIN: 'https://admin.hirevai.com' },
+    { source: 'messenger', whatsapp: null, conversation_id: conversationId, need: 'presupuesto' },
+    { name: 'Velai' },
+  );
+  assert.match(notice, new RegExp(`href="https://admin\\.hirevai\\.com/conversaciones\\?conversation=${conversationId}"`));
+  assert.ok(!testing.notificationText(
+    { ADMIN_ORIGIN: 'javascript:alert(1)' },
+    { source: 'messenger', whatsapp: null, conversation_id: conversationId }, null,
+  ).includes('href='), 'un origen no http(s) nunca entra en el HTML del aviso');
 });
 
 async function twilioRequest(url, params, authToken) {
@@ -1503,7 +1551,10 @@ function withConversations(inner) {
             first: async () => {
               if (/FROM conversations/.test(sql) && /last_at > \?/.test(sql)) {
                 const found = openOf(args[0], args[1], args[2], args[3]);
-                return found ? { id: found.id, demo: found.demo, msgs: found.msgs } : null;
+                return found ? {
+                  id: found.id, demo: found.demo, msgs: found.msgs, state: found.state,
+                  state_at: found.state_at, agent_email: found.agent_email, lead_id: found.lead_id,
+                } : null;
               }
               return b.first();
             },
@@ -1514,7 +1565,14 @@ function withConversations(inner) {
               }
               return b.all();
             },
-            run: async () => b.run(),
+            run: async () => {
+              if (/UPDATE conversations SET lead_id=/.test(sql)) {
+                const found = convs.find((c) => c.id === args[1]);
+                if (found) found.lead_id = args[0];
+                return { meta: { changes: found ? 1 : 0 } };
+              }
+              return b.run();
+            },
           };
         },
       };
@@ -1525,11 +1583,17 @@ function withConversations(inner) {
       if (!stmts.every((st) => /conversations|conv_messages/.test(st.sql || ''))) return inner.batch(stmts);
       for (const st of stmts) {
         if (/INSERT INTO conversations/.test(st.sql)) {
-          const [id, tenant_id, channel, external_id, demo, m,, started] = st.args;
-          convs.push({ id, tenant_id, channel, external_id, demo, msgs: m, last_at: started });
+          const [id, tenant_id, channel, external_id, demo, m, unanswered, started_at, last_at,
+            expires_at, inbox_address, last_inbound_at] = st.args;
+          convs.push({ id, tenant_id, channel, external_id, demo, msgs: m, unanswered,
+            started_at, last_at, expires_at, inbox_address, last_inbound_at, lead_id: null });
         } else if (/UPDATE conversations SET msgs/.test(st.sql)) {
           const c = convs.find((x) => x.id === st.args.at(-1));
-          if (c) { c.msgs += st.args[0]; c.last_at = st.args[2]; }
+          if (c) {
+            c.msgs += st.args[0]; c.unanswered += st.args[1]; c.last_at = st.args[2];
+            c.expires_at = st.args[3]; c.inbox_address ||= st.args[4];
+            c.last_inbound_at = st.args[5] || c.last_inbound_at;
+          }
         } else if (/INSERT INTO conv_messages/.test(st.sql)) {
           // (conversation_id, role, agent_email, text, created_at) desde la migración 0023
           msgs.push({ conversation_id: st.args[0], role: st.args[1], agent_email: st.args[2], text: st.args[3] });
@@ -2475,6 +2539,45 @@ test('la dirección del canal se DERIVA: alta prospecto, promoción a web al act
   const envD = { DB: { prepare: () => ({ bind: () => ({ all: async () => ({ results: [{ address: 'whatsapp:+34624121930', kind: 'whatsapp' }] }), first: async () => null }) }) } };
   const sum2 = await testing.tenantChannelSummary(envD, tenant);
   assert.deepEqual(sum2.find((c) => c.kind === 'whatsapp'), { kind: 'whatsapp', address: 'whatsapp:+34624121930', state: 'live' });
+
+  // Velai conserva Messenger en un tenant técnico heredado. Conexiones debe enseñar el
+  // mismo «atendido» que Canales, sin fingir que la fila pertenece al tenant principal.
+  const main = { ...tenant, id: 't-velai', slug: 'velai', name: 'Velai', channel_address: 'whatsapp:+15706160059', twilio_from: 'whatsapp:+15706160059' };
+  const aliasRow = { address: 'messenger:1077804955422697', kind: 'messenger', tenant_id: 't-msg',
+    slug: 'velai-messenger', name: 'Velai (Messenger)', active: 1, twilio_from: 'whatsapp:+15706160059' };
+  const aliasWhatsapp = { ...aliasRow, kind: 'whatsapp', address: 'whatsapp:+34999999999' };
+  let aliasQuery = null;
+  const envAlias = { DB: { prepare: (sql) => ({ bind: (...args) => ({
+    all: async () => { aliasQuery = { sql, args }; return { results: sql.includes('FROM tenant_channels') ? [aliasRow, aliasWhatsapp] : [] }; },
+    first: async () => null, sql, args,
+  }) }) } };
+  const aliased = await testing.tenantChannelSummary(envAlias, main);
+  assert.deepEqual(aliased.find((c) => c.kind === 'messenger'), {
+    kind: 'messenger', address: aliasRow.address, state: 'live', managed_by: 'Velai (Messenger)',
+  });
+  assert.match(aliasQuery.sql, /t\.slug IN \(\?\).*c\.kind='messenger'/, 'el filtro del alias solo admite Messenger');
+  assert.deepEqual(aliased.find((c) => c.kind === 'whatsapp'), {
+    kind: 'whatsapp', address: main.channel_address, state: 'live',
+  }, 'defensa en memoria: nunca adopta el WhatsApp devuelto por un mock/consulta defectuosa');
+  assert.equal(testing.routingChannelState(aliasRow), 'live', 'Canales y Conexiones comparten el mismo intérprete');
+
+  // Un slug llamado como una propiedad de Object no activa alias ni rompe `.map()`.
+  let prototypeArgs = null;
+  const protoTenant = { ...tenant, id: 't-constructor', slug: 'constructor', channel_address: 'web:constructor' };
+  const protoSummary = await testing.tenantChannelSummary({ DB: { prepare: () => ({ bind: (...args) => ({
+    all: async () => { prototypeArgs = args; return { results: [] }; },
+  }) }) } }, protoTenant);
+  assert.deepEqual(prototypeArgs, [protoTenant.id]);
+  assert.equal(protoSummary.find((c) => c.kind === 'messenger').state, 'off');
+
+  // Predeploy local: una fila directa cuyo From no coincide se interpreta igual en
+  // Conexiones y Canales; esta comprobación no necesita ni consulta producción.
+  const mismatchRow = { ...main, tenant_id: main.id, kind: 'whatsapp', address: 'whatsapp:+34111111111' };
+  const mismatchSummary = await testing.tenantChannelSummary({ DB: { prepare: () => ({ bind: () => ({
+    all: async () => ({ results: [mismatchRow] }),
+  }) }) } }, main);
+  assert.equal(mismatchSummary.find((c) => c.kind === 'whatsapp').state, 'from_mismatch');
+  assert.equal(testing.channelsForScope({ role: 'cliente' }, mismatchSummary).find((c) => c.kind === 'whatsapp').state, 'preparing');
 });
 
 test('plantilla: se puede REENVIAR a aprobación (el paso 2 lanzaba 409 y dejaba el panel atascado)', async () => {
@@ -2640,9 +2743,16 @@ test('captura de lead: los DOS canales exigen un asunto y reintentan mientras fa
   try {
     const kv = new Map();
     const stored = [];
+    const updates = [];
+    const legacyLeadId = 'dddddddd-0000-4000-8000-000000000001';
     const env = { ANTHROPIC_API_KEY: 'k', DB: {
       batch: async (st) => { stored.push(st); return []; },
-      prepare: () => ({ bind: () => ({ first: async () => null, run: async () => ({ meta: { changes: 1 } }), all: async () => ({ results: [] }) }) }) },
+      prepare: (sql) => ({ bind: (...args) => ({
+        sql, args,
+        first: async () => (sql.includes('SELECT id FROM leads WHERE tenant_id=') ? { id: legacyLeadId } : null),
+        run: async () => { updates.push({ sql, args }); return { meta: { changes: 1 } }; },
+        all: async () => ({ results: [] }),
+      }) }) },
       KV: { async get(k) { return kv.get(k) ?? null; }, async put(k, v) { kv.set(k, v); }, async delete(k) { kv.delete(k); } } };
     const ctx = { waitUntil() {} };
     const tenant = { id: 't1', slug: 'gog' };
@@ -2667,6 +2777,50 @@ test('captura de lead: los DOS canales exigen un asunto y reintentan mientras fa
     await cap();
     assert.equal(stored.length, 2);
     assert.equal(marked(), true, 'con nombre ya no hay nada que ganar: captura cerrada');
+
+    // Tras 72 h se abre otra conversación para el mismo remitente. La marca evita un
+    // segundo lead/aviso, pero debe enlazar la sesión nueva al lead que ya existe.
+    const leadId = kv.get('lead:wa:t1:whatsapp:+34600');
+    assert.match(leadId, /^[0-9a-f-]{36}$/i, 'las marcas nuevas conservan el leadId');
+    await testing.captureWhatsAppLead(
+      { SUMMARY_PROMPT: 'p' }, env, ctx, tenant, 'whatsapp:+34600', '+34600', turns(2), 'conv-72h',
+    );
+    assert.equal(stored.length, 2, 'la sesión nueva no crea ni vuelve a avisar otro lead');
+    assert.ok(updates.some((u) => u.sql.includes('UPDATE conversations SET lead_id=')
+      && u.args[0] === leadId && u.args[1] === 'conv-72h'));
+
+    const writesBeforeRelink = updates.length;
+    let lookupsBeforeRelink = 0;
+    const originalPrepare = env.DB.prepare;
+    env.DB.prepare = (sql) => {
+      if (sql.includes('SELECT id FROM leads WHERE tenant_id=')) lookupsBeforeRelink++;
+      return originalPrepare(sql);
+    };
+    await testing.captureWhatsAppLead(
+      { SUMMARY_PROMPT: 'p' }, env, ctx, tenant, 'whatsapp:+34600', '+34600', turns(2),
+      'conv-ya-enlazada', { currentLeadId: leadId },
+    );
+    assert.equal(lookupsBeforeRelink, 0, 'una conversación enlazada no vuelve a buscar el lead');
+    assert.equal(updates.length, writesBeforeRelink, 'ni reescribe la misma FK lead_id');
+
+    // Compatibilidad durante el TTL con marcas antiguas cuyo valor era "1".
+    kv.set('lead:wa:t1:whatsapp:+34600', '1');
+    await testing.captureWhatsAppLead(
+      { SUMMARY_PROMPT: 'p' }, env, ctx, tenant, 'whatsapp:+34600', '+34600', turns(2), 'conv-marca-antigua',
+    );
+    assert.ok(updates.some((u) => u.sql.includes('UPDATE conversations SET lead_id=')
+      && u.args[0] === legacyLeadId && u.args[1] === 'conv-marca-antigua'));
+
+    // Messenger comparte la maquinaria, pero no la atribución: los datos nuevos deben
+    // poder separarse sin buscar substrings ni cargarle sus leads a WhatsApp.
+    await testing.captureWhatsAppLead(
+      { SUMMARY_PROMPT: 'p' }, env, ctx, tenant, 'messenger:1077804955422697',
+      '1077804955422697', turns(2), 'conv-messenger',
+    );
+    assert.equal(stored.at(-1)[0].args[4], 'messenger');
+    assert.equal(stored.at(-1)[0].args[2], 'messenger:t1:1077804955422697');
+    assert.equal(stored.at(-1)[0].args[3], 'conv-messenger', 'el aviso puede enlazar al hilo que originó el lead');
+    assert.deepEqual(stored.at(-1)[0].args.slice(6, 8), [null, null], 'un PSID no se guarda como teléfono');
   } finally { globalThis.fetch = realFetch; }
 });
 
@@ -3101,22 +3255,43 @@ test('dashboard: leads por canal, tasa de captura con denominador real y consumo
   await testing.recordConversation(envConv, { id: 't-1' }, 'web');
   assert.ok(binds[0].sql.includes('ON CONFLICT(tenant_id,day,channel) DO UPDATE SET convs=convs+1'));
   assert.deepEqual([binds[0].a[0], binds[0].a[2]], ['t-1', 'web']);
+  await testing.recordConversation(envConv, { id: 't-1' }, 'messenger');
+  assert.equal(binds[1].a[2], 'messenger', 'el agregado tampoco disfraza Messenger de WhatsApp');
   await testing.recordConversation({ DB: { prepare: () => { throw new Error('d1 down'); } } }, { id: 't-1' }, 'web'); // no lanza
   await testing.recordConversation(envConv, null, 'web');
-  assert.equal(binds.length, 1, 'sin tenant no se cuenta nada');
-  // stats devuelve canal y captura, con el aviso de desde cuándo hay denominador
+  assert.equal(binds.length, 2, 'sin tenant no se cuenta nada');
+  // stats separa adquisición (source libre, incluidos formularios) de captura
+  // conversacional (la propia conversación enlazada al lead).
   const batches = [
-    { results: [{ n: 9 }] }, { results: [{ n: 2, oldest: '2026-08-01' }] }, { results: [{ n: 0 }] },
-    { results: [{ d: '2026-08-25', n: 3 }] },
-    { results: [{ source: 'whatsapp', n: 6 }, { source: 'chat web', n: 3 }] },
-    { results: [{ channel: 'whatsapp', n: 20 }, { channel: 'web', n: 10 }] },
+    { results: [{ n: 13 }] }, { results: [{ n: 2, oldest: '2026-08-01' }] }, { results: [{ n: 0 }] },
+    { results: [{ d: '2026-08-26', source: 'chat web', n: 3 }] },
+    { results: [{ source: 'whatsapp', n: 6 }, { source: 'chat web', n: 3 }, { source: 'formulario web', n: 4 }] },
+    { results: [
+      { channel: 'messenger', convs: 2, leads: 1 },
+      { channel: 'web', convs: 10, leads: 3 },
+      { channel: 'whatsapp', convs: 5, leads: 2 },
+    ] },
+    { results: [{ source: 'chat web' }, { source: 'formulario web' }, { source: 'whatsapp' }] },
     { results: [{ active: 1, n: 7 }] },
   ];
-  const env = { DB: { prepare: () => ({ bind: () => ({}) }), batch: async () => batches } };
+  const queries = [];
+  const env = { DB: { prepare: (sql) => ({ bind: (...args) => { queries.push({ sql, args }); return {}; } }), batch: async () => batches } };
   const res = await (await testing.adminRouter(adminReq('/api/admin/stats'), env, { waitUntil() {} }, '/api/admin/stats', new URL('https://x/api/admin/stats'), {}, VELAI)).json();
-  assert.deepEqual(res.porCanal, [{ canal: 'whatsapp', n: 6 }, { canal: 'chat web', n: 3 }]);
-  assert.equal(res.captura.conversaciones, 30, 'suma de conversaciones de todos los canales');
-  assert.ok(res.captura.desde, 'dice desde cuándo se cuentan: sin eso el % engañaría');
+  assert.deepEqual(res.porCanal, [
+    { canal: 'whatsapp', n: 6 }, { canal: 'chat web', n: 3 }, { canal: 'formulario web', n: 4 },
+  ]);
+  assert.deepEqual(res.captura.porCanal, [
+    { canal: 'messenger', convs: 2, leads: 1 },
+    { canal: 'web', convs: 10, leads: 3 },
+    { canal: 'whatsapp', convs: 5, leads: 2 },
+  ]);
+  assert.deepEqual([res.captura.conversaciones, res.captura.leads], [17, 6]);
+  assert.ok(res.captura.desde, 'expone el inicio efectivo de la ventana comparable');
+  const captureQ = queries.find((q) => q.sql.includes('FROM conversations'));
+  assert.ok(captureQ && captureQ.sql.includes('lead_id IS NOT NULL') && captureQ.sql.includes("demo = ''"));
+  assert.ok(!queries.some((q) => q.sql.includes('FROM conv_daily')), 'no mezcla el contador agregado con leads de otra población');
+  assert.equal(String(captureQ.args[0]).slice(0, 10), res.captura.desde, 'una sola ventana bindeada para numerador y denominador');
+  assert.ok(!JSON.stringify(res.captura).includes('formulario web'), 'un formulario no se hace pasar por conversación');
   // consumo de Cloudflare: sin permiso NO devuelve ceros, devuelve el motivo y los límites
   const realFetch = globalThis.fetch;
   try {
@@ -3219,6 +3394,35 @@ test('conversaciones: sesión de 72 h, ventana de 20 al modelo y recuento de «n
   assert.equal(windowed.messages.length, testing.CONV_WINDOW);
   assert.equal(windowed.messages.at(-1).content, 'm29', 'la ventana es la COLA, no la cabeza');
   assert.equal(env.DB.msgs.filter((m) => m.conversation_id === tras72h.id).length, 31, 'guardado íntegro: 1 + 30');
+});
+
+test('leer lead_id no altera el guardado completo de una conversación ya enlazada', async () => {
+  const env = { DB: withConversations({
+    prepare: () => ({ bind: () => ({ first: async () => null, all: async () => ({ results: [] }), run: async () => ({}) }) }),
+    batch: async () => [],
+  }) };
+  const tenant = { id: 't-enlazado' };
+  const first = await testing.convLoad(env, tenant, 'whatsapp', 'whatsapp:+34600', 'whatsapp:+34111');
+  await testing.convAppend(env, first, [{ role: 'user', content: 'primer mensaje' }]);
+  const stored = env.DB.convs[0];
+  stored.lead_id = 'eeeeeeee-0000-4000-8000-000000000001';
+  stored.last_at = '2026-09-03T08:00:00.000Z';
+  stored.expires_at = '2026-12-01T08:00:00.000Z';
+
+  const loaded = await testing.convLoad(env, tenant, 'whatsapp', 'whatsapp:+34600', 'whatsapp:+34111');
+  assert.equal(loaded.leadId, stored.lead_id, 'convLoad trae la FK en la misma consulta');
+  await testing.convAppend(env, loaded, [
+    { role: 'user', content: 'segundo mensaje' },
+    { role: 'assistant', content: 'segunda respuesta' },
+  ]);
+
+  assert.equal(stored.lead_id, 'eeeeeeee-0000-4000-8000-000000000001');
+  assert.equal(stored.msgs, 3, 'msgs sigue incrementándose');
+  assert.notEqual(stored.last_at, '2026-09-03T08:00:00.000Z', 'last_at sigue renovándose');
+  assert.ok(stored.expires_at > stored.last_at, 'expires_at sigue corriendo desde el último turno');
+  assert.deepEqual(env.DB.msgs.map((message) => message.text), [
+    'primer mensaje', 'segundo mensaje', 'segunda respuesta',
+  ], 'los textos siguen guardándose íntegros');
 });
 
 test('«no supe contestar»: el patrón cuenta las respuestas sin resolver y no las normales', () => {

@@ -1,4 +1,4 @@
-# Integración del panel v2 (React) en el worker
+# Integración vigente del panel v2 (React) en el Worker
 
 El panel v2 es una SPA autocontenida en `panel/` que compila a estáticos (`panel/dist`).
 La sirve **el propio worker** en `admin.hirevai.com` mediante el binding de assets de
@@ -6,8 +6,9 @@ Workers: mismo origen que la API, así que el panel hace `fetch` con rutas relat
 (`/api/admin/...`), sin CORS y sin gestión de tokens — Cloudflare Access pone la cookie
 y el worker valida el JWT en cada petición, exactamente igual que hoy.
 
-**Nada de esto está cableado todavía.** Este documento es el plan para el orquestador:
-el worker y `wrangler.toml` no se tocaron desde esta rama (regla dura de la entrega).
+**Estado actual:** esta integración está cableada y `PANEL_V2 = "1"` está desplegado
+en producción desde el 2026-09-01. Las secciones siguientes documentan el diseño y el
+procedimiento operativo; no son una lista de tareas por implementar.
 
 ## 1. Assets binding en `wrangler.toml`
 
@@ -71,20 +72,28 @@ connect-src 'self'; base-uri 'none'; frame-ancestors 'none'
   (los assets con hash pueden ir con `immutable`), `X-Frame-Options: DENY` y
   `Referrer-Policy: no-referrer`, como hoy (ver `ADMIN_HEADERS` en worker/admin-page.js).
 
-## 3. Paso de build en el workflow de deploy
+## 3. Build probado que consume el workflow de deploy
 
-Antes del `wrangler deploy`, añadir:
+CI construye y prueba el panel; después publica `panel/dist` durante 7 días. El workflow
+de deploy solo acepta un `workflow_run` verde o un `workflow_dispatch` cuyo SHA actual
+tenga ese CI verde, y descarga el artifact sin recompilar una variante distinta:
 
 ```yaml
-- name: Build panel v2
-  working-directory: panel
-  run: |
-    npm ci
-    npm run build   # tsc --noEmit + vite build → panel/dist
+- uses: actions/download-artifact@v4
+  with:
+    name: panel-dist
+    path: panel/dist
+    run-id: ${{ needs.gate.outputs.ci_run_id }}
+    github-token: ${{ github.token }}
 ```
 
-- `npm run build` incluye el typecheck: un error de tipos rompe el deploy, a propósito.
-- `npm test` (`vitest run`) puede añadirse al job de checks junto a `npm run check`.
+- `npm run build` incluye el typecheck: un error de tipos rompe CI, a propósito.
+- `npm run typecheck` valida por separado la aplicación/Vitest y
+  `tsconfig.e2e.json`/Playwright, sin mezclar sus globals.
+- `npm test` (`vitest run`) y `npm run test:e2e` forman parte del job de CI. El
+  smoke E2E intercepta toda `/api/admin/*`, rechaza rutas no declaradas y comprueba que
+  no sale ninguna mutación; no necesita credenciales ni toca el Worker. Esta base no se
+  declara validada hasta observar su primer job verde en GitHub Actions.
 - `scripts/check-bundle.mjs` (el del panel v1 serializado) sigue igual: el v1 no se toca.
 
 ## 4. Desarrollo local
@@ -100,19 +109,15 @@ cd panel && npm run dev # http://localhost:5173, proxy de /api, /media y /favico
 En dev no hay Access: el worker debe seguir teniendo su camino de identidad de
 desarrollo (el que use hoy `wrangler dev` para el panel v1).
 
-## 5. Cutover con bandera `PANEL_V2`
+## 5. Estado y cambios de la bandera `PANEL_V2`
 
-- La bandera es una **var de entorno del worker**, no un secret: `PANEL_V2 = "1"`.
-- Orden propuesto:
-  1. Desplegar con la bandera puesta **solo en staging** (`[env.staging.vars]`).
-  2. Validar en staging: login por Access, dashboard, leads (filtros/cursor/CSV/detalle),
-     bandeja (cola, takeover/release, responder, ventana de 24 h), rol cliente.
-  3. Poner `PANEL_V2 = "1"` en producción.
-  4. Cuando el v2 cubra todas las vistas (ver TODO.md), retirar `ADMIN_HTML`,
-     `admin-page.js`, `admin-panel.js` y `check-bundle.mjs` en un PR aparte.
-- Las vistas aún no migradas enseñan «En construcción» en el v2: mientras convivan,
-  quien las necesite puede volver al v1 quitando la bandera (o sirviendo el v1 en una
-  ruta secundaria si se quiere convivencia fina, p. ej. `/v1` → `ADMIN_HTML`).
+- La bandera es una **var de entorno del Worker**, no un secret: `PANEL_V2 = "1"` en
+  staging y producción.
+- Cualquier cambio futuro se valida primero en staging y llega a producción mediante
+  el workflow normal, nunca mediante una edición manual de la bandera aislada.
+- El v1 y `check-bundle.mjs` se mantienen como rollback consciente. Su retirada será
+  un cambio separado cuando se decida cerrar esa red de seguridad; los acabados de
+  producto pendientes viven en `docs/TAREAS-PENDIENTES.md`.
 
 ## 6. Rollback
 
