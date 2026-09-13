@@ -595,6 +595,7 @@ function Composer({ thread, queueMin, onToast }: { thread: InboxThread; queueMin
   }
 
   if (state.kind === 'closed') {
+    const iaAtendiendo = c.state === 'bot';
     return (
       <div className="composer">
         <div className="cvfield shut">
@@ -605,6 +606,19 @@ function Composer({ thread, queueMin, onToast }: { thread: InboxThread; queueMin
         </div>
         <div className="crow">
           <span className="cwin shut">{state.why}</span>
+          {iaAtendiendo ? (
+            <>
+              <span className="sp" />
+              <button
+                className="btn alt btnsm"
+                type="button"
+                disabled
+                data-tip="Se habilita únicamente cuando la persona pide hablar con el equipo"
+              >
+                Responder como humano
+              </button>
+            </>
+          ) : null}
         </div>
       </div>
     );
