@@ -205,6 +205,42 @@ describe('vista Conversaciones', () => {
     expect(screen.getByPlaceholderText('Escribe tu respuesta…')).toBeInTheDocument();
   });
 
+  it('con la IA atendiendo, muestra la respuesta humana bloqueada hasta que la persona la pida', async () => {
+    const botThread = {
+      ...inboxConThread,
+      thread: inboxConThread.thread
+        ? {
+            ...inboxConThread.thread,
+            conversation: { ...inboxConThread.thread.conversation, state: 'bot', agent_email: null },
+            window: { open: false, reason: 'atiende_la_ia' },
+          }
+        : null,
+    };
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        const path = url.split('?')[0] ?? url;
+        if (path === '/api/admin/inbox') {
+          const body = url.includes('conversation=') ? botThread : inbox;
+          return new Response(JSON.stringify(body), { status: 200, headers: { 'Content-Type': 'application/json' } });
+        }
+        const routes: Record<string, unknown> = baseRoutes;
+        return new Response(JSON.stringify(routes[path] ?? { error: 'not_found' }), {
+          status: path in routes ? 200 : 404,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }),
+    );
+    render(providers(<Conversaciones />));
+    const fila = (await screen.findAllByText('¿Tenéis hueco mañana?'))[0]!;
+    await userEvent.setup().click(fila);
+
+    const button = await screen.findByRole('button', { name: 'Responder como humano' });
+    expect(button).toBeDisabled();
+    expect(screen.getByText(/se abre cuando la persona pide un asesor/i)).toBeInTheDocument();
+  });
+
   it('abre directamente el hilo enlazado desde un aviso de Messenger', async () => {
     vi.stubGlobal(
       'fetch',
