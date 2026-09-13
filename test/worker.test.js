@@ -4045,6 +4045,23 @@ test('el panel no referencia ids que no existen: uno solo mata TODO el script', 
   assert.deepEqual(huerfanos, [], 'ids que el panel usa y NADIE crea');
 });
 
+test('el alta guiada no guarda en el paso 0: el prompt aún no se ha podido escribir', async () => {
+  // Bug del 2026-09-13: «Guardar y continuar» en el primer paso del alta hacía POST con
+  // system_prompt vacío y el worker respondía invalid_system_prompt — el usuario nunca
+  // llegaba a «Contexto», que es justo el paso donde ese campo se escribe. Con cliente
+  // nuevo el paso 0 solo avanza; el guardado real ocurre al salir de Contexto, y la
+  // edición de un cliente ya guardado sigue guardando en todos los pasos.
+  const js = await readFile(new URL('../worker/admin-panel.js', import.meta.url), 'utf8');
+  const handler = js.slice(js.indexOf("$('#wizNext').onclick"));
+  const salto = handler.indexOf('if(wasNew&&wizStep===0){wizStep++;wizShow();return}');
+  const guardado = handler.indexOf('saveTenant()');
+  assert.ok(salto !== -1, 'el paso 0 con cliente nuevo avanza sin guardar');
+  assert.ok(guardado !== -1 && salto < guardado, 'y el salto va ANTES del guardado del paso');
+  // El salto solo tiene sentido mientras el prompt viva en «Contexto» (índice 1 del
+  // stepper): si algún día se mueve al paso 0, esta aserción avisa de revisarlo.
+  assert.match(js, /const WIZ=\['identidad','contexto'/);
+});
+
 test('el panel no pierde manejadores por el camino: inventario congelado', async () => {
   // Tripwire por el incidente del 2026-08-26: al sustituir la vista de Conversaciones por
   // la bandeja se reemplazó un bloque delimitado por dos comentarios y se llevó por delante

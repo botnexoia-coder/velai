@@ -1109,6 +1109,10 @@ $('#wizNext').onclick=async()=>{
  // El canal ya no se teclea: el worker deriva pending:<slug> (prospecto que no enruta) y
  // lo promueve a web:<slug> en cuanto se marca Activo.
  const wasNew=!editing;
+ // El prompt vive en «Contexto» (paso 1): con cliente nuevo, guardar en el paso 0 haría
+ // POST con system_prompt vacío y el worker respondería invalid_system_prompt antes de
+ // dejar ver el paso donde se escribe. Se avanza sin guardar; Contexto guarda la ficha entera.
+ if(wasNew&&wizStep===0){wizStep++;wizShow();return}
  if(tenantDirty||wasNew){const ok=await saveTenant();if(!ok)return}
  if(wasNew&&editing){$('#ttabProv').hidden=false;$('#ttabUsers').hidden=false;$('#ttabHist').hidden=false;$('#tProv').hidden=false;$('#tUsersCard').hidden=false;$('#tDup').hidden=true;loadProv(editing.id);loadUsers(editing.id);loadVersions(editing.id)}
  if(wizStep===WIZ.length-1){setWizard(false);showPane('identidad');toast('Alta completada ✓ — actívalo en «Identidad y canal» cuando su canal esté listo');return}
