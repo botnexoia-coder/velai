@@ -46,6 +46,13 @@
 /blog/
   Cache-Control: public, max-age=0, must-revalidate
 
+# Catálogo de demos: sin indexación y con estados siempre frescos
+/demo/*
+  X-Robots-Tag: noindex, nofollow
+
+/demo/manifest.json
+  Cache-Control: public, max-age=0, must-revalidate
+
 # El panel (admin.hirevai.com, otro origen) carga las fuentes de marca desde aquí:
 # sin CORS el navegador las descarta aunque la CSP del panel las permita.
 /fonts/*

@@ -1,0 +1,17 @@
+{
+  "version": 1,
+  "demos": [
+    {
+      "id": "quierodigi",
+      "slug": "quierodigi",
+      "title": "QuieroDIGI",
+      "eyebrow": "Telecomunicaciones · Venta asistida",
+      "description": "Configurador de tarifas, promociones editables y una conversación guiada que prepara la contratación y la llamada.",
+      "status": "active",
+      "path": "/demo/quierodigi/",
+      "image": "/demo/quierodigi/connected-home-v2.webp",
+      "accent": "blue",
+      "updatedAt": "2026-09-13"
+    }
+  ]
+}

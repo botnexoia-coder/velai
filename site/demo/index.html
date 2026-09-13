@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="description" content="Catálogo privado de demostraciones interactivas creadas por Velai." />
+    <meta name="robots" content="noindex,nofollow" />
+    <title>Demos · Velai</title>
+    <link rel="stylesheet" href="/demo/hub.css?v=2" />
+  </head>
+  <body>
+    <a class="skip" href="#demos">Saltar a los demos</a>
+    <header class="topbar">
+      <a class="brand" href="https://hirevai.com/" aria-label="Velai, inicio">
+        <span class="brand-mark" aria-hidden="true">V</span>
+        <span>VELAI</span>
+      </a>
+      <a class="back" href="https://hirevai.com/">← Volver a Velai</a>
+    </header>
+
+    <main>
+      <section class="hero" aria-labelledby="page-title">
+        <div class="hero-copy">
+          <p class="eyebrow">Laboratorio de experiencias</p>
+          <h1 id="page-title">Demos que convierten una idea en algo que se puede probar.</h1>
+          <p class="lead">Propuestas interactivas preparadas para enseñar el diseño, el recorrido comercial y la automatización antes de construir la versión final.</p>
+        </div>
+        <aside class="hero-note" aria-label="Acerca de este espacio">
+          <span>Espacio de demostración</span>
+          <strong>Diseño, conversación y operación en una sola experiencia.</strong>
+          <p>Los datos y acciones son simulados salvo que se indique expresamente.</p>
+        </aside>
+      </section>
+
+      <section id="demos" class="catalog" aria-labelledby="catalog-title">
+        <div class="section-head">
+          <div>
+            <p class="eyebrow">Proyectos disponibles</p>
+            <h2 id="catalog-title">Elige una experiencia</h2>
+          </div>
+          <p id="catalog-count" class="count" aria-live="polite">Cargando demos…</p>
+        </div>
+        <div id="demo-grid" class="grid" aria-live="polite" aria-busy="true"></div>
+        <div id="catalog-error" class="error" role="alert" hidden>
+          No pudimos cargar el catálogo ahora mismo. Vuelve a intentarlo en unos instantes.
+        </div>
+      </section>
+    </main>
+
+    <footer>
+      <p>VELAI · Experiencias digitales y agentes que ayudan a vender mejor.</p>
+      <a href="https://hirevai.com/">Conocer Velai →</a>
+    </footer>
+    <script src="/demo/hub.js?v=2" defer></script>
+  </body>
+</html>
