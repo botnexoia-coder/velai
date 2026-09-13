@@ -230,6 +230,7 @@ describe('vista Clientes', () => {
       const body = JSON.parse(String(post?.init?.body)) as Record<string, unknown>;
       expect(body['slug']).toBe('nuevo-negocio');
       expect(body['system_prompt']).toContain('Contexto válido');
+      expect(body['meta_partner_status']).toBe('pendiente');
       // El borrador nace SIN activar: prospecto hasta el final del alta.
       expect(body['active']).toBe(false);
     });

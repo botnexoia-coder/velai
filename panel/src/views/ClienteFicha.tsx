@@ -63,7 +63,9 @@ type TFKey = (typeof TF_KEYS)[number];
 type Form = Record<TFKey, string>;
 
 function emptyForm(): Form {
-  return Object.fromEntries(TF_KEYS.map((k) => [k, ''])) as Form;
+  const form = Object.fromEntries(TF_KEYS.map((k) => [k, ''])) as Form;
+  form.meta_partner_status = 'pendiente';
+  return form;
 }
 
 function formFrom(t: TenantDetail): Form {
