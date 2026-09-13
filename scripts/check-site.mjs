@@ -9,7 +9,9 @@ const root = path.resolve(process.argv[2] ?? 'site');
 // Cinturón por si dentro de la raíz aparecen carpetas que no son el sitio publicado
 // (node_modules, artefactos, worktrees de agentes bajo .claude/). Sin esto, el check
 // validaría un index.html de Vite como si fuera una landing y fallaría por cosas que no aplican.
-const EXCLUIR = new Set(['node_modules', 'panel', '.claude', '.git', '.wrangler', 'dist']);
+// `demo/` contiene aplicaciones autocontenidas exportadas: llevan su propia analítica,
+// asistente y política de caché, por lo que no deben validarse como landings de Velai.
+const EXCLUIR = new Set(['node_modules', 'panel', 'demo', '.claude', '.git', '.wrangler', 'dist']);
 async function walk(dir) {
   const out = [];
   for (const name of await readdir(dir)) {
