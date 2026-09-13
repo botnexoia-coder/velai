@@ -613,7 +613,7 @@ function Composer({ thread, queueMin, onToast }: { thread: InboxThread; queueMin
                 className="btn alt btnsm"
                 type="button"
                 disabled
-                data-tip="Se habilita únicamente cuando la persona pide hablar con el equipo"
+                data-tip="Se habilita solo cuando la persona pide hablar con el equipo"
               >
                 Responder como humano
               </button>
