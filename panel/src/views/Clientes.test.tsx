@@ -199,7 +199,7 @@ describe('vista Clientes', () => {
     await waitFor(() => expect(within(dialog).getByText('Formato inválido — revisa el ejemplo del campo.')).toBeInTheDocument());
   });
 
-  it('el alta abre el stepper y «Guardar y continuar» hace el POST del borrador', async () => {
+  it('el alta pide el contexto antes de hacer el POST del borrador', async () => {
     const { calls } = renderClientes((url, init) => {
       if (init?.method === 'POST' && url.endsWith('/api/admin/tenants')) {
         return new Response(JSON.stringify({ ok: true, id: detailTenant.id, updated_at: '2026-09-01T00:00:00.000Z' }), {
@@ -218,15 +218,22 @@ describe('vista Clientes', () => {
     await user.type(within(dialog).getByLabelText('Nombre'), 'Nuevo Negocio');
     await user.type(within(dialog).getByLabelText('Slug'), 'nuevo-negocio');
     await user.click(within(dialog).getByRole('button', { name: 'Guardar y continuar' }));
+    // El backend exige system_prompt: Identidad avanza sin guardar para permitir
+    // escribirlo en Contexto.
+    expect(calls.some((c) => c.init?.method === 'POST' && c.url.endsWith('/api/admin/tenants'))).toBe(false);
+    const prompt = await within(dialog).findByLabelText('Contexto del negocio');
+    await user.type(prompt, 'Contexto válido del nuevo negocio con más de sesenta caracteres para crear la ficha completa.');
+    await user.click(within(dialog).getByRole('button', { name: 'Guardar y continuar' }));
     await waitFor(() => {
       const post = calls.find((c) => c.init?.method === 'POST' && c.url.endsWith('/api/admin/tenants'));
       expect(post).toBeTruthy();
       const body = JSON.parse(String(post?.init?.body)) as Record<string, unknown>;
       expect(body['slug']).toBe('nuevo-negocio');
+      expect(body['system_prompt']).toContain('Contexto válido');
       // El borrador nace SIN activar: prospecto hasta el final del alta.
       expect(body['active']).toBe(false);
     });
-    // Y avanza al paso de Contexto.
-    await waitFor(() => expect(within(dialog).getByLabelText('Contexto del negocio')).toBeInTheDocument());
+    // Tras guardar identidad + contexto, avanza a Marca.
+    await waitFor(() => expect(within(dialog).getByLabelText('Nombre del bot')).toBeInTheDocument());
   });
 });

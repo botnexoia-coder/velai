@@ -363,6 +363,12 @@ export function ClienteFicha({ id, onClose }: { id: string | null; onClose: () =
                 void (async () => {
                   // El canal no se teclea: el worker deriva pending:<slug> (prospecto que
                   // no enruta) y lo promueve a web:<slug> al marcar Activo.
+                  // En un alta nueva el prompt todavía no existe en Identidad: primero
+                  // mostramos Contexto y guardamos la ficha completa al salir de ese paso.
+                  if (!editing && wizStep === 0) {
+                    setWizStep(1);
+                    return;
+                  }
                   if (isDirty || !editing) {
                     const ok = await saveTenant();
                     if (!ok) return;
