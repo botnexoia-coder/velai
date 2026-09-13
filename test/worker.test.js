@@ -71,6 +71,12 @@ test('extractPhone no confunde fechas, importes, CIFs ni rangos con teléfonos',
   assert.equal(testing.extractPhone('mi cif es B-12345678'), '');
   assert.equal(testing.extractPhone('somos 120.000 - 150.000 clientes'), '');
   assert.equal(testing.extractPhone('llámame al 612 345 678 mejor'), '612345678');
+  assert.equal(testing.extractPhone('mi WhatsApp es 66363738'), '', 'ocho dígitos no son un teléfono completo');
+  assert.equal(testing.extractPhoneFromMessages([
+    { role: 'user', content: 'Mi WhatsApp es +34 612 345 678' },
+    { role: 'assistant', content: '¿Está todo correcto?' },
+    { role: 'user', content: 'Sí' },
+  ]), '+34612345678', 'recupera el teléfono de un turno anterior al confirmar');
 });
 
 test('las variables de plantilla nunca van vacías y se normalizan', () => {
