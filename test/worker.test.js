@@ -3396,7 +3396,10 @@ test('conversaciones: sesión de 72 h, ventana de 20 al modelo y recuento de «n
   assert.equal(env.DB.msgs.filter((m) => m.conversation_id === tras72h.id).length, 31, 'guardado íntegro: 1 + 30');
 });
 
-test('leer lead_id no altera el guardado completo de una conversación ya enlazada', async () => {
+test('leer lead_id no altera el guardado completo de una conversación ya enlazada', async (t) => {
+  // Reloj fijado: convLoad mide la sesión de 72 h contra Date.now() y las fechas de esta
+  // prueba son absolutas — sin fijarlo, la prueba caduca sola con el calendario.
+  t.mock.timers.enable({ apis: ['Date'], now: new Date('2026-09-03T10:00:00.000Z') });
   const env = { DB: withConversations({
     prepare: () => ({ bind: () => ({ first: async () => null, all: async () => ({ results: [] }), run: async () => ({}) }) }),
     batch: async () => [],
@@ -4949,7 +4952,10 @@ test('las etiquetas del globo no pueden romper el formato aunque vengan de fuera
   assert.equal(fila.slice(fila.lastIndexOf(':') + 1), '9');
 });
 
-test('leads por día trae el desglose por canal, y suma lo mismo que la barra', async () => {
+test('leads por día trae el desglose por canal, y suma lo mismo que la barra', async (t) => {
+  // Reloj fijado: fillSeries construye los 14 días desde «hoy» y estas filas llevan
+  // fechas absolutas — sin fijarlo, la prueba caduca sola con el calendario.
+  t.mock.timers.enable({ apis: ['Date'], now: new Date('2026-09-01T12:00:00.000Z') });
   const filas = [
     { d: '2026-08-30', source: 'whatsapp', n: 4 },
     { d: '2026-08-30', source: 'chat web', n: 2 },
@@ -4979,7 +4985,10 @@ test('leads por día trae el desglose por canal, y suma lo mismo que la barra', 
   assert.deepEqual(vacio.canales, []);
 });
 
-test('el gasto de IA trae las llamadas POR CLIENTE de cada día', async () => {
+test('el gasto de IA trae las llamadas POR CLIENTE de cada día', async (t) => {
+  // Reloj fijado: la serie de ai-usage cubre los últimos `days` desde «hoy» y estas
+  // filas llevan fechas absolutas — sin fijarlo, la prueba caduca sola con el calendario.
+  t.mock.timers.enable({ apis: ['Date'], now: new Date('2026-09-01T12:00:00.000Z') });
   const rows = [
     { tenant_id: 't1', day: '2026-08-31', model: 'm', calls: 5, in_tokens: 10, out_tokens: 5, cache_w_tokens: 0, cache_r_tokens: 0, tenant_name: 'GOgestión', slug: 'gogestion' },
     { tenant_id: 't2', day: '2026-08-31', model: 'm', calls: 2, in_tokens: 4, out_tokens: 2, cache_w_tokens: 0, cache_r_tokens: 0, tenant_name: 'Zoe', slug: 'zoe' },
