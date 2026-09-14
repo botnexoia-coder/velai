@@ -1214,7 +1214,7 @@ test('el widget pinta la marca del tenant desde /widget/boot, no la de Velai', a
   assert.match(widget, /BRAND && BRAND\.wa_number/);
   // bilingüe: el saludo EN del tenant se usa cuando la página está en inglés
   assert.match(widget, /BRAND\.greeting_en/);
-  for (const fragment of ['BRAND.portrait_url', "setProperty('--vai-acc'", '--vai-lift', 'aria-expanded', 'BRAND.teaser_title_en', '· v16']) assert.ok(widget.includes(fragment), fragment);
+  for (const fragment of ['BRAND.portrait_url', "setProperty('--vai-acc'", '--vai-lift', 'aria-expanded', 'BRAND.teaser_title_en', '· v17']) assert.ok(widget.includes(fragment), fragment);
   assert.equal(widget.includes('va-ui'), false);
   assert.equal(widget.includes('vaiPulse'), false);
 
@@ -6194,14 +6194,20 @@ test('subir retrato guarda y audita portrait_url sin canales ni sincronización 
 });
 
 
-test('widget v16: loader vigente, ventana nueva y cinco sugerencias', async () => {
+test('widget: loader y cabecera en la misma versión, ventana nueva y cinco sugerencias', async () => {
   const loader = await readFile(new URL('../site/assets/vai.js', import.meta.url), 'utf8');
   assert.match(loader, /currentScript/);
   assert.match(loader, /vai-widget\.js\?v=/);
-  assert.match(loader, /V = '16'/);
   const widget = await readFile(new URL('../site/assets/vai-widget.js', import.meta.url), 'utf8');
+  // La versión no se clava aquí: el loader debe coincidir con la cabecera del widget,
+  // que es lo que rompe la caché. check-site.mjs añade a esto los 27 HTML.
+  assert.equal(loader.match(/V = '(\d+)'/)[1], widget.match(/· v(\d+)/)[1]);
   assert.equal(widget.includes('#075e54'), false);
-  for (const token of ['.vai-hero', 'is-empty', 'is-open', 'prefers-color-scheme', '· v16']) assert.ok(widget.includes(token));
+  // Un tenant sin textos propios cae a copy genérico, jamás al reclamo de Velai.
+  assert.match(widget, /TENANT \? T\.teaserTitleGen : T\.teaserTitle/);
+  assert.match(widget, /TENANT \? T\.teaserCopyGen : T\.teaserCopy/);
+  assert.match(widget, /TENANT \? \[\] : T\.chips/);
+  for (const token of ['.vai-hero', 'is-empty', 'is-open', 'prefers-color-scheme', '· v17']) assert.ok(widget.includes(token));
   const chips = ['Uno', 'Dos', 'Tres', 'Cuatro', 'Cinco'];
   assert.deepEqual(JSON.parse(testing.validateTenant({ chips_json: chips }, { partial: true }).chips_json), chips);
 });

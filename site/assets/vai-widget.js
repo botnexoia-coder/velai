@@ -1,5 +1,5 @@
 /* ══════════════════════════════════════════════════════════════════════════
-   VAI CHAT WIDGET — autocontenido (CSS + markup + lógica) · v16
+   VAI CHAT WIDGET — autocontenido (CSS + markup + lógica) · v17
    ──────────────────────────────────────────────────────────────────────────
    OJO CON LA VERSIÓN: este archivo se sirve con Cache-Control immutable durante un
    año (_headers, /*.js), así que el `?v=N` de la URL ES la clave de caché. Cambiar el
@@ -9,7 +9,7 @@
    falla si las dos no coinciden.
 
    Se carga en TODAS las páginas con una sola línea:
-     <script src="/assets/vai-widget.js?v=16" defer></script>
+     <script src="/assets/vai-widget.js?v=17" defer></script>
 
    En la web de un CLIENTE van dos líneas (la primera declara el tenant):
      <script>window.VELAI_TENANT='zoe';</script>
@@ -92,6 +92,8 @@
     talk: 'Talk to ', closeConv: 'Close conversation', kicker: 'ASISTENTE IA · VELAI',
     teaserTitle: 'Does your business need more time?',
     teaserCopy: 'Tell me what you would like to automate and I can help you explore your options.',
+    teaserTitleGen: 'How can I help?',
+    teaserCopyGen: 'Tell me what you need and I can help you find the next step.',
     teaserCta: 'Start conversation',
     open: 'Open chat with ', close: 'Close chat with ', closeBtn: 'Close chat',
     chat: 'Chat with ', send: 'Send', msg: 'Message', dismiss: 'Dismiss',
@@ -109,6 +111,8 @@
     talk: 'Hablar con ', closeConv: 'Cerrar conversación', kicker: 'ASISTENTE IA · VELAI',
     teaserTitle: '¿Tu negocio necesita más tiempo?',
     teaserCopy: 'Cuéntame qué tarea te gustaría automatizar y te ayudo a explorar las opciones.',
+    teaserTitleGen: '¿En qué puedo ayudarte?',
+    teaserCopyGen: 'Cuéntame qué necesitas y te ayudo a encontrar el siguiente paso.',
     teaserCta: 'Iniciar conversación',
     open: 'Abrir chat con ', close: 'Cerrar chat con ', closeBtn: 'Cerrar chat',
     chat: 'Chat con ', send: 'Enviar', msg: 'Mensaje', dismiss: 'Cerrar',
@@ -151,10 +155,12 @@
     if (BRAND && /^https:\/\/[^\s]+$/i.test(BRAND.portrait_url || '')) return BRAND.portrait_url;
     return !TENANT ? 'https://hirevai.com/assets/assistants/vai-v1.jpg' : '';
   }
+  // Sin textos en la ficha, un tenant cae a copy GENÉRICO, nunca al de Velai:
+  // el material comercial de hirevai.com solo aplica cuando no hay tenant.
   function teaserText() {
     return {
-      title: (BRAND && ((LANG === 'en' && BRAND.teaser_title_en) || BRAND.teaser_title)) || T.teaserTitle,
-      copy: (BRAND && ((LANG === 'en' && BRAND.teaser_copy_en) || BRAND.teaser_copy)) || T.teaserCopy
+      title: (BRAND && ((LANG === 'en' && BRAND.teaser_title_en) || BRAND.teaser_title)) || (TENANT ? T.teaserTitleGen : T.teaserTitle),
+      copy: (BRAND && ((LANG === 'en' && BRAND.teaser_copy_en) || BRAND.teaser_copy)) || (TENANT ? T.teaserCopyGen : T.teaserCopy)
     };
   }
   function renderPortrait(face, size) {
@@ -314,7 +320,7 @@
   // El saludo y los chips por defecto salen de la marca del tenant (boot);
   // sin marca, los de Velai en el idioma de la página.
   function defaultScript() {
-    return { greeting: brandGreeting(), chips: (BRAND && BRAND.chips) || T.chips };
+    return { greeting: brandGreeting(), chips: (BRAND && BRAND.chips) || (TENANT ? [] : T.chips) };
   }
 
   // Guiones de modo demo (material comercial de Velai, solo en hirevai.com).

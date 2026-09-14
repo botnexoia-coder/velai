@@ -90,7 +90,7 @@ test('banners externos: solo cuentan si están visibles y solapan horizontalment
   await expect(page.locator('#vaiWidget')).toHaveCSS('bottom', '24px');
 });
 
-test('ventana v16: geometría, bienvenida, saludo único e hilo desde abajo', async ({ page }) => {
+test('ventana v17: geometría, bienvenida, saludo único e hilo desde abajo', async ({ page }) => {
   await mountWidget(page, { delay: 60000 });
   await page.evaluate(() => Object.assign(window, { VELAI_HUMAN: { execute: async () => 'human-test' } }));
   const payloads: Record<string, unknown>[] = [];
@@ -188,7 +188,8 @@ test('loader: resuelve desde su propio origen y evita duplicados', async ({ page
   await page.goto('https://cliente.test/');
   await page.addScriptTag({ url: 'https://preview.pages.dev/assets/vai.js' });
   await expect.poll(() => scripts.length).toBe(1);
-  expect(scripts[0]).toBe('https://preview.pages.dev/assets/vai-widget.js?v=16');
+  const version = loader.match(/V = '(\d+)'/)![1];
+  expect(scripts[0]).toBe(`https://preview.pages.dev/assets/vai-widget.js?v=${version}`);
   await page.addScriptTag({ url: 'https://preview.pages.dev/assets/vai.js' });
   expect(await page.locator('script[src*="vai-widget.js"]').count()).toBe(1);
   await page.goto('https://cliente.test/already-mounted');
@@ -221,4 +222,13 @@ test('el nombre de cada agente se pinta sin HTML y sobrevive al restaurar', asyn
   await page.addScriptTag({ content: await readFile(new URL('../../site/assets/vai-widget.js', import.meta.url), 'utf8') });
   await page.locator('#vaiBubble').click();
   await expect(page.locator('.vai-b-who')).toHaveText(['Ana <b> · Equipo Acme', 'Juan · Equipo Acme']);
+});
+
+test('tenant sin textos propios: teaser y sugerencias genéricos, nunca el reclamo de Velai', async ({ page }) => {
+  await mountWidget(page, { tenant: 'zoe', brand: { bot_name: 'Zoe', greeting: '¡Hola! Soy Zoe' } });
+  await expect(page.locator('.vai-teaser-title')).toHaveText('¿En qué puedo ayudarte?');
+  await expect(page.locator('.vai-teaser-copy')).toHaveText('Cuéntame qué necesitas y te ayudo a encontrar el siguiente paso.');
+  await page.locator('#vaiBubble').click();
+  await expect(page.locator('#vaiChips .vai-chip')).toHaveCount(0);
+  await expect(page.locator('#vaiWindow')).not.toContainText('automatizar');
 });
