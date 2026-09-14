@@ -201,22 +201,20 @@ Ahora cada cliente puede completar SU vinculación, cosa que nunca fue posible:
 
 - [x] Worker con dominio propio `api.hirevai.com`; widget v=8 y las 2 herramientas (diagnóstico, test-ley) llaman ahí. workers.dev sigue vivo para widgets viejos y webhooks Twilio/Telegram.
 - [ ] **Juan:** purgar en el dashboard de Cloudflare (hirevai.com → Caching → Custom purge) las URLs `https://hirevai.com/assets/vai-widget.js?v=7` y `https://hirevai.com/assets/vai-widget.js` — así los visitantes nuevos de las webs de clientes (aún con snippet v=7) reciben ya el widget arreglado.
-- [ ] **Sebas:** cambiar las webs de clientes al loader `/assets/vai.js` (verificado en Pages el
-      2026-09-14; sustituye la antigua petición de subir a `?v=8`). Intentado desde Claude Code el
-      2026-09-14 sin éxito: la clave SSH y el `gh` de esta máquina (juanesgarciag / jgarciagFarma)
-      no tienen escritura en los repos de botnexoia-coder. Estado real por sitio:
-
-      | Web | Dónde vive | Snippet hoy | Cambio |
-      |---|---|---|---|
-      | zoetravelspain.com | Pages `zoe` ← repo `botnexoia-coder/Zoe`, 7 HTML en `public/` (`index`, `blog/*`, `privacidad`, `prueba-vai`) | `vai-widget.js?v=14` | sustituir la línea por `<script src="https://hirevai.com/assets/vai.js" defer></script>`; `window.VELAI_TENANT='zoe'` se queda |
-      | dialogosqueensenan.com | Pages `dialogos` ← repo privado `botnexoia-coder/Dialogos` | `vai-widget.js?v=14` | igual, tenant `dialogos` |
-      | hiredatavision.com | Pages `hiredatavision` ← repo privado `botnexoia-coder/hiredatavision` | `vai-widget.js?v=14` | igual, tenant `hiredatavision` |
-      | tufisiooficial.com | Worker `tufisiooficial` con dominio propio (fuente fuera de este repo) | `vai-widget.js?v=20260913-salo` | igual, tenant `tufisiooficial` |
-      | myxucostura.com | Pages `myxucostura` ← repo privado `botnexoia-coder/MyXuCostura` | **sin widget** hoy | añadir las dos líneas con `window.VELAI_TENANT='myxu-costura'` antes del loader |
-
-      hirevai.com no cambia: carga `vai-widget.js?v=N` directo y check-site vigila el número.
-      Alternativa sin Sebas: `gh auth login` con la cuenta botnexoia-coder en esta máquina y
-      Claude Code hace los cinco cambios en una pasada.
+- [x] Webs de clientes al loader `/assets/vai.js` (2026-09-14, desde Claude Code con la cuenta
+      botnexoia-coder): **Zoe** (`5afc847`, 7 HTML, retirada también su copia local de
+      `velai-assistant-polish.js` + `assistant-brand.js`), **hiredatavision** (`1e9f3d0`, 6 HTML,
+      misma retirada) y **Dialogos** (`a37d17e`, 12 HTML; `promo-qr.html` nunca llevó widget).
+      Verificado en vivo tras Pages: las tres cargan el loader, sin widget directo ni polish;
+      zoetravelspain.com abierto en Chromium monta «Hablar con Zoe» una sola vez y encadena
+      `vai.js` → `vai-widget.js?v=16` sin errores.
+- [ ] **Sebas:** tufisiooficial.com al loader. Lo sirve el Worker `tufisiooficial` con dominio
+      propio; su fuente no está en ningún repo de botnexoia-coder. Hoy carga
+      `vai-widget.js?v=20260913-salo` (misma línea a sustituir, tenant `tufisiooficial`).
+- [ ] myxucostura.com **no lleva el widget** y no debe llevarlo aún: el tenant `myxu-costura`
+      no existe en producción (`/widget/boot` → 404 `invalid_tenant`; prospecto con su propio
+      bot Mei). Cuando se dé de alta el tenant, añadir en `index.html` del repo `MyXuCostura`
+      las dos líneas con `window.VELAI_TENANT='myxu-costura'` antes del loader.
 
 ### 2m. Marca del negocio en WhatsApp (desplegado 2026-08-22)
 
