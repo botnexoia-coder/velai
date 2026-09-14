@@ -56,6 +56,13 @@ const detailTenant: TenantDetail = {
   bot_name: 'Vai',
   brand_name: null,
   logo_url: null,
+  portrait_url: null,
+  accent_color: null,
+  teaser_title: null,
+  teaser_copy: null,
+  teaser_title_en: null,
+  teaser_copy_en: null,
+
   brand_color: null,
   brand_color_2: null,
   agent_color: null,
@@ -154,6 +161,9 @@ describe('vista Clientes', () => {
     // Editar enciende el punto ámbar de SU pestaña.
     await user.type(within(dialog).getByLabelText('Nombre'), ' SL');
     expect(within(dialog).getByRole('button', { name: /identidad y canal/i }).className).toContain('dirty');
+    await user.click(within(dialog).getByRole('button', { name: 'Marca del widget' }));
+    await user.type(within(dialog).getByLabelText('Título de la tarjeta'), 'Bienvenido');
+    await user.type(within(dialog).getByLabelText('URL del retrato'), 'https://example.com/vai.png');
     // Guardar: PATCH con expected_updated_at (el 409 stale_tenant existe para esto).
     await user.click(within(dialog).getByRole('button', { name: 'Guardar' }));
     await waitFor(() => {
@@ -162,6 +172,8 @@ describe('vista Clientes', () => {
       const body = JSON.parse(String(patch?.init?.body)) as Record<string, unknown>;
       expect(body['expected_updated_at']).toBe('2026-08-20T00:00:00.000Z');
       expect(body['name']).toBe('Barbería López SL');
+      expect(body['teaser_title']).toBe('Bienvenido');
+      expect(body['portrait_url']).toBe('https://example.com/vai.png');
       expect(body['chips_json']).toEqual(['Pedir cita']);
       expect(body['web_origins']).toEqual(['https://barberia.com']);
       // El token NO viaja si no se escribió (write-only).
@@ -236,5 +248,84 @@ describe('vista Clientes', () => {
     });
     // Tras guardar identidad + contexto, avanza a Marca.
     await waitFor(() => expect(within(dialog).getByLabelText('Nombre del bot')).toBeInTheDocument());
+  });
+});
+
+
+describe('lanzador en Marca del widget', () => {
+  it('la pestaña Marca enseña retrato, acento y tarjeta', async () => {
+    renderClientes();
+    const user = userEvent.setup();
+    await user.click(await screen.findByText('Barbería López'));
+    const dialog = await screen.findByRole('dialog', { hidden: true });
+    await waitFor(() => expect(within(dialog).getByLabelText('Nombre')).toHaveValue('Barbería López'));
+    await user.click(within(dialog).getByRole('button', { name: 'Marca del widget' }));
+    for (const label of ['URL del retrato', 'Color de acento', 'Título de la tarjeta', 'Texto de la tarjeta', 'Título de la tarjeta en inglés', 'Texto de la tarjeta en inglés']) {
+      expect(within(dialog).getByLabelText(label)).toBeInTheDocument();
+    }
+    expect(within(dialog).getByText('Hablar con Vai')).toBeInTheDocument();
+    expect(within(dialog).getByText('¿Tu negocio necesita más tiempo?')).toBeInTheDocument();
+    await user.type(within(dialog).getByLabelText('Título de la tarjeta'), 'Tu asesor');
+    expect(within(dialog).getByText('Tu asesor')).toBeInTheDocument();
+  });
+
+  it('subir retrato hace POST /logo?kind=portrait y rellena la URL', async () => {
+    const portrait = 'https://api.hirevai.com/media/portraits/test.png?v=1';
+    const { calls } = renderClientes((url, init) => {
+      if (url.endsWith('/logo?kind=portrait') && init?.method === 'POST') {
+        return new Response(JSON.stringify({ ok: true, kind: 'portrait', portrait_url: portrait, store: 'kv', updated_at: '2026-09-14T12:00:00.000Z' }), { status: 200 });
+      }
+      return null;
+    });
+    const user = userEvent.setup();
+    await user.click(await screen.findByText('Barbería López'));
+    const dialog = await screen.findByRole('dialog', { hidden: true });
+    await waitFor(() => expect(within(dialog).getByLabelText('Nombre')).toHaveValue('Barbería López'));
+    await user.click(within(dialog).getByRole('button', { name: 'Marca del widget' }));
+    await user.type(within(dialog).getByLabelText('Título de la tarjeta'), 'Bienvenida pendiente');
+    const file = new File(['image'], 'portrait.png', { type: 'image/png' });
+    await user.upload(dialog.querySelector<HTMLInputElement>('#tPortraitFile')!, file);
+    await user.click(within(dialog).getByRole('button', { name: 'Guardar retrato' }));
+    await waitFor(() => expect(within(dialog).getByLabelText('URL del retrato')).toHaveValue(portrait));
+    expect(await screen.findByText('Retrato guardado')).toBeInTheDocument();
+    const request = calls.find((c) => c.url.endsWith('/logo?kind=portrait'));
+    expect(request?.init?.body).toBe(file);
+    expect(new Headers(request?.init?.headers).get('Content-Type')).toBe('image/png');
+    await user.click(within(dialog).getByRole('button', { name: 'Guardar' }));
+    await waitFor(() => {
+      const patch = calls.find((c) => c.init?.method === 'PATCH');
+      const body = JSON.parse(String(patch?.init?.body)) as Record<string, unknown>;
+      expect(body['expected_updated_at']).toBe('2026-09-14T12:00:00.000Z');
+      expect(body['teaser_title']).toBe('Bienvenida pendiente');
+      expect(body['portrait_url']).toBe(portrait);
+    });
+  });
+});
+
+describe('ventana del widget v16', () => {
+  it('preview con saludo, cinco sugerencias y selector de tema claro/oscuro', async () => {
+    const { calls } = renderClientes();
+    const user = userEvent.setup();
+    await user.click(await screen.findByText('Barbería López'));
+    const dialog = await screen.findByRole('dialog', { hidden: true });
+    await waitFor(() => expect(within(dialog).getByLabelText('Nombre')).toHaveValue('Barbería López'));
+    await user.click(within(dialog).getByRole('button', { name: 'Marca del widget' }));
+    expect(within(dialog).getByText('Hola, soy Vai. ¿En qué puedo ayudarte?')).toBeInTheDocument();
+    expect(dialog.querySelector('.bp-c')).toHaveTextContent('Pedir cita');
+    const theme = within(dialog).getByLabelText('Tema del chat');
+    await user.selectOptions(theme, 'dark');
+    expect(dialog.querySelector('.brandprev')).toHaveClass('bp-dark');
+    await user.selectOptions(theme, 'light');
+    expect(dialog.querySelector('.brandprev')).toHaveClass('bp-light');
+    expect(within(dialog).getByRole('option', { name: 'Automático (según el visitante)' })).toBeInTheDocument();
+    const chips = within(dialog).getByLabelText('Sugerencias');
+    await user.clear(chips);
+    await user.type(chips, 'Uno\nDos\nTres\nCuatro\nCinco');
+    expect(dialog.querySelectorAll('.bp-c>span')).toHaveLength(5);
+    await user.click(within(dialog).getByRole('button', { name: 'Guardar' }));
+    await waitFor(() => {
+      const patch = calls.find((c) => c.init?.method === 'PATCH');
+      expect(JSON.parse(String(patch?.init?.body)).chips_json).toEqual(['Uno', 'Dos', 'Tres', 'Cuatro', 'Cinco']);
+    });
   });
 });

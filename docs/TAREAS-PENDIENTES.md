@@ -16,6 +16,12 @@ decide quién puede cerrar cada cosa:
 
 ### CÓDIGO
 
+- [ ] Nombre público editable del agente, independiente de su alias de acceso;
+      v16 muestra el alias que utiliza el panel, sin exponer el correo completo.
+
+- [ ] Retrato en Conexiones (rol cliente); por ahora lo cura Velai en el alta.
+- [ ] Widget: seguir cambios de `<html lang>` en caliente para todos sus textos.
+
 - [ ] Contextos amplios fases 2–4 (`tenant_docs`, consulta indexada y, solo a escala,
       Vectorize); no recortar prompts como sustituto.
 - [ ] Informe semanal por WhatsApp e Instagram cuando se decida activar esos canales.
@@ -28,6 +34,18 @@ decide quién puede cerrar cada cosa:
       negocio priorice esas fases.
 
 ### OPERACIÓN (código ya disponible; requiere entorno o una persona)
+
+- [ ] Publicar y verificar el lote v15 + loader + ventana v16: CD habitual con migración 0033 → worker
+      → panel, y después Pages. Registrar IDs y fecha en IMPLEMENTADO.md.
+      En staging comprobar boot (6 campos), subida a `media/portraits`, guardado,
+      recarga e Historial config con previous_value. En Pages revisar ES/EN,
+      móvil con consentimiento, retrato Vai, apertura/cierre y eventos GA4.
+- [ ] Tras Pages, verificar con `curl -sI https://hirevai.com/assets/vai.js` que
+      Cache-Control sea `public, max-age=300, must-revalidate`, sin `immutable` ni
+      max-age de un año. Solo entonces pedir a los clientes el cambio definitivo
+      a `/assets/vai.js` sin versión (dominios en `web_origins`, última vez).
+- [ ] Comprobar ventana v16 en staging y una web cliente con cabecera fija; confirmar
+      tema, saludo único, hasta cinco sugerencias, conversación viva y analítica.
 
 - [ ] Completar y verificar staging: clave Anthropic propia, primer job de CD y login
       con rol cliente. Staging seguirá sin Twilio/Telegram por seguridad.
@@ -181,7 +199,7 @@ Ahora cada cliente puede completar SU vinculación, cosa que nunca fue posible:
 
 - [x] Worker con dominio propio `api.hirevai.com`; widget v=8 y las 2 herramientas (diagnóstico, test-ley) llaman ahí. workers.dev sigue vivo para widgets viejos y webhooks Twilio/Telegram.
 - [ ] **Juan:** purgar en el dashboard de Cloudflare (hirevai.com → Caching → Custom purge) las URLs `https://hirevai.com/assets/vai-widget.js?v=7` y `https://hirevai.com/assets/vai-widget.js` — así los visitantes nuevos de las webs de clientes (aún con snippet v=7) reciben ya el widget arreglado.
-- [ ] **Sebas:** subir el snippet a `?v=8` en las 4 webs de clientes (dialogosqueensenan.com confirmada con snippet correcto; el cambio es solo la query). Los navegadores que cachearon v=7 (immutable, 1 año) solo se arreglan con esto.
+- [ ] **Sebas:** cambiar las 4 webs de clientes al loader `/assets/vai.js` tras verificar Pages y su caché corta (sustituye la antigua petición de subir a `?v=8`).
 
 ### 2m. Marca del negocio en WhatsApp (desplegado 2026-08-22)
 

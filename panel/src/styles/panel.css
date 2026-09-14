@@ -558,17 +558,33 @@ dialog.cfm{width:min(460px,calc(100% - 24px));padding:20px 22px}
 .versions article{margin-bottom:10px}
 .versions pre{white-space:pre-wrap;background:var(--bg3);border:1px solid var(--border);border-radius:8px;padding:8px;font-size:11.5px;max-height:220px;overflow:auto}
 /* Previsualización de la marca del widget: mini-mock del chat con los valores del form */
-.brandprev{margin-top:8px;max-width:300px;border-radius:12px;overflow:hidden;border:1px solid var(--border2);background:#ece5dd}
-.brandprev .bp-h{display:flex;align-items:center;gap:8px;padding:8px 10px;color:#fff;background:#075e54}
-.brandprev .bp-av{width:26px;height:26px;border-radius:50%;overflow:hidden;display:flex;align-items:center;justify-content:center;background:#FF6B1A;color:#fff;font-weight:700;font-size:12px;flex-shrink:0}
-.brandprev .bp-av img{width:100%;height:100%;object-fit:cover}
-.brandprev .bp-n{font-size:12px;font-weight:600}
-.brandprev .bp-g{margin:8px;background:#fff;color:#111;border-radius:0 8px 8px 8px;padding:6px 8px;font-size:12px;width:fit-content;max-width:85%}
-.brandprev .bp-c{display:flex;flex-wrap:wrap;gap:4px;margin:0 8px 8px}
-.brandprev .bp-c span{border:1px solid rgba(0,0,0,.2);border-radius:10px;padding:3px 8px;font-size:10.5px;background:#fff;color:#075e54}
-.brandprev.bp-dark{background:#0b141a}
-.brandprev.bp-dark .bp-g{background:#1f2c34;color:#e9edef}
-.brandprev.bp-dark .bp-c span{background:#1f2c34;color:#e9edef;border-color:rgba(255,255,255,.2)}
+.brandprev{margin-top:8px;max-width:320px;--bp-srf:#f7f4ef;--bp-text:#172033;--bp-muted:#5b6472;--bp-line:rgba(0,0,0,.08);--bp-in:#ece8e1}
+.brandprev.bp-dark{--bp-srf:linear-gradient(145deg,#202736,#111722);--bp-text:#fff;--bp-muted:#ced7e5;--bp-line:rgba(255,255,255,.08);--bp-in:#182030}
+@media(prefers-color-scheme:dark){.brandprev:not(.bp-light){--bp-srf:linear-gradient(145deg,#202736,#111722);--bp-text:#fff;--bp-muted:#ced7e5;--bp-line:rgba(255,255,255,.08);--bp-in:#182030}}
+.bp-window{display:flex;flex-direction:column;min-height:540px;border:1px solid;border-radius:22px;background:var(--bp-srf);color:var(--bp-text);overflow:hidden}
+.bp-window .bp-h{display:flex;align-items:center;justify-content:space-between;min-height:52px;padding:0 14px;border-bottom:1px solid var(--bp-line);font-size:10px;font-weight:750;color:var(--bp-muted)}
+.bp-window .bp-h>span:last-child{font-size:24px}
+.bp-hero{display:flex;flex:1;flex-direction:column;align-items:center;justify-content:center;text-align:center;gap:16px;padding:30px 20px}
+.bp-hero .bp-portrait{width:84px;height:84px;font-size:34px;border:2px solid;color:#fff}
+.bp-hero strong{font-size:22px;font-weight:800;line-height:1.3;white-space:pre-wrap;overflow-wrap:anywhere}
+.bp-hero small{font-size:13px;color:var(--bp-muted)}
+.bp-window .bp-c{display:flex;flex-direction:column;padding:0 16px 12px}
+.bp-window .bp-c>span{display:flex;align-items:center;gap:12px;min-height:48px;border-top:1px solid var(--bp-line);font-size:14px;font-weight:600}
+.bp-input{display:flex;align-items:center;gap:8px;padding:14px;border-top:1px solid var(--bp-line);font-size:13px;color:var(--bp-muted)}
+.bp-input>span{display:flex;align-items:center;flex:1;min-height:44px;padding:8px 12px;background:var(--bp-in);border-radius:22px}
+.bp-input>b{display:grid;place-items:center;width:44px;height:44px;border-radius:50%;background:var(--bp-in);font-size:22px}
+/* Lanzador y bienvenida del widget v15. */
+.bp-launcher{display:flex;align-items:center;gap:10px;min-height:64px;margin:12px 8px;padding:6px 14px 6px 7px;border:2px solid;border-radius:40px;color:#fff;font-size:13px;font-weight:750;box-shadow:inset 0 0 0 100px #0003}
+.bp-launcher small{display:block;margin-top:3px;font-size:10px}
+.bp-face{position:relative;display:grid;place-items:center;flex:none;width:46px;height:46px;background:#fff;color:#172033;border-radius:50%;font-size:21px}
+.bp-face img{position:absolute;width:100%;height:100%;object-fit:cover;object-position:50% 25%;border-radius:50%}
+.bp-face i{position:absolute;right:-2px;bottom:0;width:12px;height:10px;border:2px solid #fff;border-radius:5px 5px 5px 0}
+.bp-teaser{margin:12px 8px;padding:18px 20px;border:1px solid;border-radius:22px 22px 5px 22px;background:linear-gradient(145deg,#202736,#111722);color:#fff}
+.bp-teaser small{display:block;font-size:10px;margin-bottom:8px;color:#e2e8f2}
+.bp-teaser strong{display:block;font-size:18px;line-height:1.25}
+.bp-teaser p{font-size:13px;line-height:1.5;color:#ced7e5;margin:6px 0 12px}
+.bp-teaser>span{font-size:13px;text-decoration:underline;text-underline-offset:4px}
+
 /* ── Configuración: estado de integraciones con semáforo ── */
 .stpill{display:inline-flex;align-items:center;gap:8px;border-radius:999px;padding:5px 13px;font-size:12.5px;font-weight:700;white-space:nowrap;border:1px solid transparent}
 .stpill i{width:8px;height:8px;border-radius:50%;flex-shrink:0}

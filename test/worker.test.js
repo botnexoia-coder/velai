@@ -1209,18 +1209,23 @@ test('el widget pinta la marca del tenant desde /widget/boot, no la de Velai', a
   const widget = await readFile(new URL('../site/assets/vai-widget.js', import.meta.url), 'utf8');
   assert.match(widget, /\/widget\/boot/);
   // colores por variables CSS aplicadas por CSSOM, nunca style="" (lección de la CSP del panel)
-  assert.match(widget, /setProperty\('--vai-c1'/);
+  assert.match(widget, /setProperty\('--vai-l1'/);
   // el WhatsApp de los mensajes de error sale de la marca del tenant
   assert.match(widget, /BRAND && BRAND\.wa_number/);
   // bilingüe: el saludo EN del tenant se usa cuando la página está en inglés
   assert.match(widget, /BRAND\.greeting_en/);
+  for (const fragment of ['BRAND.portrait_url', "setProperty('--vai-acc'", '--vai-lift', 'aria-expanded', 'BRAND.teaser_title_en', '· v16']) assert.ok(widget.includes(fragment), fragment);
+  assert.equal(widget.includes('va-ui'), false);
+  assert.equal(widget.includes('vaiPulse'), false);
+
 });
 
 test('GET /widget/boot devuelve la marca del tenant, con CORS, y 404 si el slug no existe', async () => {
   const worker = createWorker({ SYSTEM: 's', DEMOS: {}, SUMMARY_PROMPT: '', GUARDRAILS: '' });
   const row = {
     id: 't1', slug: 'zoe', name: 'Zoe Travel', active: 1, bot_name: 'Zoe', brand_name: 'Zoe Travel Spain',
-    brand_color: '#1a4fd0', greeting: '¡Hola! Soy Zoe', chips_json: '["Vuelos","Hoteles"]', theme: 'dark',
+    portrait_url: 'https://example.com/portrait.png', accent_color: '#ff914f', teaser_title: 'Hola',
+    brand_color: '#1a4fd0', greeting: '¡Hola! Soy Zoe', chips_json: '["Vuelos","Hoteles","Trenes","Coches","Cruceros"]', theme: 'dark',
     twilio_auth_token_enc: 'v1:SECRETO', system_prompt: 'PROMPT-PRIVADO',
   };
   const env = {
@@ -1233,7 +1238,11 @@ test('GET /widget/boot devuelve la marca del tenant, con CORS, y 404 si el slug 
   assert.equal(res.headers.get('Access-Control-Allow-Origin'), 'https://zoetravelspain.com');
   const body = await res.json();
   assert.equal(body.bot_name, 'Zoe');
-  assert.deepEqual(body.chips, ['Vuelos', 'Hoteles']);
+  assert.equal(body.portrait_url, row.portrait_url);
+  assert.equal(body.accent_color, row.accent_color);
+  assert.equal(body.teaser_title, 'Hola');
+  for (const key of ['teaser_copy', 'teaser_title_en', 'teaser_copy_en']) assert.equal(body[key], null);
+  assert.deepEqual(body.chips, ['Vuelos', 'Hoteles', 'Trenes', 'Coches', 'Cruceros']);
   assert.equal(body.theme, 'dark');
   // NADA sensible sale del endpoint público: ni token cifrado ni system_prompt
   const raw = JSON.stringify(body);
@@ -1256,7 +1265,7 @@ test('validateTenant: la marca del widget se valida campo a campo', () => {
   assert.throws(() => testing.validateTenant({ brand_color: 'rojo' }, { partial: true }), (e) => e.code === 'invalid_brand_color');
   assert.throws(() => testing.validateTenant({ logo_url: 'http://inseguro.com/l.png' }, { partial: true }), (e) => e.code === 'invalid_logo_url', 'el logo exige https (mixed content)');
   assert.throws(() => testing.validateTenant({ theme: 'neon' }, { partial: true }), (e) => e.code === 'invalid_theme');
-  assert.throws(() => testing.validateTenant({ chips_json: ['1', '2', '3', '4'] }, { partial: true }), (e) => e.code === 'invalid_chips_json');
+  assert.throws(() => testing.validateTenant({ chips_json: ['1', '2', '3', '4', '5', '6'] }, { partial: true }), (e) => e.code === 'invalid_chips_json');
   // vacío = null: el widget cae a la marca de Velai
   assert.equal(testing.validateTenant({ chips_json: [] }, { partial: true }).chips_json, null);
   assert.equal(testing.validateTenant({ theme: '' }, { partial: true }).theme, null);
@@ -4333,7 +4342,9 @@ test('el sondeo del widget devuelve solo lo del equipo y marca que el visitante 
   const conv = { id: 'c-web', state: 'humano', state_at: null };
   const mensajes = [
     { id: 11, role: 'assistant', text: 'respuesta del bot', created_at: 'x' },
-    { id: 12, role: 'agent', text: 'Hola, soy Ana del equipo', created_at: 'y' },
+    { id: 12, role: 'agent', text: 'Hola, soy Ana del equipo', created_at: 'y', agent_email: 'ana.lopez+turno@cliente.test' },
+    { id: 13, role: 'agent', text: 'Continúo yo', created_at: 'z', agent_email: 'juan-perez@cliente.test' },
+    { id: 14, role: 'agent', text: 'Mensaje antiguo', created_at: 'z', agent_email: null },
   ];
   const writes = [];
   const env = { DB: {
@@ -4355,7 +4366,10 @@ test('el sondeo del widget devuelve solo lo del equipo y marca que el visitante 
   assert.equal(d.state, 'humano');
   // El bot ya lo pintó quien lo pidió: repetirlo duplicaría la conversación en pantalla.
   // (El filtro de rol vive en el widget; aquí se comprueba que llegan los ids para el cursor.)
-  assert.deepEqual(d.messages.map((m) => m.id), [11, 12]);
+  assert.deepEqual(d.messages.map((m) => m.id), [11, 12, 13, 14]);
+  assert.deepEqual(d.messages.map((m) => m.agent_name), [null, 'Ana lopez', 'Juan perez', null]);
+  assert.equal(JSON.stringify(d).includes('@'), false);
+  assert.equal(JSON.stringify(d).includes('agent_email'), false);
   assert.equal(d.messages.find((m) => m.role === 'agent').text, 'Hola, soy Ana del equipo');
   // La marca de presencia: sin ella, el panel no sabe si escribe a una pestaña cerrada.
   assert.ok(writes.some((w) => /visitor_seen_at/.test(w.sql)), 'se marca al visitante como presente');
@@ -6123,4 +6137,71 @@ test('aprobar con la MISMA pareja no recrea nada; rechazar exige nota y el clien
     const path = '/api/admin/solicitudes/9/aprobar';
     await assert.rejects(testing.adminRouter(adminReq(path, { method: 'POST' }), env, { waitUntil() {} }, path, new URL('https://x' + path), {}, CLIENTE), (e) => e.status === 403);
   } finally { globalThis.fetch = realFetch; }
+});
+
+
+test('el lanzador v15 retira los dos scripts externos de marca', async () => {
+  for (const file of ['assistant-brand.js', 'velai-assistant-polish.js']) {
+    await assert.rejects(readFile(new URL('../site/assets/' + file, import.meta.url)), { code: 'ENOENT' });
+  }
+});
+
+test('validateTenant valida retrato, acento y límites de la bienvenida', () => {
+  const fields = { portrait_url: 'https://example.com/p.png', accent_color: '#FF914F',
+    teaser_title: 'x'.repeat(90), teaser_title_en: 'y'.repeat(90),
+    teaser_copy: 'x'.repeat(210), teaser_copy_en: 'y'.repeat(210) };
+  const out = testing.validateTenant(fields, { partial: true });
+  assert.equal(out.accent_color, '#FF914F');
+  assert.equal(out.portrait_url, fields.portrait_url);
+  for (const key of ['teaser_title', 'teaser_title_en']) assert.equal(out[key].length, 80);
+  for (const key of ['teaser_copy', 'teaser_copy_en']) assert.equal(out[key].length, 200);
+  for (const key of Object.keys(fields)) assert.equal(testing.validateTenant({ [key]: '' }, { partial: true })[key], null);
+  assert.throws(() => testing.validateTenant({ accent_color: 'naranja' }, { partial: true }), (e) => e.code === 'invalid_accent_color');
+  assert.throws(() => testing.validateTenant({ portrait_url: 'http://example.com/p.png' }, { partial: true }), (e) => e.code === 'invalid_portrait_url');
+});
+
+test('subir retrato guarda y audita portrait_url sin canales ni sincronización de WhatsApp', async () => {
+  const TID = '00000000-0000-4000-8000-0000000000d1';
+  const writes = [], puts = [], deleted = [], pending = [];
+  const env = {
+    KV: { async get() { return null; }, async put(...args) { puts.push(args); }, async delete(key) { deleted.push(key); } },
+    DB: { prepare: (sql) => ({ bind: (...args) => ({
+      first: async () => ({ id: TID, slug: 'mio', portrait_url: 'https://example.com/old.png',
+        sender_sid: 'XE' + 'a'.repeat(32), twilio_subaccount_sid: 'AC' + 'b'.repeat(32) }),
+      run: async () => { writes.push({ sql, args }); return { meta: { changes: 1 } }; },
+      all: async () => ({ results: [] }),
+    }) }) },
+  };
+  const path = `/api/admin/tenants/${TID}/logo`;
+  const url = new URL('https://x' + path + '?kind=portrait&channels=invalid');
+  const png = new Uint8Array(200); png.set([0x89, 0x50, 0x4e, 0x47]);
+  const post = (bytes) => testing.adminRouter(adminReq(path, { method: 'POST', body: bytes }), env,
+    { waitUntil(p) { pending.push(p); } }, path, url, {}, { role: 'cliente', tenantId: TID });
+  const res = await (await post(png)).json();
+  assert.equal(res.kind, 'portrait');
+  assert.match(res.portrait_url, /\/media\/portraits\/.*\.png\?v=\d+/);
+  const update = writes.find((w) => w.sql.startsWith('UPDATE tenants SET portrait_url='));
+  assert.equal(update.args[0], res.portrait_url);
+  assert.ok(writes.every((w) => !w.sql.includes('SET logo')));
+  const version = writes.find((w) => w.sql.includes('INSERT INTO tenant_versions'));
+  assert.deepEqual(JSON.parse(version.args[3]), { portrait_url: 'https://example.com/old.png' });
+  assert.match(version.args[4], /retrato subido a/);
+  assert.equal(pending.length, 0, 'no pushSenderProfile aunque haya sender');
+  assert.ok(deleted.length > 0, 'invalida caché');
+  assert.equal(puts[0][2].metadata.contentType, 'image/png');
+  await assert.rejects(post(new Uint8Array(200)), (e) => e.code === 'invalid_image');
+  await assert.rejects(post(new Uint8Array(2 * 1024 * 1024 + 1)), (e) => e.code === 'image_too_large');
+});
+
+
+test('widget v16: loader vigente, ventana nueva y cinco sugerencias', async () => {
+  const loader = await readFile(new URL('../site/assets/vai.js', import.meta.url), 'utf8');
+  assert.match(loader, /currentScript/);
+  assert.match(loader, /vai-widget\.js\?v=/);
+  assert.match(loader, /V = '16'/);
+  const widget = await readFile(new URL('../site/assets/vai-widget.js', import.meta.url), 'utf8');
+  assert.equal(widget.includes('#075e54'), false);
+  for (const token of ['.vai-hero', 'is-empty', 'is-open', 'prefers-color-scheme', '· v16']) assert.ok(widget.includes(token));
+  const chips = ['Uno', 'Dos', 'Tres', 'Cuatro', 'Cinco'];
+  assert.deepEqual(JSON.parse(testing.validateTenant({ chips_json: chips }, { partial: true }).chips_json), chips);
 });

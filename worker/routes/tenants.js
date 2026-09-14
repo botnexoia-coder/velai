@@ -149,14 +149,15 @@ tenants.post('/api/admin/tenants', async (c) => {
   try {
     await env.DB.prepare(`INSERT INTO tenants
       (id,slug,name,channel_address,team_whatsapp,telegram_chat_id,lead_template_sid,twilio_from,twilio_subaccount_sid,waba_id,twilio_auth_token_enc,meta_partner_status,system_prompt,
-       bot_name,brand_name,logo_url,brand_color,brand_color_2,agent_color,greeting,greeting_en,chips_json,placeholder,wa_number,theme,web_origins,
+       bot_name,brand_name,logo_url,portrait_url,accent_color,teaser_title,teaser_copy,teaser_title_en,teaser_copy_en,brand_color,brand_color_2,agent_color,greeting,greeting_en,chips_json,placeholder,wa_number,theme,web_origins,
        active,created_at,updated_at)
-      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
       .bind(tenantId, fields.slug, fields.name, fields.channel_address, fields.team_whatsapp ?? null,
         fields.telegram_chat_id ?? null, fields.lead_template_sid ?? null, fields.twilio_from ?? null,
         fields.twilio_subaccount_sid ?? null, fields.waba_id ?? null, tokenColumn,
         fields.meta_partner_status ?? 'pendiente', fields.system_prompt,
         fields.bot_name ?? null, fields.brand_name ?? null, fields.logo_url ?? null,
+        fields.portrait_url ?? null, fields.accent_color ?? null, fields.teaser_title ?? null, fields.teaser_copy ?? null, fields.teaser_title_en ?? null, fields.teaser_copy_en ?? null,
         fields.brand_color ?? null, fields.brand_color_2 ?? null, fields.agent_color ?? null, fields.greeting ?? null,
         fields.greeting_en ?? null, fields.chips_json ?? null, fields.placeholder ?? null,
         fields.wa_number ?? null, fields.theme ?? null, fields.web_origins ?? null,
@@ -260,7 +261,7 @@ const grupoTenant = async (c) => {
     // Columnas explícitas, NUNCA SELECT *: twilio_auth_token_enc no sale del worker.
     const tenant = await env.DB.prepare(`SELECT id, slug, name, channel_address, team_whatsapp, telegram_chat_id,
       lead_template_sid, twilio_from, twilio_subaccount_sid, waba_id, meta_partner_status, system_prompt,
-      bot_name, brand_name, logo_url, brand_color, brand_color_2, agent_color, greeting, greeting_en, chips_json,
+      bot_name, brand_name, logo_url, portrait_url, accent_color, teaser_title, teaser_copy, teaser_title_en, teaser_copy_en, brand_color, brand_color_2, agent_color, greeting, greeting_en, chips_json,
       placeholder, wa_number, theme, web_origins, sender_sid, sender_status, telegram_chat_title,
       ai_monthly_tokens, ai_daily_limit, support_hours, support_tz,
       active, created_at, updated_at, twilio_auth_token_enc IS NOT NULL AS has_twilio_token

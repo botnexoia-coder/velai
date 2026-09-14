@@ -28,6 +28,7 @@ const failures = [];
 const allowPlaceholders = process.env.CHECK_ALLOW_PLACEHOLDERS === '1';
 for (const file of htmlFiles) {
   const html = await readFile(file, 'utf8'); const rel = path.relative(root, file);
+  if (/velai-assistant-polish|assistant-brand\.js/.test(html)) failures.push(`${rel}: capa de marca externa retirada; usar widget v15`);
   const isDemo = rel === 'demo/index.html' || rel.startsWith(`demo${path.sep}`);
   const required = [['title', /<title>[\s\S]*?<\/title>/i], ['description', /name="description"/i]];
   if (!isDemo) required.push(['funnel', /assets\/funnel\.js/], ['widget', /assets\/vai-widget\.js/]);
@@ -101,14 +102,24 @@ for (const file of htmlFiles) {
   const widget = await readFile(path.join(root, 'assets/vai-widget.js'), 'utf8');
   const header = widget.match(/· v(\d+)/);
   if (!header) failures.push('assets/vai-widget.js: la cabecera no declara versión (· vN)');
+  try {
+    const loader = await readFile(path.join(root, 'assets/vai.js'), 'utf8');
+    const version = loader.match(/\bV\s*=\s*['"](\d+)['"]/);
+    if (!version || !header || version[1] !== header[1]) failures.push('loader y widget: versiones ausentes o distintas');
+  } catch (_) { failures.push('falta assets/vai.js (loader sin versión)'); }
+  const headers = await readFile(path.join(root, '_headers'), 'utf8');
+  if (!/^\/assets\/vai\.js\r?\n[ \t]+! Cache-Control\r?\n[ \t]+Cache-Control: public, max-age=300, must-revalidate\s*$/m.test(headers)) {
+    failures.push('_headers: falta la excepción de caché corta del loader /assets/vai.js');
+  }
   const usadas = new Set();
   for (const rel of htmlFiles) {
     const html = await readFile(rel, 'utf8');
     for (const m of html.matchAll(/vai-widget\.js\?v=(\d+)/g)) usadas.add(m[1]);
   }
+  if (!usadas.size) failures.push('los HTML no declaran ninguna versión del widget');
   if (usadas.size > 1) failures.push(`los HTML piden versiones distintas del widget: ${[...usadas].join(', ')}`);
   if (header && usadas.size === 1 && !usadas.has(header[1])) {
-    failures.push(`el widget declara v${header[1]} y los HTML piden v${[...usadas][0]} — con caché immutable, el archivo nuevo no llegaría a nadie`);
+    failures.push(`el widget declara v${header[1]} y los HTML piden v${[...usadas][0]} — con caché immutable, los visitantes recurrentes podrían conservar el anterior`);
   }
 }
 

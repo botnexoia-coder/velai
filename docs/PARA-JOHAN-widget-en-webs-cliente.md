@@ -1,6 +1,28 @@
-# Sebas — widget de Vai en las webs de los 4 clientes (v3)
+# Sebas — widget de Vai en las webs de los 4 clientes (v6)
 
-> **v4 (2026-08-26).** La versión buena ahora es **`?v=14`**. Añade una cosa nueva: cuando
+> **v6 (2026-09-14).** Pasamos a **`/assets/vai.js` sin `?v=`**: última vez que
+> hay que tocar el HTML para actualizar versiones. El loader carga el widget vigente
+> (v16 en esta entrega) y tiene caché de cinco minutos. El cliente mantiene el slug
+> inline antes del script. El botón v15 se conserva; la ventana nueva incluye retrato,
+> bienvenida, hasta cinco sugerencias y tema automático/claro/oscuro desde Marca.
+> **Antes de cambiar snippets:** confirmar el despliegue de Pages y que el loader
+> devuelve `Cache-Control: public, max-age=300, must-revalidate`, sin `immutable`.
+> Este código todavía está pendiente de publicación. Las páginas ya abiertas no
+> se recargan solas: la actualización llega en posteriores cargas de la página.
+
+
+> **v5 (2026-09-14).** El snippet de aquella entrega usaba **`?v=15`**: lanzador con
+> retrato, acento y tarjeta de bienvenida configurables desde Marca del widget.
+> Sin retrato del cliente, muestra la inicial del bot. La versión está preparada
+> en el repositorio; confirmar el despliegue de Pages antes de cambiar snippets.
+>
+> Con `?v=14` habrá un estado mixto tras publicar: Pages purga edge y un visitante
+> nuevo recibe v15, pero el navegador de un recurrente puede conservar v14 hasta
+> un año (`immutable`). Ambos funcionan; cambiar a `?v=15` hace la actualización
+> determinista. La versión de idioma se fija al cargar la página.
+
+
+> **v4 (2026-08-26).** La versión de aquella entrega era **`?v=14`**. Añade una cosa nueva: cuando
 > alguien pide hablar con una persona y hay alguien del equipo disponible en el panel, el
 > chat de la web pasa a ser **conversación en vivo** — lo que escribe el equipo desde el
 > panel le llega al visitante en la propia web.
@@ -19,14 +41,14 @@
 
 ---
 
-## 1. El snippet (igual que siempre, con `v=14`)
+## 1. El snippet definitivo (loader sin versión)
 
 Dos líneas, **en este orden**, justo **antes de `</body>`**, en TODAS las páginas de cada web
 (si hay footer/layout compartido, ese es el sitio):
 
 ```html
 <script>window.VELAI_TENANT='<SLUG>';</script>
-<script src="https://hirevai.com/assets/vai-widget.js?v=14" defer></script>
+<script src="https://hirevai.com/assets/vai.js" defer></script>
 ```
 
 El `<SLUG>` es distinto en cada web. **No los mezcles**: si te equivocas, el bot de un cliente

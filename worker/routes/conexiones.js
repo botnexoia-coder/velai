@@ -23,7 +23,7 @@ conexiones.post('/api/admin/tenants/:id/logo/apply', async (c) => {
   const id = c.req.param('id');
   if (!UUID_RE.test(id)) throw new HttpError(404, 'not_found');
   assertOwnTenant(scope, id);
-  const tenant = await env.DB.prepare(`SELECT id, slug, name, logo_url, logo_wa_url, brand_name, greeting, web_origins,
+  const tenant = await env.DB.prepare(`SELECT id, slug, name, logo_url, portrait_url, logo_wa_url, brand_name, greeting, web_origins,
     sender_sid, twilio_subaccount_sid, twilio_auth_token_enc FROM tenants WHERE id=?`).bind(id).first();
   if (!tenant) throw new HttpError(404, 'not_found');
   if (!tenant.logo_url && !tenant.logo_wa_url) throw new HttpError(400, 'logo_missing');
@@ -53,6 +53,18 @@ conexiones.post('/api/admin/tenants/:id/logo', async (c) => {
   else if (body[0] === 0xff && body[1] === 0xd8 && body[2] === 0xff) { ext = 'jpg'; mime = 'image/jpeg'; }
   else if (body[0] === 0x52 && body[1] === 0x49 && body[2] === 0x46 && body[3] === 0x46 && body[8] === 0x57 && body[9] === 0x45 && body[10] === 0x42 && body[11] === 0x50) { ext = 'webp'; mime = 'image/webp'; }
   if (!ext) throw new HttpError(400, 'invalid_image');
+  const kind = url.searchParams.get('kind') === 'portrait' ? 'portrait' : 'logo';
+  if (kind === 'portrait') {
+    const key = `portraits/${tenantId}.${ext}`;
+    const store = await mediaPut(env, key, body, mime);
+    const now = new Date().toISOString();
+    const portraitUrl = `${PUBLIC_MEDIA_BASE}/media/${key}?v=${now.replace(/[^0-9]/g, '').slice(0, 14)}`;
+    await env.DB.prepare('UPDATE tenants SET portrait_url=?, updated_at=? WHERE id=?').bind(portraitUrl, now, tenantId).run();
+    await env.DB.prepare('INSERT INTO tenant_versions (tenant_id,actor_email,field,previous_value,note,created_at) VALUES (?,?,?,?,?,?)')
+      .bind(tenantId, actor, 'config', JSON.stringify({ portrait_url: tenant.portrait_url ?? null }), `retrato subido a ${store} (${ext}, ${Math.round(body.byteLength / 1024)} KB)`, now).run();
+    await invalidateTenantCache(env, [tenant]);
+    return json({ ok: true, kind: 'portrait', portrait_url: portraitUrl, store, updated_at: now }, 200, NO_STORE);
+  }
   // ¿A qué canales aplica esta imagen? Por defecto, a los dos (lo que hacía antes).
   // Ausente = a los dos canales (lo que hacía antes de separarlos). Presente pero
   // vacío es una petición explícita sin canales: eso se rechaza, no se adivina.

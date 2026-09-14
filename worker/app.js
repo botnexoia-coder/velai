@@ -635,6 +635,18 @@ export function validateTenant(body, { partial = false } = {}) {
     // https obligatorio: un logo por http rompería las webs de los clientes (mixed content).
     if (out.logo_url && !/^https:\/\/[^\s]+$/i.test(out.logo_url)) bad('logo_url');
   }
+  if (has('portrait_url')) {
+    out.portrait_url = clean(body.portrait_url, 300) || null;
+    if (out.portrait_url && !/^https:\/\/[^\s]+$/i.test(out.portrait_url)) bad('portrait_url');
+  }
+  if (has('accent_color')) {
+    out.accent_color = clean(body.accent_color, 10) || null;
+    if (out.accent_color && !HEX_COLOR_RE.test(out.accent_color)) bad('accent_color');
+  }
+  if (has('teaser_title')) out.teaser_title = clean(body.teaser_title, 80) || null;
+  if (has('teaser_copy')) out.teaser_copy = clean(body.teaser_copy, 200) || null;
+  if (has('teaser_title_en')) out.teaser_title_en = clean(body.teaser_title_en, 80) || null;
+  if (has('teaser_copy_en')) out.teaser_copy_en = clean(body.teaser_copy_en, 200) || null;
   if (has('agent_color')) {
     const raw = clean(body.agent_color, 10);
     if (!raw) out.agent_color = null;
@@ -652,12 +664,12 @@ export function validateTenant(body, { partial = false } = {}) {
   if (has('greeting')) out.greeting = clean(body.greeting, 300) || null;
   if (has('greeting_en')) out.greeting_en = clean(body.greeting_en, 300) || null;
   if (has('chips_json')) {
-    // Acepta array o JSON string; se guarda normalizado. Máximo 3 chips de 60 car.
+    // Acepta array o JSON string; se guarda normalizado. Máximo 5 chips de 60 car.
     let chips = body.chips_json;
     if (typeof chips === 'string' && chips.trim()) { try { chips = JSON.parse(chips); } catch (_) { bad('chips_json'); } }
     if (chips == null || (typeof chips === 'string' && !chips.trim()) || (Array.isArray(chips) && !chips.length)) out.chips_json = null;
     else {
-      if (!Array.isArray(chips) || chips.length > 3 || chips.some((c) => typeof c !== 'string' || !c.trim() || c.length > 60)) bad('chips_json');
+      if (!Array.isArray(chips) || chips.length > 5 || chips.some((c) => typeof c !== 'string' || !c.trim() || c.length > 60)) bad('chips_json');
       out.chips_json = JSON.stringify(chips.map((c) => c.trim()));
     }
   }
@@ -768,11 +780,17 @@ export async function handleWidgetBoot(request, env, url) {
   // web de un cliente con el snippet mal puesto — mejor que el error se vea en consola.
   if (!tenant) throw new HttpError(404, 'invalid_tenant');
   let chips = null;
-  if (tenant.chips_json) { try { const p = JSON.parse(tenant.chips_json); if (Array.isArray(p) && p.length) chips = p.slice(0, 3).map(String); } catch (_) {} }
+  if (tenant.chips_json) { try { const p = JSON.parse(tenant.chips_json); if (Array.isArray(p) && p.length) chips = p.slice(0, 5).map(String); } catch (_) {} }
   return json({
     bot_name: tenant.bot_name || null,
     brand_name: tenant.brand_name || null,
     logo_url: tenant.logo_url || null,
+    portrait_url: tenant.portrait_url || null,
+    accent_color: tenant.accent_color || null,
+    teaser_title: tenant.teaser_title || null,
+    teaser_copy: tenant.teaser_copy || null,
+    teaser_title_en: tenant.teaser_title_en || null,
+    teaser_copy_en: tenant.teaser_copy_en || null,
     brand_color: tenant.brand_color || null,
     // Acento de la burbuja del equipo. Vacío = el color de marca del cliente (nunca el
     // violeta por defecto para todos).
@@ -2206,6 +2224,14 @@ async function handleReminderButton(env, ctx, tenant, from, to, action, apptId, 
 // La vuelta del canal web (migración 0026). El widget pregunta por lo nuevo SOLO cuando la
 // conversación no la lleva el bot: con la IA atendiendo —el 99% del tráfico— no hay ni una
 // petición extra, y eso es lo que hace que esto no se coma el plan gratuito de Workers.
+// El panel usa el alias del correo como identidad visible. Solo publicamos ese
+// alias, sin dominio ni etiquetas +tag; no el correo de acceso completo.
+function publicAgentName(email) {
+  if (typeof email !== 'string' || !/^[^\s@]+@[^\s@]+$/.test(email)) return null;
+  const alias = clean(email.split('@')[0].split('+')[0].replace(/[._-]+/g, ' '), 60);
+  return alias ? alias.charAt(0).toUpperCase() + alias.slice(1) : null;
+}
+
 export async function handleChatPoll(request, env, cors, url) {
   if (!env.DB) throw new HttpError(503, 'conversation_storage_not_configured');
   const cid = clean(url.searchParams.get('conversationId'), 40);
@@ -2221,7 +2247,7 @@ export async function handleChatPoll(request, env, cors, url) {
   // quien sondea uno recién creado.
   if (!row) return json({ state: 'bot', messages: [] }, 200, cors);
   const after = Math.max(0, Math.min(1e12, Number(url.searchParams.get('after')) || 0));
-  const rows = (await env.DB.prepare(`SELECT id, role, text, created_at FROM conv_messages
+  const rows = (await env.DB.prepare(`SELECT id, role, text, created_at, agent_email FROM conv_messages
      WHERE conversation_id=? AND id > ? AND role <> 'user' ORDER BY id ASC LIMIT 20`)
     .bind(row.id, after).all()).results || [];
   // La marca de presencia: es lo que le dice al panel si el visitante sigue delante. Sin
@@ -2229,7 +2255,8 @@ export async function handleChatPoll(request, env, cors, url) {
   try { await env.DB.prepare('UPDATE conversations SET visitor_seen_at=? WHERE id=?').bind(new Date().toISOString(), row.id).run(); } catch (_) {}
   return json({
     state: row.state || 'bot',
-    messages: rows.map((m) => ({ id: m.id, role: m.role, text: m.text, at: m.created_at })),
+    messages: rows.map((m) => ({ id: m.id, role: m.role, text: m.text, at: m.created_at,
+      agent_name: m.role === 'agent' ? publicAgentName(m.agent_email) : null })),
   }, 200, cors);
 }
 

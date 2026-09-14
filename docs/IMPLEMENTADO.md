@@ -12,6 +12,101 @@
 
 ---
 
+## Loader sin versión — 2026-09-14
+
+`site/assets/vai.js` resuelve el widget contra su propio `currentScript.src`, con
+versión vigente 16 y doble guarda para evitar inyecciones repetidas o un widget
+ya montado. Los clientes incluyen el loader sin query; hirevai conserva las
+27 referencias directas `vai-widget.js?v=16`. La excepción de `_headers` retira
+Cache-Control heredado y fija `public, max-age=300, must-revalidate`.
+`check:js` valida el loader y `check-site` exige coincidencia loader/widget/HTML
+y la regla de caché corta. ALTACLIENTE y PARA-JOHAN v6 incluyen el snippet definitivo.
+La propagación de cinco minutos aplica a posteriores cargas, no a sesiones abiertas.
+La cabecera real de Pages debe verificarse antes de migrar snippets de clientes.
+
+## Ventana del chat v16 — 2026-09-14
+
+Panel fijo lateral de 400 px y márgenes de 16 px en escritorio; oculta el lanzador
+mientras está abierto y devuelve el foco al cerrarse. En <768 px conserva el sheet
+y el botón. Ambos respetan `--vai-lift`; el cálculo contempla el panel visible
+cuando el botón está oculto. Lanzador y teaser v15 conservan su aspecto.
+
+Bienvenida con retrato de 84 px, saludo y estado; identidad compacta con retrato
+al comenzar el hilo. El logo empresarial continúa configurable, pero la cabecera
+v16 usa el retrato según esta nueva especificación (sustituye la decisión v15).
+El saludo se pinta una sola vez como primera burbuja al enviar y se reconstruye
+al restaurar, sin añadirlo al payload/historial que recibe el servidor. Mensajes
+anclados abajo con `margin-top:auto`, bot según tema, usuario en gradiente,
+equipo con acento y marca. Por indicación posterior de Juan, `/chat/poll` añade
+`agent_name` por mensaje: alias del autor anterior a @, sin dominio ni etiquetas
++tag, como identidad visible del panel. No devuelve el correo completo. El widget
+pinta «Nombre · Equipo {marca}» y conserva el nombre en la sesión restaurada;
+mensajes sin autor conocido caen a «Equipo {marca}». Nombre público editable,
+independiente del alias, anotado como mejora en pendientes.
+
+Temas claro y oscuro explícitos y automático mediante prefers-color-scheme, que
+responde a cambios del sistema; sin tenant se fija oscuro. Vista previa del panel
+con bienvenida, retrato, entrada y sugerencias; selector Automático/Claro/Oscuro.
+Hasta cinco chips en validación, boot, formulario, preview y render. Botón Enviar
+inactivo sin texto o durante envío. No hay nuevas migraciones para v16 (0033 sigue
+siendo parte del lote v15 pendiente). Turnstile, demos, mecánica de poll y VaiChat se conservan.
+
+Validación local: `npm run check`, 219/219 worker + 5/5 aislamiento, 138/138
+panel, tipos y build. Chromium: 12/12 recorridos, incluido loader desde un origen
+distinto, temas, geometría, transcript restaurado y nombre de cada agente. Referencia externa
+de Claude inaccesible en esta sesión; diseño comprobado contra las medidas y tokens
+del MD, con capturas y recorridos en Chromium.
+
+**Despliegue pendiente:** v15 aún no se había commiteado; el estado de trabajo reúne
+ambas especificaciones y el loader apunta directamente a v16. Publicar por CD
+(migración 0033 → worker/chips ≤5 → panel), después Pages. No se ha ejecutado el
+primer despliegue intermedio del loader v15. Para rollback visual futuro a v15,
+restaurar juntos widget, HTML y loader con `V='15'`; no revertir 0033.
+
+
+## Lanzador de marca en el widget (v15) — 2026-09-14
+
+Absorbida la capa cosmética de `36c28a2` dentro de `vai-widget.js`: pill de 64 px,
+retrato o inicial, «Hablar con {bot_name}» / «Cerrar conversación», kicker fijo
+«ASISTENTE IA · VELAI» y tarjeta oscura ES/EN. Es el único lanzador para todos
+los tenants, incluido dialogos. Hirevai sin tenant conserva retrato absoluto
+`https://hirevai.com/assets/assistants/vai-v1.jpg`, colores
+`#b83e08 / #662a16 / #ff914f` y textos Vai. El logo sigue en la cabecera del chat.
+Retirados los dos scripts externos y sus etiquetas; 27 HTML usan `?v=15`.
+
+Migración aditiva 0033: `portrait_url`, `accent_color`, `teaser_title`,
+`teaser_copy`, `teaser_title_en`, `teaser_copy_en`. Validación, alta, ficha,
+versionado PATCH, caché KV y boot público cubren los campos. El acento vacío
+se deriva del primario; los textos EN caen a ES y después al default.
+`POST /api/admin/tenants/:id/logo?kind=portrait` reutiliza almacenamiento,
+validación por magic bytes y límite 2 MB; guarda retrato y versión config,
+invalida caché y no sincroniza WhatsApp ni valida canales. Marca del widget
+incluye subida, URLs, acento, textos y previsualización. Conexiones cliente,
+admin v1, middleware y pruebas de aislamiento quedan sin cambios.
+
+El teaser no se crea ni registra impresiones en <768 px. Un solo `--vai-lift`
+resuelve los banners visibles con solape horizontal (`velai-consent` solo
+<900 px, `cookieBanner`, `ckb`), con observación de tamaño, atributos y viewport.
+La API VaiChat, sesiones, demos, Turnstile y live-poll se conservan.
+
+**Despliegue pendiente:** no se ha publicado esta entrega. Aplicar 0033 por CD,
+worker y panel antes de Pages; completar aquí «Desplegado el … (worker …,
+Pages …, migración 0033, suite …)» únicamente con evidencia del entorno.
+Validación local: `npm run check`, 218/218 pruebas worker + 5/5 aislamiento,
+137/137 panel, tipos (incluido E2E), build y 5/5 pruebas Chromium (smoke del
+panel y cuatro recorridos del widget). Las 33 migraciones se aplicaron en SQLite.
+La subida devuelve además `updated_at`: la ficha conserva el borrador y renueva
+su versión optimista para permitir Guardar después sin un falso 409.
+
+Tras publicar, `?v=14` queda en estado mixto: Pages ignora el query en origen
+y purga edge, por lo que nuevos visitantes reciben v15; los recurrentes pueden
+retener v14 hasta un año. Es funcionalmente seguro, pero exige bumpear snippets
+para uniformidad. Loader sin versión, retrato en Conexiones y cambios de idioma
+en caliente pasan a pendientes. Rollback: revertir Pages a v14 con sus scripts;
+no revertir la migración aditiva; el worker puede mantenerse. Colores muy claros
+pueden reducir contraste; el preview permite ajustar el secundario oscuro.
+
+
 ## Vista «Plantillas» — catálogo de plantillas por cliente (2026-09-01)
 
 Pedido de Juan con la primera plantilla real en pending. Ítem SOLO-Velai en la

@@ -347,6 +347,12 @@ export interface TenantDetail {
   bot_name: string | null;
   brand_name: string | null;
   logo_url: string | null;
+  portrait_url: string | null;
+  accent_color: string | null;
+  teaser_title: string | null;
+  teaser_copy: string | null;
+  teaser_title_en: string | null;
+  teaser_copy_en: string | null;
   brand_color: string | null;
   brand_color_2: string | null;
   agent_color: string | null;
@@ -555,6 +561,15 @@ export interface WhatsappInfoResponse {
   whatsapp: WhatsappRow;
   alerts: LeadAlerts;
   profileSync: ProfileSync | null;
+}
+
+/** POST /api/admin/tenants/:id/logo?kind=portrait */
+export interface PortraitUploadResponse {
+  ok: true;
+  kind: 'portrait';
+  portrait_url: string;
+  updated_at: string;
+  store: string;
 }
 
 /** POST /api/admin/tenants/:id/logo?channels=web,whatsapp */

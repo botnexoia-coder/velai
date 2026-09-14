@@ -1,19 +1,24 @@
 /* ══════════════════════════════════════════════════════════════════════════
-   VAI CHAT WIDGET — autocontenido (CSS + markup + lógica) · v14
+   VAI CHAT WIDGET — autocontenido (CSS + markup + lógica) · v16
    ──────────────────────────────────────────────────────────────────────────
    OJO CON LA VERSIÓN: este archivo se sirve con Cache-Control immutable durante un
    año (_headers, /*.js), así que el `?v=N` de la URL ES la clave de caché. Cambiar el
-   archivo SIN subir N significa que el archivo nuevo NO LLEGA A NADIE: el CDN y los
-   navegadores siguen dando el viejo. Pasó el 2026-08-26 con la burbuja del equipo.
+   archivo SIN subir N deja un estado mixto: Pages purga edge y los visitantes nuevos
+   reciben el nuevo; los recurrentes pueden conservar el anterior hasta un año.
    Toda modificación de este archivo sube N aquí Y en los HTML; `npm run check:site`
    falla si las dos no coinciden.
 
    Se carga en TODAS las páginas con una sola línea:
-     <script src="/assets/vai-widget.js?v=14" defer></script>
+     <script src="/assets/vai-widget.js?v=16" defer></script>
 
    En la web de un CLIENTE van dos líneas (la primera declara el tenant):
      <script>window.VELAI_TENANT='zoe';</script>
-     <script src="https://hirevai.com/assets/vai-widget.js?v=14" defer></script>
+     <script src="https://hirevai.com/assets/vai.js" defer></script>
+
+   VENTANA (v16): panel lateral, bienvenida, cinco sugerencias y temas por tenant.
+   Loader estable /assets/vai.js para las webs de clientes.
+
+   LANZADOR DE MARCA (v15): retrato, acento y tarjeta de bienvenida por tenant.
 
    Autocontenido a propósito: solo index.html carga /assets/styles.css, el
    resto de páginas llevan CSS inline. Por eso este archivo inyecta su propio
@@ -80,10 +85,14 @@
   var LANG = /^en/i.test(document.documentElement.lang || navigator.language || '') ? 'en' : 'es';
   var T = LANG === 'en' ? {
     online: 'Online now',
-    placeholder: 'Type a message...',
-    greeting: "Hi! I'm Vai 👋 I'm the same assistant we build for our clients. Ask me anything — or tap one of these options:",
+    placeholder: 'Tell me what you need…',
+    greeting: "Hi, I’m {bot}. How can I help you?",
+    heroStatus: 'Online · instant replies',
     chips: ['How much does it cost?', 'Show me a demo', 'Will it work for my business?'],
-    teaser: 'Questions? Ask me anything — I reply instantly.',
+    talk: 'Talk to ', closeConv: 'Close conversation', kicker: 'ASISTENTE IA · VELAI',
+    teaserTitle: 'Does your business need more time?',
+    teaserCopy: 'Tell me what you would like to automate and I can help you explore your options.',
+    teaserCta: 'Start conversation',
     open: 'Open chat with ', close: 'Close chat with ', closeBtn: 'Close chat',
     chat: 'Chat with ', send: 'Send', msg: 'Message', dismiss: 'Dismiss',
     errHuman: "I couldn't verify you're human (an unstable network or a blocker can cause this). Reload the page and try again, or message us on WhatsApp: https://wa.me/",
@@ -93,10 +102,14 @@
     liveHuman: "You're now talking with someone from the team"
   } : {
     online: 'En línea ahora',
-    placeholder: 'Escribe un mensaje...',
-    greeting: '¡Hola! Soy Vai 👋 Soy el mismo asistente que montamos para nuestros clientes. Pregúntame lo que quieras — o toca una de estas opciones:',
+    placeholder: 'Cuéntame qué necesitas…',
+    greeting: 'Hola, soy {bot}. ¿En qué puedo ayudarte?',
+    heroStatus: 'En línea · respondo al momento',
     chips: ['¿Cuánto cuesta?', 'Enséñame una demo', '¿Sirve para mi negocio?'],
-    teaser: '¿Dudas? Pregúntame lo que quieras — respondo al momento.',
+    talk: 'Hablar con ', closeConv: 'Cerrar conversación', kicker: 'ASISTENTE IA · VELAI',
+    teaserTitle: '¿Tu negocio necesita más tiempo?',
+    teaserCopy: 'Cuéntame qué tarea te gustaría automatizar y te ayudo a explorar las opciones.',
+    teaserCta: 'Iniciar conversación',
     open: 'Abrir chat con ', close: 'Cerrar chat con ', closeBtn: 'Cerrar chat',
     chat: 'Chat con ', send: 'Enviar', msg: 'Mensaje', dismiss: 'Cerrar',
     errHuman: 'No pude verificar que eres humano (a veces lo causa una red inestable o un bloqueador). Recarga la página e inténtalo de nuevo, o escríbenos por WhatsApp: https://wa.me/',
@@ -127,12 +140,46 @@
   function withBrand(cb) { Promise.race([bootPromise, new Promise(function (r) { setTimeout(r, 1500); })]).then(cb, cb); }
 
   function botName() { return (BRAND && BRAND.bot_name) || 'Vai'; }
-  function headerName() { return botName() + ' · ' + ((BRAND && BRAND.brand_name) || 'Velai'); }
   function waNumber() { return (BRAND && BRAND.wa_number) || window.VELAI_WA || '15706160059'; }
   function brandGreeting() {
-    if (!BRAND) return T.greeting;
-    if (LANG === 'en') return BRAND.greeting_en || BRAND.greeting || T.greeting;
-    return BRAND.greeting || T.greeting;
+    if (!BRAND) return T.greeting.replace('{bot}', botName());
+    if (LANG === 'en') return BRAND.greeting_en || BRAND.greeting || T.greeting.replace('{bot}', botName());
+    return BRAND.greeting || T.greeting.replace('{bot}', botName());
+  }
+
+  function portraitUrl() {
+    if (BRAND && /^https:\/\/[^\s]+$/i.test(BRAND.portrait_url || '')) return BRAND.portrait_url;
+    return !TENANT ? 'https://hirevai.com/assets/assistants/vai-v1.jpg' : '';
+  }
+  function teaserText() {
+    return {
+      title: (BRAND && ((LANG === 'en' && BRAND.teaser_title_en) || BRAND.teaser_title)) || T.teaserTitle,
+      copy: (BRAND && ((LANG === 'en' && BRAND.teaser_copy_en) || BRAND.teaser_copy)) || T.teaserCopy
+    };
+  }
+  function renderPortrait(face, size) {
+    face.textContent = botName().charAt(0).toUpperCase();
+    var url = portraitUrl();
+    if (url) {
+      var img = document.createElement('img');
+      img.alt = ''; img.width = size; img.height = size;
+      img.onerror = function () { img.remove(); };
+      img.src = url; face.appendChild(img);
+    }
+  }
+  function renderFace() { renderPortrait(document.getElementById('vaiFace'), 46); }
+  function renderWelcome() {
+    document.getElementById('vaiGreeting').textContent = script().greeting;
+    document.getElementById('vaiHeaderKicker').textContent = botName() + ' · ' + T.kicker;
+  }
+  function updateSend() { el.send.disabled = busy || !el.input.value.trim(); }
+
+  function renderLauncher() {
+    var title = open ? T.closeConv : T.talk + botName();
+    document.getElementById('vaiLauncherTitle').textContent = title;
+    el.bubble.setAttribute('aria-expanded', String(open));
+    el.bubble.setAttribute('aria-label', title + ' · ' + T.kicker);
+    el.iconClose.style.display = open ? 'block' : 'none';
   }
 
   /* ── 1. CSS ─────────────────────────────────────────────────────────────
@@ -143,158 +190,125 @@
      Colores en variables CSS sobre #vaiWidget: la marca del tenant se aplica
      por CSSOM (setProperty), nunca con style="" (lección de la CSP del panel).
      Defaults = la marca de Velai de siempre; .vai-dark = tema oscuro.       */
-  var CSS = '' +
-    '#vaiWidget{position:fixed;bottom:calc(24px + var(--vai-lift,0px));right:24px;z-index:10000;' +
-      'font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Satoshi,system-ui,sans-serif;' +
-      'transition:bottom .25s ease;' +
-      '--vai-c1:#FF6B1A;--vai-head:#075e54;--vai-send:#00a884;' +
-      '--vai-srf:#fff;--vai-msgbg:#ece5dd;--vai-bot:#fff;--vai-user:#dcf8c6;' +
-      '--vai-agentac:#5b3fa8;--vai-agent:color-mix(in srgb,var(--vai-agentac) 16%,var(--vai-bot));' +
-      '--vai-text:#111;--vai-in:#f0f2f5;--vai-inshell:#fff;' +
-      '--vai-chipb:rgba(7,94,84,.25);--vai-chipc:#075e54;--vai-chiph:#f0f7f5}' +
-    '#vaiWidget.vai-dark{--vai-srf:#141a1f;--vai-msgbg:#0b141a;--vai-bot:#1f2c34;--vai-user:#134d37;' +
-      
-      '--vai-text:#e9edef;--vai-in:#1f2c34;--vai-inshell:#2a3942;' +
-      '--vai-chipb:rgba(233,237,239,.3);--vai-chipc:#e9edef;--vai-chiph:#2a3942}' +
-    '#vaiBubble{width:60px;height:60px;border-radius:50%;background:var(--vai-c1);display:flex;' +
-      'align-items:center;justify-content:center;cursor:pointer;border:none;padding:0;' +
-      'box-shadow:0 4px 20px rgba(0,0,0,.35);transition:transform .2s;position:relative}' +
-    '#vaiBubble{box-shadow:0 4px 20px color-mix(in srgb,var(--vai-c1) 50%,transparent)}' +
-    '#vaiBubble:hover{transform:scale(1.08)}' +
-    '#vaiBubble:focus-visible{outline:3px solid #fff;outline-offset:3px}' +
-    '#vaiPulse{position:absolute;top:-2px;right:-2px;width:16px;height:16px;border-radius:50%;' +
-      'background:#25d366;border:2px solid #fff;animation:vaiPulse 2s infinite}' +
-    '@keyframes vaiPulse{0%{box-shadow:0 0 0 0 rgba(37,211,102,.7)}70%{box-shadow:0 0 0 10px rgba(37,211,102,0)}100%{box-shadow:0 0 0 0 rgba(37,211,102,0)}}' +
+  var CSS = "#vaiWidget{position:fixed;bottom:calc(24px + var(--vai-lift,0px));right:24px;z-index:10000;font-family:-apple-system,BlinkMacSystemFont,\"Segoe UI\",Satoshi,system-ui,sans-serif;transition:bottom .25s ease;--vai-l1:#b83e08;--vai-l2:#662a16;--vai-acc:#ff914f;--vai-agentac:#5b3fa8;--vai-srf:#f7f4ef;--vai-bot:#fff;--vai-text:#172033;--vai-muted:#5b6472;--vai-line:rgba(0,0,0,.08);--vai-in:#ece8e1}" +
+    "#vaiWidget.vai-dark{--vai-srf:linear-gradient(145deg,#202736,#111722);--vai-bot:#1b2230;--vai-text:#fff;--vai-muted:#ced7e5;--vai-line:rgba(255,255,255,.08);--vai-in:#182030}" +
+    "@media(prefers-color-scheme:dark){#vaiWidget:not(.vai-light){--vai-srf:linear-gradient(145deg,#202736,#111722);--vai-bot:#1b2230;--vai-text:#fff;--vai-muted:#ced7e5;--vai-line:rgba(255,255,255,.08);--vai-in:#182030}}" +
+    '#vaiBubble{box-sizing:border-box;display:flex;position:relative;align-items:center;cursor:pointer;transition:transform .2s;width:auto;min-width:190px;max-width:calc(100vw - 48px);height:64px;padding:6px 17px 6px 7px;gap:10px;border:2px solid var(--vai-acc);border-radius:40px;background:linear-gradient(135deg,var(--vai-l1),var(--vai-l2));color:#fff;font-family:inherit;text-align:left;box-shadow:0 8px 28px #0003;isolation:isolate}' +
+    '#vaiBubble::before{content:"";position:absolute;inset:0;border-radius:inherit;background:#0003;z-index:-1}' +
+    '#vaiBubble:hover{transform:translateY(-2px)}' +
+    '#vaiBubble:focus-visible,.vai-teaser-cta:focus-visible,#vaiTeaserX:focus-visible{outline:3px solid var(--vai-acc);outline-offset:4px}' +
+    '.vai-face{position:relative;display:grid;place-items:center;width:46px;height:46px;flex:none;border-radius:50%;background:#fff;color:#172033;font-weight:800;font-size:21px}' +
+    '.vai-face img{position:absolute;inset:0;display:block;width:100%;height:100%;border-radius:50%;object-fit:cover;object-position:50% 25%}' +
+    '.vai-face::after{content:"";position:absolute;right:-2px;bottom:0;width:12px;height:10px;border:2px solid #fff;border-radius:5px 5px 5px 0;background:var(--vai-acc)}' +
+    '.vai-label{display:block;min-width:0;font-size:13px;font-weight:750;line-height:1.3}' +
+    '.vai-label>span{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}' +
+    '.vai-label small{display:block;margin-top:3px;color:#fff;font-size:10px;font-weight:750;letter-spacing:.055em;white-space:nowrap}' +
+    '#vaiBubble[aria-expanded="true"] .vai-face{display:none}' +
+    '#vaiBubble[aria-expanded="true"] #vaiIconClose{flex:none;margin:0 9px}' +
+    '#vaiTeaser{box-sizing:border-box;bottom:78px;width:min(312px,calc(100vw - 48px));padding:18px 42px 18px 20px;border:1px solid var(--vai-acc);border-radius:22px 22px 5px 22px;background:linear-gradient(145deg,#202736,#111722);color:#fff;box-shadow:0 16px 40px #0004;text-align:left;line-height:1.4;overflow:hidden}' +
+    '#vaiTeaser::before{content:"";position:absolute;inset:0 auto 0 0;width:4px;background:linear-gradient(var(--vai-acc),var(--vai-l1))}' +
+    '#vaiTeaserX{top:6px;right:6px;width:32px;height:32px;color:#dbe3ef;border-radius:50%;font-size:18px}' +
+    '.vai-teaser-kicker{display:block;margin-bottom:8px;color:#e2e8f2;font-size:10px;font-weight:750;letter-spacing:.06em}' +
+    '.vai-teaser-title{display:block;font-size:18px;line-height:1.25;font-weight:800;color:#fff}' +
+    '.vai-teaser-copy{display:block;margin-top:6px;color:#ced7e5;font-size:13px;line-height:1.5}' +
+    '.vai-teaser-cta{display:inline-block;margin-top:12px;padding:0;border:0;background:none;color:#fff;font:inherit;font-size:13px;font-weight:750;text-decoration:underline;text-underline-offset:4px;cursor:pointer;text-align:left}' +
+    '@media(max-width:767px){#vaiBubble{min-width:0;max-width:calc(100vw - 32px);height:58px;padding:5px 12px 5px 6px;gap:8px}.vai-face{width:42px;height:42px}.vai-label{font-size:12px}.vai-label small{font-size:9px;letter-spacing:.025em}#vaiTeaser{display:none!important;visibility:hidden!important;pointer-events:none!important}}' +
+    '@media(prefers-reduced-motion:reduce){#vaiWidget,#vaiBubble,#vaiTeaser{transition:none!important;animation:none!important}#vaiBubble:hover{transform:none}}' +
     '@keyframes vaiDot{0%,60%,100%{transform:translateY(0);opacity:.4}30%{transform:translateY(-5px);opacity:1}}' +
     /* teaser */
-    '#vaiTeaser{position:absolute;bottom:74px;right:0;width:250px;background:var(--vai-srf);color:var(--vai-text);' +
-      'border-radius:14px 14px 4px 14px;padding:12px 34px 12px 14px;font-size:13.5px;line-height:1.45;' +
-      'box-shadow:0 10px 34px rgba(0,0,0,.22);cursor:pointer;opacity:0;transform:translateY(8px);' +
-      'transition:opacity .3s ease,transform .3s ease}' +
+    '#vaiTeaser{position:absolute;right:0;max-height:max(0px,calc(100dvh - 114px - var(--vai-lift,0px)));overflow-y:auto;opacity:0;transform:translateY(8px);transition:opacity .3s,transform .3s}' +
     '#vaiTeaser.is-on{opacity:1;transform:translateY(0)}' +
-    '#vaiTeaserX{position:absolute;top:6px;right:8px;background:none;border:none;color:#8696a0;' +
-      'font-size:15px;line-height:1;cursor:pointer;padding:4px}' +
-    /* panel */
-    '#vaiWindow{display:none;position:absolute;bottom:72px;right:0;width:340px;height:500px;' +
-      'border-radius:16px;overflow:hidden;box-shadow:0 20px 60px rgba(0,0,0,.3);' +
-      'flex-direction:column;background:var(--vai-srf)}' +
-    '#vaiWindow.is-open{display:flex}' +
-    '.vai-h{background:var(--vai-head);padding:12px 16px;display:flex;align-items:center;gap:10px;flex-shrink:0}' +
-    '.vai-h-av{width:38px;height:38px;border-radius:50%;background:var(--vai-c1);display:flex;overflow:hidden;' +
-      'align-items:center;justify-content:center;font-size:18px;flex-shrink:0;color:#fff;font-weight:700}' +
-    '.vai-h-av img{width:100%;height:100%;object-fit:cover;border-radius:50%}' +
-    '.vai-h-id{flex:1}' +
-    '.vai-h-name{color:#fff;font-size:14px;font-weight:600}' +
-    '.vai-h-st{color:hsla(0,0%,100%,.75);font-size:12px;display:flex;align-items:center;gap:4px}' +
-    '.vai-h-dot{width:6px;height:6px;border-radius:50%;background:#25d366}' +
-    '.vai-h-x{color:hsla(0,0%,100%,.7);cursor:pointer;font-size:20px;line-height:1;background:none;border:none;padding:0 2px}' +
-    '#vaiMessages{flex:1;overflow-y:auto;padding:12px;background:var(--vai-msgbg);display:flex;' +
-      'flex-direction:column;gap:6px;scroll-behavior:smooth}' +
-    '#vaiTyping{display:none;padding:0 12px 6px;background:var(--vai-msgbg)}' +
-    '#vaiTyping.is-on{display:block}' +
-    '.vai-tb{background:var(--vai-bot);border-radius:0 8px 8px 8px;padding:8px 12px;display:inline-flex;gap:4px;' +
-      'align-items:center;box-shadow:0 1px 2px rgba(0,0,0,.1)}' +
-    '.vai-td{width:7px;height:7px;background:#8696a0;border-radius:50%;animation:vaiDot 1.2s infinite}' +
-    '.vai-td:nth-child(2){animation-delay:.2s}.vai-td:nth-child(3){animation-delay:.4s}' +
-    /* chips de respuesta rápida */
-    '#vaiChips{display:flex;flex-wrap:wrap;gap:6px;padding:0 12px 10px;background:var(--vai-msgbg)}' +
-    '#vaiChips.is-off{display:none}' +
-    '.vai-chip{background:var(--vai-bot);border:1px solid var(--vai-chipb);color:var(--vai-chipc);border-radius:16px;' +
-      'padding:7px 12px;font-size:12.5px;font-family:inherit;cursor:pointer;line-height:1.2}' +
-    '.vai-chip:hover{background:var(--vai-chiph)}' +
-    /* input */
-    '.vai-in-wrap{background:var(--vai-in);padding:8px 10px;display:flex;align-items:center;gap:8px;flex-shrink:0}' +
-    '.vai-in-shell{flex:1;background:var(--vai-inshell);border-radius:22px;display:flex;align-items:center;padding:8px 14px}' +
-    '#vaiInput{flex:1;border:none;outline:none;font-size:16px;font-family:inherit;color:var(--vai-text);' +
-      'background:transparent;resize:none;max-height:80px;line-height:1.4}' +
-    '#vaiSend{width:42px;height:42px;border-radius:50%;background:var(--vai-send);border:none;cursor:pointer;' +
-      'display:flex;align-items:center;justify-content:center;flex-shrink:0}' +
-    /* burbujas */
-    '.vai-row{display:flex}.vai-row.is-bot{justify-content:flex-start}.vai-row.is-user{justify-content:flex-end}' +
-    '.vai-b{max-width:80%;padding:8px 10px 5px;box-shadow:0 1px 2px rgba(0,0,0,.1)}' +
-    '.vai-b.is-bot{background:var(--vai-bot);border-radius:0 8px 8px 8px}' +
-    '.vai-b.is-user{background:var(--vai-user);border-radius:8px 8px 0 8px}' +
-    '.vai-row.is-agent{justify-content:flex-start}' +
-    '.vai-b.is-agent{background:var(--vai-agent);border-radius:0 8px 8px 8px;border-left:4px solid var(--vai-agentac)}' +
-    '.vai-b-who{font-size:11px;font-weight:700;color:var(--vai-text);opacity:.72;margin-bottom:2px}' +
-    '.vai-live{font-size:12px;color:#8696a0;text-align:center;padding:6px 0}' +
-    '.vai-b-t{font-size:13.5px;color:var(--vai-text);line-height:1.5;white-space:pre-wrap;word-break:break-word}' +
-    '.vai-b-h{font-size:11px;color:#8696a0;text-align:right;margin-top:2px}' +
-    /* móvil: panel a pantalla casi completa */
-    '@media(max-width:480px){' +
-      '#vaiWindow{position:fixed;bottom:0;right:0;left:0;width:100%;height:100dvh;border-radius:0}' +
-      '#vaiTeaser{width:210px}' +
-    '}' +
-    '@media(prefers-reduced-motion:reduce){#vaiPulse,.vai-td{animation:none}}';
+    '#vaiTeaserX{position:absolute;background:none;border:none;cursor:pointer}' +
+    "#vaiWindow{box-sizing:border-box;display:none;position:fixed;top:16px;right:16px;bottom:calc(16px + var(--vai-lift,0px));width:min(400px,calc(100vw - 32px));height:auto;border:1px solid var(--vai-acc);border-radius:22px;overflow:hidden;box-shadow:0 20px 60px #0003;flex-direction:column;background:var(--vai-srf);color:var(--vai-text)}" +
+    "#vaiWindow.is-open{display:flex}" +
+    "@media(min-width:768px){#vaiWidget.is-open #vaiBubble{display:none}}" +
+    ".vai-h{box-sizing:border-box;display:flex;align-items:center;gap:10px;min-height:52px;padding:4px 14px;border-bottom:1px solid var(--vai-line);flex-shrink:0}" +
+    ".vai-h-av,.vai-hero-av{position:relative;display:grid;place-items:center;flex:none;border-radius:50%;background:var(--vai-l1);color:#fff;font-weight:800}" +
+    ".vai-h-av{width:32px;height:32px;font-size:16px}" +
+    ".vai-h-av img,.vai-hero-av img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;object-position:50% 25%;border-radius:50%}" +
+    ".vai-h-av::after,.vai-hero-av::after{content:\"\";position:absolute;bottom:0;right:0;width:8px;height:8px;border:2px solid var(--vai-bot);border-radius:50%;background:var(--vai-acc)}" +
+    ".vai-h-id{flex:1;min-width:0}.vai-h-name{font-size:14px;font-weight:750}.vai-h-st{font-size:10px;color:var(--vai-muted);letter-spacing:.05em}" +
+    ".vai-h-kicker{display:none;flex:1;font-size:10px;font-weight:750;letter-spacing:.05em;color:var(--vai-muted)}" +
+    ".vai-h-x{display:grid;place-items:center;width:44px;height:44px;flex:none;border:0;background:none;color:var(--vai-muted);font-size:22px;cursor:pointer;border-radius:50%}" +
+    ".vai-h-x:focus-visible,.vai-chip:focus-visible,#vaiSend:focus-visible{outline:2px solid var(--vai-acc);outline-offset:-3px}" +
+    "#vaiWindow.is-empty .vai-h-av,#vaiWindow.is-empty .vai-h-id{display:none}#vaiWindow.is-empty .vai-h-kicker{display:block}" +
+    ".vai-hero{display:none;flex:1;min-height:0;overflow-y:auto;flex-direction:column;align-items:center;justify-content:safe center;text-align:center;padding:24px;gap:16px}" +
+    "#vaiWindow.is-empty .vai-hero{display:flex}#vaiWindow.is-empty #vaiMessages{display:none}" +
+    ".vai-hero-av{width:84px;height:84px;font-size:34px;border:2px solid var(--vai-acc);box-shadow:0 0 0 6px color-mix(in srgb,var(--vai-acc) 12%,transparent)}" +
+    ".vai-hero-av::after{width:12px;height:12px}" +
+    ".vai-hero h2{margin:0;font-size:22px;font-weight:800;line-height:1.3;white-space:pre-wrap;overflow-wrap:anywhere;color:var(--vai-text)}" +
+    ".vai-hero p{margin:0;color:var(--vai-muted);font-size:13px;line-height:1.5}" +
+    "#vaiMessages{flex:1;min-height:0;overflow-y:auto;padding:20px 16px;display:flex;flex-direction:column;gap:10px;scroll-behavior:smooth}" +
+    "#vaiMessages>:first-child{margin-top:auto}" +
+    ".vai-row{display:flex;flex-shrink:0}.vai-row.is-user{justify-content:flex-end}" +
+    ".vai-b{max-width:85%;padding:10px 12px 6px;background:var(--vai-bot);border-radius:4px 16px 16px 16px;color:var(--vai-text)}" +
+    ".vai-b.is-user{background:linear-gradient(135deg,var(--vai-l1),var(--vai-l2));color:#fff;border-radius:16px 4px 16px 16px}" +
+    ".vai-b.is-agent{border-left:3px solid var(--vai-agentac)}" +
+    ".vai-b-who{font-size:11px;font-weight:750;color:var(--vai-agentac);margin-bottom:4px}" +
+    ".vai-b-t{font-size:14px;line-height:1.5;white-space:pre-wrap;overflow-wrap:anywhere}" +
+    ".vai-b-h{font-size:11px;opacity:.6;text-align:right;margin-top:4px}" +
+    ".vai-live{text-align:center;font-size:12px;color:var(--vai-muted);padding:6px 0;flex-shrink:0}" +
+    "#vaiTyping{display:none;padding:0 16px 10px}#vaiTyping.is-on{display:block}" +
+    ".vai-tb{display:inline-flex;gap:4px;align-items:center;padding:12px;background:var(--vai-bot);border-radius:4px 16px 16px 16px}" +
+    ".vai-td{width:7px;height:7px;background:var(--vai-muted);border-radius:50%;animation:vaiDot 1.2s infinite}.vai-td:nth-child(2){animation-delay:.2s}.vai-td:nth-child(3){animation-delay:.4s}" +
+    "#vaiChips{flex-shrink:0;padding:0 20px 12px;display:flex;flex-direction:column}#vaiChips.is-off{display:none}" +
+    ".vai-chip{display:flex;align-items:center;gap:12px;min-height:48px;padding:10px 0;border:0;border-top:1px solid var(--vai-line);background:none;color:var(--vai-text);font:inherit;font-size:14px;font-weight:600;line-height:1.4;text-align:left;cursor:pointer}" +
+    ".vai-chip svg{flex:none;color:var(--vai-acc)}.vai-chip:hover{color:var(--vai-acc)}" +
+    ".vai-in-wrap{display:flex;align-items:flex-end;gap:8px;flex-shrink:0;padding:14px 16px;border-top:1px solid var(--vai-line)}" +
+    ".vai-in-shell{box-sizing:border-box;min-height:44px;flex:1;display:flex;align-items:center;background:var(--vai-in);border-radius:22px;padding:10px 16px;min-width:0}" +
+    "#vaiInput{width:100%;min-width:0;padding:0;border:0;outline:none;resize:none;max-height:80px;background:transparent;color:var(--vai-text);font:inherit;font-size:15px;line-height:24px}" +
+    "#vaiInput::placeholder{color:var(--vai-muted);opacity:.8}.vai-in-shell:focus-within{outline:2px solid var(--vai-acc)}" +
+    "#vaiSend{display:grid;place-items:center;width:44px;height:44px;flex:none;border:0;border-radius:50%;background:var(--vai-in);color:var(--vai-muted);cursor:default}" +
+    "#vaiSend:not(:disabled){background:var(--vai-acc);color:#172033;cursor:pointer}" +
+    "@media(max-width:767px){#vaiWindow{top:auto;left:0;right:0;bottom:calc(96px + var(--vai-lift,0px));width:100%;height:max(0px,calc(100dvh - 108px - var(--vai-lift,0px)));border-radius:16px 16px 0 0}.vai-chip{min-height:52px}.vai-hero{padding:16px;gap:12px}}" +
+    "@media(prefers-reduced-motion:reduce){.vai-td{animation:none}#vaiMessages{scroll-behavior:auto}}";
 
   /* ── 2. Markup ──────────────────────────────────────────────────────── */
   var HTML = '' +
-    '<button id="vaiBubble" type="button" aria-label="' + esc(T.open + 'Vai') + '">' +
-      '<svg id="vaiIconChat" width="28" height="28" viewBox="0 0 24 24" fill="white" aria-hidden="true">' +
-        '<path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 14H9V8h2v8zm4 0h-2V8h2v8z"/></svg>' +
+    '<button id="vaiBubble" type="button" aria-controls="vaiWindow" aria-haspopup="dialog" aria-expanded="false">' +
+      '<span class="vai-face" id="vaiFace" aria-hidden="true"></span>' +
+      '<span class="vai-label" aria-hidden="true"><span id="vaiLauncherTitle"></span><small>' + esc(T.kicker) + '</small></span>' +
       '<svg id="vaiIconClose" width="24" height="24" viewBox="0 0 24 24" fill="white" style="display:none" aria-hidden="true">' +
         '<path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>' +
-      '<span id="vaiPulse"></span>' +
     '</button>' +
-    '<div id="vaiWindow" role="dialog" aria-label="' + esc(T.chat + 'Vai') + '">' +
-      '<div class="vai-h">' +
-        '<div class="vai-h-av" id="vaiAvatar">🤖</div>' +
-        '<div class="vai-h-id">' +
-          '<div class="vai-h-name" id="vaiName">Vai · Velai</div>' +
-          '<div class="vai-h-st"><span class="vai-h-dot"></span>' + esc(T.online) + '</div>' +
-        '</div>' +
-        '<button class="vai-h-x" type="button" aria-label="' + esc(T.closeBtn) + '">✕</button>' +
-      '</div>' +
-      '<div id="vaiMessages"></div>' +
+    '<div id="vaiWindow" class="is-empty" role="dialog" aria-label="' + esc(T.chat + 'Vai') + '">' +
+      '<div class="vai-h"><div class="vai-h-av" id="vaiAvatar" aria-hidden="true"></div>' +
+        '<div class="vai-h-id"><div class="vai-h-name" id="vaiName">Vai</div><div class="vai-h-st">' + esc(T.kicker) + '</div></div>' +
+        '<span class="vai-h-kicker" id="vaiHeaderKicker"></span>' +
+        '<button class="vai-h-x" type="button" aria-label="' + esc(T.closeBtn) + '">✕</button></div>' +
+      '<div class="vai-hero"><div class="vai-hero-av" id="vaiHeroAvatar" aria-hidden="true"></div><h2 id="vaiGreeting"></h2><p>' + esc(T.heroStatus) + '</p></div>' +
+      '<div id="vaiMessages" role="log" aria-live="polite"></div>' +
       '<div id="vaiTyping"><div class="vai-tb"><span class="vai-td"></span><span class="vai-td"></span><span class="vai-td"></span></div></div>' +
-      '<div id="vaiChips"></div>' +
-      '<div class="vai-in-wrap">' +
-        '<div class="vai-in-shell">' +
-          '<textarea id="vaiInput" placeholder="' + esc(T.placeholder) + '" rows="1" maxlength="2000" aria-label="' + esc(T.msg) + '"></textarea>' +
-        '</div>' +
-        '<button id="vaiSend" type="button" aria-label="' + esc(T.send) + '">' +
-          '<svg width="20" height="20" viewBox="0 0 24 24" fill="white" aria-hidden="true">' +
-            '<path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/></svg>' +
-        '</button>' +
-      '</div>' +
-    '</div>';
+      '<div id="vaiChips"></div><div class="vai-in-wrap"><div class="vai-in-shell">' +
+        '<textarea id="vaiInput" placeholder="' + esc(T.placeholder) + '" rows="1" maxlength="2000" aria-label="' + esc(T.msg) + '"></textarea></div>' +
+        '<button id="vaiSend" type="button" disabled aria-label="' + esc(T.send) + '"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M12 19V5m-6 6 6-6 6 6"/></svg></button>' +
+      '</div></div>';
 
   /* Pinta la marca del tenant en el DOM y las variables CSS por CSSOM.
      Idempotente: se llama al llegar el boot y también al montar (por si el
      fetch resolvió antes que el DOMContentLoaded). */
   function applyBrand() {
-    if (!el.root || !BRAND) return;
-    if (BRAND.brand_color) {
-      var c1 = BRAND.brand_color, c2 = BRAND.brand_color_2 || BRAND.brand_color;
-      el.root.style.setProperty('--vai-c1', c1);
-      el.root.style.setProperty('--vai-send', c1);
-      el.root.style.setProperty('--vai-chipc', c1);
-      el.root.style.setProperty('--vai-head', 'linear-gradient(135deg,' + c1 + ',' + c2 + ')');
+    if (!el.root) return;
+    var b = BRAND || {};
+    if (b.brand_color) {
+      el.root.style.setProperty('--vai-l1', b.brand_color);
+      el.root.style.setProperty('--vai-l2', b.brand_color_2 || b.brand_color);
     }
-    // Color de la burbuja del equipo. Configurable por cliente (agent_color) y, si no lo
-    // ponen, el de su propia marca: así no le sale violeta a todo el mundo. Solo se fija el
-    // ACENTO — el fondo lo calcula el CSS mezclándolo con el de la burbuja del bot, que ya
-    // tiene el contraste correcto con el texto en claro y en oscuro.
-    var ac = BRAND.agent_color || BRAND.brand_color;
+    el.root.style.setProperty('--vai-acc', b.accent_color || (TENANT || b.brand_color ? 'color-mix(in srgb,var(--vai-l1) 55%,#fff)' : '#ff914f'));
+    var ac = b.agent_color || b.brand_color;
     if (ac) el.root.style.setProperty('--vai-agentac', ac);
-    var dark = BRAND.theme === 'dark' ||
-      (BRAND.theme !== 'light' && window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches);
-    el.root.classList.toggle('vai-dark', !!dark);
-    document.getElementById('vaiName').textContent = headerName();
-    var av = document.getElementById('vaiAvatar');
-    if (BRAND.logo_url && /^https:\/\//i.test(BRAND.logo_url)) {
-      var img = document.createElement('img');
-      img.src = BRAND.logo_url; img.alt = '';
-      img.onerror = function () { av.textContent = avatarFallback(); };
-      av.textContent = ''; av.appendChild(img);
-    } else if (BRAND.bot_name) {
-      av.textContent = avatarFallback();
-    }
-    if (BRAND.placeholder) el.input.placeholder = BRAND.placeholder;
+    var theme = TENANT ? b.theme : 'dark';
+    el.root.classList.toggle('vai-dark', theme === 'dark');
+    el.root.classList.toggle('vai-light', theme === 'light');
+    renderFace();
+    renderPortrait(document.getElementById('vaiAvatar'), 32);
+    renderPortrait(document.getElementById('vaiHeroAvatar'), 84);
+    document.getElementById('vaiName').textContent = botName();
+    renderWelcome();
+    if (b.placeholder) el.input.placeholder = b.placeholder;
     el.win.setAttribute('aria-label', T.chat + botName());
-    el.bubble.setAttribute('aria-label', (open ? T.close : T.open) + botName());
+    renderLauncher();
   }
-  function avatarFallback() { return (BRAND && BRAND.bot_name ? BRAND.bot_name : 'V').charAt(0).toUpperCase(); }
 
   /* ── 3. Guiones de apertura ─────────────────────────────────────────── */
   // El saludo y los chips por defecto salen de la marca del tenant (boot);
@@ -369,7 +383,7 @@
     el.msgs.innerHTML = '';
     addMsg('bot', script().greeting);
     history.forEach(function (m) {
-      addMsg(m.role === 'assistant' ? 'bot' : (m.role === 'agent' ? 'agent' : 'user'), m.content, m.t);
+      addMsg(m.role === 'assistant' ? 'bot' : (m.role === 'agent' ? 'agent' : 'user'), m.content, m.t, m.agent_name);
     });
   }
 
@@ -409,8 +423,8 @@
     el.typing = root.querySelector('#vaiTyping');
     el.chips = root.querySelector('#vaiChips');
     el.input = root.querySelector('#vaiInput');
-    el.iconChat = root.querySelector('#vaiIconChat');
     el.iconClose = root.querySelector('#vaiIconClose');
+    el.send = root.querySelector('#vaiSend');
 
     el.bubble.addEventListener('click', function () { toggle(); });
     root.querySelector('.vai-h-x').addEventListener('click', function (e) { e.stopPropagation(); toggle(false); });
@@ -419,6 +433,7 @@
       if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); }
     });
     el.input.addEventListener('input', function () {
+      updateSend();
       el.input.style.height = 'auto';
       el.input.style.height = Math.min(el.input.scrollHeight, 80) + 'px';
     });
@@ -426,6 +441,8 @@
       if (e.key === 'Escape' && open) toggle(false);
     });
 
+    renderFace();
+    renderLauncher();
     applyBrand(); // por si el boot resolvió antes que el DOM
     wireDemoTriggers();
     watchConsentBanner();
@@ -463,37 +480,75 @@
 
   /* ── 5. Banner de cookies: subir el FAB mientras esté visible ───────── */
   function watchConsentBanner() {
-    function measure() {
-      var b = document.getElementById('velai-consent');
+    var consentNodes = [];
+    var consentFrame = 0;
+    var consentResize = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(scheduleConsentMeasure) : null;
+    function measureConsent() {
+      consentFrame = 0;
+      var root = document.getElementById('vaiWidget');
+      var bubble = document.getElementById('vaiBubble');
+      if (!root || !bubble) return;
+      var bubbleRect = (open && window.innerWidth >= 768 ? el.win : bubble).getBoundingClientRect();
+      var viewportHeight = window.innerHeight;
       var lift = 0;
-      if (b && window.innerWidth < 900) lift = b.offsetHeight + 12;
-      document.documentElement.style.setProperty('--vai-lift', lift + 'px');
+      consentNodes.forEach(function (banner) {
+        if (!banner.isConnected || (banner.id === 'velai-consent' && window.innerWidth >= 900)) return;
+        var computed = window.getComputedStyle(banner);
+        var rect = banner.getBoundingClientRect();
+        if (banner.hidden || computed.display === 'none' || computed.visibility === 'hidden' || Number(computed.opacity) === 0 || rect.width <= 0 || rect.height <= 0) return;
+        if (rect.bottom <= 0 || rect.top >= viewportHeight || rect.right <= bubbleRect.left || rect.left >= bubbleRect.right) return;
+        // Anchor from the viewport, not the already-lifted bubble's vertical
+        // position, so observing a banner cannot cause lift/reset oscillation.
+        lift = Math.max(lift, viewportHeight - Math.max(0, rect.top) + 12 - 24);
+      });
+      var value = Math.ceil(Math.max(0, lift)) + 'px';
+      if (root.style.getPropertyValue('--vai-lift') !== value) root.style.setProperty('--vai-lift', value);
     }
-    measure();
-    var obs = new MutationObserver(measure);
-    obs.observe(document.body, { childList: true });
-    window.addEventListener('resize', measure);
-    // el banner entra con animación: remedimos un par de veces
-    setTimeout(measure, 400);
-    setTimeout(measure, 1200);
+    function scheduleConsentMeasure() {
+      if (!consentFrame) consentFrame = requestAnimationFrame(measureConsent);
+    }
+    function discoverConsent() {
+      ['velai-consent', 'cookieBanner', 'ckb'].forEach(function (id) {
+        var banner = document.getElementById(id);
+        if (!banner || consentNodes.indexOf(banner) !== -1) return;
+        consentNodes.push(banner);
+        var observer = new MutationObserver(scheduleConsentMeasure);
+        observer.observe(banner, { attributes: true, attributeFilter: ['style', 'class', 'hidden'] });
+        if (consentResize) consentResize.observe(banner);
+        banner.addEventListener('transitionend', scheduleConsentMeasure);
+        banner.addEventListener('animationend', scheduleConsentMeasure);
+        scheduleConsentMeasure();
+      });
+      if (consentNodes.some(function (banner) { return !banner.isConnected; })) scheduleConsentMeasure();
+    }
+    // Child-list discovery only: never observe the widget's own style mutations.
+    var consentMount = new MutationObserver(discoverConsent);
+    consentMount.observe(document.body, { childList: true, subtree: true });
+    window.addEventListener('resize', scheduleConsentMeasure);
+    if (window.visualViewport) window.visualViewport.addEventListener('resize', scheduleConsentMeasure);
+    discoverConsent();
+
   }
 
   /* ── 6. Teaser ──────────────────────────────────────────────────────── */
   function scheduleTeaser() {
-    if (ss(SS_TEASER) || ss(SS_OPENED)) return;
-    setTimeout(function () {
-      if (open || ss(SS_TEASER) || !el.root) return;
+    if (window.innerWidth < 768 || ss(SS_TEASER) || ss(SS_OPENED)) return;
+    setTimeout(function () { withBrand(function () {
+      if (window.innerWidth < 768 || open || ss(SS_OPENED) || ss(SS_TEASER) || !el.root) return;
       ssSet(SS_TEASER, '1');
       var t = document.createElement('div');
       t.id = 'vaiTeaser';
       t.innerHTML = '<button id="vaiTeaserX" type="button" aria-label="' + esc(T.dismiss) + '">✕</button>' +
-        esc(T.teaser);
+        '<span class="vai-teaser-kicker">' + esc(botName() + ' · ' + T.kicker) + '</span>' +
+        '<strong class="vai-teaser-title">' + esc(teaserText().title) + '</strong>' +
+        '<span class="vai-teaser-copy">' + esc(teaserText().copy) + '</span>' +
+        '<button type="button" class="vai-teaser-cta">' + esc(T.teaserCta) + ' →</button>';
       el.root.appendChild(t);
       requestAnimationFrame(function () { t.classList.add('is-on'); });
       t.addEventListener('click', function () { t.remove(); toggle(true, 'teaser'); });
       t.querySelector('#vaiTeaserX').addEventListener('click', function (e) { e.stopPropagation(); t.remove(); });
       track('chat_teaser_shown', {});
-    }, TEASER_DELAY);
+    }); }, TEASER_DELAY);
   }
 
   /* ── 7. Abrir / cerrar ──────────────────────────────────────────────── */
@@ -509,12 +564,12 @@
     }
 
     el.win.classList.toggle('is-open', open);
+    el.root.classList.toggle('is-open', open);
+    el.win.classList.toggle('is-empty', !history.length);
     // El sondeo vive con el panel: al abrir con una conversación en manos de una persona se
     // recupera lo que hayan escrito mientras estaba cerrado; al cerrar, se para.
     if (open && liveState !== 'bot') { startLive(); pollOnce(); } else if (!open) { stopLive(); }
-    el.iconChat.style.display = open ? 'none' : 'block';
-    el.iconClose.style.display = open ? 'block' : 'none';
-    el.bubble.setAttribute('aria-label', (open ? T.close : T.open) + botName());
+    renderLauncher();
     var teaser = document.getElementById('vaiTeaser');
     if (open && teaser) teaser.remove();
 
@@ -531,25 +586,23 @@
           if (liveState !== 'bot') applyLive(liveState);
         });
       } else {
-        setTimeout(function () {
-          withBrand(function () {
-            addMsg('bot', script().greeting);
-            renderChips();
-          });
-        }, 500);
+        withBrand(function () {
+          if (!history.length) { renderWelcome(); renderChips(); }
+        });
       }
     }
     saveState(); // persistir abierto/cerrado entre páginas
-    if (open && window.innerWidth > 480) setTimeout(function () { el.input.focus(); }, 620);
+    if (!open) el.bubble.focus();
+    else if (window.innerWidth >= 768) setTimeout(function () { if (open) el.input.focus(); }, 620);
   }
 
   function renderChips() {
     el.chips.innerHTML = '';
-    script().chips.forEach(function (txt) {
+    script().chips.slice(0, 5).forEach(function (txt) {
       var b = document.createElement('button');
       b.className = 'vai-chip';
       b.type = 'button';
-      b.textContent = txt;
+      b.innerHTML = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M5 12h14m-6-6 6 6-6 6"/></svg><span>' + esc(txt) + '</span>';
       b.addEventListener('click', function () { send(txt, 'chip'); });
       el.chips.appendChild(b);
     });
@@ -557,7 +610,8 @@
   }
 
   /* ── 8. Mensajes ────────────────────────────────────────────────────── */
-  function addMsg(role, text, t) {
+  function addMsg(role, text, t, agentName) {
+    el.win.classList.remove('is-empty');
     // 'agent' (v9) es una PERSONA del equipo: burbuja propia y con nombre. Disfrazarla de
     // bot sería mentirle al visitante sobre con quién está hablando.
     var kind = role === 'bot' ? 'is-bot' : (role === 'agent' ? 'is-agent' : 'is-user');
@@ -566,7 +620,7 @@
     var row = document.createElement('div');
     row.className = 'vai-row ' + kind;
     row.innerHTML = '<div class="vai-b ' + kind + '">' +
-      (role === 'agent' ? '<div class="vai-b-who">' + esc(T.agentLabel) + '</div>' : '') +
+      (role === 'agent' ? '<div class="vai-b-who">' + esc((agentName ? String(agentName).slice(0, 60) + ' · ' : '') + T.agentLabel + ' ' + ((BRAND && BRAND.brand_name) || 'Velai')) + '</div>' : '') +
       '<div class="vai-b-t">' + esc(text) + '</div>' +
       '<div class="vai-b-h">' + time + '</div></div>';
     el.msgs.appendChild(row);
@@ -616,8 +670,8 @@
         // widget avanzaba el cursor por encima de ellos sin pintarlos nunca.
         // El cursor `lastId` es lo que evita duplicados, no el rol.
         var kind = m.role === 'agent' ? 'agent' : 'bot';
-        history.push({ role: m.role === 'agent' ? 'agent' : 'assistant', content: m.text, t: Date.parse(m.at) || Date.now() });
-        addMsg(kind, m.text, m.at);
+        history.push({ role: m.role === 'agent' ? 'agent' : 'assistant', content: m.text, t: Date.parse(m.at) || Date.now(), agent_name: m.role === 'agent' ? m.agent_name : null });
+        addMsg(kind, m.text, m.at, m.agent_name);
       }
       if (data.state !== liveState) applyLive(data.state);
       else saveState();
@@ -644,6 +698,10 @@
     if (busy) return;
     var text = (preset || el.input.value).trim();
     if (!text) return;
+    busy = true;
+    updateSend();
+    await new Promise(function (resolve) { withBrand(resolve); });
+    if (!history.length) addMsg('bot', script().greeting);
     if (!preset) { el.input.value = ''; el.input.style.height = 'auto'; }
     el.chips.classList.add('is-off');
 
@@ -654,7 +712,7 @@
     if (sent === 1) track('chat_first_message', { source: source || 'input', page: location.pathname, demo: demo || 'none' });
     track('chat_message', { n: sent, demo: demo || 'none' });
 
-    busy = true;
+    updateSend();
     el.typing.classList.add('is-on');
     el.msgs.scrollTop = el.msgs.scrollHeight;
 
@@ -696,6 +754,7 @@
       track('chat_error', { msg: code });
     } finally {
       busy = false;
+      updateSend();
     }
   }
 

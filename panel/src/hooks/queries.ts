@@ -31,6 +31,7 @@ import type {
   PlantillasResponse,
   SolicitudesResponse,
   LogoUploadResponse,
+  PortraitUploadResponse,
   Me,
   OkResponse,
   PreviewResponse,
@@ -499,9 +500,9 @@ export function useTelegramSetup() {
   });
 }
 /** Subida del logo: cuerpo binario con el Content-Type del archivo. */
-export function useLogoUpload() {
-  return useConexionMutation(({ id, file, channels }: { id: string; file: File; channels: string[] }) =>
-    api<LogoUploadResponse>(`/api/admin/tenants/${id}/logo${channels.length ? `?channels=${channels.join(',')}` : ''}`, {
+export function useLogoUpload<K extends 'portrait' | undefined = undefined>() {
+  return useConexionMutation(({ id, file, channels = [], kind }: { id: string; file: File; channels?: string[]; kind?: K }) =>
+    api<K extends 'portrait' ? PortraitUploadResponse : LogoUploadResponse>(`/api/admin/tenants/${id}/logo${kind === 'portrait' ? '?kind=portrait' : channels.length ? `?channels=${channels.join(',')}` : ''}`, {
       method: 'POST',
       headers: { 'Content-Type': file.type || 'application/octet-stream' },
       body: file,
