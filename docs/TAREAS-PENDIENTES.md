@@ -205,6 +205,30 @@ Ahora cada cliente puede completar SU vinculación, cosa que nunca fue posible:
       Verificado en vivo tras Pages: las tres cargan el loader, sin widget directo ni polish;
       zoetravelspain.com abierto en Chromium monta «Hablar con Zoe» una sola vez y encadena
       `vai.js` → `vai-widget.js?v=16` sin errores.
+- [ ] **Juan (panel, 10 min):** cargar en Clientes → ficha → Marca del widget el retrato, el
+      acento y los textos de la tarjeta de los tres clientes. Hasta que se carguen, el botón
+      muestra la inicial del bot y la tarjeta usa el texto genérico. Esos datos vivían solo en
+      los archivos de cada web (`assistant-brand.js` y `dialogos-widget-polish.js`, retirados
+      el 2026-09-14); se recuperaron de git y son estos:
+
+      **Alma · dialogos** — retrato `https://dialogosqueensenan.com/img/alma.jpg`,
+      acento `#ff8a42`, tarjeta ES «¿En qué puedo ayudarte?» / «Cuéntame qué necesitas.
+      Estoy aquí para escucharte y orientarte.» Su botón usaba el degradado `#194fd1 → #263c85`;
+      hoy la ficha tiene `#5AA0FF / #FF6577`, que pinta un azul claro a rosa. Decidir cuál queda.
+
+      **Zoe · zoe** — retrato `https://zoetravelspain.com/img/zoe-cat.jpg`, acento `#f57a1f`,
+      tarjeta ES «¿A dónde te gustaría viajar?» / «Cuéntame tu destino y te ayudo a dar el
+      primer paso de tu próximo viaje.», EN «Where would you like to travel?» / «Tell me your
+      destination and I can help you take the first step towards your next trip.»
+
+      **Dara · hiredatavision** — retrato `https://hiredatavision.com/assets/assistants/dara-v2.webp`,
+      acento `#57e6bd`, tarjeta ES «¿Qué dato no cuadra?» / «Cuéntame qué proceso tarda
+      demasiado o qué decisión necesitas tomar. Te ayudo a ordenar el siguiente paso.»,
+      EN «Could your data tell you more?» / «Let's talk about reports, metrics and manual
+      tasks. I can help you find a starting point.»
+
+      Mejor subir la imagen con el botón de la ficha que pegar la URL: así el retrato deja de
+      depender de la web del cliente. Cambio visible en el sitio en ≤5 min por la caché del boot.
 - [ ] **Sebas:** tufisiooficial.com al loader. Lo sirve el Worker `tufisiooficial` con dominio
       propio; su fuente no está en ningún repo de botnexoia-coder. Hoy carga
       `vai-widget.js?v=20260913-salo` (misma línea a sustituir, tenant `tufisiooficial`).

@@ -32,6 +32,29 @@ Desde entonces `_headers` es la única fuente de la política de caché de hirev
 lo que hay en git es lo que sirve el borde. Único efecto lateral: `robots.txt`, sin
 regla propia en el archivo, pasó de 4 h a la cabecera de Pages (`max-age=0`).
 
+## Widget v17: el copy de Velai no viaja a webs de cliente — 2026-09-14
+
+Al absorber la capa cosmética en el widget, cada web de cliente dejó de traer su propio
+`assistant-brand.js` y pasó a depender de la ficha en admin.hirevai.com, que es lo
+correcto. Pero la cascada del teaser y de las sugerencias caía al texto de Velai cuando
+la ficha no tenía los suyos: zoetravelspain.com y hiredatavision.com llegaron a mostrar
+«¿Tu negocio necesita más tiempo? Cuéntame qué tarea te gustaría automatizar». Con
+tenant, el teaser usa ahora copy genérico («¿En qué puedo ayudarte?») y las sugerencias
+quedan vacías; sin tenant, hirevai.com conserva el suyo. Misma regla que el retrato.
+
+Diálogos además conservaba su propia capa, `dialogos-widget-polish.js`, escrita para
+Alma porque el polish compartido excluía ese tenant: con v17 duplicaba cara y etiqueta
+dentro del mismo botón. Retirada en el repo `Dialogos` (`9ca194c`), conservando su única
+regla propia, subir el botón sobre el FAB de la página de CV.
+
+Desplegado el 2026-09-14 (commit `595ffbf`, CI `34859408570`, deploy `34859554503`).
+Verificado en los tres sitios en vivo: un solo botón, una sola cara, `?v=17` y consola
+limpia. Los tests de versión dejaron de clavar el número y comparan loader contra
+cabecera del widget; check-site sigue añadiendo los 27 HTML.
+
+Pendiente de datos, no de código: los retratos, acentos y textos de tarjeta de los tres
+clientes se recuperaron de git y hay que cargarlos en el panel (ver TAREAS-PENDIENTES).
+
 ## Ventana del chat v16 — 2026-09-14
 
 Panel fijo lateral de 400 px y márgenes de 16 px en escritorio; oculta el lanzador
