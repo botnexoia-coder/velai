@@ -35,17 +35,19 @@ decide quién puede cerrar cada cosa:
 
 ### OPERACIÓN (código ya disponible; requiere entorno o una persona)
 
-- [ ] Publicar y verificar el lote v15 + loader + ventana v16: CD habitual con migración 0033 → worker
-      → panel, y después Pages. Registrar IDs y fecha en IMPLEMENTADO.md.
-      En staging comprobar boot (6 campos), subida a `media/portraits`, guardado,
-      recarga e Historial config con previous_value. En Pages revisar ES/EN,
-      móvil con consentimiento, retrato Vai, apertura/cierre y eventos GA4.
-- [ ] Tras Pages, verificar con `curl -sI https://hirevai.com/assets/vai.js` que
-      Cache-Control sea `public, max-age=300, must-revalidate`, sin `immutable` ni
-      max-age de un año. Solo entonces pedir a los clientes el cambio definitivo
-      a `/assets/vai.js` sin versión (dominios en `web_origins`, última vez).
-- [ ] Comprobar ventana v16 en staging y una web cliente con cabecera fija; confirmar
-      tema, saludo único, hasta cinco sugerencias, conversación viva y analítica.
+- [x] Publicado el lote v15 + loader + ventana v16 el 2026-09-14 (commit `953d020`,
+      deploy worker `34853293426`). Verificado en producción: boot con los 6 campos,
+      loader `V='16'`, home en `?v=16`, ventana 400×768 con botón oculto, consola limpia.
+- [ ] **Juan:** en Cloudflare (hirevai.com → Caching → Configuration → Browser Cache
+      TTL) elegir «Respect Existing Headers», o una Cache Rule solo para
+      `/assets/vai.js`. Hoy el loader sale con `max-age=14400` (4 h): la zona eleva el
+      300 de `_headers`. Funciona, pero cada versión nueva tarda hasta 4 h en llegar.
+- [ ] Pedir a los clientes el cambio definitivo a `/assets/vai.js` sin versión
+      (dominios en `web_origins`, última vez). Ya se puede: la caché corta está
+      verificada, aunque sea de 4 h hasta el ajuste anterior.
+- [ ] Comprobar la ventana v16 en una web cliente con cabecera fija y en staging con un
+      tenant real: tema, saludo único, hasta cinco sugerencias, conversación viva,
+      analítica, y subida de retrato con Historial `config`.
 
 - [ ] Completar y verificar staging: clave Anthropic propia, primer job de CD y login
       con rol cliente. Staging seguirá sin Twilio/Telegram por seguridad.
@@ -199,7 +201,7 @@ Ahora cada cliente puede completar SU vinculación, cosa que nunca fue posible:
 
 - [x] Worker con dominio propio `api.hirevai.com`; widget v=8 y las 2 herramientas (diagnóstico, test-ley) llaman ahí. workers.dev sigue vivo para widgets viejos y webhooks Twilio/Telegram.
 - [ ] **Juan:** purgar en el dashboard de Cloudflare (hirevai.com → Caching → Custom purge) las URLs `https://hirevai.com/assets/vai-widget.js?v=7` y `https://hirevai.com/assets/vai-widget.js` — así los visitantes nuevos de las webs de clientes (aún con snippet v=7) reciben ya el widget arreglado.
-- [ ] **Sebas:** cambiar las 4 webs de clientes al loader `/assets/vai.js` tras verificar Pages y su caché corta (sustituye la antigua petición de subir a `?v=8`).
+- [ ] **Sebas:** cambiar las 4 webs de clientes al loader `/assets/vai.js` (verificado en Pages el 2026-09-14; sustituye la antigua petición de subir a `?v=8`).
 
 ### 2m. Marca del negocio en WhatsApp (desplegado 2026-08-22)
 

@@ -21,8 +21,14 @@ ya montado. Los clientes incluyen el loader sin query; hirevai conserva las
 Cache-Control heredado y fija `public, max-age=300, must-revalidate`.
 `check:js` valida el loader y `check-site` exige coincidencia loader/widget/HTML
 y la regla de caché corta. ALTACLIENTE y PARA-JOHAN v6 incluyen el snippet definitivo.
-La propagación de cinco minutos aplica a posteriores cargas, no a sesiones abiertas.
-La cabecera real de Pages debe verificarse antes de migrar snippets de clientes.
+La propagación aplica a posteriores cargas, no a sesiones abiertas.
+
+Desplegado el 2026-09-14 (commit `953d020`, CI `34853146142`, Pages publicado con el
+mismo push). Verificado con curl: el `!` de `_headers` sí retiró el `immutable`, pero la
+cabecera real llega como `public, max-age=14400, must-revalidate`: el Browser Cache TTL
+de la zona de Cloudflare (4 h) eleva cualquier max-age inferior. Funciona y es
+determinista, con propagación de 4 h en vez de 5 min; bajarlo es un ajuste de
+dashboard (ver TAREAS-PENDIENTES · OPERACIÓN).
 
 ## Ventana del chat v16 — 2026-09-14
 
@@ -57,11 +63,13 @@ distinto, temas, geometría, transcript restaurado y nombre de cada agente. Refe
 de Claude inaccesible en esta sesión; diseño comprobado contra las medidas y tokens
 del MD, con capturas y recorridos en Chromium.
 
-**Despliegue pendiente:** v15 aún no se había commiteado; el estado de trabajo reúne
-ambas especificaciones y el loader apunta directamente a v16. Publicar por CD
-(migración 0033 → worker/chips ≤5 → panel), después Pages. No se ha ejecutado el
-primer despliegue intermedio del loader v15. Para rollback visual futuro a v15,
-restaurar juntos widget, HTML y loader con `V='15'`; no revertir 0033.
+Desplegado el 2026-09-14 (commit `953d020`, CI `34853146142`, deploy worker
+`34853293426` con gate y deploy en verde, Pages con el mismo push; suite 224/224,
+panel 138/138, Chromium 11/11). Verificado en hirevai.com real con Chromium: ventana
+de 400×768 desde `top:16px`, botón oculto al abrir, «Hablar con Vai» al cerrar, sin
+errores de consola y una sola petición `vai-widget.js?v=16`. Queda por mirar en una
+web cliente con cabecera fija. Rollback visual a v15: restaurar juntos widget, HTML y
+loader con `V='15'`; no revertir 0033.
 
 
 ## Lanzador de marca en el widget (v15) — 2026-09-14
@@ -89,9 +97,10 @@ resuelve los banners visibles con solape horizontal (`velai-consent` solo
 <900 px, `cookieBanner`, `ckb`), con observación de tamaño, atributos y viewport.
 La API VaiChat, sesiones, demos, Turnstile y live-poll se conservan.
 
-**Despliegue pendiente:** no se ha publicado esta entrega. Aplicar 0033 por CD,
-worker y panel antes de Pages; completar aquí «Desplegado el … (worker …,
-Pages …, migración 0033, suite …)» únicamente con evidencia del entorno.
+Desplegado el 2026-09-14 en el mismo push que el loader y la ventana v16 (commit
+`953d020`, deploy worker `34853293426`, migración 0033 aplicada por CD en staging y
+producción). Verificado: `GET /widget/boot` en producción devuelve los seis campos
+nuevos; hirevai.com sirve el widget v16 sin rastro de los scripts polish.
 Validación local: `npm run check`, 218/218 pruebas worker + 5/5 aislamiento,
 137/137 panel, tipos (incluido E2E), build y 5/5 pruebas Chromium (smoke del
 panel y cuatro recorridos del widget). Las 33 migraciones se aplicaron en SQLite.
