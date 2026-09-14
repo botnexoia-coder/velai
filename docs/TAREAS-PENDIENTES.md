@@ -38,13 +38,10 @@ decide quién puede cerrar cada cosa:
 - [x] Publicado el lote v15 + loader + ventana v16 el 2026-09-14 (commit `953d020`,
       deploy worker `34853293426`). Verificado en producción: boot con los 6 campos,
       loader `V='16'`, home en `?v=16`, ventana 400×768 con botón oculto, consola limpia.
-- [ ] **Juan:** en Cloudflare (hirevai.com → Caching → Configuration → Browser Cache
-      TTL) elegir «Respect Existing Headers», o una Cache Rule solo para
-      `/assets/vai.js`. Hoy el loader sale con `max-age=14400` (4 h): la zona eleva el
-      300 de `_headers`. Funciona, pero cada versión nueva tarda hasta 4 h en llegar.
-- [ ] Pedir a los clientes el cambio definitivo a `/assets/vai.js` sin versión
-      (dominios en `web_origins`, última vez). Ya se puede: la caché corta está
-      verificada, aunque sea de 4 h hasta el ajuste anterior.
+- [x] **Juan:** TTL de caché del navegador de la zona hirevai.com puesto en «Respetar los
+      encabezados existentes» (2026-09-14). El loader sirve ya `max-age=300` y `_headers`
+      manda en toda la caché del sitio. No volver a fijar un valor numérico ahí: anularía
+      en silencio las cabeceras del repositorio.
 - [ ] Comprobar la ventana v16 en una web cliente con cabecera fija y en staging con un
       tenant real: tema, saludo único, hasta cinco sugerencias, conversación viva,
       analítica, y subida de retrato con Historial `config`.

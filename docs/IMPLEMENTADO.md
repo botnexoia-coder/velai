@@ -24,11 +24,13 @@ y la regla de caché corta. ALTACLIENTE y PARA-JOHAN v6 incluyen el snippet defi
 La propagación aplica a posteriores cargas, no a sesiones abiertas.
 
 Desplegado el 2026-09-14 (commit `953d020`, CI `34853146142`, Pages publicado con el
-mismo push). Verificado con curl: el `!` de `_headers` sí retiró el `immutable`, pero la
-cabecera real llega como `public, max-age=14400, must-revalidate`: el Browser Cache TTL
-de la zona de Cloudflare (4 h) eleva cualquier max-age inferior. Funciona y es
-determinista, con propagación de 4 h en vez de 5 min; bajarlo es un ajuste de
-dashboard (ver TAREAS-PENDIENTES · OPERACIÓN).
+mismo push). El `!` de `_headers` retiró el `immutable`, pero la cabecera real llegaba
+como `max-age=14400`: el ajuste de zona **TTL de caché del navegador** estaba en 4 h y
+elevaba cualquier max-age inferior. Juan lo pasó a «Respetar los encabezados
+existentes» el mismo día y el loader quedó en `public, max-age=300, must-revalidate`.
+Desde entonces `_headers` es la única fuente de la política de caché de hirevai.com, y
+lo que hay en git es lo que sirve el borde. Único efecto lateral: `robots.txt`, sin
+regla propia en el archivo, pasó de 4 h a la cabecera de Pages (`max-age=0`).
 
 ## Ventana del chat v16 — 2026-09-14
 
