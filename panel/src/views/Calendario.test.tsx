@@ -172,8 +172,10 @@ describe('vista Calendario', () => {
       </QueryClientProvider>,
     );
     await waitFor(() => expect(screen.getByText(/negocio@gmail\.com/)).toBeInTheDocument());
-    // La cita sale como chip en su día y el horario laboral por defecto se dice.
-    await waitFor(() => expect(screen.getByText(/Marta/)).toBeInTheDocument());
+    // La cita sale como chip en su día…
+    await waitFor(() => expect(screen.getAllByText(/Marta/).length).toBeGreaterThan(0));
+    // …y la configuración del calendario vive en la pestaña Ajustes.
+    await userEvent.click(screen.getByRole('tab', { name: 'Ajustes' }));
     expect(screen.getByText(/Usando el horario por defecto/)).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Guardar calendario' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Desconectar' })).toBeInTheDocument();
@@ -184,6 +186,11 @@ describe('vista Calendario', () => {
 
 describe('Confirmaciones (SPEC-CONFIRMACIONES)', () => {
   afterEach(() => vi.unstubAllGlobals());
+  // Con calendario conectado la card vive en Ajustes; sin él, en la pantalla de conectar.
+  async function abrirAjustes() {
+    const tab = screen.queryByRole('tab', { name: 'Ajustes' });
+    if (tab) await userEvent.click(tab);
+  }
 
   const calRow: CalendarRow = {
     provider: 'google',
@@ -246,6 +253,8 @@ describe('Confirmaciones (SPEC-CONFIRMACIONES)', () => {
         </ToastProvider>
       </QueryClientProvider>,
     );
+    await waitFor(() => expect(screen.getByRole('tab', { name: 'Ajustes' })).toBeInTheDocument());
+    await abrirAjustes();
     await waitFor(() => expect(screen.getByText('Confirmaciones')).toBeInTheDocument());
     expect(screen.getByText('Activado')).toBeInTheDocument();
     expect(screen.getByText(/lo activa el equipo de Velai/)).toBeInTheDocument();
@@ -253,8 +262,10 @@ describe('Confirmaciones (SPEC-CONFIRMACIONES)', () => {
     // Sin botones: el interruptor y la plantilla son solo de Velai.
     expect(screen.queryByRole('button', { name: /Activar Confirmaciones|Desactivar/ })).toBeNull();
     expect(screen.queryByRole('button', { name: 'Crear plantilla de recordatorios' })).toBeNull();
-    // El chip de la cita confirmada por el cliente.
-    await waitFor(() => expect(screen.getByText(/✅/)).toBeInTheDocument());
+    // El estado de la cita: el chip lleva punto de color y lo dice en su título (antes
+    // era un emoji dentro del texto).
+    await userEvent.click(screen.getByRole('tab', { name: 'Agenda' }));
+    await waitFor(() => expect(screen.getByTitle(/confirmada por el cliente/)).toBeInTheDocument());
   });
 
   it('velai: interruptor, antelación editable (PATCH curado) y el alta abre el diálogo configurable', async () => {
@@ -302,6 +313,8 @@ describe('Confirmaciones (SPEC-CONFIRMACIONES)', () => {
         </ToastProvider>
       </QueryClientProvider>,
     );
+    await waitFor(() => expect(screen.getByRole('tab', { name: 'Ajustes' })).toBeInTheDocument());
+    await abrirAjustes();
     await waitFor(() => expect(screen.getByText('Confirmaciones')).toBeInTheDocument());
     expect(screen.getByText('Desactivado')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Activar Confirmaciones' })).toBeInTheDocument();

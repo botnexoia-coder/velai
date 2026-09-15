@@ -144,13 +144,18 @@ test('el panel v2 arranca con API simulada y recorre Dashboard → Conexiones si
 
   await page.getByRole('tab', { name: 'Calendario' }).click();
   await expect(page.getByRole('heading', { name: /Calendario/ })).toBeVisible();
-  await page.getByRole('button', { name: 'Reservas online' }).click();
-  await expect(page.getByRole('heading', { name: 'Reservas online' })).toBeVisible();
-  await expect(page.getByText('Sesión presencial · 30 min · Activo · orden 10')).toBeVisible();
-  await expect(page.getByText('Sesión por vídeo · 30 min · Activo · orden 20')).toBeVisible();
-  await expect(page.getByText('Sesión por teléfono · 30 min · Activo · orden 30')).toBeVisible();
-  await expect(page.getByText('2026-12-25 · Cerrado · Navidad')).toBeVisible();
-  await expect(page.getByLabel('Calendario integrado')).toHaveValue(/data-vai-citas="dialogos"/);
+  // Reservas online es una pestaña de la misma vista (rediseño 2026-09-16), no otra pantalla.
+  await page.getByRole('tab', { name: 'Reservas online' }).click();
+  await expect(page.getByRole('heading', { name: 'Servicios' })).toBeVisible();
+  await expect(page.getByText('30 min · Presencial')).toBeVisible();
+  await expect(page.getByText('30 min · Vídeo')).toBeVisible();
+  await expect(page.getByText('30 min · Teléfono')).toBeVisible();
+  // El estado de la página y lo que falta antes de compartir el enlace.
+  await expect(page.getByRole('switch', { name: 'Activar página de reservas' })).toHaveAttribute('aria-checked', 'true');
+  await expect(page.getByText('Google Calendar conectado')).toBeVisible();
+  await expect(page.getByText('25 dic 2026')).toBeVisible();
+  await expect(page.getByText('Cerrado todo el día · Navidad')).toBeVisible();
+  await expect(page.locator('.codebox code')).toContainText('data-vai-citas="dialogos"');
   await page.screenshot({ path: test.info().outputPath('reservas-online-panel.png'), fullPage: true });
 
   expect(missing).toEqual([]);

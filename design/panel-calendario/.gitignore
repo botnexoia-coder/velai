@@ -1,0 +1,6 @@
+# Generados: se reconstruyen con `node gen-*.mjs` desde site/fonts y _base.mjs.
+# No entran al repo porque llevan las tipografías embebidas en base64 (~130 KB cada uno)
+# y el lienzo empaquetado pasa de 3 MB.
+_fonts.css
+*.dc.html
+panel-reservas.html
