@@ -815,7 +815,7 @@
     footer { border-top:1px solid var(--border); background:var(--bg2); padding:3rem 2rem; }
     .footer-inner { max-width:1160px; margin:0 auto; display:grid; grid-template-columns:1.6fr repeat(4, 1fr); gap:2.2rem; }
     .footer-brand p { font-size:.85rem; color:var(--muted); line-height:1.65; margin-top:.8rem; max-width:280px; }
-    .footer-col h4 { font-size:.8rem; font-weight:600; text-transform:uppercase; letter-spacing:.08em; color:var(--muted); margin-bottom:1rem; }
+    .footer-col h3 { font-size:.8rem; font-weight:600; text-transform:uppercase; letter-spacing:.08em; color:var(--muted); margin-bottom:1rem; }
     .footer-col a { display:block; color:var(--muted2); text-decoration:none; font-size:.85rem; margin-bottom:.5rem; transition:color .2s; }
     .footer-col a:hover { color:var(--white); }
     .footer-bottom {
@@ -846,7 +846,7 @@
         position:relative; isolation:isolate; display:grid; gap:0;
         margin:2rem 0 2.5rem; padding:2rem 1.25rem;
         border:1px solid rgba(255,107,26,.18); border-radius:26px; overflow:hidden;
-        background:#0b080a url("/assets/pricing-journey-orbit-v1.png?v=20260913b") 58% center/auto 100% no-repeat;
+        background:#0b080a url("/assets/pricing-journey-orbit-v1.webp?v=20260915") 58% center/auto 100% no-repeat;
         box-shadow:0 22px 58px rgba(0,0,0,.28);
       }
       .pricing-flow::before { content:""; position:absolute; inset:0; z-index:-1; background:linear-gradient(90deg,rgba(8,6,8,.94),rgba(8,6,8,.68)); }
@@ -988,7 +988,8 @@
       border:6px solid transparent;
       border-left-color:#005c4b; border-top-color:#005c4b;
     }
-    .wa-time { font-size:.56rem; color:#8696a0; text-align:right; margin-top:2px; }
+    .wa-time { font-size:.56rem; color:#aebbc2; text-align:right; margin-top:2px; }
+    .wa-msg-u .wa-time { color:#c5d9d4; }
     .wa-tick { color:#53bdeb; }
     .wa-action {
       font-size:.62rem; color:#8696a0; text-align:center;
@@ -1001,7 +1002,7 @@
     }
     .wa-input {
       flex:1; background:#2a3942; border-radius:20px;
-      padding:6px 12px; font-size:.68rem; color:#8696a0;
+      padding:6px 12px; font-size:.68rem; color:#b9c6cc;
     }
     .wa-send {
       width:32px; height:32px; border-radius:50%;
@@ -1045,7 +1046,7 @@
       padding:.36rem .6rem; cursor:pointer; transition:all .2s;
       letter-spacing:.05em; line-height:1;
     }
-    .lang-btn.active { background:var(--orange); color:#fff; }
+    .lang-btn.active { background:#c74712; color:#fff; }
     .lang-sep { color:var(--border2); font-size:.85rem; line-height:1; pointer-events:none; user-select:none; }
     @media(max-width:600px) { .nav-cta { display:none; } }
 
@@ -1101,14 +1102,14 @@
     </ul>
     <a href="#contacto" class="nav-cta">Solicitar demo</a>
     <div class="nav-toggles">
-      <button class="theme-toggle" id="themeToggle" onclick="toggleTheme()" title="Cambiar tema">☀️</button>
+      <button class="theme-toggle" id="themeToggle" type="button" onclick="toggleTheme()" title="Cambiar tema" aria-label="Cambiar tema claro u oscuro">☀️</button>
       <div class="lang-toggle">
-        <button class="lang-btn active" id="btnEs" onclick="setLang('es')">ES</button>
+        <button class="lang-btn active" id="btnEs" type="button" onclick="setLang('es')" aria-label="Ver en español">ES</button>
         <span class="lang-sep">|</span>
-        <button class="lang-btn" id="btnEn" onclick="setLang('en')">EN</button>
+        <button class="lang-btn" id="btnEn" type="button" onclick="setLang('en')" aria-label="View in English">EN</button>
       </div>
     </div>
-    <button class="hamburger" id="hamburger" onclick="toggleMenu()" aria-label="Abrir menú" aria-expanded="false">☰</button>
+    <button class="hamburger" id="hamburger" type="button" onclick="toggleMenu()" aria-label="Abrir menú" aria-expanded="false">☰</button>
   </div>
 </nav>
 
@@ -1717,7 +1718,7 @@
       <p>El ecosistema de IA que gestiona tu negocio 24/7. Presentamos Vai — tu asistente que nunca duerme.</p>
     </div>
     <div class="footer-col">
-      <h4>Producto</h4>
+      <h3>Producto</h3>
       <a href="#como-funciona">Cómo funciona</a>
       <a href="#industrias">Industrias</a>
       <a href="#precios">Precios</a>
@@ -1725,20 +1726,20 @@
       <a href="/blog/">Blog</a>
     </div>
     <div class="footer-col">
-      <h4>Contacto</h4>
+      <h3>Contacto</h3>
       <a href="mailto:equipo@hirevai.com" data-email>equipo@hirevai.com</a>
       <a href="tel:+15706160059">+1 570-616-0059</a>
       <a href="https://wa.me/15706160059" data-wa target="_blank" rel="noopener noreferrer">WhatsApp</a>
     </div>
     <div class="footer-col">
-      <h4>Por sector</h4>
+      <h3>Por sector</h3>
       <a href="/restaurantes/">Restaurantes</a>
       <a href="/clinicas/">Clínicas</a>
       <a href="/talleres/">Talleres</a>
       <a href="/inmobiliarias/">Inmobiliarias</a>
     </div>
     <div class="footer-col">
-      <h4>Herramientas</h4>
+      <h3>Herramientas</h3>
       <a href="/diagnostico-whatsapp/">Diagnóstico WhatsApp</a>
       <a href="/calculadora-ventas-perdidas/">Calculadora de pérdidas</a>
       <a href="/calculadora-roi/">Calculadora ROI</a>
@@ -2158,16 +2159,16 @@
     setText('.footer-brand p', t.ftP);
     var fc = document.querySelectorAll('.footer-col');
     if (fc[0]) {
-      subText(fc[0], 'h4', t.ftC1);
+      subText(fc[0], 'h3', t.ftC1);
       var fl = fc[0].querySelectorAll('a');
       if (fl[0]) fl[0].textContent = t.ftL1;
       if (fl[1]) fl[1].textContent = t.ftL2;
       if (fl[2]) fl[2].textContent = t.ftL3;
       if (fl[3]) fl[3].textContent = t.ftL4;
     }
-    if (fc[1]) subText(fc[1], 'h4', t.ftC2);
-    if (fc[2]) subText(fc[2], 'h4', t.ftC3);
-    if (fc[3]) subText(fc[3], 'h4', t.ftC4);
+    if (fc[1]) subText(fc[1], 'h3', t.ftC2);
+    if (fc[2]) subText(fc[2], 'h3', t.ftC3);
+    if (fc[3]) subText(fc[3], 'h3', t.ftC4);
     setText('.geo-label', t.geoLabel);
     setText('.geo-title', t.geoTitle);
     setText('.geo-p', t.geoP);
@@ -2201,7 +2202,6 @@
   // (Sección "Así trabaja Vai": contenido estático y honesto, sin contadores simulados.)
 </script>
 
-<script defer src="https://static.cloudflareinsights.com/beacon.min.js" data-cf-beacon='{"token":"cfa66a7600f94512ac2e595181c8d04d"}'></script>
 <script src="/assets/vai-widget.js?v=17" defer></script>
 <script src="/assets/kinetic-grid.js?v=2" defer></script>
 </body>
