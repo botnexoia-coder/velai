@@ -232,13 +232,23 @@ Ahora cada cliente puede completar SU vinculación, cosa que nunca fue posible:
 - [x] myxucostura.com carga a Mei con el loader (2026-09-15, `b61514b` en `MyXuCostura`,
       home y `/myxu-costura`). Su marca ya estaba completa en el panel y se ve tal cual:
       retrato, saludo, cinco sugerencias, tarjeta y acento.
-- [ ] **Decisión de negocio en myxucostura.com:** la web tiene ADEMÁS su propio chat de Mei
-      incrustado en la página (`#chat-section`), servido por su worker en workers.dev con
-      aviso a Telegram. Ahora conviven dos Mei con memorias distintas y solo la del widget
-      se ve en el panel. Decidir si se retira el chat incrustado.
+- [x] Retirados los chats locales de myxucostura.com (2026-09-15, `dc0edef`/`a050a34`):
+      la portada tenía un panel flotante propio contra `myxu-costura-bot.workers.dev` y la
+      landing vieja un guion simulado. La sección y sus 17 llamadas a la acción se conservan;
+      el botón abre el widget con `VaiChat.open()`. Regla del dueño: nada de bots locales.
+- [ ] El worker `myxu-costura-bot` ya no lo llama ninguna web. Igual que `hiredatavision-bot`
+      y `gogestion-bot`, que tampoco aparecen en sus sitios. Revisar si siguen sirviendo a
+      algún canal (Telegram) antes de retirarlos.
+- [ ] **SEO de myxucostura.com:** cualquier ruta inexistente devuelve 200 con la portada
+      (comprobado con `/esto-no-existe-12345`). Google lo trata como error blando; conviene
+      un `404.html` en el proyecto de Pages.
 - [ ] El retrato de Mei pesa 1,9 MB y se sirve desde la web del cliente
       (`myxucostura.com/assets/assistants/myxu-mei-admin-v2.png`). Para un avatar de 46 px
       sobra con una versión pequeña, y subirla por la ficha la mueve al dominio de Velai.
+- [ ] `/myxu-costura` conserva su URL y devuelve 200, pero sirve el rediseño por una regla
+      de `_redirects` (reescritura a `/`, no a `/index.html`: Pages canoniza esa ruta y la
+      convierte en 308). Su canonical apunta a la raíz, así que Google mostrará la portada:
+      para que esa URL posicione por su cuenta necesitaría contenido propio, no una copia.
 - [ ] **Zoe: falta el retrato en la ficha.** Es la causa de que el rediseño de la portada
       restaurara la capa local el 2026-09-15 y dejara la home en `?v=14` (corregido en
       `38d24d3`). La gata sigue publicada en `https://zoetravelspain.com/img/zoe-cat.jpg`.
