@@ -299,6 +299,40 @@ a Telegram y se pausa 4 h para esa conversación (clave `pause:<tenant>:<from>` 
 escaladas activas se ven en el panel como chips ⏸ con botón "Reanudar bot". Mientras no haya
 bandeja, el equipo del cliente responde desde SU WhatsApp (número distinto al del bot).
 
+## Autoagenda pública
+
+La autoagenda vive únicamente en `citas.hirevai.com` y en
+`citas-staging.hirevai.com`. `BOOKING_ORIGIN` debe coincidir exactamente con uno de esos
+dos orígenes; cualquier otro valor apaga todas las rutas con 404. El host no lleva
+Cloudflare Access. El panel y la API conservan sus hostnames y perímetros actuales.
+
+Antes del primer despliegue:
+
+1. Aplicar las migraciones D1 0034, 0035 y 0036 **antes** del Worker. La 0036 prepara
+   para `dialogos` tres modalidades de 30 minutos y deja `booking_enabled=0`.
+2. Crear un secreto independiente por entorno con al menos 32 caracteres:
+   `npx wrangler secret put APP_SECRET` y
+   `npx wrangler secret put APP_SECRET --env staging`. Cambiarlo revoca todos los
+   enlaces de gestión ya emitidos, aunque el token almacenado siga en D1.
+3. Configurar el hostname de citas en el widget de Turnstile. El botón
+   «Sincronizar Turnstile» incluye `BOOKING_ORIGIN` mediante
+   `ALLOWED_WEB_ORIGINS`; verificarlo antes de activar un tenant.
+4. En staging, conectar un calendario de pruebas y configurar su propio cliente OAuth.
+   No copiar tokens, D1 ni KV de producción.
+5. Crear y enviar a aprobación la plantilla `confirmacion_reserva` para el tenant si
+   tiene Confirmaciones activo. Hasta aprobarse, la cita se crea correctamente pero el
+   enlace de gestión se muestra solo en la página; no se improvisa texto libre fuera de
+   la ventana de WhatsApp.
+6. Completar lugar/enlace de las modalidades y usar la vista previa del panel. Activar
+   `booking_enabled` solo después de reservar, reagendar y cancelar en staging.
+
+Las horas de inicio son siempre `:00` o `:30`. La duración y el descanso del servicio
+pueden ocupar varios bloques. Los bloqueos de reserva viven en D1; KV solo cachea
+disponibilidad. Una fila `booking_claims.state='booking'` persistente indica una llamada
+a Google de resultado incierto: el cliente puede reintentar con el mismo hold y el mismo
+evento, sin duplicarlo. No se debe borrar esa fila a ciegas sin comprobar primero el
+evento determinista en Google.
+
 ## Alertas operativas
 
 Automáticas (llegan al Telegram del equipo, con antirebote de 1 h):

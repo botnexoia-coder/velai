@@ -23,3 +23,7 @@ AI_TENANT_DAILY_LIMIT="300"
 # Redirect en dev: http://localhost:8787/oauth/calendar/callback (dado de alta allí).
 GOOGLE_OAUTH_CLIENT_ID=""
 GOOGLE_OAUTH_CLIENT_SECRET=""
+
+# Autoagenda: dedicated origin; APP_SECRET must be a random secret (>=32 characters).
+BOOKING_ORIGIN=https://citas-staging.hirevai.com
+APP_SECRET=

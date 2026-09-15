@@ -121,6 +121,15 @@ for (const file of htmlFiles) {
   if (header && usadas.size === 1 && !usadas.has(header[1])) {
     failures.push(`el widget declara v${header[1]} y los HTML piden v${[...usadas][0]} — con caché immutable, los visitantes recurrentes podrían conservar el anterior`);
   }
+  try {
+    const citas = await readFile(path.join(root, 'assets/vai-citas.js'), 'utf8');
+    const citasVersion = citas.match(/VAI CITAS · v(\d+)/);
+    const panel = await readFile(path.join(path.dirname(root), 'panel/src/views/ReservasOnline.tsx'), 'utf8');
+    const snippetVersion = panel.match(/vai-citas\.js\?v=(\d+)/);
+    if (!citasVersion || !snippetVersion || !header || citasVersion[1] !== header[1] || snippetVersion[1] !== header[1]) {
+      failures.push('vai-citas.js, su snippet del panel y el widget deben declarar la misma versión');
+    }
+  } catch (_) { failures.push('falta assets/vai-citas.js o su snippet del panel'); }
 }
 
 if (htmlFiles.length < 26) failures.push(`se esperaban al menos 26 HTML y hay ${htmlFiles.length}`);

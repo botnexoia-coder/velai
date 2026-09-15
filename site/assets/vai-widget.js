@@ -1,5 +1,5 @@
 /* ══════════════════════════════════════════════════════════════════════════
-   VAI CHAT WIDGET — autocontenido (CSS + markup + lógica) · v17
+   VAI CHAT WIDGET — autocontenido (CSS + markup + lógica) · v18
    ──────────────────────────────────────────────────────────────────────────
    OJO CON LA VERSIÓN: este archivo se sirve con Cache-Control immutable durante un
    año (_headers, /*.js), así que el `?v=N` de la URL ES la clave de caché. Cambiar el
@@ -9,7 +9,7 @@
    falla si las dos no coinciden.
 
    Se carga en TODAS las páginas con una sola línea:
-     <script src="/assets/vai-widget.js?v=17" defer></script>
+     <script src="/assets/vai-widget.js?v=18" defer></script>
 
    En la web de un CLIENTE van dos líneas (la primera declara el tenant):
      <script>window.VELAI_TENANT='zoe';</script>
@@ -389,7 +389,7 @@
     el.msgs.innerHTML = '';
     addMsg('bot', script().greeting);
     history.forEach(function (m) {
-      addMsg(m.role === 'assistant' ? 'bot' : (m.role === 'agent' ? 'agent' : 'user'), m.content, m.t, m.agent_name);
+      addMsg(m.role === 'assistant' ? 'bot' : (m.role === 'agent' ? 'agent' : 'user'), m.content, m.t, m.agent_name, m.booking);
     });
   }
 
@@ -616,7 +616,7 @@
   }
 
   /* ── 8. Mensajes ────────────────────────────────────────────────────── */
-  function addMsg(role, text, t, agentName) {
+  function addMsg(role, text, t, agentName, booking) {
     el.win.classList.remove('is-empty');
     // 'agent' (v9) es una PERSONA del equipo: burbuja propia y con nombre. Disfrazarla de
     // bot sería mentirle al visitante sobre con quién está hablando.
@@ -629,6 +629,17 @@
       (role === 'agent' ? '<div class="vai-b-who">' + esc((agentName ? String(agentName).slice(0, 60) + ' · ' : '') + T.agentLabel + ' ' + ((BRAND && BRAND.brand_name) || 'Velai')) + '</div>' : '') +
       '<div class="vai-b-t">' + esc(text) + '</div>' +
       '<div class="vai-b-h">' + time + '</div></div>';
+    if (role === 'bot' && booking && booking.type === 'booking') {
+      try {
+        var target = new URL(booking.url);
+        var expectedTenant = TENANT || 'velai';
+        if (['https://citas.hirevai.com', 'https://citas-staging.hirevai.com'].indexOf(target.origin) !== -1 && target.pathname === '/' + expectedTenant + '/reservas' && !target.username && !target.password && !target.hash) {
+          var card = document.createElement('a'); card.href = target.href; card.target = '_blank'; card.rel = 'noopener noreferrer';
+          card.textContent = LANG === 'en' ? 'Open booking calendar →' : 'Ver calendario de reservas →';
+          card.style.display = 'block'; card.style.padding = '12px 0'; row.querySelector('.vai-b-t').appendChild(card);
+        }
+      } catch (_) {}
+    }
     el.msgs.appendChild(row);
     el.msgs.scrollTop = el.msgs.scrollHeight;
   }
@@ -741,8 +752,8 @@
       // Sin reply el bot no ha hablado (lo lleva una persona): no se pinta una burbuja
       // vacía, se enseña el estado y el sondeo trae lo que escriba el equipo.
       if (data.reply) {
-        history.push({ role: 'assistant', content: data.reply, t: Date.now() });
-        addMsg('bot', data.reply);
+        history.push({ role: 'assistant', content: data.reply, t: Date.now(), booking: data.booking || null });
+        addMsg('bot', data.reply, null, null, data.booking);
         track('chat_reply', { n: sent });
       }
       applyLive(data.state);

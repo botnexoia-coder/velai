@@ -1,4 +1,5 @@
 import test from 'node:test';
+import { sqliteD1 } from './helpers/sqlite-d1.js';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { createWorker, testing } from '../worker/app.js';
@@ -1214,7 +1215,7 @@ test('el widget pinta la marca del tenant desde /widget/boot, no la de Velai', a
   assert.match(widget, /BRAND && BRAND\.wa_number/);
   // bilingüe: el saludo EN del tenant se usa cuando la página está en inglés
   assert.match(widget, /BRAND\.greeting_en/);
-  for (const fragment of ['BRAND.portrait_url', "setProperty('--vai-acc'", '--vai-lift', 'aria-expanded', 'BRAND.teaser_title_en', '· v17']) assert.ok(widget.includes(fragment), fragment);
+  for (const fragment of ['BRAND.portrait_url', "setProperty('--vai-acc'", '--vai-lift', 'aria-expanded', 'BRAND.teaser_title_en', '· v18']) assert.ok(widget.includes(fragment), fragment);
   assert.equal(widget.includes('va-ui'), false);
   assert.equal(widget.includes('vaiPulse'), false);
 
@@ -1914,51 +1915,33 @@ function nextWorkday() {
   }
 }
 
-test('agendar_cita: relee el hueco antes de crear, no duplica y respeta el cerrojo', async () => {
+test('agendar_cita: relee Google y comparte con la web el bloqueo D1', async (t) => {
   const { localToUtcMs } = await import('../worker/calendar.js');
   const day = nextWorkday();
   const iso = (hhmm) => new Date(localToUtcMs('Europe/Madrid', day, hhmm)).toISOString();
-  const inserts = [];
-  const db = { prepare: (sql) => ({ bind: (...args) => ({
-    run: async () => {
-      if (sql.includes('INSERT INTO appointments')) {
-        if (inserts.some((i) => i[2] === args[2])) throw new Error('UNIQUE constraint failed: appointments.request_id');
-        inserts.push(args);
-      }
-      return { meta: { changes: 1 } };
-    },
-    first: async () => null, all: async () => ({ results: [] }),
-  }) }) };
+  const db = await sqliteD1(); t.after(() => db.close());
+  await db.exec("INSERT INTO tenants(id,slug,name,channel_address,system_prompt,created_at,updated_at) VALUES ('t-cal','uno','Uno','web:uno','test','2026-01-01','2026-01-01'); INSERT INTO tenant_calendars(tenant_id,provider,refresh_token_enc,connected_by,connected_at,updated_at) VALUES ('t-cal','google','test','test','2026-01-01','2026-01-01');");
   const env = { DB: db, KV: mapKV(), GOOGLE_OAUTH_CLIENT_ID: 'cid', GOOGLE_OAUTH_CLIENT_SECRET: 'sec', SECRETS_KEK: TEST_KEK };
   const enc = await encryptSecret(env, 'calendar:t-cal', 'refresh-tok');
   const cal = { tenant_id: 't-cal', provider: 'google', refresh_token_enc: enc, calendar_id: 'primary', timezone: 'Europe/Madrid', slot_minutes: 30, business_hours: null, status: 'connected' };
   const created = [];
-  const realFetch = globalThis.fetch;
+  const realFetch = globalThis.fetch; t.after(() => { globalThis.fetch = realFetch; });
   globalThis.fetch = async (url, init) => {
     const u = String(url);
-    if (u.includes('oauth2.googleapis.com/token')) return new Response(JSON.stringify({ access_token: 'at', expires_in: 3600 }), { status: 200 });
-    if (u.includes('/events?')) return new Response(JSON.stringify({ items: [{ start: { dateTime: iso('10:00') }, end: { dateTime: iso('10:30') }, status: 'confirmed' }] }), { status: 200 });
-    if (u.includes('/events')) { created.push(JSON.parse(init.body)); return new Response(JSON.stringify({ id: 'evt1' }), { status: 201 }); }
-    return new Response('{}', { status: 200 });
+    if (u.includes('oauth2.googleapis.com/token')) return Response.json({ access_token: 'at', expires_in: 3600 });
+    if (u.includes('/events?')) return Response.json({ items: [{ start: { dateTime: iso('10:00') }, end: { dateTime: iso('10:30') }, status: 'confirmed' }] });
+    if (u.includes('/events')) { const event=JSON.parse(init.body); created.push(event); return Response.json({ id: event.id }, {status:201}); }
+    return Response.json({});
   };
-  try {
-    const exec = testing.calendarExecutor(env, { slug: 'uno' }, cal, { channel: 'whatsapp', conversationKey: 'whatsapp:+34600', defaultPhone: '+34600000000' });
-    // relectura del proveedor: el hueco de las 10:00 está ocupado — ni evento ni fila
-    const busy = JSON.parse(await exec('agendar_cita', { fecha_hora: `${day}T10:00`, nombre: 'Ana', telefono: '612345678' }));
-    assert.equal(busy.error, 'hueco_ocupado');
-    assert.ok(busy.alternativas.length && !busy.alternativas.includes('10:00'));
-    assert.equal(created.length, 0);
-    // hueco libre: evento en Google + fila en appointments
-    const ok = JSON.parse(await exec('agendar_cita', { fecha_hora: `${day}T11:00`, nombre: 'Ana', telefono: '612345678' }));
-    assert.deepEqual([ok.ok, ok.hora], [true, '11:00']);
-    assert.equal(created.length, 1);
-    assert.equal(inserts.length, 1);
-    assert.ok(created[0].summary.includes('Ana'));
-    // cerrojo KV: otra conversación sobre el MISMO hueco no crea un segundo evento
-    const race = JSON.parse(await exec('agendar_cita', { fecha_hora: `${day}T11:00`, nombre: 'Luis', telefono: '612345679' }));
-    assert.equal(race.error, 'hueco_ocupado');
-    assert.equal(created.length, 1, 'el cerrojo evita el segundo evento');
-  } finally { globalThis.fetch = realFetch; }
+  const exec = testing.calendarExecutor(env, { id:'t-cal',slug: 'uno' }, cal, { channel: 'whatsapp', conversationKey: 'c1', defaultPhone: '+34600000000' });
+  const busy = JSON.parse(await exec('agendar_cita', { fecha_hora: `${day}T10:00`, nombre: 'Ana' }));
+  assert.equal(busy.error, 'hueco_ocupado'); assert.equal(created.length, 0);
+  const ok = JSON.parse(await exec('agendar_cita', { fecha_hora: `${day}T11:00`, nombre: 'Ana' }));
+  assert.deepEqual([ok.ok, ok.hora], [true, '11:00']); assert.equal(created.length,1);
+  assert.equal((await db.prepare('SELECT count(*) AS n FROM appointments').first()).n,1);
+  const other = testing.calendarExecutor(env, {id:'t-cal',slug:'uno'},cal,{channel:'whatsapp',conversationKey:'c2',defaultPhone:'+34600000001'});
+  const race=JSON.parse(await other('agendar_cita',{fecha_hora:`${day}T11:00`,nombre:'Luis'}));
+  assert.equal(race.error,'hueco_ocupado'); assert.equal(created.length,1);
 });
 
 test('webhook con calendario: tool_use → TwiML vacío YA y la respuesta llega por la Messages API', async () => {
@@ -5584,20 +5567,13 @@ test('cancelar_cita: el teléfono del remitente MANDA, la ambigüedad lista y el
   assert.equal(basura.ok, true, 'con una sola cita, fecha_hora inválida se ignora');
 });
 
-test('cancelar_cita en el chat web: sin teléfono pide el teléfono; con uno ajeno no hay citas', async () => {
-  const { localToUtcMs } = await import('../worker/calendar.js');
-  const day = nextWorkday();
-  const citas = [{ id: '00000000-0000-4000-8000-0000000000c4', tenant_id: 't-cal', status: 'confirmed', customer_name: 'Ana', customer_phone: '612345678', reason: null, starts_at: new Date(localToUtcMs('Europe/Madrid', day, '10:00')).toISOString(), timezone: 'Europe/Madrid', provider_event_id: null }];
-  const updates = [];
-  const env = { DB: citasDb(citas, updates) };
-  const cal = { tenant_id: 't-cal', calendar_id: 'primary', timezone: 'Europe/Madrid', slot_minutes: 30, business_hours: null };
-  const exec = testing.calendarExecutor(env, { id: 't-cal', slug: 'uno', name: 'Uno' }, cal, { channel: 'web', conversationKey: 'c1', defaultPhone: '' });
-  assert.equal(JSON.parse(await exec('cancelar_cita', {})).error, 'telefono_requerido');
-  assert.equal(JSON.parse(await exec('cancelar_cita', { telefono: '+34699999999' })).error, 'sin_citas_futuras');
-  assert.equal(updates.length, 0);
-  // El teléfono guardado sin prefijo casa con el mismo número con +34 (samePhone).
-  const ok = JSON.parse(await exec('cancelar_cita', { telefono: '+34612345678' }));
-  assert.equal(ok.ok, true);
+test('gestionar por chat web exige el enlace privado: conocer un teléfono no autoriza', async () => {
+  const env = { DB: { prepare() { throw new Error('must not enumerate appointments'); } } };
+  const cal = { tenant_id:'t-cal' };
+  const exec=testing.calendarExecutor(env,{id:'t-cal'},cal,{channel:'web',conversationKey:'c1',defaultPhone:''});
+  for(const name of ['cancelar_cita','confirmar_cita']) for(const input of [{},{telefono:'+34612345678'}]) {
+    assert.equal(JSON.parse(await exec(name,input)).error,'manage_link_required');
+  }
 });
 
 // ── Confirmaciones en el panel: bloque del GET del calendario + interruptor solo-Velai ──
@@ -5673,7 +5649,7 @@ test('GET /plantillas por rol: velai la matriz global con opciones; el cliente S
   const call = (scope) => testing.adminRouter(adminReq(path), env, ctx, path, new URL('https://x' + path), {}, scope);
   const out = await (await call(VELAI)).json();
   // El catálogo es LA lista completa: el registro Y la legacy de columnas.
-  assert.deepEqual(out.kinds.map((k) => `${k.kind}:${k.fuente}`).sort(), ['aviso_lead:columnas', 'recordatorio_cita:registro']);
+  assert.deepEqual(out.kinds.map((k) => `${k.kind}:${k.fuente}`).sort(), ['aviso_lead:columnas', 'confirmacion_reserva:registro', 'recordatorio_cita:registro']);
   assert.ok(out.kinds.every((k) => k.label));
   // El orden del SQL (activos primero) se respeta tal cual.
   assert.deepEqual(out.tenants.map((t) => t.slug), ['beta', 'alfa']);
@@ -6207,7 +6183,32 @@ test('widget: loader y cabecera en la misma versión, ventana nueva y cinco suge
   assert.match(widget, /TENANT \? T\.teaserTitleGen : T\.teaserTitle/);
   assert.match(widget, /TENANT \? T\.teaserCopyGen : T\.teaserCopy/);
   assert.match(widget, /TENANT \? \[\] : T\.chips/);
-  for (const token of ['.vai-hero', 'is-empty', 'is-open', 'prefers-color-scheme', '· v17']) assert.ok(widget.includes(token));
+  for (const token of ['.vai-hero', 'is-empty', 'is-open', 'prefers-color-scheme', '· v18']) assert.ok(widget.includes(token));
   const chips = ['Uno', 'Dos', 'Tres', 'Cuatro', 'Cinco'];
   assert.deepEqual(JSON.parse(testing.validateTenant({ chips_json: chips }, { partial: true }).chips_json), chips);
+});
+
+test('autoagenda: host dedicado no expone assets, admin, OAuth ni chat', async () => {
+  const worker = createWorker({ SYSTEM: '', DEMOS: {}, GUARDRAILS: '' });
+  const env = { BOOKING_ORIGIN: 'https://citas.hirevai.com', ADMIN_ORIGIN: 'https://admin.hirevai.com', PANEL_V2: '1', ASSETS: { fetch() { throw new Error('ASSETS must be unreachable'); } } };
+  for (const path of ['/index.html', '/assets/index-secret.js', '/api/admin/leads', '/oauth/calendar/callback', '/widget/boot', '/chat']) {
+    const res = await worker.fetch(new Request(`https://citas.hirevai.com${path}`), env, { waitUntil() {} });
+    assert.equal(res.status, 404, path);
+    assert.equal((await res.json()).error, 'not_found');
+  }
+});
+
+test('autoagenda: fail-closed y reserva ausente en otros hosts; admin conserva Access', async () => {
+  const worker = createWorker({ SYSTEM: '', DEMOS: {}, GUARDRAILS: '' });
+  const base = { ADMIN_ORIGIN: 'https://admin.hirevai.com', PANEL_V2: '1', ASSETS: { fetch() { throw new Error('no assets without identity'); } } };
+  for (const origin of ['', 'http://citas.hirevai.com', 'https://admin.hirevai.com', 'https://api.hirevai.com', 'https://citas.hirevai.com/unsafe']) {
+    const res = await worker.fetch(new Request('https://citas.hirevai.com/dialogos/reservas'), { ...base, BOOKING_ORIGIN: origin }, { waitUntil() {} });
+    assert.equal(res.status, 404);
+  }
+  for (const host of ['api.hirevai.com', 'vai-worker.botnexo-ia.workers.dev']) {
+    const res = await worker.fetch(new Request(`https://${host}/dialogos/reservas`), { ...base, BOOKING_ORIGIN: 'https://citas.hirevai.com' }, { waitUntil() {} });
+    assert.equal(res.status, 404);
+  }
+  const admin = await worker.fetch(new Request('https://admin.hirevai.com/dialogos/reservas'), { ...base, BOOKING_ORIGIN: 'https://citas.hirevai.com' }, { waitUntil() {} });
+  assert.equal(admin.status, 401, 'admin sigue exigiendo identidad, nunca muestra reservas');
 });

@@ -394,9 +394,12 @@ no a una segunda ejecución manual:
       propio? (referencia de mercado: 12–31 USD/mes por volumen de citas; cada
       recordatorio es una conversación Utility de Meta — verificar tarifa ES/CO).
 
-Futuras (de la spec, no implementadas): **F3** autoagenda pública por enlace
-(`/reserva/<slug>` con availableSlots — decidir si aporta o dispersa: el chat ya
-agenda) y **F4** métricas de confirmación/cancelación/no-show en dashboard e informe
+**F3 implementada en el repositorio** según
+[`SPEC-AUTOAGENDA.md`](./SPEC-AUTOAGENDA.md): página
+`citas.hirevai.com/{cliente}/reservas`, servicios, embeds y reagendado por token; el chat
+sigue agendando conversando. Pendiente operativa: migrar, validar en staging y activar
+Diálogos con sus tres modalidades de 30 minutos. Futura: **F4** métricas de
+confirmación/cancelación/no-show en dashboard e informe
 semanal (el no-show exige marcarlo a mano en el panel). Técnica pendiente: unificar
 la plantilla de LEADS (columnas `lead_template_*` de tenants) en `tenant_templates`,
 migrando datos y lectores a la vez.

@@ -20,7 +20,8 @@ routes = [
   # bloqueo (EasyPrivacy y afines) y a los visitantes con adblock el widget les salía
   # sin marca y con el chat muerto (descubierto en dialogosqueensenan.com, 2026-08-22).
   # workers_dev sigue true: los widgets v<=7 cacheados (immutable, 1 año) siguen vivos.
-  { pattern = "api.hirevai.com", custom_domain = true }
+  { pattern = "api.hirevai.com", custom_domain = true },
+  { pattern = "citas.hirevai.com", custom_domain = true }
 ]
 
 # Panel v2 (React): la SPA compilada viaja con el worker como estáticos. run_worker_first
@@ -41,8 +42,9 @@ run_worker_first = true
 # lista en allowedOrigins() — esta var sostiene nuestro sitio si D1 cae. Los de cliente
 # de aquí abajo pueden migrarse a sus fichas y retirarse de esta línea con calma.
 # El botón «Sincronizar Turnstile» del panel reescribe los hostnames del widget desde D1.
-ALLOWED_WEB_ORIGINS = "https://hirevai.com,https://www.hirevai.com,https://velai-dey.pages.dev,https://hiredatavision.com,https://www.hiredatavision.com,https://gogestion.es,https://www.gogestion.es,https://zoetravelspain.com,https://www.zoetravelspain.com,https://dialogosqueensenan.com,https://www.dialogosqueensenan.com,https://gogestion-demo.pages.dev"
+ALLOWED_WEB_ORIGINS = "https://citas.hirevai.com,https://hirevai.com,https://www.hirevai.com,https://velai-dey.pages.dev,https://hiredatavision.com,https://www.hiredatavision.com,https://gogestion.es,https://www.gogestion.es,https://zoetravelspain.com,https://www.zoetravelspain.com,https://dialogosqueensenan.com,https://www.dialogosqueensenan.com,https://gogestion-demo.pages.dev"
 ADMIN_ORIGIN = "https://admin.hirevai.com"
+BOOKING_ORIGIN = "https://citas.hirevai.com"
 LEAD_RETENTION_MONTHS = "24"
 # Retención de TRANSCRIPCIONES (migración 0021), aparte y más corta que la de los leads:
 # una conversación guardada es más sensible que una ficha de contacto. El cron la purga
@@ -173,12 +175,13 @@ database_id = "4b3056eb-6dee-44a4-8d17-5a80af740ca5"
 name = "vai-worker-staging"
 workers_dev = true
 
-# El único dominio de staging. Vacío no vale: sin la lista, hereda la de producción.
+# Los únicos dominios de staging. Vacío no vale: sin la lista, hereda la de producción.
 # admin-staging.hirevai.com FALLA CERRADO mientras no tenga Cloudflare Access delante:
 # adminIdentity() exige la cabecera Cf-Access-Jwt-Assertion y sin ella todo /api/admin/*
 # responde 401. No hay ventana de panel abierto (ver docs/OPERATIONS.md §Staging).
 routes = [
-  { pattern = "admin-staging.hirevai.com", custom_domain = true }
+  { pattern = "admin-staging.hirevai.com", custom_domain = true },
+  { pattern = "citas-staging.hirevai.com", custom_domain = true }
 ]
 
 # Sin cron en staging, a propósito. drainQueuedLeads hace un LISTADO de KV por tick y el
@@ -202,8 +205,9 @@ head_sampling_rate = 1
 # token cuyo hostname no esté en esta lista (worker/app.js:168). Sin esta entrada, POST
 # /chat en staging responde 403 human_verification_failed SIEMPRE y el entorno no puede
 # probar el chat — que es la mitad del producto. En producción no aparece ni debe aparecer.
-ALLOWED_WEB_ORIGINS = "http://localhost:8080,http://127.0.0.1:8080,https://velai-dey.pages.dev,https://example.com"
+ALLOWED_WEB_ORIGINS = "https://citas-staging.hirevai.com,http://localhost:8080,http://127.0.0.1:8080,https://velai-dey.pages.dev,https://example.com"
 ADMIN_ORIGIN = "https://admin-staging.hirevai.com"
+BOOKING_ORIGIN = "https://citas-staging.hirevai.com"
 LEAD_RETENTION_MONTHS = "24"
 CONV_RETENTION_DAYS = "90"
 # Topes de gasto MUY por debajo de producción: staging usa una clave real de Anthropic y
@@ -221,7 +225,8 @@ CF_ACCOUNT_ID = "6a5877b5637ec5fa28d05af46e894542"
 # secret de staging: 1x0000000000000000000000000000000AA.
 TURNSTILE_SITEKEY = "1x00000000000000000000AA"
 # Calendario APAGADO en staging: sin client id, los endpoints responden 503 y el chat
-# funciona igual. Rellenar solo para probar el flujo OAuth, con el proyecto de pruebas.
+# funciona igual. Para la prueba real de autoagenda se necesita el cliente OAuth de
+# pruebas y una conexión de calendario propia de staging; nunca usar la de producción.
 GOOGLE_OAUTH_CLIENT_ID = ""
 # ⚠️ VACÍOS A PROPÓSITO, Y NO SE RELLENAN. Son los ids de los grupos de Cloudflare Access
 # de PRODUCCIÓN. Con ellos puestos, gestionar usuarios desde el panel de staging

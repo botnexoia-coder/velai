@@ -3,6 +3,7 @@
 // modal. El cliente abre SU calendario; Velai abre el del tenant velai con selector
 // para saltar al de cualquier cliente.
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { ReservasOnline } from './ReservasOnline';
 import { confirmar } from '../components/Confirmar';
 import { useNavigate, useSearchParams } from 'react-router';
 import { traducir } from '../api/errors';
@@ -189,6 +190,7 @@ function CalendarConnected({
   const range = monthRange(month.y, month.m);
   const { data: appts } = useAppointments(tenantId, range.from, range.to, isCliente);
   const byDay = useMemo(() => apptsByDay(appts?.appointments ?? [], tz), [appts, tz]);
+  const [tab, setTab] = useState<'calendar' | 'booking'>('calendar');
   const [openDay, setOpenDay] = useState<string | null>(null);
 
   const shape = monthShape(month.y, month.m);
@@ -196,8 +198,10 @@ function CalendarConnected({
   const monthTitle = new Intl.DateTimeFormat('es-ES', { month: 'long', year: 'numeric' }).format(new Date(month.y, month.m, 1));
   const total = appts?.appointments.length ?? 0;
 
+  if (tab === 'booking') return <div><div className="actions"><button className="btn alt" onClick={() => setTab('calendar')}>← Calendario</button><h2>Reservas online</h2></div><ReservasOnline key={tenantId} tenantId={tenantId} /></div>;
   return (
     <div>
+      <div className="actions"><button className="btn alt" onClick={() => setTab('booking')}>Reservas online</button></div>
       <div className="card">
         <div className="muted">
           Conectado como <b>{cal.account_email ?? 'cuenta de Google'}</b> · las citas se crean en su calendario «

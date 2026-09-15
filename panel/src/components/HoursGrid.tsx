@@ -10,14 +10,15 @@ interface Props {
   variant?: 'plain' | 'toggles';
   /** Prefijo de ids para los inputs (accesibilidad/labels), p. ej. 'sh' o 'cal'. */
   idPrefix: string;
+  days?: readonly Dia[];
 }
 
-export function HoursGrid({ grid, onChange, variant = 'plain', idPrefix }: Props) {
+export function HoursGrid({ grid, onChange, variant = 'plain', idPrefix, days = DIAS }: Props) {
   const toggles = variant === 'toggles';
   const set = (d: Dia, campo: keyof DiaGrid, v: string) => onChange({ ...grid, [d]: { ...grid[d], [campo]: v } });
   return (
     <div className={`shgrid${toggles ? ' cxsh' : ''}`}>
-      {DIAS.map((d) => {
+      {days.map((d) => {
         const on = dayOn(grid, d);
         return (
           <div key={d} className={`shrow${toggles && !on ? ' off' : ''}`}>

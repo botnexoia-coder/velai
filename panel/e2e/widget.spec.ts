@@ -90,7 +90,7 @@ test('banners externos: solo cuentan si están visibles y solapan horizontalment
   await expect(page.locator('#vaiWidget')).toHaveCSS('bottom', '24px');
 });
 
-test('ventana v17: geometría, bienvenida, saludo único e hilo desde abajo', async ({ page }) => {
+test('ventana v18: geometría, bienvenida, saludo único e hilo desde abajo', async ({ page }) => {
   await mountWidget(page, { delay: 60000 });
   await page.evaluate(() => Object.assign(window, { VELAI_HUMAN: { execute: async () => 'human-test' } }));
   const payloads: Record<string, unknown>[] = [];
@@ -139,6 +139,28 @@ test('ventana v17: geometría, bienvenida, saludo único e hilo desde abajo', as
   await page.locator('#vaiBubble').click();
   await expect(page.locator('#vaiMessages .vai-row')).toHaveCount(5);
   await expect(page.locator('.vai-hero')).toBeHidden();
+});
+
+test('la tarjeta de reservas solo acepta el marcador estructurado y el host dedicado', async ({ page }) => {
+  await mountWidget(page, { tenant: 'dialogos', delay: 60000 });
+  await page.evaluate(() => Object.assign(window, { VELAI_HUMAN: { execute: async () => 'human-test' } }));
+  await page.route('**/chat', async (route) => {
+    await route.fulfill({ json: {
+      reply: 'Aquí tienes el calendario: https://attacker.test/phishing',
+      state: 'bot',
+      booking: { type: 'booking', url: 'https://citas.hirevai.com/dialogos/reservas?s=video', label: '<img src=x>' },
+    } });
+  });
+  await page.locator('#vaiBubble').click();
+  await page.locator('#vaiInput').fill('Prefiero ver el calendario');
+  await page.locator('#vaiSend').click();
+  const booking = page.locator('.vai-b-t a');
+  await expect(booking).toHaveCount(1);
+  await expect(booking).toHaveAttribute('href', 'https://citas.hirevai.com/dialogos/reservas?s=video');
+  await expect(booking).toHaveAttribute('rel', 'noopener noreferrer');
+  await expect(page.locator('.vai-b-t').last()).toContainText('https://attacker.test/phishing');
+  await expect(page.locator('a[href^="https://attacker.test"]')).toHaveCount(0);
+  await expect(page.locator('.vai-b-t img')).toHaveCount(0);
 });
 
 for (const theme of ['light', 'dark', 'auto']) {

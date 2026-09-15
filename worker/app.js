@@ -6,6 +6,9 @@ import {
   mwAdminHost, mwAdminCors, mwAdminIdentity, mwResolveScope, clienteGate,
 } from './middleware.js';
 import { publico } from './routes/publico.js';
+import { reserva } from './routes/reserva.js';
+import { bookingHost, bookingOrigin } from './booking-security.js';
+import { monthAvailability, bookAppointment, serviceFor, validDate, invalidateAvailability } from './agenda.js';
 import { leads as rutasLeads } from './routes/leads.js';
 import { conversaciones as rutasConversaciones } from './routes/conversaciones.js';
 import { tenants as rutasTenants } from './routes/tenants.js';
@@ -16,7 +19,7 @@ import { solicitudes as rutasSolicitudes } from './routes/solicitudes.js';
 import { encryptSecret, decryptSecret } from './crypto.js';
 import { cloudflareConfigured, syncTurnstileDomains, syncAccessGroup, syncAdminGroup, verifyCfToken } from './cloudflare.js';
 import { createSubaccount, fetchSubaccount, findSubaccountByName, createContentTemplate, submitTemplateApproval, fetchApprovalStatus, createWhatsAppSender, verifySender, fetchSenderStatus, listWhatsAppSenders, updateSenderWebhook, updateSenderProfile, fetchSender } from './twilio.js';
-import { CALENDAR_TOOLS, CALENDAR_GUARDRAILS, DEFAULT_BUSINESS_HOURS, freeSlots, localToUtcMs, localDateStr, localWeekday, utcToLocalHHMM, googleAuthUrl, exchangeGoogleCode, refreshGoogleToken, revokeGoogleToken, googleBusy, createGoogleEvent, deleteGoogleEvent } from './calendar.js';
+import { calendarTools, CALENDAR_TOOLS, CALENDAR_GUARDRAILS, DEFAULT_BUSINESS_HOURS, freeSlots, localToUtcMs, localDateStr, localWeekday, utcToLocalHHMM, googleAuthUrl, exchangeGoogleCode, refreshGoogleToken, revokeGoogleToken, googleBusy, createGoogleEvent, deleteGoogleEvent } from './calendar.js';
 import { templateKind, templateOptions } from './plantillas.js';
 
 const JSON_HEADERS = { 'Content-Type': 'application/json; charset=utf-8' };
@@ -50,7 +53,7 @@ export function clean(value, max = 200) {
   return typeof value === 'string' ? value.trim().slice(0, max) : '';
 }
 
-function normalizePhone(value) {
+export function normalizePhone(value) {
   const raw = clean(value, 40);
   const digits = raw.replace(/\D/g, '');
   return digits.length >= 6 && digits.length <= 15 ? (raw.startsWith('+') ? '+' : '') + digits : '';
@@ -131,11 +134,11 @@ export async function readJson(request, maxBytes = 16000) {
   const length = Number(request.headers.get('Content-Length') || 0);
   if (length > maxBytes) throw new HttpError(413, 'payload_too_large');
   let text = await request.text();
-  if (text.length > maxBytes) throw new HttpError(413, 'payload_too_large');
+  if (new TextEncoder().encode(text).byteLength > maxBytes) throw new HttpError(413, 'payload_too_large');
   // Las rutas JSON exigen su content-type (415); el webhook de Twilio va aparte
   // como x-www-form-urlencoded y nunca pasa por aquí.
   const contentType = request.headers.get('Content-Type') || '';
-  if (!contentType.includes('application/json')) throw new HttpError(415, 'unsupported_media_type');
+  if (!/^application\/json(?:\s*;|$)/i.test(contentType)) throw new HttpError(415, 'unsupported_media_type');
   let parsed;
   try { parsed = JSON.parse(text); } catch (_) { throw new HttpError(400, 'invalid_json'); }
   // `null`, arrays o primitivos son entrada inválida (400), no un 500 al leer .campo
@@ -179,7 +182,7 @@ export async function rateLimited(env, ip, bucket, limit) {
   return false;
 }
 
-async function verifyTurnstile(env, token, request, expectedAction) {
+export async function verifyTurnstile(env, token, request, expectedAction, expectedHostname = null) {
   if (!env.TURNSTILE_SECRET_KEY) throw new HttpError(503, 'turnstile_not_configured');
   if (!clean(token, 2048)) throw new HttpError(403, 'human_verification_required');
   const form = new FormData();
@@ -195,6 +198,7 @@ async function verifyTurnstile(env, token, request, expectedAction) {
   if (!result.success || (result.action && result.action !== expectedAction)) {
     throw new HttpError(403, 'human_verification_failed');
   }
+  if (expectedHostname && (result.action !== expectedAction || result.hostname !== expectedHostname)) throw new HttpError(403, 'human_verification_failed');
   // Un token emitido para un hostname ajeno no vale aunque sea "success": la lista
   // sale de ALLOWED_WEB_ORIGINS (config del servidor), nunca del Origin del cliente.
   if (result.hostname) {
@@ -1739,8 +1743,9 @@ async function tenantCalendar(env, tenant) {
   // try/catch deliberado: si la tabla aún no existe (deploy antes de migrar en dev),
   // el tenant simplemente no tiene calendario — el chat nunca se cae por esto.
   try {
-    row = await env.DB.prepare("SELECT tenant_id,provider,refresh_token_enc,calendar_id,timezone,slot_minutes,business_hours,status FROM tenant_calendars WHERE tenant_id = ? AND status = 'connected'").bind(tenant.id).first();
+    row = await env.DB.prepare("SELECT tenant_id,provider,refresh_token_enc,calendar_id,timezone,slot_minutes,business_hours,status,booking_enabled,min_notice_min,max_days_ahead,booking_note,booking_revision FROM tenant_calendars WHERE tenant_id = ? AND status = 'connected'").bind(tenant.id).first();
   } catch (_) { return null; }
+  if (row) row.services = (await env.DB.prepare('SELECT slug,name,minutes FROM tenant_services WHERE tenant_id=? AND active=1 ORDER BY position,name').bind(tenant.id).all()).results || [];
   if (env.KV) { try { await env.KV.put(key, JSON.stringify(row || {}), { expirationTtl: TENANT_TTL }); } catch (_) {} }
   return row || null;
 }
@@ -1748,7 +1753,7 @@ async function tenantCalendar(env, tenant) {
 // invalid_grant = el negocio revocó el acceso (o caducó el token en modo Testing de
 // Google): la conexión pasa a error, alerta con antirebote, y las tools dejan de
 // ofrecerse en ≤5 min (caché de calcfg) — el bot vuelve a contestar sin calendario.
-async function calendarAccessToken(env, cal) {
+export async function calendarAccessToken(env, cal) {
   const kvKey = `caltoken:${cal.tenant_id}`;
   if (env.KV) { try { const cached = await env.KV.get(kvKey); if (cached) return cached; } catch (_) {} }
   let secret;
@@ -1789,6 +1794,7 @@ function calendarSystem(config, tenant, cal, handoff = null) {
     { type: 'text', text: `${systemFor(config, tenant)}\n${CALENDAR_GUARDRAILS}`, cache_control: { type: 'ephemeral' } },
     // Volátil: la fecha y, cuando el canal lo sabe, si hay asesores disponibles ahora.
     { type: 'text', text: `Ahora mismo es ${now} (zona horaria del negocio: ${tz}). Las citas duran ${Number(cal.slot_minutes) || 30} minutos.`
+      + `\nServicios disponibles: ${JSON.stringify(cal.services || [])}. Antelación mínima: ${cal.min_notice_min ?? 15} minutos; máximo ${cal.max_days_ahead ?? 60} días.`
       + (handoff === null ? '' : `\n${handoff ? HANDOFF_ON : HANDOFF_OFF}`) },
   ];
 }
@@ -1803,26 +1809,21 @@ function calendarHoursFor(cal, weekday) {
 
 // null si la fecha es operable; si no, el JSON de error que se devuelve al modelo.
 function validCalendarDate(cal, fecha) {
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(fecha)) return JSON.stringify({ error: 'fecha_invalida', nota: 'usa YYYY-MM-DD' });
+  if (!validDate(fecha)) return JSON.stringify({ error: 'fecha_invalida', nota: 'usa YYYY-MM-DD' });
   const tz = cal.timezone || 'Europe/Madrid';
   const today = localDateStr(tz, Date.now());
-  const max = localDateStr(tz, Date.now() + 60 * 86400000);
+  const max = localDateStr(tz, Date.now() + (cal.max_days_ahead ?? 60) * 86400000);
   if (fecha < today) return JSON.stringify({ error: 'fecha_pasada', hoy: today });
-  if (fecha > max) return JSON.stringify({ error: 'fecha_lejana', nota: 'máximo 60 días vista' });
+  if (fecha > max) return JSON.stringify({ error: 'fecha_lejana', nota: `máximo ${cal.max_days_ahead ?? 60} días vista` });
   return null;
 }
 
 // Huecos libres del día: horario del negocio menos la ocupación REAL de su Google
 // Calendar (releída del proveedor — es la barrera principal contra dobles reservas).
-async function availableSlots(env, cal, fecha) {
-  const tz = cal.timezone || 'Europe/Madrid';
-  const windows = calendarHoursFor(cal, localWeekday(tz, fecha));
-  if (!windows.length) return [];
-  const dayStart = localToUtcMs(tz, fecha, '00:00');
-  const dayEnd = localToUtcMs(tz, fecha, '23:59') + 60000;
-  const token = await calendarAccessToken(env, cal);
-  const busy = await googleBusy(env, token, cal.calendar_id, new Date(dayStart).toISOString(), new Date(dayEnd).toISOString());
-  return freeSlots({ date: fecha, busy, hours: windows, slotMinutes: cal.slot_minutes, timezone: tz, nowMs: Date.now() });
+async function availableSlots(env, cal, fecha, service = null) {
+  const selected = service || await serviceFor(env, cal);
+  const days = await monthAvailability(env, cal, { from: fecha, to: fecha, service: selected, fresh: true });
+  return days[fecha] || [];
 }
 
 // El executor es un CLOSURE sobre el tenant ya resuelto por el canal: las tools no
@@ -1833,11 +1834,21 @@ async function availableSlots(env, cal, fecha) {
 function calendarExecutor(env, tenant, cal, meta) {
   return async (name, rawInput) => {
     const input = rawInput && typeof rawInput === 'object' && !Array.isArray(rawInput) ? rawInput : {};
+    if (name === 'enviar_enlace_reserva') {
+      const current = await env.DB.prepare("SELECT booking_enabled FROM tenant_calendars WHERE tenant_id=? AND status='connected'").bind(cal.tenant_id).first();
+      if (!current?.booking_enabled || !bookingOrigin(env)) return JSON.stringify({ error: 'tool_desconocida' });
+      const slug = clean(input.servicio, 60);
+      if (slug) await serviceFor(env, cal, slug);
+      const url = `${bookingOrigin(env)}/${encodeURIComponent(tenant.slug)}/reservas${slug ? '?s=' + encodeURIComponent(slug) : ''}`;
+      meta.bookingCard = { type: 'booking', url, label: 'Ver calendario' };
+      return JSON.stringify({ ok: true, url });
+    }
     if (name === 'consultar_disponibilidad') {
       const fecha = clean(input.fecha, 10);
       const invalid = validCalendarDate(cal, fecha);
       if (invalid) return invalid;
-      const huecos = await availableSlots(env, cal, fecha);
+      const service = await serviceFor(env, cal, clean(input.servicio, 60));
+      const huecos = await availableSlots(env, cal, fecha, service);
       return JSON.stringify(huecos.length ? { fecha, huecos } : { fecha, huecos, nota: 'sin huecos ese día, prueba otro' });
     }
     if (name === 'agendar_cita') {
@@ -1851,40 +1862,14 @@ function calendarExecutor(env, tenant, cal, meta) {
       const telefono = normalizePhone(clean(input.telefono, 40)) || meta.defaultPhone || '';
       if (!nombre || !telefono) return JSON.stringify({ error: 'datos_incompletos', nota: 'hacen falta nombre y teléfono' });
       const motivo = clean(input.motivo, 200);
-      // Relectura del hueco JUSTO antes de crear + cerrojo KV best-effort: las dos
-      // primeras capas anti doble reserva; la tercera es el UNIQUE de request_id.
-      const huecos = await availableSlots(env, cal, fecha);
-      if (!huecos.includes(hhmm)) return JSON.stringify({ error: 'hueco_ocupado', alternativas: huecos.slice(0, 6) });
-      const tz = cal.timezone || 'Europe/Madrid';
-      const startMs = localToUtcMs(tz, fecha, hhmm);
-      const endMs = startMs + (Number(cal.slot_minutes) || 30) * 60000;
-      const startIso = new Date(startMs).toISOString();
-      if (env.KV) {
-        const lockKey = `booklock:${cal.tenant_id}:${startIso}`;
-        try {
-          if (await env.KV.get(lockKey)) return JSON.stringify({ error: 'hueco_ocupado', alternativas: huecos.filter((h) => h !== hhmm).slice(0, 6) });
-          await env.KV.put(lockKey, '1', { expirationTtl: 60 });
-        } catch (_) {}
-      }
-      const token = await calendarAccessToken(env, cal);
-      const event = await createGoogleEvent(env, token, cal.calendar_id, {
-        summary: `Cita: ${nombre}${motivo ? ` — ${motivo}` : ''}`,
-        description: `Teléfono: ${telefono}\nAgendada por Vai (${meta.channel}).`,
-        startIso, endIso: new Date(endMs).toISOString(), timezone: tz,
-      });
-      const now = new Date().toISOString();
+      const service = await serviceFor(env, cal, clean(input.servicio, 60));
       try {
-        await env.DB.prepare('INSERT INTO appointments (id,tenant_id,request_id,channel,customer_name,customer_phone,reason,starts_at,ends_at,timezone,provider_event_id,status,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)')
-          .bind(crypto.randomUUID(), cal.tenant_id, `cita:${cal.tenant_id}:${clean(meta.conversationKey, 80)}:${fechaHora}`, meta.channel, nombre, telefono, motivo || null, startIso, new Date(endMs).toISOString(), tz, (event && event.id) || null, 'confirmed', now)
-          .run();
+        const appt = await bookAppointment(env, cal, service, { fecha_hora: fechaHora, nombre, telefono: meta.defaultPhone || telefono, motivo }, meta);
+        return JSON.stringify({ ok: true, fecha, hora: hhmm, nombre: appt.customer_name, duracion_min: service.minutes });
       } catch (error) {
-        // UNIQUE de request_id: un reintento del bucle no duplica la cita (el evento
-        // de Google sí podría duplicarse en ese reintento — riesgo residual asumido).
-        if (!/UNIQUE/i.test(String(error.message))) throw error;
+        if (!(error instanceof HttpError) || error.status >= 500) throw error;
+        return JSON.stringify({ error: error.code, alternativas: error.code === 'hueco_ocupado' ? (await availableSlots(env, cal, fecha, service)).slice(0, 6) : [] });
       }
-      console.log(JSON.stringify({ level: 'info', code: 'appointment_created', tenant: tenant.slug, channel: meta.channel }));
-      // La fecha vuelve YA formateada en local: el modelo no debe recalcularla.
-      return JSON.stringify({ ok: true, fecha, hora: hhmm, nombre, duracion_min: Number(cal.slot_minutes) || 30 });
     }
     // SPEC-CONFIRMACIONES F2: cancelar/confirmar por texto libre. MISMO contrato de
     // seguridad que agendar_cita: el input del modelo es hostil. La cita se localiza
@@ -1894,6 +1879,9 @@ function calendarExecutor(env, tenant, cal, meta) {
     // acepta el que el cliente dio en conversación (mismo nivel de confianza que
     // agendar_cita, que también lo recibe del modelo).
     if (name === 'cancelar_cita' || name === 'confirmar_cita') {
+      // A self-reported phone is not proof of identity. The web visitor must use
+      // the unguessable management link they received when booking.
+      if (!meta.defaultPhone) return JSON.stringify({ error: 'manage_link_required', nota: 'Usa el enlace Gestionar mi cita de tu confirmación, o escribe desde el WhatsApp de la reserva.' });
       const telefono = meta.defaultPhone || normalizePhone(clean(input.telefono, 40));
       if (!telefono) return JSON.stringify({ error: 'telefono_requerido', nota: 'pide al cliente el teléfono con el que agendó' });
       const rows = (await env.DB.prepare(`SELECT id, tenant_id, starts_at, timezone, reason, customer_name, customer_phone, provider_event_id, status
@@ -2010,7 +1998,7 @@ export async function tenantTemplate(env, tenantId, kind) {
 // operan con SUS credenciales, y un mensaje iniciado por el negocio va SIEMPRE con
 // plantilla aprobada (63016). Mismo contrato de resultado que deliver:
 // {ok} | {skipped, error} | {error}.
-async function deliverReminder(env, tenant, template, appt) {
+async function deliverReminder(env, tenant, template, appt, variables = null) {
   if (!Number(tenant.reminders_enabled)) return { skipped: true, error: 'reminders_disabled' };
   if (!template || !template.sid) return { skipped: true, error: 'template_not_configured' };
   if (template.status !== 'approved') return { skipped: true, error: 'template_not_approved' };
@@ -2029,11 +2017,37 @@ async function deliverReminder(env, tenant, template, appt) {
       From: fromAddress,
       To: `whatsapp:${phone.startsWith('+') ? phone : `+${phone}`}`,
       ContentSid: template.sid,
-      ContentVariables: reminderTemplateVariables(tenant, appt),
+      ContentVariables: variables || reminderTemplateVariables(tenant, appt),
     }),
     signal: AbortSignal.timeout(8000),
   });
   return response.ok ? { ok: true } : { error: `twilio_${response.status}` };
+}
+
+export async function processBookingNotifications(env, appointmentId = null) {
+  if (!bookingOrigin(env)) return;
+  const due = (await env.DB.prepare(`SELECT n.appointment_id,n.tenant_id FROM booking_notifications n
+    JOIN appointments a ON a.id=n.appointment_id AND a.tenant_id=n.tenant_id
+    JOIN tenants t ON t.id=n.tenant_id AND t.active=1 AND t.reminders_enabled=1
+    JOIN tenant_templates tt ON tt.tenant_id=t.id AND tt.kind='confirmacion_reserva' AND tt.status='approved'
+    WHERE n.status IN ('pending','failed') AND n.attempts<3 AND a.status='confirmed' AND a.starts_at>?
+    AND (? IS NULL OR n.appointment_id=?) ORDER BY n.updated_at LIMIT 5`).bind(new Date().toISOString(), appointmentId, appointmentId).all()).results || [];
+  for (const n of due) {
+    const claimed = await env.DB.prepare("UPDATE booking_notifications SET status='sending',attempts=attempts+1,updated_at=? WHERE appointment_id=? AND tenant_id=? AND status IN ('pending','failed') AND attempts<3").bind(new Date().toISOString(),n.appointment_id,n.tenant_id).run();
+    if (!claimed.meta.changes) continue;
+    // No automatic retry after an ambiguous network timeout: a message might have
+    // been delivered. A known HTTP failure is retryable, an uncertain send stays held.
+    try {
+      const tenant = await env.DB.prepare('SELECT * FROM tenants WHERE id=? AND active=1').bind(n.tenant_id).first();
+      const appt = await env.DB.prepare("SELECT * FROM appointments WHERE id=? AND tenant_id=? AND status='confirmed'").bind(n.appointment_id,n.tenant_id).first();
+      if (!tenant || !appt || !appt.manage_token) continue;
+      const template = await tenantTemplate(env,n.tenant_id,'confirmacion_reserva');
+      const when = reminderWhen(appt);
+      const variables = JSON.stringify({1:templateVar(appt.customer_name,'Hola'),2:templateVar(tenant.brand_name||tenant.name,'el negocio'),3:when.fecha,4:when.hora,5:`${bookingOrigin(env)}/${tenant.slug}/cita/${appt.manage_token}`});
+      const result = await deliverReminder(env,tenant,template,appt,variables);
+      await env.DB.prepare('UPDATE booking_notifications SET status=?,updated_at=? WHERE appointment_id=? AND tenant_id=?').bind(result.ok?'sent':'failed',new Date().toISOString(),appt.id,tenant.id).run();
+    } catch (_) { console.log(JSON.stringify({level:'warn',code:'booking_notification_uncertain',tenant:n.tenant_id})); }
+  }
 }
 
 // Siembra el ledger: citas confirmadas que entran en la ventana de antelación y aún no
@@ -2165,11 +2179,14 @@ async function settleAppointmentSideEffects(env, tenant, appt, action) {
 
 // Escrituras idempotentes y SIEMPRE ancladas al tenant: un segundo botón (o un
 // reintento del bucle de tools) no repite efectos — changes=0 y el llamante lo sabe.
-async function markAppointmentCancelled(env, tenant, appt) {
+export async function markAppointmentCancelled(env, tenant, appt) {
   const res = await env.DB.prepare("UPDATE appointments SET status='cancelled', cancelled_by='customer' WHERE id=? AND tenant_id=? AND status='confirmed'")
     .bind(appt.id, tenant.id).run();
   const changed = Boolean(res.meta && res.meta.changes);
-  if (changed) console.log(JSON.stringify({ level: 'info', code: 'appointment_cancelled_by_customer', tenant: tenant.slug }));
+  if (changed) {
+    await invalidateAvailability(env, tenant.id);
+    console.log(JSON.stringify({ level: 'info', code: 'appointment_cancelled_by_customer', tenant: tenant.slug }));
+  }
   return changed;
 }
 
@@ -2201,6 +2218,8 @@ async function handleReminderButton(env, ctx, tenant, from, to, action, apptId, 
     reply = appt.status === 'confirmed'
       ? `¡Gracias, ${appt.customer_name}! Tu cita del ${fecha} a las ${hora} queda confirmada. Hasta entonces.`
       : 'Esa cita ya estaba cancelada. Si quieres otra, dímelo por aquí y te propongo huecos.';
+  } else if (appt.manage_token && bookingOrigin(env)) {
+    reply = `Puedes cancelar o cambiar tu cita aquí: ${bookingOrigin(env)}/${tenant.slug}/cita/${appt.manage_token}`;
   } else {
     const changed = await markAppointmentCancelled(env, tenant, appt);
     if (changed) ctx.waitUntil(settleAppointmentSideEffects(env, tenant, appt, 'cancelada').catch(() => {}));
@@ -2311,11 +2330,12 @@ export async function handleChat(request, env, cors, ctx, config) {
   // tool_use consume output, así que el camino del calendario necesita al menos tanto.
   const cal = isDemoKey(config, conv.demo) ? null : await tenantCalendar(env, tenant);
   let reply;
+  const bookingMeta = { channel: 'web', conversationKey: body.conversationId, defaultPhone: '' };
   if (cal) {
     reply = await runToolLoop(env, {
       model: 'claude-sonnet-4-6', max_tokens: WEB_MAX_TOKENS,
       system: calendarSystem(config, tenant, cal, hayAsesor), messages: history,
-    }, CALENDAR_TOOLS, calendarExecutor(env, tenant, cal, { channel: 'web', conversationKey: body.conversationId, defaultPhone: '' }), { tenant, closing: 'cita' });
+    }, calendarTools(cal, Boolean(bookingOrigin(env))), calendarExecutor(env, tenant, cal, bookingMeta), { tenant, closing: 'cita' });
     reply = reply || 'Ahora mismo no puedo consultar la agenda. Déjame tu nombre y teléfono y el equipo te confirma la cita enseguida.';
   } else {
     reply = await callAnthropic(env, {
@@ -2348,7 +2368,7 @@ export async function handleChat(request, env, cors, ctx, config) {
   }
   // `state` y `lastId` los usa el widget para decidir si tiene que empezar a preguntar por
   // mensajes nuevos, y desde qué punto. Un widget viejo ignora los dos campos.
-  return json({ reply, state: wantsHuman && hayAsesor ? 'esperando' : 'bot', lastId: conv.lastId || 0 }, 200, cors);
+  return json({ reply, ...(bookingMeta.bookingCard ? { booking: bookingMeta.bookingCard } : {}), state: wantsHuman && hayAsesor ? 'esperando' : 'bot', lastId: conv.lastId || 0 }, 200, cors);
 }
 
 // Una conversación NUEVA (no cada mensaje): es el denominador de la tasa de captura.
@@ -2879,7 +2899,7 @@ export async function handleTwilio(request, env, ctx, config) {
   // de Twilio (si lo hubiera) duplique el trabajo.
   const payload = { model: 'claude-sonnet-4-6', max_tokens: WA_TOOL_MAX_TOKENS, system: calendarSystem(config, tenant, cal, hayAsesor), messages: history };
   const waOpts = { tenant, retries: 0, timeoutMs: 10000, closing: 'cita', bodyLimit: WA_BODY_LIMIT };
-  const first = await callAnthropicRaw(env, { ...payload, tools: CALENDAR_TOOLS }, waOpts);
+  const first = await callAnthropicRaw(env, { ...payload, tools: calendarTools(cal, Boolean(bookingOrigin(env))) }, waOpts);
   if (first.stop_reason !== 'tool_use') {
     return twiml(await settleTwilioReply(config, env, ctx, tenant, from, message, conv, settleReply(first, waOpts, contentText(first))));
   }
@@ -2890,7 +2910,7 @@ export async function handleTwilio(request, env, ctx, config) {
       defaultPhone: normalizePhone(from.replace(/^whatsapp:/i, '')),
     });
     // Timeouts agresivos en el tramo asíncrono: waitUntil da ~30 s en total.
-    const raw = await runToolLoop(env, payload, CALENDAR_TOOLS, executor, waOpts, first)
+    const raw = await runToolLoop(env, payload, calendarTools(cal, Boolean(bookingOrigin(env))), executor, waOpts, first)
       || 'No he podido confirmar la agenda ahora mismo; el equipo te escribe enseguida para cerrarla.';
     const reply = await settleTwilioReply(config, env, ctx, tenant, from, message, conv, raw);
     if (reply) {
@@ -3208,7 +3228,10 @@ async function runProvisionStep(request, env, ctx, tenant, tenantId, step, actor
     // Turnstile admite MÁXIMO 10 dominios por widget (verificado: la API rechazó 12 con
     // "too many values") y cubre los subdominios de los listados automáticamente: se
     // sincronizan solo los apex — www.x.com se pliega en x.com sin perder cobertura.
-    const hosts = [...new Set((await allowedOrigins(env)).map((o) => { try { return new URL(o).hostname.replace(/^www\./, ''); } catch (_) { return ''; } }).filter(Boolean))];
+    const apexes = [...new Set((await allowedOrigins(env)).map((o) => { try { return new URL(o).hostname.replace(/^www\./, ''); } catch (_) { return ''; } }).filter(Boolean))];
+    // Y por lo mismo se pliega CUALQUIER subdominio, no solo www: citas.hirevai.com ya
+    // viaja dentro de hirevai.com, y cada entrada redundante gastaba uno de los 10 huecos.
+    const hosts = apexes.filter((h) => !apexes.some((otro) => otro !== h && h.endsWith(`.${otro}`)));
     if (hosts.length > 10) throw new HttpError(400, 'turnstile_domains_limit');
     try {
       await syncTurnstileDomains(cfEnv, hosts);
@@ -3975,6 +3998,15 @@ async function scheduled(env, cron) {
   try { await processReminders(env); } catch (error) {
     console.log(JSON.stringify({ level: 'error', code: 'reminders_cron_failed', error: clean(String(error.message || error), 80) }));
   }
+  if (bookingOrigin(env)) {
+    try {
+      await env.DB.batch([
+        env.DB.prepare('DELETE FROM booking_rate_limits WHERE key IN (SELECT key FROM booking_rate_limits WHERE expires_at<? LIMIT 500)').bind(Date.now()-86400000),
+        env.DB.prepare("DELETE FROM booking_claims WHERE id IN (SELECT id FROM booking_claims WHERE (state='hold' AND expires_at<?) OR (state='booked' AND busy_until<?) LIMIT 100)").bind(new Date(Date.now()-86400000).toISOString(),new Date(Date.now()-86400000).toISOString()),
+      ]);
+    } catch (_) { console.log(JSON.stringify({level:'warn',code:'booking_cleanup_unavailable'})); }
+  }
+  try { await processBookingNotifications(env); } catch (_) { console.log(JSON.stringify({level:'warn',code:'booking_notifications_unavailable'})); }
   // Dos consultas con ORDER BY: lo entregable (pending/failed) tiene prioridad y las
   // filas 'skipped' perpetuas no pueden acaparar la ventana del cron (inanición).
   // Red por si el reloj de cada minuto no llegara a dispararse: es idempotente, así que
@@ -4081,6 +4113,10 @@ function buildApp(config) {
   // La config (prompts SYSTEM/DEMOS/GUARDRAILS del entrypoint) viaja en el contexto:
   // los handlers la leen con c.get('config') igual que antes la recibían por parámetro.
   app.use('*', async (c, next) => { c.set('config', config); await next(); });
+  app.use('*', async (c, next) => {
+    if (bookingHost(c.env) && new URL(c.req.url).hostname === bookingHost(c.env)) return reserva.fetch(c.req.raw, c.env, c.executionCtx);
+    await next();
+  });
   // Perímetro admin: la cadena entera se aplica a TODO /api/admin/* — un endpoint
   // nuevo no puede registrarse fuera de ella (esa es la mejora de fondo).
   app.use('/api/admin/*', mwAdminHost, mwAdminCors, mwAdminIdentity, mwResolveScope);

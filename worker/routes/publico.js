@@ -5,6 +5,7 @@
 // helpers con el cron y con el panel (convLoad, storeLead, publicCors…). Cada rama
 // conserva el orden y las guardas del router monolítico original — mismo contrato,
 // verificado por test/worker.test.js.
+import { bookingOrigin } from '../booking-security.js';
 import { Hono } from 'hono';
 import { adminHost, adminIdentity } from '../middleware.js';
 import {
@@ -36,7 +37,7 @@ async function panelV2Assets(request, env, url) {
   const out = new Response(res.body, res);
   // CSP SIN nonce ni inline: el v2 son ficheros externos del mismo origen y React aplica
   // estilos por CSSOM. Más estricta que la del v1, no menos.
-  out.headers.set('Content-Security-Policy', PANEL_V2_CSP);
+  out.headers.set('Content-Security-Policy', PANEL_V2_CSP + (bookingOrigin(env) ? `; frame-src ${bookingOrigin(env)}` : ''));
   out.headers.set('X-Robots-Tag', 'noindex, nofollow');
   out.headers.set('X-Frame-Options', 'DENY');
   out.headers.set('Referrer-Policy', 'no-referrer');
