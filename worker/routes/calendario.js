@@ -2,7 +2,7 @@
 // de Google Calendar por tenant (conectar por OAuth, configurar, desconectar). El
 // callback OAuth vive en routes/publico.js (no es /api/admin/*) y el proveedor puro
 // en worker/calendar.js. Migrado tal cual del adminRouter monolítico.
-import { bookingOrigin } from '../booking-security.js';
+import { bookingOrigin, bookingReadiness } from '../booking-security.js';
 import { invalidateAvailability, validDate } from '../agenda.js';
 import { Hono } from 'hono';
 import { partesAdmin, scopeClause, assertOwnTenant, adminOrigin } from '../middleware.js';
@@ -207,7 +207,7 @@ const bookingAdmin = async (c) => {
     if (services) return json({services:(await env.DB.prepare('SELECT id,slug,name,description,minutes,mode,location,buffer_min,active,position FROM tenant_services WHERE tenant_id=? ORDER BY position,name').bind(tenantId).all()).results},200,NO_STORE);
     const config = await env.DB.prepare('SELECT booking_enabled,min_notice_min,max_days_ahead,booking_note FROM tenant_calendars WHERE tenant_id=?').bind(tenantId).first();
     const exceptions = (await env.DB.prepare('SELECT date,windows,note FROM calendar_exceptions WHERE tenant_id=? ORDER BY date').bind(tenantId).all()).results || [];
-    return json({config,exceptions:exceptions.map((e)=>({...e,windows:e.windows?JSON.parse(e.windows):null})),url:bookingOrigin(env)?`${bookingOrigin(env)}/${tenant.slug}/reservas`:null},200,NO_STORE);
+    return json({config,exceptions:exceptions.map((e)=>({...e,windows:e.windows?JSON.parse(e.windows):null})),url:bookingOrigin(env)?`${bookingOrigin(env)}/${tenant.slug}/reservas`:null,faltan:bookingReadiness(env)},200,NO_STORE);
   }
   if (services) {
     if (request.method==='DELETE') {
@@ -240,7 +240,7 @@ const bookingAdmin = async (c) => {
     if(body.booking_enabled!==undefined){
       if(scope.role!=='velai')throw new HttpError(403,'not_authorized');
       if(typeof body.booking_enabled!=='boolean')throw new HttpError(400,'invalid_enabled');
-      if(body.booking_enabled&&(!bookingOrigin(env)||!env.APP_SECRET||env.APP_SECRET.length<32||!env.TURNSTILE_SITEKEY||!env.TURNSTILE_SECRET_KEY))throw new HttpError(503,'booking_not_configured');
+      if(body.booking_enabled){const faltan=bookingReadiness(env);if(faltan.length)throw new HttpError(503,`booking_falta_${faltan[0]}`);}
       sets.push('booking_enabled=?');args.push(body.booking_enabled?1:0);
     }
     for(const [field,min,max] of [['min_notice_min',0,43200],['max_days_ahead',1,365]])if(body[field]!==undefined){const n=Number(body[field]);if(!Number.isInteger(n)||n<min||n>max)throw new HttpError(400,'invalid_booking_rule');sets.push(`${field}=?`);args.push(n);}

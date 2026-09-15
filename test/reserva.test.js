@@ -99,6 +99,15 @@ test('CRUD admin: cliente crea/configura solo lo suyo, valida excepciones y desa
  await assert.rejects(call(base+'/booking','PATCH',{booking_enabled:true}),(e)=>e.status===403);
  assert.equal((await f.DB.prepare('SELECT booking_enabled FROM tenant_calendars WHERE tenant_id=?').bind(TID).first()).booking_enabled,1);
  const velai={role:'velai',email:'admin@velai'};
+ // El 503 de encender dice QUÉ falta (un genérico obligaba a adivinar entre cuatro).
+ const conVelai=(body)=>{const r=new Request('https://admin.hirevai.com'+base+'/booking',{method:'PATCH',body:JSON.stringify(body),headers:{'Content-Type':'application/json'}});return testing.adminRouter(r,f.env,f.ctx,base+'/booking',new URL(r.url),{},velai);};
+ const secreto=f.env.APP_SECRET;
+ f.env.APP_SECRET='corto';
+ await assert.rejects(conVelai({booking_enabled:true}),(e)=>e.status===503&&e.code==='booking_falta_secret_corto');
+ delete f.env.APP_SECRET;
+ await assert.rejects(conVelai({booking_enabled:true}),(e)=>e.code==='booking_falta_secret');
+ f.env.APP_SECRET=secreto;
+ assert.deepEqual((await (await call(base+'/booking')).json()).faltan,[]);
  const req=new Request('https://admin.hirevai.com'+base+'/booking',{method:'PATCH',body:JSON.stringify({booking_enabled:false}),headers:{'Content-Type':'application/json'}});
  assert.equal((await testing.adminRouter(req,f.env,f.ctx,base+'/booking',new URL(req.url),{},velai)).status,200);
  assert.equal((await f.DB.prepare('SELECT booking_enabled FROM tenant_calendars WHERE tenant_id=?').bind(TID).first()).booking_enabled,0);

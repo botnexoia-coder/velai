@@ -4,6 +4,11 @@
 // enseña tal cual, que es mejor que esconderlo.
 
 export const TERRS: Record<string, string> = {
+  booking_falta_origin: 'El dominio de reservas no está configurado en el worker (BOOKING_ORIGIN).',
+  booking_falta_secret: 'Falta el secreto APP_SECRET en el worker: sin él no se pueden firmar los enlaces de gestión.',
+  booking_falta_secret_corto: 'El secreto APP_SECRET del worker tiene menos de 32 caracteres: vuelve a ponerlo más largo.',
+  booking_falta_turnstile: 'Falta la clave de Turnstile en el worker: la página no podría verificar a los visitantes.',
+  booking_not_configured: 'La autoagenda no está configurada en el worker.',
   already_provisioned: 'Ese paso ya está hecho (idempotente: un doble clic no crea recursos duplicados).',
   provision_in_progress: 'Ese paso ya está en curso, espera unos segundos.',
   waba_required: 'Rellena y guarda primero la WABA del cliente.',

@@ -20,7 +20,7 @@ import { gridFromHours, gridVacio, hoursFromGrid } from '../lib/horario';
 
 type Service = { id?: string; slug: string; name: string; description: string; minutes: number; mode: string; location: string; buffer_min: number; active: number; position: number };
 type Exception = { date: string; windows: string[][] | null; note: string };
-type Booking = { config: { booking_enabled: number; min_notice_min: number; max_days_ahead: number; booking_note: string } | null; exceptions: Exception[]; url: string | null };
+type Booking = { config: { booking_enabled: number; min_notice_min: number; max_days_ahead: number; booking_note: string } | null; exceptions: Exception[]; url: string | null; faltan?: string[] };
 const emptyService: Service = { slug: '', name: '', description: '', minutes: 30, mode: 'presencial', location: '', buffer_min: 0, active: 1, position: 0 };
 const MODOS: Record<string, string> = { presencial: 'Presencial', video: 'Vídeo', telefono: 'Teléfono' };
 const DURACIONES = [15, 30, 45, 60, 90];
@@ -76,7 +76,7 @@ export function ReservasOnline({ tenantId, dominios, isCliente = false }: { tena
 
   if (booking.error || services.error) return <div className="card" role="alert">No se pudo cargar Reservas online. <button className="btn alt" onClick={() => { void booking.refetch(); void services.refetch(); }}>Reintentar</button></div>;
   if (!booking.data || !services.data) return <p>Cargando reservas online…</p>;
-  const { config, url, exceptions } = booking.data;
+  const { config, url, exceptions, faltan = [] } = booking.data;
   if (!config) return <p>Conecta Google Calendar para configurar reservas online.</p>;
 
   const lista = services.data.services;
@@ -104,7 +104,7 @@ export function ReservasOnline({ tenantId, dominios, isCliente = false }: { tena
               <span className={`flag${activa ? ' ok' : ' off'}`}>{activa ? 'Activada' : 'Apagada'}</span>
             ) : (
               <button type="button" className="sw" role="switch" aria-checked={activa} aria-label="Activar página de reservas"
-                disabled={saving || !url}
+                disabled={saving || !url || (!activa && faltan.length > 0)}
                 onClick={async () => {
                   if (activa && !(await confirmar({ titulo: '¿Apagar la página de reservas?', cuerpo: 'El enlace dejará de funcionar al momento. Las citas ya reservadas se mantienen.', accion: 'Apagar', peligro: true }))) return;
                   void save('/booking', 'PATCH', { booking_enabled: !activa });
@@ -137,7 +137,14 @@ export function ReservasOnline({ tenantId, dominios, isCliente = false }: { tena
           <div className="reqs">
             <Req ok>Google Calendar conectado</Req>
             <Req ok={activos > 0}>{activos > 0 ? `${activos} servicio${activos === 1 ? '' : 's'} activo${activos === 1 ? '' : 's'}` : 'Sin servicios activos'}</Req>
-            <Req ok={Boolean(url)}>{url ? 'Dominio de reservas configurado' : 'Falta el dominio de reservas (lo configura Velai)'}</Req>
+            <Req ok={faltan.length === 0}>
+              {faltan.length === 0
+                ? 'Worker listo para servir la página'
+                : faltan[0] === 'secret_corto' ? 'El secreto APP_SECRET del worker es demasiado corto (mínimo 32 caracteres)'
+                  : faltan[0] === 'secret' ? 'Falta el secreto APP_SECRET en el worker'
+                    : faltan[0] === 'turnstile' ? 'Falta la clave de Turnstile en el worker'
+                      : 'Falta el dominio de reservas en el worker'}
+            </Req>
             <Req ok={dominios === undefined || dominios > 0}>
               {dominios === undefined || dominios > 0 ? 'Dominio de su web autorizado' : 'Su web no está autorizada: el calendario integrado no cargará'}
             </Req>

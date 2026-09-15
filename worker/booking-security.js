@@ -46,4 +46,16 @@ export function frameOrigins(env, tenant) {
   try { const u = new URL(env.ADMIN_ORIGIN); if (u.protocol === 'https:' && !u.username && !u.password) allowed.add(u.origin); } catch (_) {}
   return [...allowed];
 }
+// Requisitos de SERVIDOR para que la página pública pueda existir. Se consultan antes
+// de encenderla (el panel los pinta) y al encenderla (el PATCH nombra el que falla):
+// un 503 genérico obligaba a adivinar cuál de los cuatro era.
+export function bookingReadiness(env) {
+  const faltan = [];
+  if (!bookingOrigin(env)) faltan.push('origin');
+  if (!env.APP_SECRET) faltan.push('secret');
+  else if (String(env.APP_SECRET).length < 32) faltan.push('secret_corto');
+  if (!env.TURNSTILE_SITEKEY || !env.TURNSTILE_SECRET_KEY) faltan.push('turnstile');
+  return faltan;
+}
+
 export const BOOKING_HEADERS = { 'Cache-Control': 'no-store', 'Referrer-Policy': 'no-referrer', 'X-Content-Type-Options': 'nosniff', 'X-Robots-Tag': 'noindex, nofollow', 'Permissions-Policy': 'camera=(), microphone=(), geolocation=()' };
