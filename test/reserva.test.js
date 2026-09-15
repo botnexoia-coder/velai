@@ -95,6 +95,13 @@ test('CRUD admin: cliente crea/configura solo lo suyo, valida excepciones y desa
  await assert.rejects(call(base+'/booking','PATCH',{exceptions:[{date:date(),windows:[['10:00','12:00'],['11:00','13:00']]}]}),(e)=>e.status===400);
  const extra=rows.services.find((s)=>s.slug==='extra');await call(base+'/services/'+extra.id,'DELETE');
  assert.equal((await f.DB.prepare('SELECT active FROM tenant_services WHERE id=?').bind(extra.id).first()).active,0);
+ // Encender la página al público NO es suyo (decisión de Juan): el resto del PATCH sí.
+ await assert.rejects(call(base+'/booking','PATCH',{booking_enabled:true}),(e)=>e.status===403);
+ assert.equal((await f.DB.prepare('SELECT booking_enabled FROM tenant_calendars WHERE tenant_id=?').bind(TID).first()).booking_enabled,1);
+ const velai={role:'velai',email:'admin@velai'};
+ const req=new Request('https://admin.hirevai.com'+base+'/booking',{method:'PATCH',body:JSON.stringify({booking_enabled:false}),headers:{'Content-Type':'application/json'}});
+ assert.equal((await testing.adminRouter(req,f.env,f.ctx,base+'/booking',new URL(req.url),{},velai)).status,200);
+ assert.equal((await f.DB.prepare('SELECT booking_enabled FROM tenant_calendars WHERE tenant_id=?').bind(TID).first()).booking_enabled,0);
 });
 
 test('confirmación WhatsApp espera plantilla aprobada y no duplica entre entregas simultáneas',async(t)=>{

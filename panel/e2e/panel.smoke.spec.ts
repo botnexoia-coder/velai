@@ -150,8 +150,10 @@ test('el panel v2 arranca con API simulada y recorre Dashboard → Conexiones si
   await expect(page.getByText('30 min · Presencial')).toBeVisible();
   await expect(page.getByText('30 min · Vídeo')).toBeVisible();
   await expect(page.getByText('30 min · Teléfono')).toBeVisible();
-  // El estado de la página y lo que falta antes de compartir el enlace.
-  await expect(page.getByRole('switch', { name: 'Activar página de reservas' })).toHaveAttribute('aria-checked', 'true');
+  // El estado de la página y lo que falta antes de compartir el enlace. El smoke corre
+  // como CLIENTE: ve el estado, no el interruptor — encenderla es de Velai.
+  await expect(page.getByText('Activada')).toBeVisible();
+  await expect(page.getByRole('switch', { name: 'Activar página de reservas' })).toHaveCount(0);
   await expect(page.getByText('Google Calendar conectado')).toBeVisible();
   await expect(page.getByText('25 dic 2026')).toBeVisible();
   await expect(page.getByText('Cerrado todo el día · Navidad')).toBeVisible();

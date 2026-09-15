@@ -41,7 +41,7 @@ const ICO = {
   mas: 'M12 5v14M5 12h14',
 };
 
-export function ReservasOnline({ tenantId, dominios }: { tenantId: string; dominios?: number }) {
+export function ReservasOnline({ tenantId, dominios, isCliente = false }: { tenantId: string; dominios?: number; isCliente?: boolean }) {
   const path = `/api/admin/tenants/${tenantId}`;
   const client = useQueryClient();
   const toast = useToast();
@@ -97,15 +97,26 @@ export function ReservasOnline({ tenantId, dominios }: { tenantId: string; domin
       <div className="pane resestado">
         <div className="resestado-a">
           <div className="swrow">
-            <button type="button" className="sw" role="switch" aria-checked={activa} aria-label="Activar página de reservas"
-              disabled={saving || !url}
-              onClick={async () => {
-                if (activa && !(await confirmar({ titulo: '¿Apagar la página de reservas?', cuerpo: 'El enlace dejará de funcionar al momento. Las citas ya reservadas se mantienen.', accion: 'Apagar', peligro: true }))) return;
-                void save('/booking', 'PATCH', { booking_enabled: !activa });
-              }}><i /></button>
+            {/* Encender la página al público lo hace VELAI (decisión de Juan, 2026-09-16);
+                el cliente ve el estado, como en Confirmaciones. El worker lo veta además
+                en el handler: aquí no hay más que la forma de decirlo. */}
+            {isCliente ? (
+              <span className={`flag${activa ? ' ok' : ' off'}`}>{activa ? 'Activada' : 'Apagada'}</span>
+            ) : (
+              <button type="button" className="sw" role="switch" aria-checked={activa} aria-label="Activar página de reservas"
+                disabled={saving || !url}
+                onClick={async () => {
+                  if (activa && !(await confirmar({ titulo: '¿Apagar la página de reservas?', cuerpo: 'El enlace dejará de funcionar al momento. Las citas ya reservadas se mantienen.', accion: 'Apagar', peligro: true }))) return;
+                  void save('/booking', 'PATCH', { booking_enabled: !activa });
+                }}><i /></button>
+            )}
             <span className="swtxt">
               <b>{activa ? 'Página de reservas activa' : 'Página de reservas apagada'}</b>
-              <small className="muted">{activa ? 'Tus clientes pueden reservar sin escribirte.' : 'Enciéndela para que el enlace empiece a funcionar.'}</small>
+              <small className="muted">
+                {isCliente
+                  ? (activa ? 'Tus clientes pueden reservar sin escribirte.' : 'La activa el equipo de Velai: escríbenos y la encendemos.')
+                  : (activa ? 'Sus clientes pueden reservar sin escribirle.' : 'Enciéndela para que el enlace empiece a funcionar.')}
+              </small>
             </span>
           </div>
           {url ? (

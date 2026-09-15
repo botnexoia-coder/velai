@@ -301,6 +301,11 @@ bandeja, el equipo del cliente responde desde SU WhatsApp (número distinto al d
 
 ## Autoagenda pública
 
+**Quién enciende la página**: solo Velai (decisión de Juan, 2026-09-16). El cliente
+configura en su panel sus servicios, reglas y festivos, pero `booking_enabled` lo
+cambia el rol velai — el handler devuelve 403 a cualquier otro, igual que con el addon
+de Confirmaciones. En el panel del cliente el interruptor no existe: ve el estado.
+
 La autoagenda vive únicamente en `citas.hirevai.com` y en
 `citas-staging.hirevai.com`. `BOOKING_ORIGIN` debe coincidir exactamente con uno de esos
 dos orígenes; cualquier otro valor apaga todas las rutas con 404. El host no lleva

@@ -226,7 +226,7 @@ function CalendarConnected({
   );
 
   if (tab === 'booking') {
-    return <div>{pestanas}<ReservasOnline key={tenantId} tenantId={tenantId} /></div>;
+    return <div>{pestanas}<ReservasOnline key={tenantId} tenantId={tenantId} isCliente={isCliente} /></div>;
   }
   if (tab === 'ajustes') {
     return (

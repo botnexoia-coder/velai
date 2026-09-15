@@ -232,7 +232,17 @@ const bookingAdmin = async (c) => {
   } else {
     const body=await readJson(request,32000);
     const sets=[],args=[],statements=[];
-    if(body.booking_enabled!==undefined){if(typeof body.booking_enabled!=='boolean')throw new HttpError(400,'invalid_enabled');if(body.booking_enabled&&(!bookingOrigin(env)||!env.APP_SECRET||env.APP_SECRET.length<32||!env.TURNSTILE_SITEKEY||!env.TURNSTILE_SECRET_KEY))throw new HttpError(503,'booking_not_configured');sets.push('booking_enabled=?');args.push(body.booking_enabled?1:0);}
+    // Abrir (o cerrar) la página al PÚBLICO es de Velai, como el addon de Confirmaciones
+    // (decisión de Juan, 2026-09-16). El cliente configura lo suyo —servicios, reglas,
+    // festivos— pero no decide que su negocio aparezca en una URL pública. El veto va
+    // AQUÍ, en el handler: la ruta sigue en la lista blanca del rol cliente porque el
+    // resto del PATCH sí es suyo.
+    if(body.booking_enabled!==undefined){
+      if(scope.role!=='velai')throw new HttpError(403,'not_authorized');
+      if(typeof body.booking_enabled!=='boolean')throw new HttpError(400,'invalid_enabled');
+      if(body.booking_enabled&&(!bookingOrigin(env)||!env.APP_SECRET||env.APP_SECRET.length<32||!env.TURNSTILE_SITEKEY||!env.TURNSTILE_SECRET_KEY))throw new HttpError(503,'booking_not_configured');
+      sets.push('booking_enabled=?');args.push(body.booking_enabled?1:0);
+    }
     for(const [field,min,max] of [['min_notice_min',0,43200],['max_days_ahead',1,365]])if(body[field]!==undefined){const n=Number(body[field]);if(!Number.isInteger(n)||n<min||n>max)throw new HttpError(400,'invalid_booking_rule');sets.push(`${field}=?`);args.push(n);}
     if(body.booking_note!==undefined){sets.push('booking_note=?');args.push(clean(body.booking_note,1000)||null);}
     if(body.exceptions!==undefined){
