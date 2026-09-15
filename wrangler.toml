@@ -123,7 +123,8 @@ head_sampling_rate = 1
 
 [triggers]
 # DOS relojes a propósito:
-#  - cada MINUTO: solo los tiempos de la cola de espera (docs/H2-HANDOFF.md). Con */5, «5
+#  - cada MINUTO: solo los tiempos de la cola de espera (handoff con toma de control,
+#    en docs/IMPLEMENTADO.md). Con */5, «5
 #    minutos» eran en realidad 5-10 y «15» eran 15-20.
 #  - cada 5 MINUTOS: todo lo demás. No se puede subir a un minuto porque drainQueuedLeads
 #    hace un LISTADO de KV por tick y el plan gratuito da 1.000 listados/día: a 1.440 ticks

@@ -61,7 +61,7 @@ Depende de §1: sin fuentes separadas del prompt no hay traza que enseñar.
 
 ---
 
-## §4. Responder desde el panel → adelantado a [`H2-BANDEJA.md`](./H2-BANDEJA.md)
+## §4. Responder desde el panel → HECHO (2026-08-26, resumen en [`IMPLEMENTADO.md`](./IMPLEMENTADO.md))
 
 Juan lo pidió el 2026-08-26 con capturas de una bandeja de dos paneles, así que sale de
 este esbozo y tiene spec propia. Lo de abajo se queda como resumen.

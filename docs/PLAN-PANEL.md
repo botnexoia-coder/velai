@@ -6,7 +6,8 @@
 > atención al cliente. Base comparada: Velai en `812b22d`, 7 vistas.
 >
 > Este doc es el **mapa**, no la spec. Cada horizonte tiene el suyo:
-> [`H1-PANEL.md`](./H1-PANEL.md) · [`H2-PANEL.md`](./H2-PANEL.md) · [`H3-PANEL.md`](./H3-PANEL.md).
+> [`H1-PANEL.md`](./H1-PANEL.md) · [`H2-PANEL.md`](./H2-PANEL.md). H3 se cerró el 2026-09-15:
+> su §4 está en [`IMPLEMENTADO.md`](./IMPLEMENTADO.md) y el resto en [`TAREAS-PENDIENTES.md`](./TAREAS-PENDIENTES.md).
 > La decisión de almacenamiento que salió de H1 §1 vive aparte, en
 > [`VOLUMEN-Y-ALMACENAMIENTO.md`](./VOLUMEN-Y-ALMACENAMIENTO.md) — sobrevive al horizonte.
 > Cuando un horizonte se cierre: su doc se borra, el resumen va a `IMPLEMENTADO.md` y

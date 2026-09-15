@@ -90,7 +90,8 @@ conversaciones.get('/api/admin/conversations/export.csv', async (c) => {
   return new Response('\uFEFF' + csv, { headers: { 'Content-Type': 'text/csv; charset=utf-8', 'Content-Disposition': 'attachment; filename="velai-conversaciones.csv"', 'Cache-Control': 'no-store' } });
 });
 
-// ── Bandeja: lista + hilo abierto en UNA llamada (docs/H2-BANDEJA.md §5) ────
+// ── Bandeja: lista + hilo abierto en UNA llamada; el porqué del sondeo de 15 s
+// con la pestaña visible está en docs/IMPLEMENTADO.md ───────────────────────
 // Un solo endpoint porque el panel hace polling: dos llamadas cada 5 s con seis paneles
 // abiertos son 35.000 peticiones/día, un tercio del plan gratuito de Workers en
 // refrescar una pantalla. Con una cada 15 s y solo con la pestaña visible, ~11.500.
@@ -170,7 +171,7 @@ conversaciones.get('/api/admin/alerts', async (c) => {
 });
 
 // Disponibilidad de la persona que mira el panel. El interruptor es POR PERSONA; el
-// horario es del cliente y lo cierra por fuera (docs/H2-HANDOFF.md).
+// horario es del cliente y lo cierra por fuera (docs/IMPLEMENTADO.md).
 conversaciones.on(['GET', 'PATCH'], '/api/admin/availability', async (c) => {
   const { request, env, url, scope, actor } = partesAdmin(c);
   // Velai solo puede estar disponible para SUS conversaciones: el ?tenant= se ignora a
@@ -264,7 +265,8 @@ conversaciones.post('/api/admin/conversations/:id/:accion{takeover|release}', as
 });
 
 // Responder desde el panel. La parte difícil no es enviar: es NO enviar cuando no se
-// puede, y decir por qué (docs/H2-BANDEJA.md §1 y §2).
+// puede, y decir por qué: la ventana de 24 h y el número de llegada, en
+// docs/IMPLEMENTADO.md.
 conversaciones.post('/api/admin/conversations/:id/reply', async (c) => {
   const { request, env, scope, actor } = partesAdmin(c);
   const id = c.req.param('id');

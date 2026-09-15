@@ -942,6 +942,126 @@ principal) — y con la página de WhatsApp senders ya sabemos que el menú de l
 ofrecerla. Meta decide de verdad, pero con Self Sign-up la WABA vive en el Business Manager DEL
 CLIENTE, así que Velai normalmente no la ve: Twilio es la ventana práctica, y el botón del panel evita
 depender de ella.
+## Bandeja de conversaciones — responder desde el panel (2026-08-26, `H2-BANDEJA.md`, migraciones 0023/0026/0029)
+
+Pedido de Juan el 2026-08-26: lista de conversaciones con filtros por canal, hilo a la
+derecha y cajón de escritura. Es paridad, no diferenciador; lo diferenciador fue hacerla
+honesta, y de eso iba casi toda la spec.
+
+**La ventana de 24 h de Meta se dice antes de escribir, no después de fallar.** El texto
+libre solo es legal dentro de la ventana que abre el último mensaje entrante; fuera,
+WhatsApp responde `63016`. Dentro, el cajón enseña las horas que quedan; fuera, se
+deshabilita con el motivo escrito. El canal web no tiene ventana pero sí el problema
+opuesto: si el visitante cerró la pestaña la respuesta no llega, así que `visitor_seen_at`
+avisa en vez de bloquear.
+
+**Por qué número se responde** (`conversations.inbox_address`, el `To` del webhook): con
+dos números por cliente, `tenants.twilio_from` puede no ser el de llegada y el cliente
+final vería la respuesta desde otro número. Se rellena con `COALESCE` en cada entrante,
+así que las conversaciones anteriores a la migración se reparan solas con el siguiente
+mensaje; mientras esté a `NULL` el cajón se cierra diciendo por qué.
+
+**`role='agent'` se reconstruyó con la tabla casi vacía**, que era el momento más barato:
+SQLite no amplía un `CHECK` con `ALTER`. Al modelo se le presenta como `assistant` porque
+la API solo conoce dos roles y el modelo TIENE que ver lo que dijo la persona: si no, al
+expirar la pausa retomaría contradiciéndola. La burbuja del panel sí los distingue, con el
+correo de quien respondió; sin eso la tasa de resolución mentiría.
+
+**El sondeo se midió antes de escribirlo.** Un panel abierto 8 h refrescando cada 5 s con
+dos llamadas son ~5.800 peticiones/día por panel, y con seis clientes 35.000: un tercio del
+presupuesto gratuito en refrescar una pantalla. Con un solo endpoint cada 15 s y solo con la
+pestaña visible son ~1.900 por panel y ~11.500 con seis, el 11%. Se marca leído solo cuando
+hay algo nuevo: un `UPDATE` incondicional serían ~1.900 escrituras diarias para nada. El
+scroll no salta si el lector no estaba abajo, y el tope de 40 conversaciones se dice en voz
+alta, porque un tope callado se lee como «esto es todo».
+
+**Responder por el canal web** llegó el mismo día (migración 0026, widget v9): el widget
+declara `live:true` y pregunta cada 6 s solo cuando la conversación no la lleva el bot. Un
+widget cacheado sin la bandera no recibe el turno y se comporta como antes, y por eso se
+pudo desplegar sin tocar las webs de los clientes.
+
+**Avisos de mensajes nuevos** (migración 0029): el sonido va con un oscilador de Web Audio,
+no con `<audio>`, porque la CSP del panel no declara `media-src` y cualquier archivo
+—incluido un `data:`— quedaría bloqueado; hay un test que falla si alguien mete un
+`new Audio()`. Ese sondeo, al revés que el de la bandeja, NO mira `visibilityState`: el caso
+a cubrir es justamente la pestaña en segundo plano, así que va cada 30 s con una sola
+consulta agregada. Mira `conversations.last_inbound_at` y no `last_at`, porque con `last_at`
+una respuesta del propio equipo se avisaría a sí misma. El permiso y el `AudioContext` solo
+se pueden pedir dentro de un gesto, así que viven en el clic del botón, y la preferencia se
+recuerda por pestaña.
+
+**Fuera de alcance, con motivo:** enviar plantillas fuera de la ventana (comparte maquinaria
+con el informe semanal por WhatsApp), Instagram (no se pinta una pestaña de un canal que no
+existe: un filtro que no filtra es la clase de mentira que este panel no se permite),
+asignación, etiquetas y adjuntos.
+
+## Handoff con toma de control (2026-08-26, `H2-HANDOFF.md`, migraciones 0025/0027)
+
+Pedido de Juan: «el chat solo se habilita cuando el usuario pida hablar con un asesor y
+haya alguien conectado; si no, envía un lead y sigue la IA». Antes, `[[HUMANO]]` escribía
+una pausa de 4 h y avisaba a Telegram sin que nada garantizara respuesta: si el aviso
+llegaba de noche, el cliente final se quedaba mudo cuatro horas justo después de pedir
+ayuda. **Si no hay nadie disponible ya no se escala:** se captura el lead y la IA sigue.
+
+**Cuatro estados** (`conversations.state`): `bot`, `esperando`, `humano` y vuelta a `bot`.
+En `esperando`, a los 5 minutos se avisa de que se sigue buscando y a los 15 la IA retoma y
+pide el teléfono. Los 5 minutos eran el final en la primera versión y estaba mal: con un
+asesor ocupado en otra conversación saltaba casi siempre y el visitante leía «no hay nadie
+disponible» cuando sí lo había. La disponibilidad nunca fue exclusiva, así que atender
+varias a la vez ya funcionaba; lo que faltaba era verlas, y por eso la bandeja pone lo que
+espera primero con un contador «N esperando asesor».
+
+**La vuelta al bot se avisa siempre.** Al principio «Devolver a Vai» no mandaba nada,
+razonando que sobraba; estaba mal: el visitante venía hablando con una persona y se quedaba
+esperando a alguien que ya no estaba. Ahora se avisa con el nombre del asistente de ese
+cliente, el aviso queda en el hilo, y si el envío falla la conversación se devuelve igual,
+porque quedarse en `humano` sin nadie es peor.
+
+**Disponible = interruptor Y horario.** El interruptor es por usuario del panel; el horario
+es del cliente y lo cierra por fuera. `support_hours` a `NULL` cae al mismo default que el
+calendario: se propuso que `NULL` fuera «sin restricción» y Juan lo corrigió, porque si la
+interacción humana va con horario, un `NULL` sin límite es lo contrario de lo pedido. Un
+`{}` explícito sí significa «nunca se ofrece asesor», y el panel lo dice con esas palabras.
+Lo edita el cliente en Conexiones con una rejilla de siete días y dos tramos: la primera
+versión fue un textarea de JSON y Juan la paró, porque eso es para nosotros, no para un
+cliente.
+
+**Velai atiende SOLO lo de Velai.** Un admin de Velai podía tomar el control de la
+conversación de un cliente, y la burbuja lleva el correo de quien escribe: el cliente final
+de una gestoría habría visto `botnexo.ia@gmail.com` dentro de su chat. Ver sí, atender no.
+El cajón se cierra antes con el motivo escrito y el endpoint devuelve **403, no 404**,
+porque fingir que la conversación no existe sería mentirle al panel que la está enseñando.
+La disponibilidad de un admin de Velai es siempre la del tenant `velai` y el `?tenant=` se
+ignora: antes dependía del selector de la bandeja y con «Todos los clientes» dejaba el botón
+mudo.
+
+**Detalles que no se disimularon:** el cron es `*/5`, así que «5 minutos» son entre 5 y 10;
+se compensa porque si la persona vuelve a escribir con el plazo vencido la IA contesta en
+ese mismo mensaje, y el cron solo hace falta cuando el cliente final se queda callado. El
+lead se captura sí o sí al pedir asesor, saltándose el mínimo de dos turnos, porque pedir
+hablar con una persona ya es intención comercial. Quién tomó el control se guarda y se
+enseña, para que dos personas no se pisen. Los dos cambios de riesgo alto, `escalateToHuman`
+y la guarda de pausa del webhook, se hicieron al final y manteniendo la clave `pause:` en
+paralelo.
+
+## Cupo de IA visible, sin corte (2026-08-26, `H3-PANEL.md` §4, migración 0024)
+
+Decisión de Juan: **visible sí, corte no**, que son dos cosas distintas y el panel las
+separa. El saldo mensual de tokens (`tenants.ai_monthly_tokens`) lo ve el cliente, baja
+hasta cero y no corta nada; es un contador, y la tarjeta lo dice con letra clara, porque un
+saldo a cero sin explicación haría pensar en una factura. El cupo diario de llamadas
+(`ai_daily_limit`) sí corta con un 429: es la guarda anti-abuso, y subió de 300 a 1.500
+porque 300 llamadas son unas 37 conversaciones al día y un cliente que creciera se comía un
+corte duro antes de que su saldo dijera nada. Avisa a Velai al 80%, porque el punto de
+subirlo es ver venir el problema, no solo retrasarlo.
+
+Dos decisiones que aparecieron al construirlo. **Al cliente no se le enseña el coste:** la
+tarjeta en dólares es solo para Velai, porque enseñarle lo que pagamos por él es enseñarle
+el margen; su tarjeta lleva tokens y porcentaje, y hay un test que falla si se cuela
+cualquier rastro de coste. Y **el cupo se dimensionó con consumo real**, no a ojo: 3.148
+tokens por llamada en Diálogos frente a 4.872 en GOgestión, y la diferencia no es el tráfico
+sino el prompt, que en GOgestión son 12.858 caracteres viajando en cada turno.
+
 ## Conversaciones a pantalla completa (2026-08-27, del canvas «Conversaciones · Panel Velai»)
 
 La bandeja vivía en una caja de `min(72vh,760px)` con la cabecera, la nota de disponibilidad y seis

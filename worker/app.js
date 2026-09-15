@@ -2465,7 +2465,7 @@ export async function convAppend(env, conv, turns) {
   return true;
 }
 
-// ── Disponibilidad de asesores (migración 0025, docs/H2-HANDOFF.md) ─────────
+// ── Disponibilidad de asesores (migración 0025, docs/IMPLEMENTADO.md) ───────
 // Regla de Juan: el BOT no tiene restricción horaria; hablar con una persona SÍ. Fuera de
 // horario no se ofrece interacción humana, y si la piden se rechaza con explicación.
 const CONV_STATES = ['bot', 'esperando', 'humano'];
@@ -3759,7 +3759,7 @@ async function pollTemplateApprovals(env) {
 // Intercom fuera del mercado hispano) lo mandan por CORREO. Va por Telegram porque es
 // donde el dueño YA está y porque no tiene ventana de 24 h: por WhatsApp haría falta una
 // plantilla aprobada por Meta, que es un bloque aparte y comparte maquinaria con las
-// plantillas de la bandeja (docs/H2-BANDEJA.md).
+// plantillas de la bandeja (docs/IMPLEMENTADO.md).
 const WEEKLY_REPORT_HOUR = 7;    // UTC
 const WEEKLY_REPORT_BATCH = 5;   // clientes por tick: el plan gratuito de D1 da 50 consultas por invocación
 const WEEKLY_REPORT_TRIES = 3;

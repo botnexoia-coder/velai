@@ -274,8 +274,8 @@ Ahora cada cliente puede completar SU vinculación, cosa que nunca fue posible:
 
 Del artifact «El panel de Velai frente al mercado» (25 productos revisados) salió un plan
 en tres horizontes: [`PLAN-PANEL.md`](./PLAN-PANEL.md) es el mapa y las decisiones;
-[`H1-PANEL.md`](./H1-PANEL.md), [`H2-PANEL.md`](./H2-PANEL.md) y
-[`H3-PANEL.md`](./H3-PANEL.md), el trabajo. Lo que depende de ti:
+[`H1-PANEL.md`](./H1-PANEL.md) y [`H2-PANEL.md`](./H2-PANEL.md), el trabajo que queda
+(H3 se cerró: §4 está en IMPLEMENTADO.md y §1, §2, §3 y §5 bajaron aquí). Lo que depende de ti:
 
 - [x] **H1 §1 desplegado el 2026-08-26** (migración 0021 + historial en D1 + vista Conversaciones + `/privacidad/`). El CI aplicó la migración y desplegó; el humo del preflight de `/chat` pasó.
 - [ ] **Pendiente de comprobar en vivo:** escribir por el widget y por WhatsApp y ver que la conversación aparece en la vista **Conversaciones** con los dos turnos (la tabla arranca vacía: las conversaciones anteriores vivían en KV y ya caducaron). Comprobar de paso que la ficha de un lead nuevo enlaza con su conversación.
@@ -284,8 +284,8 @@ en tres horizontes: [`PLAN-PANEL.md`](./PLAN-PANEL.md) es el mapa y las decision
 - [x] **H1 §2 (informe semanal) desplegado el 2026-08-26** — migración 0022, por Telegram, con interruptor de baja en Conexiones. Sin cron nuevo: viaja en el de 5 minutos dentro de una ventana de 24 h que abre el lunes a las 07:00 UTC (09:00 en verano, 08:00 en invierno).
 - [ ] **El primer informe llega el lunes 2026-08-31 por la mañana.** Comprobar que llega a los grupos de los 6 clientes activos y que el que no tenga Telegram vinculado queda como `skipped` en `tenant_reports` (no en silencio). El código de log es `weekly_report`.
 - [ ] **Ese primer informe NO llevará comparación** con la semana anterior (el historial arrancó el 2026-08-26): es correcto y deliberado. La comparación empieza a aparecer el lunes 2026-09-14.
-- [ ] **Informe por WhatsApp** (segundo paso de H1 §2): necesita su propia plantilla aprobada por Meta (`velai_weekly_report`) provisionada por subcuenta. Comparte maquinaria con el envío de plantillas de la bandeja — se hacen juntas, ver `H2-BANDEJA.md` §6.
-- [ ] **Instagram** (Juan, 2026-08-26): va por Meta igual que Messenger, así que cuando se conecte Facebook se conecta Instagram. Se decide al llegar a la bandeja — el filtro de canal NO se pinta hasta que el canal exista (`H2-BANDEJA.md` §6).
+- [ ] **Informe por WhatsApp** (segundo paso de H1 §2): necesita su propia plantilla aprobada por Meta (`velai_weekly_report`) provisionada por subcuenta. Comparte maquinaria con el envío de plantillas de la bandeja — se hacen juntas (alcance excluido de la bandeja, en IMPLEMENTADO.md).
+- [ ] **Instagram** (Juan, 2026-08-26): va por Meta igual que Messenger, así que cuando se conecte Facebook se conecta Instagram. Se decide al llegar a la bandeja — el filtro de canal NO se pinta hasta que el canal exista: un filtro que no filtra nada es la clase de mentira que el panel no se permite.
 - [ ] **Validar en vivo la regla «ESPACIO Y CIERRE»** (Juan, 2026-08-26: «no podemos dejar a un cliente a mitad de una conversación»). La red de seguridad es determinista y está en tests — nadie se queda a mitad, con modelo o sin él. Lo que SOLO se puede validar contra el modelo vivo es la *prevención*: que ante una consulta larga resuma y cierre en vez de empezar a enumerarlo todo. Herramienta: **ficha del cliente → Probar**, con la consulta de NIE de GOgestión que lo destapó. Si aún se va largo, la regla es una cadena de texto en `vai-worker.js`: se endurece y se vuelve a desplegar.
 - [ ] **Vigilar `reply_truncated` en Workers Logs.** Si sale mucho para un cliente, súbele el tope de su canal o aprieta su prompt. Si sale para un cliente que atiende en otro idioma, el cierre de emergencia (en español fijo) hay que hacerlo por tenant.
 - [ ] **Cuando la base pase de 100 MB o KV pase del 50% del cupo diario**, revisar [`VOLUMEN-Y-ALMACENAMIENTO.md`](./VOLUMEN-Y-ALMACENAMIENTO.md) (medido el 2026-08-26: la base entera pesa 332 KB y el cuello real es KV, no D1).
@@ -293,6 +293,16 @@ en tres horizontes: [`PLAN-PANEL.md`](./PLAN-PANEL.md) es el mapa y las decision
 - [ ] **Coexistence y Embedded Signup: decidir antes de septiembre de 2026** (H3 §1 y §2). El 15 de octubre Meta retira Embedded Signup v2/v3 y `coex` no migra solo. Si el alta sigue siendo acompañada en la consola de Twilio, no toca nada; solo hay que decidirlo a tiempo.
 - [ ] **Verificar contra Twilio en vivo** qué campos devuelve de verdad la aprobación de plantillas (`rejection_reason`, quality rating) antes de escribir la UI de los siete estados (H1 §5). La plantilla de GOgestión sirve de caso.
 - [ ] **Supuestos del ahorro** (H1 §4): confirmar minutos por conversación y coste/hora por defecto. Referencia citable: 6–12 $ por ticket humano (informe de ROI de Intercom).
+- [ ] **Satisfacción medida aparte** (H3 §3): decidir si se hace una pregunta al cerrar, que es
+      lo único que hace Tidio del grupo DIY. Consenso unánime del sector: **nunca mezclar el CSAT
+      del bot con el de los humanos**. Si se decide NO hacerla, el argumento de Intercom para matar
+      la encuesta clásica sirve tal cual: baja respuesta, sesgo a los extremos y castigo injusto a
+      la IA. Una puntuación propia tipo CX Score sigue descartada en `PLAN-PANEL.md`.
+- [ ] **Kit Digital y Kit Consulting** (H3 §5): verificar convocatoria y plazos vigentes antes de
+      usarlo en un presupuesto. Siguen vivos en 2026 con fondos remanentes y ya financian IA; es el
+      mecanismo de compra que la pyme española reconoce y Centribal ya lo usa como canal de entrada.
+      No es panel, es canal comercial, pero condiciona cómo se presenta el precio (`PLAN-PANEL.md`:
+      por cliente y mes con los mensajes a coste, nunca créditos).
 - [ ] **Cupo de IA al agotarse** (H3 §4): ¿se corta con 429 como hoy, o se desborda con aviso como hacen Crisp y Zendesk?
 
 ### 2k. Canales múltiples por cliente (tenant_channels — fase 1 desplegada 2026-08-22)

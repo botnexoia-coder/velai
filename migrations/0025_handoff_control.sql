@@ -1,4 +1,4 @@
--- Handoff con toma de control (docs/H2-HANDOFF.md). Decisión de Juan el 2026-08-26:
+-- Handoff con toma de control (docs/IMPLEMENTADO.md). Decisión de Juan el 2026-08-26:
 --   «bot sin restricción horaria, hablar con un asesor CON restricción horaria.
 --    Fuera de horario no se ofrece interacción humana o se rechaza.»
 --
