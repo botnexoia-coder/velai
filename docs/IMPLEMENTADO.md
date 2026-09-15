@@ -32,6 +32,25 @@ Desde entonces `_headers` es la única fuente de la política de caché de hirev
 lo que hay en git es lo que sirve el borde. Único efecto lateral: `robots.txt`, sin
 regla propia en el archivo, pasó de 4 h a la cabecera de Pages (`max-age=0`).
 
+## Sesión de Access caducada: el panel lo dice — 2026-09-15
+
+Access no responde 401 a las peticiones del panel: responde 302 hacia su login, en otro
+origen. Con el redirect por defecto el navegador intentaba seguirlo, la CSP del panel
+(`connect-src 'self'`) lo bloqueaba y `fetch` caía con un TypeError genérico. La ficha
+mostraba «la petición falló» y parecía un botón roto, con la consola llena de avisos de
+CSP que no señalaban la causa. Le pasó a Juan subiendo el retrato de Dara.
+
+`api()` pide ahora `redirect:'manual'` —puesto después del spread, para que ninguna
+llamada pueda volver a esconderlo— y trata la respuesta opaca como lo que es:
+`session_expired`. Un módulo `api/session.ts` avisa una sola vez, y el marco pinta una
+barra que ofrece **entrar en otra pestaña**, no recargar: recargar tiraría el formulario
+a medio escribir, que es justo lo que se estaba guardando cuando saltó. De paso, un
+fallo de red se traduce a `network_failed` en vez de propagarse crudo, y un abort de los
+sondeos de fondo sigue siendo un abort.
+
+Cubierto por `src/api/session.test.ts` (respuesta opaca, aviso único, redirect manual,
+red frente a abort) y por un caso en `Shell.test.tsx`. Panel v2.7.0.
+
 ## Widget v17: el copy de Velai no viaja a webs de cliente — 2026-09-14
 
 Al absorber la capa cosmética en el widget, cada web de cliente dejó de traer su propio

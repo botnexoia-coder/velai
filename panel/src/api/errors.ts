@@ -69,6 +69,8 @@ export const TERRS: Record<string, string> = {
   invalid_note: 'Escribe la nota antes de guardarla.',
   invalid_message: 'Escribe el mensaje antes de enviarlo.',
   request_failed: 'La petición falló. Reintenta en unos segundos.',
+  session_expired: 'Tu sesión caducó. Vuelve a entrar para continuar.',
+  network_failed: 'Sin conexión con el servidor. Comprueba la red y reintenta.',
 };
 
 // Por qué NO se puede responder, en palabras del dueño. El cajón se cierra ANTES de que

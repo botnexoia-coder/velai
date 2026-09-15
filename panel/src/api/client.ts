@@ -2,6 +2,7 @@
 // admin.hirevai.com): rutas relativas, sin CORS y sin tokens propios — la cookie la pone
 // Cloudflare Access y el worker valida el JWT en cada petición.
 import { busyStart, busyEnd } from './activity';
+import { markSessionExpired } from './session';
 
 export class ApiError extends Error {
   /** Código de error del worker (p. ej. 'stale_tenant'); se traduce con TERRS/WIN_WHY. */
@@ -33,7 +34,21 @@ export async function api<T>(path: string, init?: RequestInit, options?: ApiOpti
   const quiet = options?.quiet === true;
   if (!quiet) busyStart();
   try {
-    const response = await fetch(path, { ...init, signal: options?.signal ?? init?.signal ?? null });
+    // redirect:'manual' va DESPUÉS del spread a propósito: ninguna llamada puede
+    // pedir 'follow' y volver a esconder la sesión caducada tras un error de CSP.
+    let response: Response;
+    try {
+      response = await fetch(path, { ...init, signal: options?.signal ?? init?.signal ?? null, redirect: 'manual' });
+    } catch (e) {
+      // Un abort es intencionado (sondeos de fondo): sigue su camino sin traducirse.
+      if ((e as { name?: string })?.name === 'AbortError') throw e;
+      throw new ApiError('network_failed', 0);
+    }
+    // Access interceptó la petición: respuesta opaca, sin cuerpo ni estado que leer.
+    if (response.type === 'opaqueredirect' || response.status === 0) {
+      markSessionExpired();
+      throw new ApiError('session_expired', 401);
+    }
     if (response.status === 204) return null as T;
     let data: unknown;
     try {

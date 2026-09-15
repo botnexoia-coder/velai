@@ -7,6 +7,7 @@ import { MemoryRouter } from 'react-router';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { App } from '../App';
 import { createQueryClient } from '../api/queryClient';
+import { markSessionExpired, resetSession } from '../api/session';
 import { ToastProvider } from '../components/Toasts';
 import { availability, inbox, leadsPage1, meCliente, meVelai, mockFetch, stats, tenants } from '../test/fixtures';
 import type { Me } from '../api/types';
@@ -113,4 +114,22 @@ it('el pie firma la versión desplegada — es lo que distingue un deploy de otr
   // vX.Y.Z · commit: la semántica la sube una persona; el commit cambia solo en cada
   // deploy. Si esto desaparece del pie, volvemos al «¿estoy viendo el nuevo o el viejo?».
   expect(document.querySelector('.foot-ver')?.textContent).toMatch(/^v\d+\.\d+\.\d+ · \S+$/);
+});
+
+it('cuando Access caduca, el marco avisa una vez y ofrece entrar sin perder el borrador', async () => {
+  resetSession();
+  renderApp(meVelai);
+  await waitFor(() => expect(screen.getByText(/todos los derechos reservados/i)).toBeInTheDocument());
+  expect(screen.queryByRole('alert')).toBeNull();
+
+  markSessionExpired();
+
+  const aviso = await screen.findByRole('alert');
+  expect(aviso).toHaveTextContent(/Tu sesión caducó/);
+  // Abre OTRA pestaña: recargar esta tiraría el formulario a medio escribir.
+  const abrir = vi.fn();
+  vi.stubGlobal('open', abrir);
+  await userEvent.click(screen.getByRole('button', { name: /entrar en otra pestaña/i }));
+  expect(abrir).toHaveBeenCalledWith(window.location.origin, '_blank', 'noopener');
+  resetSession();
 });

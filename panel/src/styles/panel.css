@@ -770,3 +770,8 @@ dialog.cfm{width:min(460px,calc(100% - 24px));padding:20px 22px}
 @media(max-width:1100px){.grid{grid-template-columns:1fr 1fr}}
 @media(max-width:900px){#root{flex-direction:column}.side{position:static;height:auto;width:auto;flex-direction:row;align-items:center;gap:6px;padding:10px 16px;border-right:0;border-bottom:1px solid var(--border);overflow-x:auto;flex:none}.sep,.navlabel{display:none}.tabs{flex-direction:row}.sidefoot{display:flex;flex-direction:row;border:0;padding:0;margin-left:auto}.brand small{display:none}}
 @media(max-width:700px){.grid{grid-template-columns:1fr}}
+
+/* Aviso de sesión caducada: por encima de todo, incluida la barra lateral oscura. */
+.sessionbar{position:fixed;top:0;left:0;right:0;z-index:2147483645;display:flex;flex-wrap:wrap;align-items:center;justify-content:center;gap:10px;padding:10px 16px;background:#2b1508;border-bottom:1px solid var(--orange);color:#fff;font-size:13px;line-height:1.4;text-align:center}
+.sessionbar b{font-weight:750}
+.sessionbar span{color:#e8ddd4}
