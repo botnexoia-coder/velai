@@ -635,7 +635,8 @@
 
     /* ── INDUSTRIES ── */
     .industries-section { background: var(--bg2); border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); }
-    .industry-tabs { display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; margin-bottom: 2.5rem; }
+    /* 3.5rem = el mismo aire que hay entre el subtítulo de la sección y esta fila. */
+    .industry-tabs { display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; margin-bottom: 3.5rem; }
     .tab-btn {
       padding: .5rem 1.2rem; border-radius: 100px;
       border: 1px solid var(--border2); background: transparent;
@@ -644,16 +645,27 @@
     }
     .tab-btn.active, .tab-btn:hover { background: var(--orange); color: #fff; border-color: var(--orange); }
     .industry-content { display: none; }
-    /* La columna de texto es bastante más corta que la conversación: centrada, el hueco
-       se reparte arriba y abajo en vez de caer entero debajo del texto. */
-    .industry-content.active { display: grid; grid-template-columns: 1.05fr .95fr; gap: 3rem; align-items: center; }
+    /* La descripción arranca pegada a las pestañas (mismo aire que el subtítulo con
+       ellas) y la conversación se centra contra ella. */
+    .industry-content.active { display: grid; grid-template-columns: 1.05fr .95fr; gap: 3rem; align-items: start; }
+    .indchat { align-self: center; }
     .industry-info h3 { font-family: var(--font-d); font-size: 1.5rem; font-weight: 800; letter-spacing: -.03em; margin-bottom: .8rem; }
     .industry-info p { font-size: .95rem; color: var(--muted); line-height: 1.7; margin-bottom: 1.5rem; font-weight: 300; }
     .industry-features { list-style: none; display: flex; flex-direction: column; gap: .7rem; }
     .industry-features li { display: flex; align-items: center; gap: .6rem; font-size: .88rem; color: var(--muted); }
     .feat-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--orange); flex-shrink: 0; }
     /* industry wa overrides */
-    .industry-content .indchat-body { min-height: 210px; }
+    /* Alto acotado: la conversación se lee como una de verdad (abierta por el final)
+       y la tarjeta deja de doblar en alto a la columna de texto, que es lo que hacía
+       imposible centrarla contra ella. De paso, las dos pieles miden lo mismo y
+       cambiar de canal ya no da un salto de 100 px. */
+    .industry-content .indchat-body {
+      min-height: 300px; max-height: 300px; overflow-y: auto;
+      /* El primer mensaje visible queda cortado por arriba: el degradado lo convierte
+         en «esto viene de antes» en vez de en un recorte descuidado. */
+      -webkit-mask-image: linear-gradient(180deg, transparent 0, #000 26px);
+      mask-image: linear-gradient(180deg, transparent 0, #000 26px);
+    }
 
     /* ── VAI SECTION ── */
     .vai-section { text-align: center; }
@@ -1896,12 +1908,20 @@
     document.querySelectorAll('.tab-btn').forEach(el => el.classList.remove('active'));
     document.getElementById('ind-' + id).classList.add('active');
     btn.classList.add('active');
+    document.querySelectorAll('.indchat-body').forEach(function (cuerpo) { cuerpo.scrollTop = cuerpo.scrollHeight; });
   }
 
   // ── CANAL DEL CHAT DE INDUSTRIAS (WhatsApp / web) ──
   // El canal elegido se aplica a las CUATRO pestañas a la vez: si alguien quiere ver
   // cómo se ve en la web, quiere verlo en el sector que mire después, no volver a
   // pulsarlo en cada uno.
+  // La conversación se muestra por el final, como cuando abres un chat de verdad: el
+  // último mensaje es el que cierra el ejemplo y el que tiene que verse sin tocar nada.
+  function alFinal() {
+    document.querySelectorAll('.indchat-body').forEach(function (cuerpo) {
+      cuerpo.scrollTop = cuerpo.scrollHeight;
+    });
+  }
   document.querySelectorAll('.indchat-btn').forEach(function (btn) {
     btn.addEventListener('click', function () {
       var canal = btn.dataset.canal;
@@ -1912,8 +1932,10 @@
         mock.classList.toggle('is-wa', canal === 'wa');
         mock.classList.toggle('is-web', canal === 'web');
       });
+      alFinal();
     });
   });
+  alFinal();
 
   // ── HAMBURGER MENU ──
   function toggleMenu() {

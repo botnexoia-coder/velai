@@ -1,3 +1,28 @@
+# Design QA — Industrias: aire entre pestañas y descripción, y chats centrados (2026-09-16)
+
+- Pedido: quitar el hueco entre las pestañas de sector y la descripción —dejarlo como el
+  que hay entre el subtítulo de la sección y esas pestañas— y centrar verticalmente los chats.
+- Medido: subtítulo → pestañas = **56 px**. Pestañas → descripción = **131 px** (la descripción
+  iba centrada contra una conversación que medía casi el doble que ella). Texto 284 px de
+  alto, conversación 521 (WhatsApp) y 623 (web).
+- Cambios: `.industry-tabs` pasa a 3.5rem de margen inferior (los mismos 56 px); la rejilla
+  pasa a `align-items:start`, así la descripción arranca pegada a las pestañas; y la tarjeta
+  lleva `align-self:center`.
+- Para que ese centrado se NOTE hubo que acortar la conversación: con 521 px contra 284 la
+  tarjeta manda en la fila y centrarla no cambia nada. El cuerpo se acota a 300 px con scroll
+  y se abre **por el final**, como cuando abres un chat de verdad; un degradado en el borde
+  superior convierte el corte en «esto viene de antes». Efecto lateral bueno: las dos pieles
+  miden ya casi lo mismo (383 y 390 px), así que cambiar de canal ya no da el salto de 100 px
+  que quedó anotado en la revisión anterior.
+- Coste consciente: el saludo inicial de Vai queda fuera de la primera pantalla de la
+  tarjeta; se lee subiendo. Si se prefiere verlo, se sube el tope del cuerpo.
+- Comprobado a 1757, 880 y 390 px, en las dos pieles y en dos pestañas.
+- P0/P1/P2 pendientes: ninguno.
+
+final result: passed
+
+---
+
 # Design QA — disposición de Industrias (2026-09-16)
 
 - Origen: captura de Juan a ~1757 px. Medido antes de tocar: la columna de texto mide 284 px
