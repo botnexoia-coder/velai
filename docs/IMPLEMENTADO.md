@@ -12,6 +12,40 @@
 
 ---
 
+## Las tres webs que faltaban pasan al loader — 2026-09-16
+
+Con los repos de los seis sitios ya accesibles se revisó página por página quién servía
+qué. Diálogos, hiredatavision y Zoe estaban al día (loader en todas sus páginas salvo
+`404.html`). Faltaban tres, y cada una por un motivo distinto:
+
+- **`CronoSeb/gogestion-demo`** (portada y privacidad) seguía en `vai-widget.js?v=14`,
+  la única versión viva que no sabe recibir la conversación en vivo del panel. Se
+  borraron además `assets/assistant-brand.js` y `assets/velai-assistant-polish.js`
+  (248 líneas): ambos se apoyaban en `window.VELAI_ASSISTANT_UI`, que el widget dejó de
+  leer en la v15 — pintaban su propio lanzador y su propia tarjeta por encima del
+  nuestro. Commit `f2de36c`.
+- **`botnexoia-coder/MyXuCostura`** estaba en `?v=17`. Cambio de dos líneas. Commit `d18bc4c`.
+- **`botnexoia-coder/TuFisioOficial`** era el caso sucio: `?v=20260913-salo`, más un
+  `velai-assistant-polish.js` pedido a hirevai.com que **respondía 404** (ese archivo
+  nunca se publicó en nuestro sitio, solo existía en el repo de gogestion), más 69 líneas
+  inline de `VELAI_ASSISTANT_UI` y un `MutationObserver` que reescribía nombre, saludo y
+  chips del widget ya montado y añadía su propia tarjeta en móvil. Todo eso llega hoy de
+  Marca. Commit `77a9629`.
+
+Las tres publicaron solas: `myxucostura` y `gogestion-demo` son proyectos de Pages con
+Git, y `tufisiooficial` es un Worker con assets que también despliega desde el repo. **Las
+tres verificadas mirándolas** (captura con chrome-headless-shell a 1280×900 sobre el
+dominio real, no sobre el repo): lanzador, tarjeta de bienvenida y `assets/vai.js` sin
+versión en el HTML servido.
+
+`ArteYMotor` queda fuera a propósito: ese sitio no lleva widget. `gogestion.es` es la web
+real del cliente y no es nuestra — nuestro repo solo sirve el demo en `gogestion-demo.pages.dev`.
+
+**Lo que la limpieza dejó a la vista:** Salo y Faby salen con la inicial del bot y la
+tarjeta genérica, porque sus fichas de Marca tienen `portrait_url` y teaser a NULL —
+antes eso lo tapaba el andamiaje local. Mei, que sí los tiene cargados, sale perfecta. Es
+trabajo de panel, no de código: queda en TAREAS-PENDIENTES.
+
 ## Loader sin versión — 2026-09-14
 
 `site/assets/vai.js` resuelve el widget contra su propio `currentScript.src`, con

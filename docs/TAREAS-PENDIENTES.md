@@ -42,6 +42,23 @@ decide quién puede cerrar cada cosa:
       encabezados existentes» (2026-09-14). El loader sirve ya `max-age=300` y `_headers`
       manda en toda la caché del sitio. No volver a fijar un valor numérico ahí: anularía
       en silencio las cabeceras del repositorio.
+- [ ] **Marca de Salo (`tufisiooficial`) y de Faby (`gogestion`) en el panel**: subir
+      retrato y escribir la tarjeta de bienvenida. Hoy las dos fichas tienen
+      `portrait_url` y `teaser_*` a NULL, así que el widget saca la inicial del bot y el
+      texto genérico; hasta el 2026-09-16 eso lo tapaba el andamiaje local que se retiró
+      de sus webs. Material ya publicado y servible:
+      `https://www.tufisiooficial.com/images/salo-avatar-widget.webp` y
+      `https://gogestion-demo.pages.dev/assets/assistants/faby-v1.jpg` (Mei ya está así).
+      Teasers que tenían antes — Salo: «¿No sabes qué atención necesitas?» / «Cuéntame qué
+      sucede y te ayudo a orientar el servicio y preparar tu cita.»; Faby: «¿Necesitas
+      ayuda con tus trámites?» / «Cuéntame qué necesitas y te ayudo a orientar tu consulta
+      con el equipo de GOgestión.»
+- [ ] **Logo de `tufisiooficial` fuera de `workers.dev`**: su `logo_url` apunta a
+      `tufisiooficial.botnexo-ia.workers.dev`, justo el dominio que cortan los bloqueadores
+      (el motivo del salto v7→v8). Resubirlo desde el panel para que quede en
+      `api.hirevai.com/media`.
+- [ ] **`MyXuCostura/myxu-costura.html`**: copia antigua de la portada (54 KB, sin
+      canonical) que sigue en el repo y no lleva widget. Decidir si se publica o se borra.
 - [ ] Comprobar la ventana v16 en una web cliente con cabecera fija y en staging con un
       tenant real: tema, saludo único, hasta cinco sugerencias, conversación viva,
       analítica, y subida de retrato con Historial `config`.

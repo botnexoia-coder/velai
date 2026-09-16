@@ -1,4 +1,17 @@
-# Sebas — widget de Vai en las webs de los 4 clientes (v6)
+# Sebas — widget de Vai en las webs de los clientes (v7)
+
+> **v7 (2026-09-16). No hay nada que pegar: las seis webs ya están al día.** Con los
+> repos de todos los sitios a mano, se repasó página por página y se pasaron al loader
+> las tres que faltaban (`gogestion-demo`, `MyXuCostura`, `TuFisioOficial`). Las tres
+> publicaron solas al hacer push y se comprobaron mirando el dominio real. Diálogos,
+> hiredatavision y Zoe ya estaban. `ArteYMotor` no lleva widget.
+>
+> Este documento se queda como referencia para **webs nuevas**: el snippet del §1 es el
+> definitivo y no vuelve a cambiar con las versiones. Si te encuentras una página con
+> `vai-widget.js?v=...`, con `velai-assistant-polish.js` o con un
+> `window.VELAI_ASSISTANT_UI` inline, es de la época anterior: se sustituye por las dos
+> líneas del §1 y se borra el resto — la marca la sirve el panel.
+
 
 > **v6 (2026-09-14).** Pasamos a **`/assets/vai.js` sin `?v=`**: última vez que
 > hay que tocar el HTML para actualizar versiones. El loader carga el widget vigente
@@ -54,16 +67,25 @@ Dos líneas, **en este orden**, justo **antes de `</body>`**, en TODAS las pági
 El `<SLUG>` es distinto en cada web. **No los mezcles**: si te equivocas, el bot de un cliente
 contesta con el contexto de otro y el lead se guarda en la ficha equivocada.
 
-| Web | Repo | `<SLUG>` | Estado actual |
+| Web | Repo | `<SLUG>` | Estado (2026-09-16) |
 |---|---|---|---|
-| `dialogosqueensenan.com` | `botnexoia-coder/Dialogos` | `dialogos` | Snippet YA puesto y correcto — solo cambiar `?v=7` → `?v=8` |
-| `hiredatavision.com` | `botnexoia-coder/hiredatavision` | `hiredatavision` | Poner/actualizar a `?v=8` |
-| `gogestion.es` | `CronoSeb/gogestion-demo` | `gogestion` | Poner/actualizar a `?v=8` |
-| `zoetravelspain.com` | `botnexoia-coder/Zoe` | `zoe` | Poner/actualizar a `?v=8` (incluida la página `/prueba-vai/` si sigue con v=5) |
+| `dialogosqueensenan.com` | `botnexoia-coder/Dialogos` | `dialogos` | Loader en las 12 páginas ✅ |
+| `hiredatavision.com` | `botnexoia-coder/hiredatavision` | `hiredatavision` | Loader en las 6 páginas ✅ |
+| `zoetravelspain.com` | `botnexoia-coder/Zoe` | `zoe` | Loader en las 7 páginas, `/prueba-vai/` incluida ✅ |
+| `gogestion-demo.pages.dev` | `CronoSeb/gogestion-demo` | `gogestion` | Loader en portada y privacidad ✅ (demo; `gogestion.es` es la web del cliente y no la servimos nosotros) |
+| `myxucostura.com` | `botnexoia-coder/MyXuCostura` | `myxu-costura` | Loader en la portada ✅ |
+| `www.tufisiooficial.com` | `botnexoia-coder/TuFisioOficial` | `tufisiooficial` | Loader en la portada ✅ |
+| `arteymotor` | `botnexoia-coder/ArteYMotor` | — | Sin widget, a propósito |
+
+Los `404.html` de todos los repos van sin widget. Publicación: `dialogos`, `zoe`,
+`hiredatavision`, `myxucostura` y `gogestion-demo` son proyectos de Cloudflare Pages
+conectados a su repo, y `tufisiooficial` es un Worker con assets que también despliega
+desde el repo: **el push publica**, sin CI propio en ninguno.
 
 La marca (logo, colores, saludo, chips, WhatsApp) **no se toca en el HTML**: la editamos desde
-el panel y el widget la pide solo al cargar. Los 4 dominios ya están autorizados en el worker —
-no hay que pedir ni desplegar nada más.
+el panel y el widget la pide solo al cargar. Los dominios de la tabla ya están autorizados en el
+worker (los de Velai en `ALLOWED_WEB_ORIGINS`, el resto en el `web_origins` de cada tenant) — no
+hay que pedir ni desplegar nada más. Para una web nueva, ese es el único paso de nuestro lado.
 
 ## 2. Cómo verificar cada web (1 minuto)
 
