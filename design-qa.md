@@ -1,3 +1,27 @@
+# Design QA — cinta de canales y tema claro del hero (2026-09-16)
+
+- Origen: captura de Juan a ~1800 px de ancho; la cinta de canales del hero quedaba pegada
+  al borde de la sección «El problema», sin aire entre las tarjetas y la sección siguiente.
+- Medido antes de tocar: hueco real de **0 px** entre `.channel-ribbon` y `.problem-section`
+  (la cinta sube 75 px con margen negativo y sobresalía 7 px POR DEBAJO del hero, justo
+  encima del borde de la siguiente sección). Defecto de origen, no de una entrega reciente.
+- Implementación: `.channel-ribbon` pasa a `margin:-96px auto 56px` — la cinta queda entera
+  dentro del hero (14 px de margen hasta su borde) y deja 56 px hasta la sección. En ≤900
+  px, `-55px 20px 40px`; en ≤600 px, `-48px 14px 32px`.
+- Hallazgo del paso de tema claro (barrido de luminancia sobre todo el texto del hero y de
+  la cinta): **`.channel-pill` y el botón «Hablar con Vai» heredaban el `--white` invertido**
+  y quedaban oscuros sobre el hero, que sigue siendo oscuro en tema claro. El botón
+  desaparecía por completo. Añadidas dos reglas `body.light` que les devuelven el texto claro.
+- Viewports comprobados: 1800 × 1000 (claro y oscuro), 1280 y 390 × 800. Barrido completo de
+  la página en tiras, en los dos temas, sin más hallazgos: el único hueco a 0 era este.
+- Falso positivo descartado: la figura de precios sale en blanco en capturas fuera del
+  viewport porque es `loading="lazy"`; con la sección a la vista carga y se ve correcta.
+- P0/P1/P2 pendientes: ninguno.
+
+final result: passed
+
+---
+
 # Design QA — recorrido editorial de precios
 
 - Fuente visual: `exec-5b32fc4f-e2a8-4343-b9d5-f05cde6ef56a.png` (dirección 1 aprobada).
