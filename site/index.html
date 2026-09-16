@@ -635,7 +635,7 @@
 
     /* ── INDUSTRIES ── */
     .industries-section { background: var(--bg2); border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); }
-    .industry-tabs { display: flex; gap: .5rem; flex-wrap: wrap; margin-bottom: 2.5rem; }
+    .industry-tabs { display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; margin-bottom: 2.5rem; }
     .tab-btn {
       padding: .5rem 1.2rem; border-radius: 100px;
       border: 1px solid var(--border2); background: transparent;
@@ -644,7 +644,9 @@
     }
     .tab-btn.active, .tab-btn:hover { background: var(--orange); color: #fff; border-color: var(--orange); }
     .industry-content { display: none; }
-    .industry-content.active { display: grid; grid-template-columns: 1fr 1fr; gap: 2rem; align-items: start; }
+    /* La columna de texto es bastante más corta que la conversación: centrada, el hueco
+       se reparte arriba y abajo en vez de caer entero debajo del texto. */
+    .industry-content.active { display: grid; grid-template-columns: 1.05fr .95fr; gap: 3rem; align-items: center; }
     .industry-info h3 { font-family: var(--font-d); font-size: 1.5rem; font-weight: 800; letter-spacing: -.03em; margin-bottom: .8rem; }
     .industry-info p { font-size: .95rem; color: var(--muted); line-height: 1.7; margin-bottom: 1.5rem; font-weight: 300; }
     .industry-features { list-style: none; display: flex; flex-direction: column; gap: .7rem; }
@@ -920,7 +922,7 @@
       .problem-grid { grid-template-columns:1fr; }
       .flow-grid { grid-template-columns:1fr 1fr; gap:2rem; }
       .flow-grid::before { display:none; }
-      .industry-content.active { grid-template-columns:1fr; }
+      .industry-content.active { grid-template-columns:1fr; gap:2rem; }
       .vai-features-grid { grid-template-columns:1fr; }
       .pricing-grid { grid-template-columns:1fr; }
       .footer-inner { grid-template-columns:1fr; gap:2rem; }
@@ -939,8 +941,9 @@
        manda nuestro widget. Por eso el mismo diálogo tiene DOS pieles y un interruptor,
        y no una sola apariencia. `.indchat-solo-wa` / `.indchat-solo-web` marcan lo que existe en un
        canal y no en el otro. */
-    .indchat-switch { display: flex; gap: 6px; margin-bottom: 10px; }
-    .indchat-demo { min-width: 0; }
+    /* El canal va en la MISMA fila que los sectores, pegado a la derecha: son dos ejes
+       del mismo control (qué negocio miras y en qué canal), no dos filas de pastillas. */
+    .indchat-switch { display: flex; gap: 6px; margin-left: auto; }
     .indchat-btn {
       padding: .35rem .85rem; border-radius: 100px; cursor: pointer;
       border: 1px solid var(--border2); background: transparent; color: var(--muted);
@@ -950,7 +953,9 @@
     .indchat-btn.is-on { background: var(--orange); border-color: transparent; color: #fff; }
     .indchat.is-wa .indchat-solo-web, .indchat.is-web .indchat-solo-wa { display: none; }
 
-    .indchat { border-radius: 16px; overflow: hidden; }
+    /* Ancho de conversación de verdad: el widget mide 400 y un móvil poco más. Estirada
+       a la columna entera dejaba de parecer un chat. */
+    .indchat { max-width: 460px; margin-left: auto; border-radius: 16px; overflow: hidden; }
     .indchat-head { display: flex; align-items: center; gap: 10px; padding: 8px 12px; }
     .indchat-avatar {
       position: relative; width: 36px; height: 36px; flex: none; border-radius: 50%;
@@ -1042,6 +1047,16 @@
       border-radius: 22px; background: var(--indchat-in); color: var(--indchat-muted); font-size: .8rem;
     }
     .is-web .indchat-send { width: 44px; height: 44px; background: var(--indchat-acc); color: #172033; }
+
+    /* En una sola columna la conversación ocupa el ancho y el interruptor vuelve a la
+       izquierda: pegada a la derecha y estrecha parecía un descuadre. Va aquí, al final
+       de la hoja del chat, porque el responsive general está ANTES y perdía por orden. */
+    @media (max-width: 900px) {
+      .indchat { max-width: none; margin-left: 0; }
+      /* Sin la calle de la derecha, pegado a las pestañas de sector parecía un sector
+         más: baja a su propia línea. */
+      .indchat-switch { flex-basis: 100%; margin: .35rem 0 0; }
+    }
 
     /* ── LIGHT MODE ── */
     body.light {
@@ -1273,6 +1288,10 @@
       <button class="tab-btn" onclick="showIndustry('clinica', this)">Clínica</button>
       <button class="tab-btn" onclick="showIndustry('tienda', this)">Tienda</button>
       <button class="tab-btn" onclick="showIndustry('inmobiliaria', this)">Inmobiliaria</button>
+      <div class="indchat-switch" role="group" aria-label="Canal del chat">
+        <button type="button" class="indchat-btn is-on" data-canal="wa">WhatsApp</button>
+        <button type="button" class="indchat-btn" data-canal="web" data-i18n="channelWeb">Chat web</button>
+      </div>
     </div>
 
     <!-- Restaurante -->
@@ -1288,12 +1307,7 @@
           <li><div class="feat-dot"></div>Notificación directa a cocina y sala</li>
         </ul>
       </div>
-      <div class="indchat-demo">
-        <div class="indchat-switch" role="group" aria-label="Canal del chat">
-          <button type="button" class="indchat-btn is-on" data-canal="wa">WhatsApp</button>
-          <button type="button" class="indchat-btn" data-canal="web" data-i18n="channelWeb">Chat web</button>
-        </div>
-        <div class="indchat is-wa">
+      <div class="indchat is-wa">
         <div class="indchat-statusbar indchat-solo-wa"><span>21:30</span><span>▋▋▋ WiFi ●</span></div>
         <div class="indchat-head">
           <div class="indchat-avatar">🍷</div>
@@ -1314,7 +1328,6 @@
           <div class="indchat-input"><span class="indchat-solo-wa">Escribe un mensaje</span><span class="indchat-solo-web">Cuéntame qué necesitas…</span></div>
           <div class="indchat-send" aria-hidden="true"><span class="indchat-solo-wa">🎤</span><svg class="indchat-solo-web" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M12 19V5m-6 6 6-6 6 6"/></svg></div>
         </div>
-        </div>
       </div>
     </div>
 
@@ -1331,12 +1344,7 @@
           <li><div class="feat-dot"></div>Seguimiento post-consulta</li>
         </ul>
       </div>
-      <div class="indchat-demo">
-        <div class="indchat-switch" role="group" aria-label="Canal del chat">
-          <button type="button" class="indchat-btn is-on" data-canal="wa">WhatsApp</button>
-          <button type="button" class="indchat-btn" data-canal="web" data-i18n="channelWeb">Chat web</button>
-        </div>
-        <div class="indchat is-wa">
+      <div class="indchat is-wa">
         <div class="indchat-statusbar indchat-solo-wa"><span>10:02</span><span>▋▋▋ WiFi ●</span></div>
         <div class="indchat-head">
           <div class="indchat-avatar">🩺</div>
@@ -1357,7 +1365,6 @@
           <div class="indchat-input"><span class="indchat-solo-wa">Escribe un mensaje</span><span class="indchat-solo-web">Cuéntame qué necesitas…</span></div>
           <div class="indchat-send" aria-hidden="true"><span class="indchat-solo-wa">🎤</span><svg class="indchat-solo-web" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M12 19V5m-6 6 6-6 6 6"/></svg></div>
         </div>
-        </div>
       </div>
     </div>
 
@@ -1374,12 +1381,7 @@
           <li><div class="feat-dot"></div>Recomendaciones personalizadas</li>
         </ul>
       </div>
-      <div class="indchat-demo">
-        <div class="indchat-switch" role="group" aria-label="Canal del chat">
-          <button type="button" class="indchat-btn is-on" data-canal="wa">WhatsApp</button>
-          <button type="button" class="indchat-btn" data-canal="web" data-i18n="channelWeb">Chat web</button>
-        </div>
-        <div class="indchat is-wa">
+      <div class="indchat is-wa">
         <div class="indchat-statusbar indchat-solo-wa"><span>23:14</span><span>▋▋▋ WiFi ●</span></div>
         <div class="indchat-head">
           <div class="indchat-avatar">👟</div>
@@ -1400,7 +1402,6 @@
           <div class="indchat-input"><span class="indchat-solo-wa">Escribe un mensaje</span><span class="indchat-solo-web">Cuéntame qué necesitas…</span></div>
           <div class="indchat-send" aria-hidden="true"><span class="indchat-solo-wa">🎤</span><svg class="indchat-solo-web" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M12 19V5m-6 6 6-6 6 6"/></svg></div>
         </div>
-        </div>
       </div>
     </div>
 
@@ -1417,12 +1418,7 @@
           <li><div class="feat-dot"></div>Alertas de nuevas propiedades</li>
         </ul>
       </div>
-      <div class="indchat-demo">
-        <div class="indchat-switch" role="group" aria-label="Canal del chat">
-          <button type="button" class="indchat-btn is-on" data-canal="wa">WhatsApp</button>
-          <button type="button" class="indchat-btn" data-canal="web" data-i18n="channelWeb">Chat web</button>
-        </div>
-        <div class="indchat is-wa">
+      <div class="indchat is-wa">
         <div class="indchat-statusbar indchat-solo-wa"><span>19:47</span><span>▋▋▋ WiFi ●</span></div>
         <div class="indchat-head">
           <div class="indchat-avatar">🏠</div>
@@ -1442,7 +1438,6 @@
         <div class="indchat-foot">
           <div class="indchat-input"><span class="indchat-solo-wa">Escribe un mensaje</span><span class="indchat-solo-web">Cuéntame qué necesitas…</span></div>
           <div class="indchat-send" aria-hidden="true"><span class="indchat-solo-wa">🎤</span><svg class="indchat-solo-web" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M12 19V5m-6 6 6-6 6 6"/></svg></div>
-        </div>
         </div>
       </div>
     </div>

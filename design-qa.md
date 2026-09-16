@@ -1,3 +1,28 @@
+# Design QA — disposición de Industrias (2026-09-16)
+
+- Origen: captura de Juan a ~1757 px. Medido antes de tocar: la columna de texto mide 284 px
+  de alto y la conversación 509, así que quedaban **224 px de hueco muerto** bajo el texto; y
+  el interruptor de canal formaba una segunda fila de pastillas justo debajo de las de sector.
+- Cambios: (1) el interruptor sube a la MISMA fila que los sectores, pegado a la derecha —
+  son dos ejes del mismo control, no dos filas; (2) la rejilla pasa a `1.05fr .95fr` con
+  `align-items:center`, así el hueco se reparte arriba y abajo en vez de caer entero debajo
+  del texto; (3) la tarjeta se limita a 460 px y se alinea con el borde derecho de la sección
+  — estirada a la columna entera dejaba de parecer una conversación.
+- Por debajo de 900 px la tarjeta ocupa el ancho y el interruptor baja a su propia línea:
+  pegado a las pestañas de sector parecía un sector más.
+- Trampa de cascada: las reglas de móvil vivían en el bloque RESPONSIVE general, que está
+  ANTES de la hoja del chat; con la misma especificidad ganaba la última y la tarjeta seguía
+  estrecha y a la derecha a 880 px. Ahora van al final de su propia hoja.
+- Comprobado a 1757, 880 y 390 px, en las dos pieles y en varias pestañas.
+- Queda anotado: cambiar de canal mueve la altura de la tarjeta (WhatsApp 521 px, web 623),
+  así que la sección da un salto de ~100 px al pulsar. Es honesto —son dos cosas distintas—
+  pero si molesta se iguala con un `min-height`.
+- P0/P1/P2 pendientes: ninguno.
+
+final result: passed
+
+---
+
 # Design QA — Industrias enseña los dos canales (2026-09-16)
 
 - Decisión: el bot vive en WhatsApp Y en la web, y cada canal lo pinta a su manera, así que
