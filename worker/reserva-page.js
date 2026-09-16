@@ -166,11 +166,12 @@ main{width:min(520px,100%);padding:40px 32px;border:1px solid var(--line);border
 h1{margin:0;font-family:'Cabinet Grotesk',sans-serif;font-weight:800;font-size:28px;line-height:1.15;letter-spacing:-.03em}
 p{margin:14px 0 0;color:var(--muted)}
 .botones{display:flex;flex-wrap:wrap;justify-content:center;gap:10px;margin-top:28px}
-a{display:inline-flex;align-items:center;justify-content:center;min-height:48px;padding:0 22px;border-radius:12px;font-weight:500;text-decoration:none}
-a.primario{background:var(--acc);color:#fff}
-a.primario:hover{background:#e55f14}
-a.secundario{border:1px solid var(--line);color:var(--ink)}
-a.secundario:hover{border-color:var(--acc);color:var(--acc)}
+.botones a{display:inline-flex;align-items:center;justify-content:center;min-height:48px;padding:0 22px;border-radius:12px;font-weight:500;text-decoration:none}
+.botones a.primario{background:var(--acc);color:#fff}
+.botones a.primario:hover{background:#e55f14}
+.botones a.secundario{border:1px solid var(--line);color:var(--ink)}
+.botones a.secundario:hover{border-color:var(--acc);color:var(--acc)}
+.en a{color:var(--acc);text-decoration:underline;text-underline-offset:3px}
 .en{margin-top:26px;padding-top:18px;border-top:1px solid var(--line);font-size:14px;color:var(--muted)}
 `;
 
@@ -185,7 +186,7 @@ export function paginaSinReservas(nonce = null) {
     + `<p>¿Eres el negocio y la esperabas encendida? Escríbenos y la activamos.</p>`
     + `<div class="botones"><a class="primario" href="mailto:equipo@hirevai.com?subject=Reservas%20online">Escribir a Velai</a>`
     + `<a class="secundario" href="https://hirevai.com" target="_blank" rel="noopener noreferrer">Ver qué es Velai</a></div>`
-    + `<p class="en">This booking page isn\u2019t active. Write to <a href="mailto:equipo@hirevai.com" style="min-height:0;padding:0;color:var(--acc)">equipo@hirevai.com</a> and we\u2019ll look into it.</p>`
+    + `<p class="en">This booking page isn\u2019t active. Write to <a href="mailto:equipo@hirevai.com">equipo@hirevai.com</a> and we\u2019ll look into it.</p>`
     + `</main></body></html>`;
   // frame-ancestors abierto a https: a propósito: si un cliente dejó el embed puesto, dentro
   // del iframe tiene que verse el aviso y no un marco en blanco. La página no lleva datos ni
