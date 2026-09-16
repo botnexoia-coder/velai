@@ -1,6 +1,6 @@
 /* VAI LOADER · sin versión · caché 5 min. Versión vigente del widget. */
 (function () {
-  var V = '18';
+  var V = '19';
   if (window.__vaiLoader || document.getElementById('vaiWidget')) return;
   window.__vaiLoader = true;
   var base = (document.currentScript && document.currentScript.src) || 'https://hirevai.com/assets/vai.js';

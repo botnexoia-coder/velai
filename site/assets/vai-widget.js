@@ -1,5 +1,5 @@
 /* ══════════════════════════════════════════════════════════════════════════
-   VAI CHAT WIDGET — autocontenido (CSS + markup + lógica) · v18
+   VAI CHAT WIDGET — autocontenido (CSS + markup + lógica) · v19
    ──────────────────────────────────────────────────────────────────────────
    OJO CON LA VERSIÓN: este archivo se sirve con Cache-Control immutable durante un
    año (_headers, /*.js), así que el `?v=N` de la URL ES la clave de caché. Cambiar el
@@ -16,6 +16,9 @@
      <script src="https://hirevai.com/assets/vai.js" defer></script>
 
    VENTANA (v16): panel lateral, bienvenida, cinco sugerencias y temas por tenant.
+   MÓVIL (v19): telón con desenfoque y la página de debajo bloqueada mientras el chat
+   está abierto — la ventana deja 108 px para el lanzador y por ese hueco se veía, y se
+   movía, la web del cliente.
    Loader estable /assets/vai.js para las webs de clientes.
 
    LANZADOR DE MARCA (v15): retrato, acento y tarjeta de bienvenida por tenant.
@@ -267,10 +270,14 @@
     "#vaiSend{display:grid;place-items:center;width:44px;height:44px;flex:none;border:0;border-radius:50%;background:var(--vai-in);color:var(--vai-muted);cursor:default}" +
     "#vaiSend:not(:disabled){background:var(--vai-acc);color:#172033;cursor:pointer}" +
     "@media(max-width:767px){#vaiWindow{top:auto;left:0;right:0;bottom:calc(96px + var(--vai-lift,0px));width:100%;height:max(0px,calc(100dvh - 108px - var(--vai-lift,0px)));border-radius:16px 16px 0 0}.vai-chip{min-height:52px}.vai-hero{padding:16px;gap:12px}}" +
+    "#vaiScrim{display:none;position:fixed;inset:0;background:rgba(9,7,10,.55);backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px);touch-action:none}" +
+    "@media(max-width:767px){#vaiWidget.is-open #vaiScrim{display:block}}" +
+    "#vaiMessages,.vai-hero{overscroll-behavior:contain}" +
     "@media(prefers-reduced-motion:reduce){.vai-td{animation:none}#vaiMessages{scroll-behavior:auto}}";
 
   /* ── 2. Markup ──────────────────────────────────────────────────────── */
   var HTML = '' +
+    '<div id="vaiScrim" aria-hidden="true"></div>' +
     '<button id="vaiBubble" type="button" aria-controls="vaiWindow" aria-haspopup="dialog" aria-expanded="false">' +
       '<span class="vai-face" id="vaiFace" aria-hidden="true"></span>' +
       '<span class="vai-label" aria-hidden="true"><span id="vaiLauncherTitle"></span><small>' + esc(T.kicker) + '</small></span>' +
@@ -433,6 +440,9 @@
     el.send = root.querySelector('#vaiSend');
 
     el.bubble.addEventListener('click', function () { toggle(); });
+    // Tocar fuera cierra, que es lo que hace cualquier hoja en un móvil.
+    var telon = root.querySelector('#vaiScrim');
+    if (telon) telon.addEventListener('click', function () { toggle(false); });
     root.querySelector('.vai-h-x').addEventListener('click', function (e) { e.stopPropagation(); toggle(false); });
     root.querySelector('#vaiSend').addEventListener('click', function () { send(); });
     el.input.addEventListener('keydown', function (e) {
@@ -558,6 +568,39 @@
   }
 
   /* ── 7. Abrir / cerrar ──────────────────────────────────────────────── */
+  // La web de debajo deja de moverse mientras el chat está abierto en móvil: con la
+  // ventana ocupando casi todo el alto, ver el fondo desplazarse desorienta. Se guarda el
+  // `style` inline previo y se restaura tal cual al cerrar — la página no es nuestra.
+  var scrollBloqueado = false, scrollY = 0, estiloPrevio = null;
+  function bloquearFondo(activar) {
+    var movil = window.matchMedia && window.matchMedia('(max-width:767px)').matches;
+    var cuerpo = document.body;
+    if (activar && movil && !scrollBloqueado) {
+      scrollY = window.pageYOffset || document.documentElement.scrollTop || 0;
+      estiloPrevio = cuerpo.getAttribute('style');
+      cuerpo.style.position = 'fixed';
+      cuerpo.style.top = (-scrollY) + 'px';
+      cuerpo.style.left = '0';
+      cuerpo.style.right = '0';
+      cuerpo.style.width = '100%';
+      scrollBloqueado = true;
+    } else if (!activar && scrollBloqueado) {
+      if (estiloPrevio === null) cuerpo.removeAttribute('style');
+      else cuerpo.setAttribute('style', estiloPrevio);
+      estiloPrevio = null;
+      window.scrollTo(0, scrollY);
+      scrollBloqueado = false;
+    }
+  }
+  // Si se gira el móvil o se pasa a escritorio con el chat abierto, el bloqueo sobra.
+  if (window.matchMedia) {
+    try {
+      window.matchMedia('(max-width:767px)').addEventListener('change', function (e) {
+        if (!e.matches) bloquearFondo(false); else if (open) bloquearFondo(true);
+      });
+    } catch (_) {}
+  }
+
   function toggle(force, source, demoKey) {
     open = typeof force === 'boolean' ? force : !open;
 
@@ -571,6 +614,7 @@
 
     el.win.classList.toggle('is-open', open);
     el.root.classList.toggle('is-open', open);
+    bloquearFondo(open);
     el.win.classList.toggle('is-empty', !history.length);
     // El sondeo vive con el panel: al abrir con una conversación en manos de una persona se
     // recupera lo que hayan escrito mientras estaba cerrado; al cerrar, se para.
