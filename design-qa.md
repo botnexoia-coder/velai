@@ -1,21 +1,21 @@
-# Design QA — el chat de Industrias pasa a ser el widget actual (2026-09-16)
+# Design QA — Industrias enseña los dos canales (2026-09-16)
 
-- Origen: la sección Industrias pintaba un chat que ya no usamos — imitación de WhatsApp:
-  barra de estado del móvil, iconos de videollamada/llamada/⋮, dobles ticks azules, verde
-  `#005c4b` y el micrófono en la barra de escribir.
-- Referencia: el widget real abierto en producción (`site/assets/vai-widget.js`, tema
-  oscuro), capturado en estado de conversación para comparar burbuja a burbuja.
-- Implementación: mismos textos, tiempos y conversaciones de las cuatro pestañas; cambia
-  solo la apariencia. Tokens copiados del widget (`--vai-acc #ff914f`, `--vai-l1 #b83e08`,
-  superficie `linear-gradient(145deg,#202736,#111722)`, burbuja del bot `#1b2230`), radio
-  de tarjeta 22 px con borde de acento, burbujas 4/16/16/16 y 16/4/16/16, hora a 11 px con
-  opacidad .6, y barra de escribir con cápsula `#182030` y botón circular de acento con la
-  flecha del widget. Fuera: barra de estado, iconos de llamada, ticks y micrófono.
-- `width:fit-content` en las burbujas reproduce lo que en el widget hace la fila flex: se
-  ajustan al texto y solo parten línea al llegar al 85%.
-- Comprobado en las cuatro pestañas (restaurante, clínica, tienda e inmobiliaria), a 1800 y
-  390 px y en tema claro — la tarjeta sigue siendo oscura en claro, igual que antes y que
-  el widget real con un tenant de tema oscuro.
+- Decisión: el bot vive en WhatsApp Y en la web, y cada canal lo pinta a su manera, así que
+  la sección no puede enseñar una sola apariencia. Mismo diálogo, dos pieles y un
+  interruptor «WhatsApp / Chat web» encima de la tarjeta; el canal elegido se aplica a las
+  cuatro pestañas a la vez, para no tener que volver a pulsarlo en cada sector.
+- Piel WhatsApp: la que ya había (barra de estado del móvil, iconos de llamada, burbujas
+  verdes con cola, dobles ticks azules y micrófono). Piel web: el widget real de
+  `site/assets/vai-widget.js` en tema oscuro, con sus tokens, radios y burbujas.
+  `.indchat-solo-wa` / `.indchat-solo-web` marcan lo que existe en un canal y no en el otro.
+- **Colisión de nombres cazada al mirarlo**: `site/assets/styles.css` ya define `.chat-mock`
+  (el mock de WhatsApp de otras landings) con `max-width:340px; margin-left:auto`, y también
+  existían `.chat-header` y `.chat-avatar` en la propia home. Las clases nuevas heredaban ese
+  ancho y la tarjeta salía a 340 px pegada a la derecha. Todas pasan a `indchat-*`.
+- Segundo tropiezo: el interruptor y la tarjeta eran dos hijos de una rejilla de dos
+  columnas, así que la tarjeta caía a una fila nueva. Van dentro de `.indchat-demo`.
+- Comprobado: las dos pieles en las cuatro pestañas, a 1800 y 390 px, y el interruptor
+  cambiando de canal en vivo. `npm run check:site` en verde.
 - P0/P1/P2 pendientes: ninguno.
 
 final result: passed
