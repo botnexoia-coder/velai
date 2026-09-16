@@ -135,6 +135,8 @@ export interface TenantRow {
   meta_partner_status: string | null;
   sender_status: string | null;
   channels: string | null;
+  /** Mismo resumen que Conexiones; opcional durante la transición de versiones. */
+  connection_summary?: TenantChannel[];
   prompt_len: number;
   lead_count: number;
 }

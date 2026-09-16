@@ -2857,6 +2857,52 @@ test('canales del cliente: ve los suyos sin diagnóstico, el ajeno es 404, y la 
   assert.equal(testing.clienteAllowed(`/api/admin/tenants/${TID}/channels`, 'GET'), true);
 });
 
+test('Clientes y Conexiones comparten el resumen real, con consultas acotadas, alias y sin credenciales', async (t) => {
+  const db = await sqliteD1(); t.after(() => db.close());
+  const linked = '00000000-0000-4000-8000-0000000000a1';
+  const unrouted = '00000000-0000-4000-8000-0000000000a2';
+  const paused = '00000000-0000-4000-8000-0000000000a3';
+  for (const [id, slug, active] of [[linked, 'linked', 1], [unrouted, 'unrouted', 1], [paused, 'paused', 0]]) {
+    await db.prepare(`INSERT INTO tenants (id,slug,name,channel_address,active,system_prompt,created_at,updated_at)
+      VALUES (?,?,?,?,?,'contexto','2026-09-16','2026-09-16')`).bind(id, slug, slug, `web:${slug}`, active).run();
+  }
+  await db.prepare(`UPDATE tenants SET telegram_chat_id='-123', telegram_chat_title='Equipo vinculado',
+    web_origins='["https://www.example.com"]', twilio_auth_token_enc='SECRET' WHERE id=?`).bind(linked).run();
+  await db.prepare("UPDATE tenants SET sender_sid='XE-own', twilio_from='whatsapp:+34910000001' WHERE id=?").bind(unrouted).run();
+  const queries = [];
+  const env = { DB: { prepare(sql) { queries.push(sql); return db.prepare(sql); } } };
+  const ctx = { waitUntil() {} };
+  const call = (path, scope = VELAI) => testing.adminRouter(adminReq(path), env, ctx, path, new URL('https://x' + path), {}, scope);
+  const response = await (await call('/api/admin/tenants')).json();
+  assert.equal(queries.length, 2, 'lista y enrutado: no se consulta una vez por cliente');
+  for (const row of response.tenants) {
+    const own = await (await call(`/api/admin/tenants/${row.id}/channels`)).json();
+    assert.deepEqual(row.connection_summary, own.channels, row.slug);
+    for (const privateKey of ['sender_sid', 'telegram_chat_id', 'twilio_auth_token_enc', 'system_prompt']) {
+      assert.equal(privateKey in row, false, privateKey);
+    }
+  }
+  const summary = (id, kind) => response.tenants.find((r) => r.id === id).connection_summary.find((c) => c.kind === kind);
+  assert.deepEqual(summary(linked, 'telegram'), { kind: 'telegram', address: 'Equipo vinculado', state: 'live' });
+  assert.equal(summary(linked, 'web').address, 'example.com');
+  assert.equal(summary(linked, 'whatsapp').state, 'off');
+  assert.equal(summary(unrouted, 'whatsapp').state, 'unrouted');
+  assert.equal(summary(paused, 'web').state, 'inactive');
+  const main = response.tenants.find((r) => r.slug === 'velai');
+  assert.equal(summary(main.id, 'messenger').managed_by, 'Velai (Messenger)');
+  const global = await (await call('/api/admin/channels')).json();
+  assert.ok(global.unrouted.some((r) => r.tenant_id === unrouted), 'el detector de GOgestión se conserva con SQL real');
+  await db.prepare(`INSERT INTO tenant_channels (address,tenant_id,kind,created_at)
+    VALUES ('whatsapp:+34910000001',?,'whatsapp','2026-09-16')`).bind(unrouted).run();
+  const resolved = await (await call('/api/admin/channels')).json();
+  assert.ok(!resolved.unrouted.some((r) => r.tenant_id === unrouted), 'la incidencia desaparece al registrar su ruta');
+  assert.equal(resolved.channels.find((r) => r.tenant_id === unrouted).state, 'live');
+  const count = queries.length;
+  await assert.rejects(call('/api/admin/tenants', { role: 'cliente', tenantId: linked }), (e) => e.code === 'not_authorized');
+  await assert.rejects(call('/api/admin/channels', { role: 'cliente', tenantId: linked }), (e) => e.code === 'not_authorized');
+  assert.equal(queries.length, count, 'el cliente no llega a consultar datos globales');
+});
+
 test('canales: la vista diagnostica el enrutado real y delata el sender vivo SIN fila (bot mudo en verde)', async () => {
   const CH = [
     // atendido: fila, cliente activo y el From coincide

@@ -886,6 +886,34 @@ export async function tenantChannelSummary(env, tenant) {
            t.slug, t.name, t.active, t.twilio_from
     FROM tenant_channels c JOIN tenants t ON t.id = c.tenant_id
     WHERE c.tenant_id=?${aliasSql}`).bind(tenant.id, ...aliases).all()).results || [];
+  return summarizeTenantChannels(tenant, rawRows);
+}
+
+// El listado reutiliza la interpretación de Conexiones sin una consulta por cliente.
+// Solo se consultan direcciones y datos de enrutado; nunca credenciales.
+export async function tenantChannelSummaries(env, tenants) {
+  if (!tenants.length) return [];
+  const rows = (await env.DB.prepare(`SELECT c.address, c.kind, c.tenant_id,
+           t.slug, t.name, t.active, t.twilio_from
+    FROM tenant_channels c JOIN tenants t ON t.id = c.tenant_id`).all()).results || [];
+  const byTenant = new Map();
+  const messengerBySlug = new Map();
+  for (const row of rows) {
+    const own = byTenant.get(row.tenant_id) || [];
+    own.push(row);
+    byTenant.set(row.tenant_id, own);
+    if (row.kind === 'messenger') messengerBySlug.set(row.slug, row);
+  }
+  return tenants.map((tenant) => {
+    const aliases = Object.hasOwn(LEGACY_CHANNEL_ALIASES, tenant.slug) ? LEGACY_CHANNEL_ALIASES[tenant.slug] : [];
+    return summarizeTenantChannels(tenant, [
+      ...(byTenant.get(tenant.id) || []),
+      ...aliases.map((slug) => messengerBySlug.get(slug)).filter(Boolean),
+    ]);
+  });
+}
+
+function summarizeTenantChannels(tenant, rawRows) {
   const byKind = Object.create(null);
   for (const raw of rawRows) {
     // Compatibilidad con el fallback y con D1 antiguo: si una fila propia no trae las

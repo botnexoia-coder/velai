@@ -9,7 +9,7 @@ import {
   HttpError, json, NO_STORE, clean, readJson, rateLimited, callAnthropic,
   validateTenant, tenantTokenColumn, assertNotActivePending, assertTeamNotFrom,
   tenantWriteError, syncPrimaryChannel, assertChannelFree, invalidateTenantCache,
-  tenantChannelSummary, handleProvision, panelUserAudit, syncPanelGate,
+  tenantChannelSummary, tenantChannelSummaries, handleProvision, panelUserAudit, syncPanelGate,
   sendTelegramText, escapeHtml, UUID_RE, PANEL_EMAIL_RE, PENDING_RE,
   PROMPT_MIN, PROMPT_MAX, WA_MAX_TOKENS, WA_BODY_LIMIT, reminderHoursFor,
 } from '../app.js';
@@ -22,6 +22,7 @@ tenants.get('/api/admin/tenants', async (c) => {
   // prompt sospechosamente corto se ve desde el listado, sin abrir nada.
   const rows = (await env.DB.prepare(`
     SELECT t.id, t.slug, t.name, t.channel_address, t.active, t.updated_at,
+           t.twilio_from, t.sender_sid, t.telegram_chat_id, t.telegram_chat_title, t.web_origins,
            t.lead_template_sid IS NOT NULL AS has_template,
            t.team_whatsapp IS NOT NULL AS has_team,
            t.twilio_subaccount_sid IS NOT NULL AS has_subaccount,
@@ -34,8 +35,11 @@ tenants.get('/api/admin/tenants', async (c) => {
            length(t.system_prompt) AS prompt_len,
            COUNT(l.id) AS lead_count
     FROM tenants t LEFT JOIN leads l ON l.tenant_id = t.id
-    GROUP BY t.id ORDER BY t.active DESC, t.name ASC`).all()).results;
-  return json({ tenants: rows }, 200, NO_STORE);
+    GROUP BY t.id ORDER BY t.active DESC, t.name ASC`).all()).results || [];
+  const summaries = await tenantChannelSummaries(env, rows);
+  return json({ tenants: rows.map(({ twilio_from, sender_sid, telegram_chat_id, telegram_chat_title, web_origins, ...row }, i) => ({
+    ...row, connection_summary: summaries[i],
+  })) }, 200, NO_STORE);
 });
 
 // ── Catálogo de plantillas (vista «Plantillas», para AMBOS roles) ─────────────

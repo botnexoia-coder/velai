@@ -113,12 +113,12 @@ export function Shell() {
               tiene sección Sistema. Velai la sigue teniendo en Sistema, abajo. */}
           {isCliente ? <Tab to="/plantillas" label="Plantillas" icon={<IcoTemplate />} /> : null}
           {isVelai ? <Tab to="/clientes" label="Clientes" icon={<IcoBriefcase />} /> : null}
-          {isVelai ? <Tab to="/canales" label="Canales" icon={<IcoChannels />} /> : null}
         </nav>
         {isVelai ? (
           <>
             <div className="navlabel">Sistema</div>
-            <nav className="tabs">
+            <nav className="tabs" aria-label="Sistema">
+              <Tab to="/canales" label="Diagnóstico de canales" icon={<IcoChannels />} />
               <Tab to="/plantillas" label="Plantillas" icon={<IcoTemplate />} />
               <Tab to="/configuracion" label="Configuración" icon={<IcoSliders />} />
             </nav>

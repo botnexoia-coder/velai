@@ -1,17 +1,55 @@
 // Los hooks de query, con fixtures que copian la forma real de la API.
 import { QueryClientProvider } from '@tanstack/react-query';
-import { renderHook, waitFor } from '@testing-library/react';
+import { act, renderHook, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { ReactNode } from 'react';
 import { createQueryClient } from '../api/queryClient';
 import { inbox, inboxConThread, leadsPage1, leadsPage2, mockFetch, stats } from '../test/fixtures';
 import { convQs, inboxAlive, leadQs, useInbox, useLeads, useStats, INBOX_IDLE_MS, INBOX_LIVE_MS } from './queries';
+import { useGlobalChannels, useTenantSave, useProvisionStep, useSenderSync, useTelegramUnlink, useVersionRestore } from './queries';
 
 function wrapper({ children }: { children: ReactNode }) {
   return <QueryClientProvider client={createQueryClient()}>{children}</QueryClientProvider>;
 }
 
 afterEach(() => vi.unstubAllGlobals());
+
+it.each(['save', 'create', 'provision', 'sync', 'unlink', 'restore'] as const)('%s refresca el diagnóstico y los resúmenes aunque su caché sea reciente', async (operation) => {
+  const client = createQueryClient();
+  client.setQueryData(['channels'], { channels: [], unrouted: [] });
+  client.setQueryData(['tenants'], { tenants: [] });
+  client.setQueryData(['tenant-channels', 'own'], { channels: [] });
+  client.setQueryData(['tenant-channels', 'alias-parent'], { channels: [] });
+  let reads = 0;
+  vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+    if (String(input) === '/api/admin/channels') {
+      reads++;
+      return new Response(JSON.stringify({ channels: [], unrouted: [{ tenant_id: 'fresh' }] }));
+    }
+    return new Response('{"ok":true}');
+  }));
+  const { result, unmount } = renderHook(() => ({
+    data: useGlobalChannels(), save: useTenantSave(), provision: useProvisionStep(),
+    sync: useSenderSync(), unlink: useTelegramUnlink(), restore: useVersionRestore(),
+  }), { wrapper: ({ children }) => <QueryClientProvider client={client}>{children}</QueryClientProvider> });
+  expect(reads).toBe(0);
+  await act(async () => {
+    if (operation === 'save' || operation === 'create') await result.current.save.mutateAsync({ id: operation === 'create' ? null : 'own', body: {} });
+    if (operation === 'provision') await result.current.provision.mutateAsync({ id: 'own', step: 'sender' });
+    if (operation === 'sync') await result.current.sync.mutateAsync({ id: 'own' });
+    if (operation === 'unlink') await result.current.unlink.mutateAsync({ id: 'own' });
+    if (operation === 'restore') await result.current.restore.mutateAsync({ id: 'own', versionId: 1 });
+  });
+  await waitFor(() => expect(result.current.data.data?.unrouted[0]?.tenant_id).toBe('fresh'));
+  expect(reads).toBe(1);
+  expect(client.getQueryState(['tenants'])?.isInvalidated).toBe(true);
+  if (operation !== 'create') {
+    expect(client.getQueryState(['tenant-channels', 'own'])?.isInvalidated).toBe(true);
+    expect(client.getQueryState(['tenant-channels', 'alias-parent'])?.isInvalidated).toBe(true);
+  }
+  unmount();
+  client.clear();
+});
 
 describe('useStats', () => {
   it('trae las métricas con el desglose por canal y las fuentes del filtro', async () => {

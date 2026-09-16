@@ -3,7 +3,9 @@
 > Escrito el 2026-09-16 a petición de Juan: «no está retroalimentándose cuando se crean
 > los canales… pero antes validemos si sí aporta algo al software o cómo lo podemos
 > mejorar». Primero el diagnóstico —con los números de producción delante—, después las
-> opciones. **Nada de esto está implementado**: la decisión es de Juan.
+> opciones. **Decisión aprobada e implementada:** conservar el diagnóstico en Sistema,
+> llevar las incidencias al Dashboard y el resumen de conexiones a Clientes. Véase §9.
+> Las cifras de producción de §2 corresponden al diagnóstico original, no a una nueva consulta.
 
 ---
 
@@ -59,11 +61,11 @@ vista —o vuelves antes de esos 15 s— ves lo viejo sin ningún aviso.
 
 ## 4. ¿Aporta algo? Sí, pero no lo que su nombre promete
 
-**Lo que solo ella hace hoy**, y vale:
+**Los diagnósticos que reúne**, y valen:
 
 - **`unrouted`**: sender vivo en Twilio sin fila que lo enrute. Nació de un incidente real
-  y es el único sitio donde se ve.
-- **`orphan`**: una fila cuyo cliente ya no existe, que seguiría capturando mensajes.
+  y también se ve por cliente en Conexiones.
+- **`orphan`**: una fila cuyo cliente ya no existe; no puede resolver un cliente activo.
 - **`from_mismatch`**: la fila enruta una dirección y el `twilio_from` del cliente es otra
   — mensajes que entran por un número y salen por otro.
 
@@ -131,8 +133,8 @@ volver a parecer rota.
 - [ ] Endpoint o reutilización de `/api/admin/channels` para quedarse solo con `unrouted`
       + `orphan` + `from_mismatch` (la consulta ya existe).
 - [ ] Tira de aviso en el Dashboard (solo rol Velai) con enlace a la ficha del cliente.
-- [ ] Borrar `Canales.tsx`, su entrada de navegación, `lib/canales.ts` y sus tests; revisar
-      que `CHST`/`channelsBad` no los use nadie más.
+- [ ] Si se retirara la vista, eliminar solo sus piezas exclusivas. `lib/canales.ts`
+      es compartido con Conexiones y no se puede borrar entero.
 - [ ] Un test que falle si un cliente con sender propio y sin fila deja de salir en el aviso
       — es el guardián del incidente de GOgestión, y no puede perderse en la mudanza.
 
@@ -144,3 +146,34 @@ volver a parecer rota.
 - [ ] Invalidar `['channels']` en `invalidateConexiones` y en las mutaciones de cliente.
 - [ ] Tests: un cliente con Telegram vinculado aparece con su canal; uno sin WhatsApp
       aparece en `off`, no ausente.
+
+## 9. Decisión aprobada y resultado
+
+Se aplica una variante de A junto con C, conservando la herramienta técnica. Las
+opciones y recomendación originales de §5–8 quedan como contexto de la decisión.
+
+- **Dashboard (solo Velai):** muestra `unrouted` de clientes activos, `from_mismatch`
+  y `orphan`, con enlaces al WhatsApp del cliente o al registro huérfano del diagnóstico.
+  Las pausas deliberadas no se cuentan como averías. Un fallo de consulta se muestra
+  como tal, nunca como «sin incidencias».
+- **Sistema → Diagnóstico de canales:** conserva `/canales`, sus filtros y la tabla
+  física. Incluye Actualizar, hora de última consulta y accesos a Conexiones y a la ficha.
+  «Enrutado» describe la configuración, no una prueba de entrega. El filtro de estado
+  ya no oculta los números sin enrutar; la búsqueda y el filtro de cliente sí los acotan.
+- **Clientes:** sustituye la dirección primaria por el resumen de Web, WhatsApp,
+  Messenger y avisos de Telegram. Distingue lo configurado de lo que falta y enlaza
+  a Conexiones. No hay una tercera pantalla de inventario.
+- **Conexiones:** separa «Canales de conversación» y «Destinos de avisos». Los enlaces
+  `?t=<id>` seleccionan el negocio y `#whatsapp` lleva a su tarjeta. Un cliente inexistente
+  muestra un error; el rol cliente sigue limitado a su propio negocio.
+- **Datos compartidos:** Clientes y Conexiones usan el mismo resumen, incluido el
+  fallback histórico y el alias Messenger de Velai. El listado usa dos consultas en total,
+  independientemente del número de clientes; no necesita migraciones de datos.
+- **Refresco:** invalidación tras guardar, crear, restaurar, aprovisionar o modificar
+  conexiones; sondeo cada 30 s con las vistas visibles y actualización al recuperar el foco
+  si los datos están obsoletos. Los resúmenes de alias también se invalidan.
+
+Verificación incorporada: SQL real para igualdad de resúmenes, alias, estados y aislamiento;
+tests del Dashboard, filtros, actualización manual e invalidaciones; recorrido de navegador
+Dashboard → Diagnóstico → Conexiones → incidencia resuelta y sondeo de cambios externos.
+Las pruebas de navegador usan API simulada y no envían mensajes a clientes ni tocan producción.

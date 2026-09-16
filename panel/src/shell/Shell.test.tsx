@@ -1,7 +1,7 @@
 // El shell: la navegación la decide el rol (velai ve todo; el cliente solo lo suyo) y
 // el tema de las vistas se conmuta y persiste por pestaña.
 import { QueryClientProvider } from '@tanstack/react-query';
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -15,9 +15,10 @@ import type { Me } from '../api/types';
 function renderApp(me: Me, path = '/') {
   vi.stubGlobal(
     'fetch',
-    mockFetch({
+    vi.fn(mockFetch({
       '/api/admin/me': me,
       '/api/admin/stats': stats,
+      '/api/admin/channels': { channels: [], unrouted: [] },
       '/api/admin/tenants': tenants,
       '/api/admin/leads': leadsPage1,
       '/api/admin/inbox': inbox,
@@ -25,7 +26,7 @@ function renderApp(me: Me, path = '/') {
       '/api/admin/escalations': { escalations: [] },
       '/api/admin/ai-usage': { days: 30, total: { cost: 0, calls: 0, tokens: 0 }, clientes: [], porDia: [], moneda: 'USD' },
       '/api/admin/ai-balance': { month: '2026-08', included: 1, used: 0, remaining: 1, pct: 0, over: false, usedToday: 0, calls: 0, serie: [] },
-    }),
+    })),
   );
   return render(
     <QueryClientProvider client={createQueryClient()}>
@@ -49,6 +50,7 @@ describe('shell y navegación por rol', () => {
     renderApp(meVelai);
     await waitFor(() => expect(screen.getByRole('tab', { name: /clientes/i })).toBeInTheDocument());
     expect(screen.getByRole('tab', { name: /canales/i })).toBeInTheDocument();
+    expect(within(screen.getByRole('navigation', { name: 'Sistema' })).getByRole('tab', { name: 'Diagnóstico de canales' })).toBeInTheDocument();
     expect(screen.getByRole('tab', { name: /configuración/i })).toBeInTheDocument();
     expect(document.body.classList.contains('cliente')).toBe(false);
   });
@@ -67,6 +69,7 @@ describe('shell y navegación por rol', () => {
     expect(screen.queryByRole('tab', { name: /canales/i })).toBeNull();
     expect(screen.queryByRole('tab', { name: /configuración/i })).toBeNull();
     expect(screen.getByText('Barbería López')).toBeInTheDocument();
+    expect(vi.mocked(fetch).mock.calls.some(([url]) => String(url).includes('/api/admin/channels'))).toBe(false);
   });
 
   it('el tema de las vistas se conmuta y se recuerda POR PESTAÑA (sessionStorage)', async () => {

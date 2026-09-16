@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { ApiError } from '../api/client';
 import { traducir } from '../api/errors';
 import { Brow, DayChart } from '../components/Bars';
+import { ChannelAlerts } from '../components/ChannelAlerts';
 import { miles, usd } from '../lib/format';
 import { useAiBalance, useAiUsage, useMe, useStats } from '../hooks/queries';
 import type { AiBalance, AiUsage, Stats } from '../api/types';
@@ -29,6 +30,7 @@ export function Dashboard() {
         </div>
       </div>
       {statsError ? <p className="error">{traducir(statsError)}</p> : null}
+      {isVelai ? <ChannelAlerts /> : null}
       <Metricas stats={stats} isVelai={isVelai} />
       {isCliente ? <SaldoIa /> : null}
       <div className="chartcard">

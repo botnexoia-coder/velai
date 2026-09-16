@@ -68,12 +68,17 @@ export function useMe() {
 }
 
 /** Lista de clientes — SOLO para velai (clienteAllowed no incluye GET /tenants). */
-export function useTenants(enabled: boolean) {
+export const CONNECTIONS_POLL_MS = 30_000;
+
+export function useTenants(enabled: boolean, live = false) {
+  const client = useQueryClient();
   return useQuery({
     queryKey: ['tenants'],
-    queryFn: () => api<TenantsResponse>('/api/admin/tenants'),
+    queryFn: () => api<TenantsResponse>('/api/admin/tenants', undefined, { quiet: quietRefetch(client, ['tenants']) }),
     enabled,
-    staleTime: 60_000,
+    staleTime: live ? 15_000 : 60_000,
+    refetchInterval: live ? CONNECTIONS_POLL_MS : false,
+    refetchOnWindowFocus: live,
   });
 }
 
@@ -294,11 +299,14 @@ export function useTenantDetail(id: string | null) {
 }
 
 function invalidateTenant(client: QueryClient, id: string | null | undefined) {
-  void client.invalidateQueries({ queryKey: ['tenants'] });
   if (id) {
+    invalidateConexiones(client, id);
     void client.invalidateQueries({ queryKey: ['tenant-detail', id] });
     void client.invalidateQueries({ queryKey: ['tenant-versions', id] });
     void client.invalidateQueries({ queryKey: ['tenant-provision', id] });
+  } else {
+    void client.invalidateQueries({ queryKey: ['tenants'] });
+    void client.invalidateQueries({ queryKey: ['channels'] });
   }
 }
 
@@ -396,26 +404,35 @@ export function useProvisionStep() {
 
 // ── Conexiones: Telegram, WhatsApp, canales del tenant, avisos, logo ─────────
 export function useTenantTelegram(id: string | null) {
+  const client = useQueryClient();
   return useQuery({
     queryKey: ['tenant-telegram', id],
-    queryFn: () => api<TelegramInfoResponse>(`/api/admin/tenants/${id}/telegram`),
+    queryFn: () => api<TelegramInfoResponse>(`/api/admin/tenants/${id}/telegram`, undefined, { quiet: quietRefetch(client, ['tenant-telegram', id]) }),
     enabled: Boolean(id),
+    refetchInterval: CONNECTIONS_POLL_MS,
+    refetchOnWindowFocus: true,
   });
 }
 
 export function useTenantChannels(id: string | null) {
+  const client = useQueryClient();
   return useQuery({
     queryKey: ['tenant-channels', id],
-    queryFn: () => api<{ channels: TenantChannel[] }>(`/api/admin/tenants/${id}/channels`),
+    queryFn: () => api<{ channels: TenantChannel[] }>(`/api/admin/tenants/${id}/channels`, undefined, { quiet: quietRefetch(client, ['tenant-channels', id]) }),
     enabled: Boolean(id),
+    refetchInterval: CONNECTIONS_POLL_MS,
+    refetchOnWindowFocus: true,
   });
 }
 
 export function useTenantWhatsapp(id: string | null) {
+  const client = useQueryClient();
   return useQuery({
     queryKey: ['tenant-whatsapp', id],
-    queryFn: () => api<WhatsappInfoResponse>(`/api/admin/tenants/${id}/whatsapp`),
+    queryFn: () => api<WhatsappInfoResponse>(`/api/admin/tenants/${id}/whatsapp`, undefined, { quiet: quietRefetch(client, ['tenant-whatsapp', id]) }),
     enabled: Boolean(id),
+    refetchInterval: CONNECTIONS_POLL_MS,
+    refetchOnWindowFocus: true,
   });
 }
 
@@ -432,7 +449,11 @@ export function useTenantHours(id: string | null, isCliente: boolean) {
 }
 
 function invalidateConexiones(client: QueryClient, id: string) {
-  for (const k of ['tenant-telegram', 'tenant-channels', 'tenant-whatsapp', 'tenant-hours'] as const) {
+  void client.invalidateQueries({ queryKey: ['channels'] });
+  void client.invalidateQueries({ queryKey: ['tenants'] });
+  // Un alias de Messenger también cambia el resumen de su negocio principal.
+  void client.invalidateQueries({ queryKey: ['tenant-channels'] });
+  for (const k of ['tenant-telegram', 'tenant-whatsapp', 'tenant-hours'] as const) {
     void client.invalidateQueries({ queryKey: [k, id] });
   }
 }
@@ -635,9 +656,12 @@ export function useAppointments(tenant: string | null, from: string, to: string,
 
 // ── Canales (vista global, solo velai) ───────────────────────────────────────
 export function useGlobalChannels() {
+  const client = useQueryClient();
   return useQuery({
     queryKey: ['channels'],
-    queryFn: () => api<ChannelsResponse>('/api/admin/channels'),
+    queryFn: () => api<ChannelsResponse>('/api/admin/channels', undefined, { quiet: quietRefetch(client, ['channels']) }),
+    refetchInterval: CONNECTIONS_POLL_MS,
+    refetchOnWindowFocus: true,
   });
 }
 

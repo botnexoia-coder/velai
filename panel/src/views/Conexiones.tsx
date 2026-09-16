@@ -2,6 +2,7 @@
 // cada aviso. El cliente abre SU tarjeta; Velai elige tenant con el selector de la
 // cabecera. Tira de estado de canales arriba y dos columnas que fluyen por su cuenta.
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { useSearchParams } from 'react-router';
 import { confirmar, pedirTexto } from '../components/Confirmar';
 import { traducir } from '../api/errors';
 import { ChIcon } from '../components/icons';
@@ -42,12 +43,16 @@ export function Conexiones() {
   const { data: me } = useMe();
   const isVelai = me?.role === 'velai';
   const isCliente = me?.role === 'cliente';
-  const { data: tenants } = useTenants(isVelai === true);
-  const [selected, setSelected] = useState<string | null>(null);
+  const { data: tenants, error: tenantsError } = useTenants(isVelai === true);
+  const [params, setParams] = useSearchParams();
+  const selected = params.get('t');
+  const selectedMissing = Boolean(isVelai && selected && tenants && !tenants.tenants.some((t) => t.id === selected));
 
   const tenantId = isCliente
     ? me?.tenantId ?? null
-    : selected ?? (tenants ? (tenants.tenants.find((t) => t.slug === 'velai') ?? tenants.tenants[0])?.id ?? null : null);
+    : isVelai && tenants && !selectedMissing
+      ? selected ?? (tenants.tenants.find((t) => t.slug === 'velai') ?? tenants.tenants[0])?.id ?? null
+      : null;
 
   return (
     <div>
@@ -59,7 +64,8 @@ export function Conexiones() {
         {isVelai ? (
           <div className="actions actions0">
             <span className="sel">
-              <select value={tenantId ?? ''} onChange={(e) => setSelected(e.target.value)} aria-label="Cliente de las conexiones">
+              <select value={tenantId ?? ''} onChange={(e) => setParams({ t: e.target.value })} aria-label="Cliente de las conexiones">
+                {selectedMissing ? <option value="">Selecciona un cliente</option> : null}
                 {(tenants?.tenants ?? []).map((t) => (
                   <option key={t.id} value={t.id}>
                     {t.name}
@@ -70,6 +76,8 @@ export function Conexiones() {
           </div>
         ) : null}
       </div>
+      {tenantsError ? <p className="error">{traducir(tenantsError)}</p> : null}
+      {selectedMissing ? <p className="error">El cliente del enlace ya no está disponible. Selecciona otro cliente.</p> : null}
       {tenantId ? <ConexionesBody key={tenantId} tenantId={tenantId} isVelai={isVelai === true} isCliente={isCliente === true} /> : null}
     </div>
   );
@@ -85,29 +93,36 @@ function ConexionesBody({ tenantId, isVelai, isCliente }: { tenantId: string; is
     <>
       {/* Tus canales: el worker ya colapsó los estados según el rol; aquí solo se les
           pone palabras. */}
-      <div className="cxtiles">
+      <div className="connection-groups">
         {chError ? (
           <div className="cxtile is-off">
             <span className="cxtm">
               <span className="cxta">{traducir(chError)}</span>
             </span>
           </div>
-        ) : (
-          tiles.map((t) => (
-            <div key={t.kind} className={`cxtile${t.off ? ' is-off' : ''}`}>
-              <span className="cxti">
-                <ChIcon ch={t.kind as ConvChannel} />
-              </span>
-              <span className="cxtm">
-                <span className="cxtn">{t.label}</span>
-                <span className="cxta">{t.address}</span>
-                {t.managedBy ? <span className="cxta">Gestionado como {t.managedBy}</span> : null}
-                <span className={`cxts ${t.stateCls}`}>
-                  <i />
-                  {t.stateLabel}
-                </span>
-              </span>
-            </div>
+        ) : !channels ? <p className="muted">Cargando conexiones…</p> : (
+          [{ label: 'Canales de conversación', notification: false }, { label: 'Destinos de avisos', notification: true }].map((group) => (
+            <section key={group.label} aria-label={group.label}>
+              <h2 className="connection-group-title">{group.label}</h2>
+              <div className="cxtiles">
+                {tiles.filter((t) => (t.kind === 'telegram') === group.notification).map((t) => (
+                  <div key={t.kind} className={`cxtile${t.off ? ' is-off' : ''}`}>
+                    <span className="cxti">
+                      <ChIcon ch={t.kind as ConvChannel} />
+                    </span>
+                    <span className="cxtm">
+                      <span className="cxtn">{t.label}</span>
+                      <span className="cxta">{t.address}</span>
+                      {t.managedBy ? <span className="cxta">Gestionado como {t.managedBy}</span> : null}
+                      <span className={`cxts ${t.stateCls}`}>
+                        <i />
+                        {t.stateLabel}
+                      </span>
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </section>
           ))
         )}
       </div>
@@ -1002,9 +1017,13 @@ function WhatsappBox({
   const [out, setOut] = useState('');
 
   const estado = wa ? waEstado(wa.whatsapp, wa.alerts) : null;
+  const box = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (window.location.hash === '#whatsapp') box.current?.scrollIntoView?.({ block: 'start' });
+  }, [tenantId, Boolean(wa)]);
 
   return (
-    <div className="cxbox">
+    <div className="cxbox" id="whatsapp" ref={box}>
       <span className="cxtitle">WhatsApp del negocio</span>
       <p className="cxsub">La conexión inicial la hacemos juntos en una sesión corta — te avisaremos.</p>
       <div className="cxrow muted">

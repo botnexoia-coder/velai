@@ -94,7 +94,7 @@ const detail: TenantDetailResponse = {
   ],
 };
 
-function renderClientes(onFetch?: (url: string, init?: RequestInit) => Response | null) {
+function renderClientes(onFetch?: (url: string, init?: RequestInit) => Response | null, path = '/') {
   const calls: { url: string; init?: RequestInit }[] = [];
   vi.stubGlobal(
     'fetch',
@@ -126,7 +126,7 @@ function renderClientes(onFetch?: (url: string, init?: RequestInit) => Response 
   const utils = render(
     <QueryClientProvider client={createQueryClient()}>
       <ToastProvider>
-        <MemoryRouter>
+        <MemoryRouter initialEntries={[path]}>
           <Clientes />
         </MemoryRouter>
       </ToastProvider>
@@ -138,12 +138,21 @@ function renderClientes(onFetch?: (url: string, init?: RequestInit) => Response 
 afterEach(() => vi.unstubAllGlobals());
 
 describe('vista Clientes', () => {
+  it('un enlace desde el diagnóstico abre directamente la ficha indicada', async () => {
+    renderClientes(undefined, `/clientes?t=${detailTenant.id}`);
+    const dialog = await screen.findByRole('dialog', { hidden: true });
+    await waitFor(() => expect(within(dialog).getByLabelText('Nombre')).toHaveValue('Barbería López'));
+  });
+
   it('el listado enseña semáforo, medidor de contexto y estado', async () => {
     renderClientes();
     await waitFor(() => expect(screen.getByText('Barbería López')).toBeInTheDocument());
     expect(screen.getByText('1200 car.')).toBeInTheDocument();
     expect(screen.getByText('activo')).toBeInTheDocument();
-    expect(screen.getByText('web')).toBeInTheDocument();
+    expect(screen.getByText('Web · Configurado')).toBeInTheDocument();
+    expect(screen.getByText('WhatsApp · Sin conectar')).toBeInTheDocument();
+    expect(screen.getByText('Telegram · Vinculado')).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Ver conexiones de Barbería López' })).toHaveAttribute('href', `/conexiones?t=${detailTenant.id}`);
     expect(screen.getByRole('button', { name: 'Nuevo cliente' })).toBeInTheDocument();
   });
 
