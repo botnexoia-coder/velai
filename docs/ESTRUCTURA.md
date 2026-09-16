@@ -130,7 +130,7 @@ dashboard, que es del dueño — pasos restantes y verificación en
 | [`TAREAS-PENDIENTES.md`](./TAREAS-PENDIENTES.md) | Pasos manuales pendientes de Juan (cuentas, IDs, terceros) |
 | [`CONTEXTOS-AMPLIOS.md`](./CONTEXTOS-AMPLIOS.md) | Fases 2–4 de contextos (fase 1 consolidada en IMPLEMENTADO.md) |
 | [`PLAN-PANEL.md`](./PLAN-PANEL.md) | Mapa del panel y decisiones cerradas («lo que NO se construye», vocabulario de métricas). El código lo cita como autoridad |
-| [`H1-PANEL.md`](./H1-PANEL.md), [`H2-PANEL.md`](./H2-PANEL.md) | Horizontes con trabajo aún abierto (H1 §3-§5, H2 §1-§3-§5). Lo cerrado salió a `IMPLEMENTADO.md` |
+| [`H1-PANEL.md`](./H1-PANEL.md), [`H2-PANEL.md`](./H2-PANEL.md) | Horizontes con trabajo aún abierto (H1 §3-§5, H2 §1-§2-§3-§5). Lo cerrado salió a `IMPLEMENTADO.md` y se borró de aquí |
 | [`ALTACLIENTE.md`](./ALTACLIENTE.md) | Proceso de alta de un cliente nuevo |
 | [`DEMOS.md`](./DEMOS.md) | Catálogo de `site/demo/` y la convención de carpetas |
 | [`PARA-JOHAN-widget-en-webs-cliente.md`](./PARA-JOHAN-widget-en-webs-cliente.md) | Instrucciones de integración del widget para terceros |
@@ -147,3 +147,10 @@ horizontes cerrados: `H2-BANDEJA.md`, `H2-HANDOFF.md` y `H3-PANEL.md` se borraro
 resumen volcado a `IMPLEMENTADO.md` y sus decisiones abiertas bajadas al backlog.
 `PLAN-PANEL.md` se queda porque es referencia viva, y `H1-PANEL.md`/`H2-PANEL.md` porque
 aún tienen secciones sin construir.
+
+Repasada de nuevo el 2026-09-16, esta vez **dentro** de los docs: se borró
+`SPEC-AUTOAGENDA.md` (construida y desplegada entera), se borró `worker/MIGRACION-HONO.md`
+(migración hecha; el mapa del worker vive en este doc §Arquitectura y en `GUIA-WORKERS.md`
+§2), y de `H1-PANEL.md` y `H2-PANEL.md` se retiraron las secciones ya construidas —
+H1 §1 y §2, H2 §4 — que pasaron a `IMPLEMENTADO.md`. La regla vale también dentro de un
+MD: una sección hecha no se queda ahí marcada como hecha, se va.

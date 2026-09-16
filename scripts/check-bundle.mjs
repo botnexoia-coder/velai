@@ -79,7 +79,7 @@ if (rejections.length) { console.error(`check-bundle: promesas rotas en el arran
 if (!fetched.some((p) => p.startsWith('/api/admin/me'))) { console.error('check-bundle: el arranque no pidió /api/admin/me'); process.exit(1); }
 console.log(`check-bundle OK: panel del bundle arranca (${fetched.length} llamadas de arranque)`);
 
-// ── Página de reservas (SPEC-AUTOAGENDA) ─────────────────────────────────────
+// ── Página de reservas (autoagenda) ─────────────────────────────────────
 // Mismo método y mismo motivo que arriba: se saca el <script> INLINE que produce el
 // bundle y se arranca en un vm con un DOM stub. Aquí el HTML no es una constante sino
 // lo que devuelve reservaPage(), así que la sonda exporta la función y la llama.

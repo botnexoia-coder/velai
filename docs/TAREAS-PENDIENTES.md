@@ -306,7 +306,7 @@ en tres horizontes: [`PLAN-PANEL.md`](./PLAN-PANEL.md) es el mapa y las decision
 - [ ] **Validar en vivo la regla «ESPACIO Y CIERRE»** (Juan, 2026-08-26: «no podemos dejar a un cliente a mitad de una conversación»). La red de seguridad es determinista y está en tests — nadie se queda a mitad, con modelo o sin él. Lo que SOLO se puede validar contra el modelo vivo es la *prevención*: que ante una consulta larga resuma y cierre en vez de empezar a enumerarlo todo. Herramienta: **ficha del cliente → Probar**, con la consulta de NIE de GOgestión que lo destapó. Si aún se va largo, la regla es una cadena de texto en `vai-worker.js`: se endurece y se vuelve a desplegar.
 - [ ] **Vigilar `reply_truncated` en Workers Logs.** Si sale mucho para un cliente, súbele el tope de su canal o aprieta su prompt. Si sale para un cliente que atiende en otro idioma, el cierre de emergencia (en español fijo) hay que hacerlo por tenant.
 - [ ] **Cuando la base pase de 100 MB o KV pase del 50% del cupo diario**, revisar [`VOLUMEN-Y-ALMACENAMIENTO.md`](./VOLUMEN-Y-ALMACENAMIENTO.md) (medido el 2026-08-26: la base entera pesa 332 KB y el cuello real es KV, no D1).
-- [x] **Retención de transcripciones + `/privacidad/`** — 90 días desde el último mensaje (`CONV_RETENTION_DAYS`), uniforme (una conversación con lead no se guarda más), y la política actualizada el 2026-08-26 con la base jurídica de la finalidad nueva. El razonamiento del plazo está en `H1-PANEL.md` §1.
+- [x] **Retención de transcripciones + `/privacidad/`** — 90 días desde el último mensaje (`CONV_RETENTION_DAYS`), uniforme (una conversación con lead no se guarda más), y la política actualizada el 2026-08-26 con la base jurídica de la finalidad nueva. El razonamiento del plazo está en `IMPLEMENTADO.md` §«Historial de conversaciones en D1».
 - [ ] **Coexistence y Embedded Signup: decidir antes de septiembre de 2026** (H3 §1 y §2). El 15 de octubre Meta retira Embedded Signup v2/v3 y `coex` no migra solo. Si el alta sigue siendo acompañada en la consola de Twilio, no toca nada; solo hay que decidirlo a tiempo.
 - [ ] **Verificar contra Twilio en vivo** qué campos devuelve de verdad la aprobación de plantillas (`rejection_reason`, quality rating) antes de escribir la UI de los siete estados (H1 §5). La plantilla de GOgestión sirve de caso.
 - [ ] **Supuestos del ahorro** (H1 §4): confirmar minutos por conversación y coste/hora por defecto. Referencia citable: 6–12 $ por ticket humano (informe de ROI de Intercom).
@@ -411,12 +411,24 @@ no a una segunda ejecución manual:
       propio? (referencia de mercado: 12–31 USD/mes por volumen de citas; cada
       recordatorio es una conversación Utility de Meta — verificar tarifa ES/CO).
 
-**F3 implementada en el repositorio** según
-[`SPEC-AUTOAGENDA.md`](./SPEC-AUTOAGENDA.md): página
-`citas.hirevai.com/{cliente}/reservas`, servicios, embeds y reagendado por token; el chat
-sigue agendando conversando. Pendiente operativa: migrar, validar en staging y activar
-Diálogos con sus tres modalidades de 30 minutos. Futura: **F4** métricas de
-confirmación/cancelación/no-show en dashboard e informe
+**F3 (autoagenda) desplegada y viva**: `citas.hirevai.com/{cliente}/reservas` responde con
+la página de Diálogos y sus tres modalidades; servicios, embeds, .ics y reagendado por token
+incluidos, y el chat sigue agendando conversando. Resumen en
+[`IMPLEMENTADO.md`](./IMPLEMENTADO.md) §Autoagenda. Lo que queda de ella:
+
+- [ ] **Plantilla `confirmacion_reserva`** creada y aprobada por Meta antes de que la
+      confirmación de una reserva salga por WhatsApp. No se reutiliza un recordatorio con
+      otro significado: el mensaje dice algo distinto.
+- [ ] **Embed en la web de Diálogos** (`vai-citas.js`, inline o popup) cuando el enlace a
+      secas lleve una semana sin sustos. Hoy su web solo lleva el widget de chat.
+- [ ] **Precio de la autoagenda**: ¿entra en el plan Profesional, va con Confirmaciones como
+      un mismo addon «Citas», o se cobra aparte? Calendly cobra 10–16 $/usuario/mes por justo
+      esto, y nosotros lo damos con recordatorio por WhatsApp y bot que reagenda encima.
+- [ ] **Vigilar los primeros días**: que ninguna reserva pública se cruce con una del chat
+      (la triple barrera está en tests, pero el tráfico real es el que manda) y que el caché
+      de huecos de 90 s no enseñe una hora ya ocupada.
+
+Futura: **F4** métricas de confirmación/cancelación/no-show en dashboard e informe
 semanal (el no-show exige marcarlo a mano en el panel). Técnica pendiente: unificar
 la plantilla de LEADS (columnas `lead_template_*` de tenants) en `tenant_templates`,
 migrando datos y lectores a la vez.

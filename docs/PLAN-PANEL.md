@@ -8,6 +8,8 @@
 > Este doc es el **mapa**, no la spec. Cada horizonte tiene el suyo:
 > [`H1-PANEL.md`](./H1-PANEL.md) · [`H2-PANEL.md`](./H2-PANEL.md). H3 se cerró el 2026-09-15:
 > su §4 está en [`IMPLEMENTADO.md`](./IMPLEMENTADO.md) y el resto en [`TAREAS-PENDIENTES.md`](./TAREAS-PENDIENTES.md).
+> **Cerrados también H1 §1 y §2 y H2 §4** (los tres en `IMPLEMENTADO.md`); sus secciones se
+> retiraron de los docs de horizonte el 2026-09-16, así que lo que quede ahí es lo que falta.
 > La decisión de almacenamiento que salió de H1 §1 vive aparte, en
 > [`VOLUMEN-Y-ALMACENAMIENTO.md`](./VOLUMEN-Y-ALMACENAMIENTO.md) — sobrevive al horizonte.
 > Cuando un horizonte se cierre: su doc se borra, el resumen va a `IMPLEMENTADO.md` y
@@ -27,7 +29,7 @@ Un cliente que compare tres presupuestos va a echar en falta exactamente esto:
 
 | Hueco | Quién lo tiene | Dónde se arregla |
 | --- | --- | --- |
-| El historial de conversación no se puede leer | Las 8 DIY + Cliengo + Respond.io | H1 · §1 |
+| El historial de conversación no se puede leer | Las 8 DIY + Cliengo + Respond.io | H1 · §1 ✅ hecho |
 | El conocimiento del bot es una caja de texto (`system_prompt`) | Tidio, Wati, Kommo, Chatfuel, HubSpot, Zendesk | H2 · §1 (= fase 2 de `CONTEXTOS-AMPLIOS.md`) |
 | Las plantillas de WhatsApp se ven a medias (estado binario) | Respond.io, Landbot, ManyChat | H1 · §5 |
 
@@ -52,7 +54,7 @@ sitio comercial**. Antes de construir nada nuevo, conviene que se vean.
 
 | Apuesta | Estado del mercado | Horizonte |
 | --- | --- | --- |
-| Informe periódico automático al dueño | Solo Fin (correo). **Nadie** en España ni LatAm | H1 · §2 |
+| Informe periódico automático al dueño | Solo Fin (correo). **Nadie** en España ni LatAm | H1 · §2 ✅ hecho |
 | Métricas del negocio, no del bot | Solo Bookline y 1MillionBot | H1 · §4 |
 | Lo que el bot no supo contestar, enlazado a las conversaciones | Fin, Gorgias, Ada, Zendesk (los cuatro grandes) | H2 · §2 |
 | Un panel distinto por vertical | Nadie enseña métricas de clínica/taller/gestoría | H2 · §5 |

@@ -7,10 +7,67 @@
 > terceros) y en [`CONTEXTOS-AMPLIOS.md`](./CONTEXTOS-AMPLIOS.md) (fases 2–4).
 >
 > Docs vivos que NO se consolidan: `OPERATIONS.md`, `GUIA-WORKERS.md`,
-> `STACK-TECNOLOGICO.md`, `ALTACLIENTE.md`, `PARA-JOHAN-widget-en-webs-cliente.md`
-> y los de marketing (`links-strategy.md`, `backlinks-plan.md`, `pauta-anuncios.md`).
+> `STACK-TECNOLOGICO.md`, `ESTRUCTURA.md`, `ALTACLIENTE.md`, `DEMOS.md`,
+> `VOLUMEN-Y-ALMACENAMIENTO.md`, `VERIFICACION-GOOGLE.md`,
+> `PARA-JOHAN-widget-en-webs-cliente.md` y los de marketing (`links-strategy.md`,
+> `backlinks-plan.md`, `pauta-anuncios.md`).
+>
+> **Repaso del 2026-09-16**: la regla se aplicó también DENTRO de los docs. Se borró
+> `SPEC-AUTOAGENDA.md` entera y se retiraron de `H1-PANEL.md` sus §1 y §2 y de
+> `H2-PANEL.md` su §4; las tres cosas están resumidas abajo. Fuera de `docs/` se borró
+> `worker/MIGRACION-HONO.md`: la migración está hecha y el mapa del worker vive en
+> `ESTRUCTURA.md` §Arquitectura y en `GUIA-WORKERS.md` §2.
 
 ---
+
+## Autoagenda: página de reserva pública, servicios y embeds (`SPEC-AUTOAGENDA.md`, 2026-09-15/16, migraciones 0034/0035/0036)
+
+La **F3** que SPEC-CONFIRMACIONES dejó anotada: una superficie de reserva **sin
+conversación**, para el visitante que no quiere escribir. El chat sigue agendando
+conversando — eso es lo que nos distingue de Calendly y no se toca; el enlace es la otra
+mitad del mismo embudo. Las cuatro fases de la spec están construidas y desplegadas:
+
+- **Núcleo** (`worker/agenda.js`): `monthAvailability()` y `bookAppointment()` extraídos de
+  `calendarExecutor` — el chat y la página llaman al MISMO código. Un mes entero se resuelve
+  con **una** lectura de `events.list` (paginada) y `freeSlots()` puro día a día, con caché KV
+  `calfree:<tenant>:<servicio>:<mes>` de 90 s que `bookAppointment` invalida al reservar. Se
+  siguen leyendo solo `start/end/status/transparency`: ni un título de evento sale de Google.
+- **Servicios** (`0034_servicios.sql`, tab «Reservas online» del panel): catálogo por negocio
+  con duración, modo (presencial/vídeo/teléfono), lugar y descanso. El bot usa la duración del
+  servicio. Horas de inicio **solo a :00 y :30**, nunca hora libre.
+- **Página pública** en `citas.hirevai.com/{cliente}/reservas` (`worker/reserva-page.js` +
+  `worker/routes/reserva.js`): HTML autocontenido con nonce, móvil primero, ES/EN, marca del
+  tenant y marca Velai fija; stepper de tres pasos, .ics propio y `/{cliente}/cita/<token>`
+  para cancelar y **reagendar** (lo que hasta ahora no existía por ningún camino).
+- **Embeds** (`site/assets/vai-citas.js`): iframe inline y popup con la misma página, altura
+  por `postMessage` con origen verificado, y el snippet listo para copiar en el panel. En el
+  chat, la tool `enviar_enlace_reserva` (`worker/calendar.js`) hace que Vai **pregunte una vez**
+  cómo prefiere reservar el visitante en vez de recitar horas.
+
+**El aislamiento se escribió como estructura, no como disciplina** — que era el riesgo real
+de añadir un hostname al mismo worker con `run_worker_first`: `BOOKING_ORIGIN` en los dos
+entornos (fail-closed: sin ella las rutas de reserva **no existen**), `mwBookingHost`
+(`worker/booking-security.js`) delante de todas ellas, el perímetro del panel intacto y tres
+tests que lo clavan: los assets del panel **no** son alcanzables desde el host de citas, las
+rutas admin dan 404 dentro de él, y las de reserva dan 404 fuera. `admin.hirevai.com` quedó
+descartado con la prueba delante (Access corta antes que nuestro código) y el atajo del
+**Bypass de Access no se reabre**: pondría la cerradura del panel de todos los clientes a
+depender de un patrón de path escrito en el dashboard, que ningún test puede ver.
+
+Anti-doble-reserva en tres barreras: relectura del hueco, claim atómico en `booking_claims`
+(0035) que cubre duración **y** descanso, y `UNIQUE(request_id)` con id determinista de evento
+para que un reintento de red no cree una cita gemela. Tope de 3 citas futuras por teléfono —
+una página pública sin eso es un formulario abierto para llenarle la agenda al cliente. El
+`manage_token` es un HMAC truncado: sin token válido, 404, y el id nunca viaja en claro.
+
+**Verificado**: suite **244/244** (incluidos los tres de aislamiento de host, los de
+`monthAvailability` con DST y horario partido, y los del hold que caduca) y la página real
+**mirada** en `citas.hirevai.com/dialogos/reservas` — cabecera de Diálogos, marca Velai y el
+paso 1 de 3 con sus tres modalidades. Migración 0036 preparó el piloto de Diálogos.
+
+**Abierto** (en TAREAS-PENDIENTES): el precio, la plantilla `confirmacion_reserva` por
+aprobar antes de que la confirmación salga por WhatsApp, y colocar el embed en la web de
+Diálogos cuando el enlace lleve una semana sin sustos.
 
 ## Las tres webs que faltaban pasan al loader — 2026-09-16
 
@@ -976,6 +1033,50 @@ principal) — y con la página de WhatsApp senders ya sabemos que el menú de l
 ofrecerla. Meta decide de verdad, pero con Self Sign-up la WABA vive en el Business Manager DEL
 CLIENTE, así que Velai normalmente no la ve: Twilio es la ventana práctica, y el botón del panel evita
 depender de ella.
+## Historial de conversaciones en D1 (`H1-PANEL.md` §1, 2026-08-26, migración 0021)
+
+El cimiento del que colgaba medio plan del panel. La conversación vivía en KV con TTL de 24 h
+y solo los últimos 20 mensajes: cuando un lead salía mal no había forma de mirar qué pasó.
+
+`conversations` + `conv_messages` **sustituyen** a KV, no lo acompañan: los `conv:web:*` y
+`conv:wa:*` se borraron. Repartir el estado entre un almacén caliente y otro frío obliga a
+decidir cuál manda cuando discrepan — el mismo patrón que produjo el «verde en Twilio y mudo
+a la vez» de GOgestión. Además el cuello del sistema estaba en KV (1.000 escrituras/día), no
+en D1, así que el cambio **subió** el techo de conversaciones al día.
+
+Decisiones que sostienen la tabla: `id` propio y no el `conversationId` del widget (lo elige
+el navegador: es entrada de usuario y no puede ser clave primaria), `UNIQUE(tenant_id,
+channel, external_id)` para que el upsert sea idempotente, `unanswered` contado al escribir
+en vez de reprocesando transcripciones, y **sin tope de mensajes por conversación**: en
+WhatsApp la dirección es el teléfono, y un tope enmudecería para siempre a un cliente real.
+Lo que acota ya es suficiente — sesión de 72 h, limitador de 20/min y cupo diario de IA.
+
+Se escribe **por turno** y con `await`, no en `waitUntil`: contar puede fallar sin daño, pero
+recordar no. Sin `env.DB` el chat responde 503 (el mismo contrato que tenía KV: responder sin
+memoria es peor que no responder); si el `batch` falla con la base presente, la respuesta se
+devuelve igual —ya está pagada— y queda `conv_state_not_saved` en los logs. Retención de 90
+días desde el último mensaje, uniforme, con `/privacidad/` actualizada el mismo día.
+
+## Informe semanal al Telegram del cliente (`H1-PANEL.md` §2, 2026-08-26, migración 0022)
+
+El hueco más grande del análisis competitivo: ni un solo proveedor español o latinoamericano
+manda un resumen periódico automático, y los de fuera lo mandan por correo, donde una pyme no
+vive. Velai ya entrega en el Telegram del cliente, así que era infraestructura de salida ya
+pagada.
+
+Cada lunes por la mañana, en la ventana de 24 h que abre a las 07:00 UTC: conversaciones,
+leads, citas y preguntas sin respuesta, **con la comparación de la semana anterior** cuando la
+hay. Cuando no la hay lo dice en vez de pintar un cero — el historial arrancó el 2026-08-26 y
+comparar contra una semana que no existió sería un -100% falso.
+
+Sin cron nuevo: viaja en el de 5 minutos. La idempotencia es una fila de `tenant_reports`
+reservada ANTES de enviar (`status='sending'`) con tope de `attempts`, porque un cron que se
+dispara dos veces no puede mandar dos informes ni reintentar un fallo permanente en cada tick.
+Un cliente sin Telegram vinculado es un `skipped` **visible con su motivo**, no un silencio.
+Interruptor de baja en Conexiones, encendido por defecto. Y el botón **«Enviar informe de
+prueba»** (últimos 7 días, marcado como prueba, sin consumir el envío real de la semana):
+sin él, la única forma de comprobar que funciona era esperar al lunes.
+
 ## Bandeja de conversaciones — responder desde el panel (2026-08-26, `H2-BANDEJA.md`, migraciones 0023/0026/0029)
 
 Pedido de Juan el 2026-08-26: lista de conversaciones con filtros por canal, hilo a la

@@ -1,4 +1,4 @@
--- Autoagenda en STAGING (SPEC-AUTOAGENDA). Datos inventados, como manda seed-staging.sql:
+-- Autoagenda en STAGING. Datos inventados, como manda seed-staging.sql:
 -- aquí NO se copian datos reales de clientes.
 --
 --   npx wrangler@4 d1 execute vai-leads-staging --remote --env staging --file seed/seed-staging-autoagenda.sql
