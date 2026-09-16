@@ -62,7 +62,7 @@ export const CALENDAR_TOOLS = [
 
 export const BOOKING_TOOL = {
   name: 'enviar_enlace_reserva',
-  description: 'Ofrece el calendario visual solo si el cliente lo pide o tras dos intentos sin acordar una hora. Sigue agendando conversando por defecto.',
+  description: 'Envía al cliente el enlace a su calendario visual, donde elige día y hora por su cuenta. Úsala cuando el cliente haya elegido esa vía al preguntarle cómo prefiere reservar.',
   input_schema: { type: 'object', properties: { servicio: { type: 'string', description: 'Slug del servicio elegido, si lo hay' } } },
 };
 export function calendarTools(cal, enabled) { return enabled && cal.booking_enabled ? [...CALENDAR_TOOLS, BOOKING_TOOL] : CALENDAR_TOOLS; }
@@ -75,7 +75,12 @@ export const CALENDAR_GUARDRAILS = [
   '- Antes de usar agendar_cita necesitas SIEMPRE: nombre y teléfono del cliente, y su confirmación de la fecha y hora exactas.',
   '- Tras agendar con éxito, confirma en una frase el día, la hora y el nombre. Si la herramienta devuelve hueco_ocupado, ofrece las alternativas que trae.',
   '- Todas las horas son hora local del negocio. Respeta las reglas y los servicios configurados; pregunta el servicio antes de proponer horas si hay varios.',
-  '- Si el cliente prefiere ver un calendario o lleváis dos intentos sin cuadrar una hora y tienes enviar_enlace_reserva, úsala. Sigue agendando conversando por defecto.',
+  // Decisión de Juan (2026-09-16): en cuanto hay cita sobre la mesa se PREGUNTA por cuál
+  // de las dos vías quiere ir, en vez de reservar el enlace para cuando la conversación
+  // se atasca. Solo aplica si el tenant tiene la página encendida — sin ella la
+  // herramienta ni se le ofrece al modelo (calendarTools).
+  '- Si tienes enviar_enlace_reserva y surge una cita (la pide el cliente, o acepta una que le has propuesto), pregúntale UNA vez cómo prefiere reservar: que le busques tú los huecos aquí mismo, o que abra el calendario y elija él. Una sola frase, con las dos opciones claras.',
+  '- Si elige el calendario, usa enviar_enlace_reserva. Si elige que le ayudes, no contesta a esa pregunta o ya te ha dicho un día y una hora concretos, sigue con consultar_disponibilidad y agendar_cita sin volver a preguntar.',
   '- Si el cliente dice que no puede ir o quiere anular, usa cancelar_cita; si confirma por texto que asistirá, usa confirmar_cita. Ambas localizan la cita por su teléfono: nunca pidas ni inventes identificadores de cita.',
   '- Si la herramienta devuelve varias_citas, pregunta cuál de la lista es y repite la llamada con fecha_hora.',
   '- Tras cancelar una cita, ofrece reagendar ahí mismo: consulta huecos con consultar_disponibilidad y agenda con agendar_cita si el cliente quiere.',

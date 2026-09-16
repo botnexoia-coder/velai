@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { bookingFixture, BOOKING_TEST_TENANT as TID } from './helpers/booking-fixture.js';
 import { testing, processBookingNotifications } from '../worker/app.js';
 import { frameOrigins } from '../worker/booking-security.js';
+import { calendarTools, CALENDAR_GUARDRAILS } from '../worker/calendar.js';
 import { appointmentIcs } from '../worker/reserva-page.js';
 const date = ()=>new Date(Date.now()+7*86400000).toISOString().slice(0,10);
 async function fixture(t){const f=await bookingFixture(),old=globalThis.fetch;globalThis.fetch=f.fetchProvider;t.after(async()=>{await f.close();globalThis.fetch=old;});return f;}
@@ -134,4 +135,18 @@ test('el chat solo emite la tarjeta estructurada desde la tool habilitada del te
  await f.DB.prepare('UPDATE tenant_calendars SET booking_enabled=0 WHERE tenant_id=?').bind(TID).run();
  const disabled=testing.calendarExecutor(f.env,{id:TID,slug:'dialogos'},cal,{channel:'web',conversationKey:'c2',defaultPhone:''});
  assert.equal(JSON.parse(await disabled('enviar_enlace_reserva',{})).error,'tool_desconocida');
+});
+
+test('con la página encendida, la regla es PREGUNTAR cuál de las dos vías; sin ella, ni se menciona',async(t)=>{
+ const f=await fixture(t);
+ const cal=await f.DB.prepare('SELECT * FROM tenant_calendars WHERE tenant_id=?').bind(TID).first();
+ // La herramienta solo se le ofrece al modelo si el tenant tiene la página encendida.
+ const conPagina=calendarTools(cal,true).map((h)=>h.name);
+ assert.ok(conPagina.includes('enviar_enlace_reserva'));
+ assert.ok(!calendarTools({...cal,booking_enabled:0},true).map((h)=>h.name).includes('enviar_enlace_reserva'));
+ // Y el guardrail manda preguntar UNA vez por la vía, no reservar el enlace para cuando
+ // la conversación se atasque (decisión de Juan, 2026-09-16).
+ assert.match(CALENDAR_GUARDRAILS,/pregúntale UNA vez cómo prefiere reservar/);
+ assert.match(CALENDAR_GUARDRAILS,/Si elige el calendario, usa enviar_enlace_reserva/);
+ assert.ok(!/dos intentos sin cuadrar/.test(CALENDAR_GUARDRAILS));
 });
