@@ -1,3 +1,27 @@
+# Design QA — el chat de Industrias pasa a ser el widget actual (2026-09-16)
+
+- Origen: la sección Industrias pintaba un chat que ya no usamos — imitación de WhatsApp:
+  barra de estado del móvil, iconos de videollamada/llamada/⋮, dobles ticks azules, verde
+  `#005c4b` y el micrófono en la barra de escribir.
+- Referencia: el widget real abierto en producción (`site/assets/vai-widget.js`, tema
+  oscuro), capturado en estado de conversación para comparar burbuja a burbuja.
+- Implementación: mismos textos, tiempos y conversaciones de las cuatro pestañas; cambia
+  solo la apariencia. Tokens copiados del widget (`--vai-acc #ff914f`, `--vai-l1 #b83e08`,
+  superficie `linear-gradient(145deg,#202736,#111722)`, burbuja del bot `#1b2230`), radio
+  de tarjeta 22 px con borde de acento, burbujas 4/16/16/16 y 16/4/16/16, hora a 11 px con
+  opacidad .6, y barra de escribir con cápsula `#182030` y botón circular de acento con la
+  flecha del widget. Fuera: barra de estado, iconos de llamada, ticks y micrófono.
+- `width:fit-content` en las burbujas reproduce lo que en el widget hace la fila flex: se
+  ajustan al texto y solo parten línea al llegar al 85%.
+- Comprobado en las cuatro pestañas (restaurante, clínica, tienda e inmobiliaria), a 1800 y
+  390 px y en tema claro — la tarjeta sigue siendo oscura en claro, igual que antes y que
+  el widget real con un tenant de tema oscuro.
+- P0/P1/P2 pendientes: ninguno.
+
+final result: passed
+
+---
+
 # Design QA — la malla cinética llega hasta el final del hero (2026-09-16)
 
 - Origen: Juan marca la banda bajo la cinta de canales; la malla interactiva no la cubría.

@@ -651,7 +651,6 @@
     .industry-features li { display: flex; align-items: center; gap: .6rem; font-size: .88rem; color: var(--muted); }
     .feat-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--orange); flex-shrink: 0; }
     /* industry wa overrides */
-    .industry-content .wa-wrap { border-radius: 14px; }
     .industry-content .wa-body { min-height: 210px; }
 
     /* ── VAI SECTION ── */
@@ -934,79 +933,65 @@
       .cta-btns { flex-direction:column; align-items:center; }
     }
 
-    /* ── WHATSAPP STYLE CHATS ── */
+    /* ── CHAT DE VAI (mock de Industrias) ── */
+    /* Es la MISMA apariencia que el widget real de `site/assets/vai-widget.js` en su
+       tema oscuro: tokens, radios, burbujas y barra de escritura copiados de ahí. Antes
+       esto imitaba WhatsApp (barra de estado del móvil, iconos de llamada, dobles ticks
+       y verde #005c4b), que es un chat que ya no usamos. */
     .wa-wrap {
-      border-radius: 16px; overflow: hidden;
-      box-shadow: 0 20px 50px rgba(0,0,0,0.5);
-      font-family: -apple-system, 'Segoe UI', sans-serif;
-    }
-    .wa-status-bar {
-      background: #1f2c34; padding: 4px 12px;
-      display: flex; align-items: center; justify-content: space-between;
-      font-size: .6rem; color: #8696a0;
+      --chat-acc: #ff914f; --chat-l1: #b83e08; --chat-l2: #662a16;
+      --chat-srf: linear-gradient(145deg,#202736,#111722); --chat-bot: #1b2230;
+      --chat-text: #fff; --chat-muted: #ced7e5;
+      --chat-line: rgba(255,255,255,.08); --chat-in: #182030;
+      border: 1px solid var(--chat-acc); border-radius: 22px; overflow: hidden;
+      background: var(--chat-srf); color: var(--chat-text);
+      box-shadow: 0 20px 60px rgba(0,0,0,.35);
     }
     .wa-header {
-      background: #202c33;
       display: flex; align-items: center; gap: 10px;
-      padding: 8px 12px;
+      min-height: 52px; padding: 8px 14px; border-bottom: 1px solid var(--chat-line);
     }
     .wa-avatar {
-      width: 36px; height: 36px; border-radius: 50%;
-      background: var(--orange);
-      display: flex; align-items: center; justify-content: center;
-      font-size: .8rem; font-weight: 700; color: #fff; flex-shrink: 0;
+      position: relative; width: 32px; height: 32px; flex: none;
+      border-radius: 50%; background: var(--chat-l1);
+      display: grid; place-items: center; font-size: .85rem; font-weight: 800; color: #fff;
     }
-    .wa-contact-name { font-size: .82rem; font-weight: 600; color: #e9edef; }
-    .wa-contact-status { font-size: .65rem; color: #8696a0; }
-    .wa-icons { display:flex; gap:18px; margin-left:auto; font-size:.85rem; color:#8696a0; }
+    .wa-avatar::after {
+      content: ''; position: absolute; right: 0; bottom: 0; width: 8px; height: 8px;
+      border: 2px solid var(--chat-bot); border-radius: 50%; background: var(--chat-acc);
+    }
+    .wa-contact-name { font-size: .875rem; font-weight: 700; color: var(--chat-text); }
+    .wa-contact-status { font-size: .625rem; letter-spacing: .05em; color: var(--chat-muted); }
+    .wa-close { margin-left: auto; color: var(--chat-muted); font-size: 1.1rem; line-height: 1; }
     .wa-body {
-      background: #0d1117;
-      background-image: url("data:image/svg+xml,%3Csvg width='60' height='60' viewBox='0 0 60 60' xmlns='http://www.w3.org/2000/svg'%3E%3Cg fill='none' fill-rule='evenodd'%3E%3Cg fill='%23ffffff' fill-opacity='0.015'%3E%3Cpath d='M36 34v-4h-2v4h-4v2h4v4h2v-4h4v-2h-4zm0-30V0h-2v4h-4v2h4v4h2V6h4V4h-4zM6 34v-4H4v4H0v2h4v4h2v-4h4v-2H6zM6 4V0H4v4H0v2h4v4h2V6h4V4H6z'/%3E%3C/g%3E%3C/g%3E%3C/svg%3E");
-      padding: .8rem;
-      display: flex; flex-direction: column; gap: 6px;
+      padding: 20px 16px; display: flex; flex-direction: column; gap: 10px;
       min-height: 260px;
     }
-    .wa-date { text-align:center; margin: 4px 0; }
-    .wa-date span { background:#182229; color:#8696a0; font-size:.6rem; padding:3px 10px; border-radius:6px; }
-    .wa-msg-v {
-      background: #202c33; border-radius: 0 8px 8px 8px;
-      padding: 7px 9px 5px; font-size: .72rem; color: #e9edef;
-      line-height: 1.5; max-width: 86%; position: relative;
-    }
-    .wa-msg-v::before {
-      content:''; position:absolute; left:-6px; top:0;
-      border:6px solid transparent;
-      border-right-color:#202c33; border-top-color:#202c33;
-    }
+    .wa-date { text-align: center; margin: 0; }
+    .wa-date span { color: var(--chat-muted); font-size: .6rem; letter-spacing: .08em; text-transform: uppercase; }
+    /* `width:fit-content` es lo que en el widget hace la fila flex: la burbuja se
+       ajusta al texto y solo al llegar al 85% parte la línea. */
+    .wa-msg-v, .wa-msg-u { max-width: 85%; width: fit-content; padding: 10px 12px 6px; font-size: .875rem; line-height: 1.5; }
+    .wa-msg-v { align-self: flex-start; }
+    .wa-msg-v { background: var(--chat-bot); border-radius: 4px 16px 16px 16px; color: var(--chat-text); }
     .wa-msg-u {
-      background: #005c4b; border-radius: 8px 0 8px 8px;
-      padding: 7px 9px 5px; font-size: .72rem; color: #e9edef;
-      line-height: 1.5; max-width: 82%; align-self: flex-end; position: relative;
+      align-self: flex-end; color: #fff; border-radius: 16px 4px 16px 16px;
+      background: linear-gradient(135deg, var(--chat-l1), var(--chat-l2));
     }
-    .wa-msg-u::before {
-      content:''; position:absolute; right:-6px; top:0;
-      border:6px solid transparent;
-      border-left-color:#005c4b; border-top-color:#005c4b;
-    }
-    .wa-time { font-size:.56rem; color:#aebbc2; text-align:right; margin-top:2px; }
-    .wa-msg-u .wa-time { color:#c5d9d4; }
-    .wa-tick { color:#53bdeb; }
-    .wa-action {
-      font-size:.62rem; color:#8696a0; text-align:center;
-      padding:4px 10px; background:rgba(0,0,0,0.35); border-radius:7px;
-      margin-top:4px; align-self:center;
-    }
+    .wa-time { margin-top: 4px; font-size: .68rem; opacity: .6; text-align: right; }
+    .wa-action { align-self: center; color: var(--chat-muted); font-size: .7rem; text-align: center; }
     .wa-footer {
-      background:#202c33; padding:7px 10px;
-      display:flex; align-items:center; gap:8px;
+      display: flex; align-items: center; gap: 8px;
+      padding: 14px 16px; border-top: 1px solid var(--chat-line);
     }
     .wa-input {
-      flex:1; background:#2a3942; border-radius:20px;
-      padding:6px 12px; font-size:.68rem; color:#b9c6cc;
+      flex: 1; min-height: 44px; display: flex; align-items: center;
+      padding: 10px 16px; border-radius: 22px;
+      background: var(--chat-in); color: var(--chat-muted); font-size: .8rem;
     }
     .wa-send {
-      width:32px; height:32px; border-radius:50%;
-      background:#00a884; display:flex; align-items:center; justify-content:center; font-size:.75rem;
+      display: grid; place-items: center; width: 44px; height: 44px; flex: none;
+      border-radius: 50%; background: var(--chat-acc); color: #172033;
     }
 
     /* ── LIGHT MODE ── */
@@ -1255,22 +1240,21 @@
         </ul>
       </div>
       <div class="wa-wrap">
-        <div class="wa-status-bar"><span>21:30</span><span>▋▋▋ WiFi ●</span></div>
         <div class="wa-header">
           <div class="wa-avatar">🍷</div>
           <div><div class="wa-contact-name">Vai · La Trattoria</div><div class="wa-contact-status">● en línea</div></div>
-          <div class="wa-icons"><span>📹</span><span>📞</span><span>⋮</span></div>
+          <div class="wa-close" aria-hidden="true">✕</div>
         </div>
         <div class="wa-body">
           <div class="wa-date"><span>Hoy</span></div>
           <div class="wa-msg-v">¡Hola! Soy Vai 🍷 ¿Te ayudo con una reserva o consultas la carta?<div class="wa-time">21:30</div></div>
-          <div class="wa-msg-u">Mesa para 2 esta noche a las 21:30<div class="wa-time">21:31 <span class="wa-tick">✓✓</span></div></div>
+          <div class="wa-msg-u">Mesa para 2 esta noche a las 21:30<div class="wa-time">21:31</div></div>
           <div class="wa-msg-v">Tengo disponible esta noche a las 21:30. ¿A nombre de quién confirmo?<div class="wa-time">21:31</div></div>
-          <div class="wa-msg-u">Ana García<div class="wa-time">21:31 <span class="wa-tick">✓✓</span></div></div>
+          <div class="wa-msg-u">Ana García<div class="wa-time">21:31</div></div>
           <div class="wa-msg-v">✅ <strong>Mesa para 2 a las 21:30, Ana.</strong> ¡Te esperamos esta noche!<div class="wa-time">21:31</div></div>
           <div class="wa-action">🔒 Reserva confirmada · Sala notificada</div>
         </div>
-        <div class="wa-footer"><div class="wa-input">Escribe un mensaje</div><div class="wa-send">🎤</div></div>
+        <div class="wa-footer"><div class="wa-input">Cuéntame qué necesitas…</div><div class="wa-send" aria-hidden="true"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 19V5m-6 6 6-6 6 6"/></svg></div></div>
       </div>
     </div>
 
@@ -1288,22 +1272,21 @@
         </ul>
       </div>
       <div class="wa-wrap">
-        <div class="wa-status-bar"><span>10:02</span><span>▋▋▋ WiFi ●</span></div>
         <div class="wa-header">
           <div class="wa-avatar">🩺</div>
           <div><div class="wa-contact-name">Vai · Clínica Salud+</div><div class="wa-contact-status">● en línea</div></div>
-          <div class="wa-icons"><span>📹</span><span>📞</span><span>⋮</span></div>
+          <div class="wa-close" aria-hidden="true">✕</div>
         </div>
         <div class="wa-body">
           <div class="wa-date"><span>Hoy</span></div>
           <div class="wa-msg-v">Hola, soy Vai 🩺 ¿En qué puedo ayudarte hoy?<div class="wa-time">10:02</div></div>
-          <div class="wa-msg-u">Necesito cita con el Dr. Martín esta semana<div class="wa-time">10:03 <span class="wa-tick">✓✓</span></div></div>
+          <div class="wa-msg-u">Necesito cita con el Dr. Martín esta semana<div class="wa-time">10:03</div></div>
           <div class="wa-msg-v">El Dr. Martín tiene disponible:<br>📅 <strong>Miércoles 14</strong> a las 10:00<br>📅 <strong>Viernes 16</strong> a las 16:30<br>¿Cuál prefieres?<div class="wa-time">10:03</div></div>
-          <div class="wa-msg-u">El miércoles perfecto 👍<div class="wa-time">10:04 <span class="wa-tick">✓✓</span></div></div>
+          <div class="wa-msg-u">El miércoles perfecto 👍<div class="wa-time">10:04</div></div>
           <div class="wa-msg-v">✅ <strong>Cita confirmada, miércoles 14 a las 10:00.</strong> Recibirás recordatorio 24h antes.<div class="wa-time">10:04</div></div>
           <div class="wa-action">🔒 Cita agendada · Dr. Martín notificado</div>
         </div>
-        <div class="wa-footer"><div class="wa-input">Escribe un mensaje</div><div class="wa-send">🎤</div></div>
+        <div class="wa-footer"><div class="wa-input">Cuéntame qué necesitas…</div><div class="wa-send" aria-hidden="true"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 19V5m-6 6 6-6 6 6"/></svg></div></div>
       </div>
     </div>
 
@@ -1321,22 +1304,21 @@
         </ul>
       </div>
       <div class="wa-wrap">
-        <div class="wa-status-bar"><span>23:14</span><span>▋▋▋ WiFi ●</span></div>
         <div class="wa-header">
           <div class="wa-avatar">👟</div>
           <div><div class="wa-contact-name">Vai · StyleShop</div><div class="wa-contact-status">● en línea</div></div>
-          <div class="wa-icons"><span>📹</span><span>📞</span><span>⋮</span></div>
+          <div class="wa-close" aria-hidden="true">✕</div>
         </div>
         <div class="wa-body">
           <div class="wa-date"><span>Hoy</span></div>
           <div class="wa-msg-v">¡Hola! Soy Vai 👟 ¿Qué estás buscando hoy?<div class="wa-time">23:14</div></div>
-          <div class="wa-msg-u">Zapatillas blancas talla 42, máximo 80€<div class="wa-time">23:14 <span class="wa-tick">✓✓</span></div></div>
+          <div class="wa-msg-u">Zapatillas blancas talla 42, máximo 80€<div class="wa-time">23:14</div></div>
           <div class="wa-msg-v">Tengo 3 opciones perfectas entre 45€ y 79€. ¿Te las envío con fotos?<div class="wa-time">23:15</div></div>
-          <div class="wa-msg-u">Sí, la segunda me gusta, la quiero 🙌<div class="wa-time">23:15 <span class="wa-tick">✓✓</span></div></div>
+          <div class="wa-msg-u">Sí, la segunda me gusta, la quiero 🙌<div class="wa-time">23:15</div></div>
           <div class="wa-msg-v">✅ <strong>Pedido listo.</strong> Te mando el enlace de pago seguro. Entrega en 24-48h 📦<div class="wa-time">23:15</div></div>
           <div class="wa-action">🔒 Pedido creado · Almacén notificado</div>
         </div>
-        <div class="wa-footer"><div class="wa-input">Escribe un mensaje</div><div class="wa-send">🎤</div></div>
+        <div class="wa-footer"><div class="wa-input">Cuéntame qué necesitas…</div><div class="wa-send" aria-hidden="true"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 19V5m-6 6 6-6 6 6"/></svg></div></div>
       </div>
     </div>
 
@@ -1354,22 +1336,21 @@
         </ul>
       </div>
       <div class="wa-wrap">
-        <div class="wa-status-bar"><span>19:47</span><span>▋▋▋ WiFi ●</span></div>
         <div class="wa-header">
           <div class="wa-avatar">🏠</div>
           <div><div class="wa-contact-name">Vai · Inmobiliaria Clave</div><div class="wa-contact-status">● en línea</div></div>
-          <div class="wa-icons"><span>📹</span><span>📞</span><span>⋮</span></div>
+          <div class="wa-close" aria-hidden="true">✕</div>
         </div>
         <div class="wa-body">
           <div class="wa-date"><span>Hoy</span></div>
           <div class="wa-msg-v">Hola, soy Vai 🏠 ¿Buscas comprar, alquilar o vender?<div class="wa-time">19:47</div></div>
-          <div class="wa-msg-u">Alquiler en Sevilla, máximo 900€, 2 habitaciones<div class="wa-time">19:48 <span class="wa-tick">✓✓</span></div></div>
+          <div class="wa-msg-u">Alquiler en Sevilla, máximo 900€, 2 habitaciones<div class="wa-time">19:48</div></div>
           <div class="wa-msg-v">Tengo 4 pisos perfectos. ¿Te envío las fichas con fotos ahora?<div class="wa-time">19:48</div></div>
-          <div class="wa-msg-u">Sí, el tercero me interesa mucho 👀<div class="wa-time">19:48 <span class="wa-tick">✓✓</span></div></div>
+          <div class="wa-msg-u">Sí, el tercero me interesa mucho 👀<div class="wa-time">19:48</div></div>
           <div class="wa-msg-v">✅ Te agendo visita — ¿mañana o el jueves?<div class="wa-time">19:49</div></div>
           <div class="wa-action">🔒 Lead cualificado · Agente asignado</div>
         </div>
-        <div class="wa-footer"><div class="wa-input">Escribe un mensaje</div><div class="wa-send">🎤</div></div>
+        <div class="wa-footer"><div class="wa-input">Cuéntame qué necesitas…</div><div class="wa-send" aria-hidden="true"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 19V5m-6 6 6-6 6 6"/></svg></div></div>
       </div>
     </div>
   </div>
