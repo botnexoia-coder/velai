@@ -3,7 +3,7 @@ import { HttpError, json, readJson, clean, processBookingNotifications } from '.
 import { localDateStr } from '../calendar.js';
 import { monthAvailability, serviceFor, genericService, createHold, bookAppointment, appointmentByToken, cancelAppointment } from '../agenda.js';
 import { bookingOrigin } from '../booking-security.js';
-import { reservaPage, appointmentIcs } from '../reserva-page.js';
+import { reservaPage, appointmentIcs, paginaSinReservas } from '../reserva-page.js';
 import { mwBookingHost, bookingRateLimit, bookingWriteOrigin, bookingHuman, BOOKING_HEADERS } from '../booking-security.js';
 
 export const reserva = new Hono();
@@ -46,11 +46,21 @@ async function writeBody(c, bucket, limit, human = false) {
   if (human) await bookingHuman(c.env, c.req.raw, body);
   return body;
 }
-reserva.get('/:cliente/reservas', async (c) => {
+// Las dos rutas de HTML no pueden responder el JSON de error: quien abre el enlace es el
+// cliente final del negocio, no un programa. El 404 se mantiene —y es el mismo para un slug
+// inexistente que para uno con las reservas apagadas, que es lo que evita enumerar clientes—
+// pero se sirve como página con la marca de Velai.
+async function conAvisoSiNoHay(handler) {
+  try { return await handler(); } catch (error) {
+    if (error instanceof HttpError && error.status === 404) return paginaSinReservas();
+    throw error;
+  }
+}
+reserva.get('/:cliente/reservas', async (c) => conAvisoSiNoHay(async () => {
   await bookingRateLimit(c.env,c.req.raw,'respage',60);
   const {tenant,cal} = await bookingTenant(c.env,c.req.param('cliente'));
   return reservaPage(c.env, tenant, await boot(c.env,tenant,cal));
-});
+}));
 reserva.get('/api/reservas/:cliente', async (c) => {
   await bookingRateLimit(c.env,c.req.raw,'resboot',60);
   const {tenant,cal} = await bookingTenant(c.env,c.req.param('cliente'));
@@ -81,12 +91,12 @@ reserva.post('/api/reservas/:cliente', async (c) => {
   c.executionCtx.waitUntil(processBookingNotifications(c.env,appt.id).catch(()=>{}));
   return json({ok:true,appointment:{...publicAppointment(appt,tenant,cal,c.env),location:service.location,mode:service.mode}});
 });
-reserva.get('/:cliente/cita/:token', async (c) => {
+reserva.get('/:cliente/cita/:token', async (c) => conAvisoSiNoHay(async () => {
   await bookingRateLimit(c.env,c.req.raw,'resmanage',30);
   const {tenant,cal} = await bookingTenant(c.env,c.req.param('cliente'),false);
   const appt = await appointmentByToken(c.env,c.req.param('token'),tenant.id);
   return reservaPage(c.env,tenant,await boot(c.env,tenant,cal),publicAppointment(appt,tenant,cal,c.env));
-});
+}));
 reserva.get('/:cliente/cita/:token/calendario.ics', async (c) => {
   await bookingRateLimit(c.env,c.req.raw,'resmanage',30);
   const {tenant} = await bookingTenant(c.env,c.req.param('cliente'),false);

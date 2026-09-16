@@ -31,7 +31,12 @@ test('público: reserva y gestión reales con D1 y Google mockeado; token de otr
 test('apagado/inexistente indistinguibles; servicio ajeno e intento de cambiar tenant ignorados',async(t)=>{
  const f=await fixture(t);
  await f.DB.exec("UPDATE tenant_calendars SET booking_enabled=0");
- for(const suffix of ['/reservas','']){const path=suffix?'/dialogos'+suffix:'/api/reservas/dialogos';const missing=suffix?'/inventado'+suffix:'/api/reservas/inventado';const a=await f.request(path),b=await f.request(missing);assert.equal(a.status,404);assert.deepEqual(await a.json(),await b.json());}
+ // La página HTML responde el aviso con marca y la API su JSON, pero en los dos casos el
+ // apagado y el inexistente son BYTE A BYTE lo mismo: es lo que impide usar el enlace para
+ // saber qué clientes existen.
+ for(const suffix of ['/reservas','']){const path=suffix?'/dialogos'+suffix:'/api/reservas/dialogos';const missing=suffix?'/inventado'+suffix:'/api/reservas/inventado';const a=await f.request(path),b=await f.request(missing);assert.equal(a.status,404);
+  if(suffix){const html=await a.text();assert.equal(a.headers.get('content-type'),'text/html; charset=utf-8');assert.match(html,/Aquí todavía no se puede reservar/);assert.match(html,/equipo@hirevai\.com/);assert.equal(html.includes('dialogos'),false);const sinNonce=(t)=>t.replace(/nonce="[^"]+"/g,'nonce="x"');assert.equal(sinNonce(html),sinNonce(await b.text()));}
+  else assert.deepEqual(await a.json(),await b.json());}
  await f.DB.exec("UPDATE tenant_calendars SET booking_enabled=1");
  const r=await f.request('/api/reservas/dialogos/huecos?mes='+date().slice(0,7)+'&s=otro-servicio');assert.equal(r.status,404);
  const rows=await (await f.request('/api/reservas/dialogos?tenant=other')).json();assert.equal(rows.name,'Diálogos que Enseñan');assert.ok(!JSON.stringify(rows).includes('refresh_token'));

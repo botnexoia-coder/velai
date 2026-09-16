@@ -147,6 +147,53 @@ footer{max-width:1040px;margin:0 auto;padding:18px 16px 28px;border-top:1px soli
 // bundle y NO viaja con toString(). Sin el shim la página se sirve con 200, el navegador
 // lanza «__name is not defined» y el visitante ve una página EN BLANCO — invisible para
 // los tests, que ejecutan el fuente sin bundlear.
+// Página de «aquí no hay reservas»: la que ve quien abre un enlace de un negocio sin el
+// calendario público encendido — o un slug que no existe. Es DELIBERADAMENTE la misma para
+// los dos casos y con el mismo 404: si dijera «este negocio no tiene el servicio», el
+// enlace serviría para averiguar qué clientes existen (SPEC-AUTOAGENDA §6, «el slug no se
+// enumera»). Sin JS y sin datos: solo copy, la marca y por dónde escribirnos.
+const CSS_AVISO = `
+@font-face{font-family:'Cabinet Grotesk';src:url(https://hirevai.com/fonts/cabinet-grotesk-800.woff2) format('woff2');font-weight:800;font-display:swap}
+@font-face{font-family:'Satoshi';src:url(https://hirevai.com/fonts/satoshi-400.woff2) format('woff2');font-weight:400;font-display:swap}
+@font-face{font-family:'Satoshi';src:url(https://hirevai.com/fonts/satoshi-500.woff2) format('woff2');font-weight:500;font-display:swap}
+:root{color-scheme:light dark;--acc:#ff6b1a;--bg:#f6f5f2;--card:#fff;--ink:#172033;--muted:#5b6472;--line:rgba(23,32,51,.10)}
+@media(prefers-color-scheme:dark){:root{--bg:#151b27;--card:#1b2230;--ink:#fff;--muted:#ced7e5;--line:rgba(255,255,255,.10)}}
+*{box-sizing:border-box}
+body{margin:0;min-height:100dvh;display:grid;place-items:center;padding:24px;background:var(--bg);color:var(--ink);font:400 16px/1.6 'Satoshi',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif}
+main{width:min(520px,100%);padding:40px 32px;border:1px solid var(--line);border-radius:22px;background:var(--card);text-align:center;box-shadow:0 24px 60px rgba(0,0,0,.10)}
+.marca{display:inline-flex;align-items:center;gap:8px;margin-bottom:28px;color:var(--muted);font-size:12px;font-weight:500;letter-spacing:.14em;text-transform:uppercase}
+.marca i{display:grid;place-items:center;width:24px;height:24px;border-radius:8px;background:var(--acc);color:#fff}
+h1{margin:0;font-family:'Cabinet Grotesk',sans-serif;font-weight:800;font-size:28px;line-height:1.15;letter-spacing:-.03em}
+p{margin:14px 0 0;color:var(--muted)}
+.botones{display:flex;flex-wrap:wrap;justify-content:center;gap:10px;margin-top:28px}
+a{display:inline-flex;align-items:center;justify-content:center;min-height:48px;padding:0 22px;border-radius:12px;font-weight:500;text-decoration:none}
+a.primario{background:var(--acc);color:#fff}
+a.primario:hover{background:#e55f14}
+a.secundario{border:1px solid var(--line);color:var(--ink)}
+a.secundario:hover{border-color:var(--acc);color:var(--acc)}
+.en{margin-top:26px;padding-top:18px;border-top:1px solid var(--line);font-size:14px;color:var(--muted)}
+`;
+
+export function paginaSinReservas(nonce = null) {
+  const n = nonce || btoa(String.fromCharCode(...crypto.getRandomValues(new Uint8Array(18))));
+  const html = `<!doctype html><html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">`
+    + `<meta name="robots" content="noindex,nofollow"><title>Reservas no disponibles</title><style nonce="${n}">${CSS_AVISO}</style></head>`
+    + `<body><main>`
+    + `<span class="marca"><i aria-hidden="true"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"><path d="M5 13.5 10 18 19 7"/></svg></i>Velai</span>`
+    + `<h1>Aquí todavía no se puede reservar</h1>`
+    + `<p>Este enlace no corresponde a ninguna página de reservas activa. Si venías a pedir cita, escribe al negocio por su canal de siempre.</p>`
+    + `<p>¿Eres el negocio y la esperabas encendida? Escríbenos y la activamos.</p>`
+    + `<div class="botones"><a class="primario" href="mailto:equipo@hirevai.com?subject=Reservas%20online">Escribir a Velai</a>`
+    + `<a class="secundario" href="https://hirevai.com" target="_blank" rel="noopener noreferrer">Ver qué es Velai</a></div>`
+    + `<p class="en">This booking page isn\u2019t active. Write to <a href="mailto:equipo@hirevai.com" style="min-height:0;padding:0;color:var(--acc)">equipo@hirevai.com</a> and we\u2019ll look into it.</p>`
+    + `</main></body></html>`;
+  // frame-ancestors abierto a https: a propósito: si un cliente dejó el embed puesto, dentro
+  // del iframe tiene que verse el aviso y no un marco en blanco. La página no lleva datos ni
+  // formularios, así que enmarcarla no expone nada.
+  return new Response(html, { status: 404, headers: { ...BOOKING_HEADERS, 'Content-Type': 'text/html; charset=utf-8',
+    'Content-Security-Policy': `default-src 'none'; style-src 'nonce-${n}'; font-src https://hirevai.com; img-src https: data:; base-uri 'none'; form-action 'none'; frame-ancestors https:` } });
+}
+
 export function reservaPage(env, tenant, boot, appointment = null) {
   const nonce = btoa(String.fromCharCode(...crypto.getRandomValues(new Uint8Array(18))));
   const origins = frameOrigins(env, tenant);

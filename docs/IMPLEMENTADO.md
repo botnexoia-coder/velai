@@ -65,6 +65,13 @@ una página pública sin eso es un formulario abierto para llenarle la agenda al
 **mirada** en `citas.hirevai.com/dialogos/reservas` — cabecera de Diálogos, marca Velai y el
 paso 1 de 3 con sus tres modalidades. Migración 0036 preparó el piloto de Diálogos.
 
+**Añadido el 2026-09-16**: quien abre un enlace de reservas de un negocio que no las tiene
+encendidas ya no recibe el JSON de error del worker, sino una página con la marca de Velai
+(«Aquí todavía no se puede reservar») y por dónde escribirnos. Sigue siendo un 404 y sigue
+siendo **la misma respuesta byte a byte** que para un slug inexistente —con el nonce del CSP
+como única diferencia, que es aleatorio por respuesta—: el aviso no puede convertirse en una
+forma de averiguar qué clientes existen. Un test lo compara.
+
 **Abierto** (en TAREAS-PENDIENTES): el precio, la plantilla `confirmacion_reserva` por
 aprobar antes de que la confirmación salga por WhatsApp, y colocar el embed en la web de
 Diálogos cuando el enlace lleve una semana sin sustos.
