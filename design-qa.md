@@ -1,3 +1,27 @@
+# Design QA — la malla cinética llega hasta el final del hero (2026-09-16)
+
+- Origen: Juan marca la banda bajo la cinta de canales; la malla interactiva no la cubría.
+- Causa medida: el lienzo (`.kinetic-grid-canvas`) cubre su contenedor entero
+  (`inset:68px 0 0`), pero esa banda **no era del hero**. El hero acababa en 932 px y la
+  cinta, con su margen inferior de 56 px, dejaba 42 px de fondo de página por debajo: ahí
+  no hay ni imagen ni malla porque no hay hero que pintar.
+- Implementación: el hero se alarga 56 px por abajo (`padding-bottom:calc(8rem + 56px)`) y
+  la cinta sube otros 56 (`margin:-152px auto 70px`), con lo que las tarjetas quedan donde
+  estaban y los 70 px que las separan de «El problema» son ya hero — con imagen y malla.
+  El margen inferior de la cinta devuelve al flujo exactamente esos 70 px: sin él, la
+  sección siguiente subía y se comía la cola del hero.
+- Por debajo de 900 px no se toca nada: ahí la cinta cae ENTERA fuera del hero (su arte va
+  anclado arriba), así que el hero conserva su relleno de siempre con una regla explícita.
+- Medido después: hero 932 · lienzo 932 · cinta 862 · sección 932. Banda de hero bajo las
+  tarjetas, 70 px; solape con la sección, 0.
+- Viewports comprobados: 1800 (claro y oscuro), 880 y 500 px — los dos últimos, idénticos
+  a antes del cambio.
+- P0/P1/P2 pendientes: ninguno.
+
+final result: passed
+
+---
+
 # Design QA — cinta de canales y tema claro del hero (2026-09-16)
 
 - Origen: captura de Juan a ~1800 px de ancho; la cinta de canales del hero quedaba pegada
