@@ -636,16 +636,15 @@
     /* ── INDUSTRIES ── */
     .industries-section { background: var(--bg2); border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); }
 
-    /* Cabecera en UNA línea: etiqueta, titular y subtítulo comparten la fila, así el
-       ancho de arriba se usa entero en vez de dejar media sección vacía al lado. */
-    .industry-head { display: flex; align-items: baseline; gap: 1.5rem; flex-wrap: wrap; }
-    .industry-head .s-title { margin: 0; }
-    .industry-head .s-sub { margin: 0; max-width: 34ch; }
+    /* La cabecera es la MISMA que la de «El problema» y el resto de secciones: etiqueta,
+       titular y subtítulo apilados, con los márgenes de `.s-label/.s-title/.s-sub`. El
+       aire de arriba lo resuelve ahora la barra de pestañas, que ocupa todo el ancho.
+       El `.s-sub` ya deja 3.5rem por debajo, así que la barra no añade margen superior. */
 
     /* Los sectores, de borde a borde: una barra de pestañas, no una fila de pastillas
        sueltas. El subrayado marca el activo y la línea inferior ata la barra al bloque. */
     .industry-tabs {
-      display: flex; gap: 0; margin: 2.25rem 0 2.75rem;
+      display: flex; gap: 0; margin: 0 0 2.75rem;
       border-bottom: 1px solid rgba(255,255,255,.08);
     }
     .industry-tabs .tab-btn {
@@ -1106,9 +1105,8 @@
       /* En una columna, la tarjeta se queda en ancho de conversación y centrada: a 816
          px de ancho dejaba de parecer un chat. */
       .indchat { max-width: 460px; }
-      .industry-tabs { margin: 1.75rem -1rem 2.25rem; padding: 0 1rem; overflow-x: auto; }
+      .industry-tabs { margin: 0 -1rem 2.25rem; padding: 0 1rem; overflow-x: auto; }
       .industry-tabs .tab-btn { flex: 0 0 auto; }
-      .industry-head { gap: .5rem 1.25rem; }
       .industry-note { margin-top: 1.25rem; }
     }
 
