@@ -1,3 +1,29 @@
+# Design QA — Industrias rediseñada (dirección C) — 2026-09-16
+
+- Origen: Juan marca dos huecos en la sección — la mitad derecha vacía junto al titular y
+  casi nada de aire abajo — y pide rediseñar SOLO Industrias. Se dibujaron tres
+  disposiciones en un lienzo (A riel de sectores · B bento · C conversación al frente) con
+  los tokens y las fuentes reales del sitio; elige **C**.
+- Implementado: cabecera en una línea (etiqueta · titular · subtítulo comparten fila, así
+  el ancho de arriba se usa entero); sectores como barra de pestañas de borde a borde con
+  icono y subrayado del activo; y contenido en tres columnas — texto | conversación (420 px,
+  con el interruptor de canal centrado encima) | capacidades.
+- Reparto vertical, que era el encargo explícito: relleno de sección 96 px, cabecera →
+  pestañas 36 px, pestañas → contenido 44 px, y 24 px de más bajo el contenido para
+  compensar ópticamente lo que la etiqueta y la mayúscula del titular añaden arriba. Medido:
+  125 px por arriba, ~120 por abajo.
+- Dos correcciones sobre la marcha: el interruptor heredaba el `margin-left:auto` de cuando
+  vivía en la fila de pestañas y salía pegado a la derecha; y en una sola columna la tarjeta
+  se estiraba a 816 px, así que se limita a 460 y va centrada.
+- El rótulo de cada pestaña pasa a `.tab-label` porque la traducción escribía sobre el botón
+  entero con `textContent` y se habría llevado el icono por delante.
+- Comprobado a 1757, 880 y 390 px, en las cuatro pestañas y en los dos canales.
+- P0/P1/P2 pendientes: ninguno.
+
+final result: passed
+
+---
+
 # Design QA — Industrias: aire entre pestañas y descripción, y chats centrados (2026-09-16)
 
 - Pedido: quitar el hueco entre las pestañas de sector y la descripción —dejarlo como el

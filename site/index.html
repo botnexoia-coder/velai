@@ -635,8 +635,30 @@
 
     /* ── INDUSTRIES ── */
     .industries-section { background: var(--bg2); border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); }
-    /* 3.5rem = el mismo aire que hay entre el subtítulo de la sección y esta fila. */
-    .industry-tabs { display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; margin-bottom: 3.5rem; }
+
+    /* Cabecera en UNA línea: etiqueta, titular y subtítulo comparten la fila, así el
+       ancho de arriba se usa entero en vez de dejar media sección vacía al lado. */
+    .industry-head { display: flex; align-items: baseline; gap: 1.5rem; flex-wrap: wrap; }
+    .industry-head .s-title { margin: 0; }
+    .industry-head .s-sub { margin: 0; max-width: 34ch; }
+
+    /* Los sectores, de borde a borde: una barra de pestañas, no una fila de pastillas
+       sueltas. El subrayado marca el activo y la línea inferior ata la barra al bloque. */
+    .industry-tabs {
+      display: flex; gap: 0; margin: 2.25rem 0 2.75rem;
+      border-bottom: 1px solid rgba(255,255,255,.08);
+    }
+    .industry-tabs .tab-btn {
+      flex: 1; display: flex; align-items: center; gap: .7rem;
+      padding: 1.05rem 1.3rem; border: 0; border-bottom: 2px solid transparent; border-radius: 0;
+      background: none; color: var(--muted); font-size: 1rem; font-weight: 400; text-align: left;
+    }
+    .industry-tabs .tab-btn svg { width: 20px; height: 20px; flex: none; }
+    .industry-tabs .tab-btn:hover { background: none; color: var(--white); border-color: rgba(255,107,26,.35); }
+    .industry-tabs .tab-btn.active {
+      background: none; color: var(--white); font-weight: 700; border-bottom-color: var(--orange);
+    }
+    .industry-tabs .tab-btn.active svg { color: var(--orange); }
     .tab-btn {
       padding: .5rem 1.2rem; border-radius: 100px;
       border: 1px solid var(--border2); background: transparent;
@@ -645,10 +667,24 @@
     }
     .tab-btn.active, .tab-btn:hover { background: var(--orange); color: #fff; border-color: var(--orange); }
     .industry-content { display: none; }
-    /* La descripción arranca pegada a las pestañas (mismo aire que el subtítulo con
-       ellas) y la conversación se centra contra ella. */
-    .industry-content.active { display: grid; grid-template-columns: 1.05fr .95fr; gap: 3rem; align-items: start; }
-    .indchat { align-self: center; }
+    /* La conversación manda en el centro: el texto a un lado, las capacidades al otro.
+       Sin margen superior propio — el aire lo pone la barra de pestañas. */
+    .industry-content.active {
+      display: grid; grid-template-columns: 1fr 420px 1fr; gap: 3.5rem; align-items: start;
+      /* 24 px que compensan el ojo: arriba, la etiqueta y la mayúscula del titular
+         añaden ~28 px al relleno de la sección; sin esto el bloque se ve descolgado. */
+      padding-bottom: 1.5rem;
+    }
+    .indchat-demo { display: flex; flex-direction: column; align-items: center; gap: .9rem; }
+    /* El margen automático que empujaba el interruptor a la derecha cuando vivía en la
+       fila de pestañas gana a align-items: aquí se anula para que quede centrado. */
+    .indchat-demo .indchat-switch { margin: 0; }
+    .industry-note {
+      display: flex; align-items: center; gap: .6rem; margin-top: 2rem;
+      font-size: .78rem; color: var(--muted);
+    }
+    .industry-note svg { width: 16px; height: 16px; flex: none; color: var(--orange); }
+    .industry-content .industry-features { padding-top: .35rem; }
     .industry-info h3 { font-family: var(--font-d); font-size: 1.5rem; font-weight: 800; letter-spacing: -.03em; margin-bottom: .8rem; }
     .industry-info p { font-size: .95rem; color: var(--muted); line-height: 1.7; margin-bottom: 1.5rem; font-weight: 300; }
     .industry-features { list-style: none; display: flex; flex-direction: column; gap: .7rem; }
@@ -965,9 +1001,9 @@
     .indchat-btn.is-on { background: var(--orange); border-color: transparent; color: #fff; }
     .indchat.is-wa .indchat-solo-web, .indchat.is-web .indchat-solo-wa { display: none; }
 
-    /* Ancho de conversación de verdad: el widget mide 400 y un móvil poco más. Estirada
-       a la columna entera dejaba de parecer un chat. */
-    .indchat { max-width: 460px; margin-left: auto; border-radius: 16px; overflow: hidden; }
+    /* La columna central ya mide lo que mide una conversación (420 px), así que la
+       tarjeta la ocupa entera. */
+    .indchat { width: 100%; border-radius: 16px; overflow: hidden; }
     .indchat-head { display: flex; align-items: center; gap: 10px; padding: 8px 12px; }
     .indchat-avatar {
       position: relative; width: 36px; height: 36px; flex: none; border-radius: 50%;
@@ -1064,10 +1100,16 @@
        izquierda: pegada a la derecha y estrecha parecía un descuadre. Va aquí, al final
        de la hoja del chat, porque el responsive general está ANTES y perdía por orden. */
     @media (max-width: 900px) {
-      .indchat { max-width: none; margin-left: 0; }
-      /* Sin la calle de la derecha, pegado a las pestañas de sector parecía un sector
-         más: baja a su propia línea. */
-      .indchat-switch { flex-basis: 100%; margin: .35rem 0 0; }
+      /* Una columna: texto, conversación y capacidades en ese orden, y las pestañas
+         pasan a una tira que se desliza en vez de partirse en dos filas. */
+      .industry-content.active { grid-template-columns: 1fr; gap: 2.25rem; }
+      /* En una columna, la tarjeta se queda en ancho de conversación y centrada: a 816
+         px de ancho dejaba de parecer un chat. */
+      .indchat { max-width: 460px; }
+      .industry-tabs { margin: 1.75rem -1rem 2.25rem; padding: 0 1rem; overflow-x: auto; }
+      .industry-tabs .tab-btn { flex: 0 0 auto; }
+      .industry-head { gap: .5rem 1.25rem; }
+      .industry-note { margin-top: 1.25rem; }
     }
 
     /* ── LIGHT MODE ── */
@@ -1291,19 +1333,17 @@
 <!-- INDUSTRIAS -->
 <section id="industrias" class="industries-section">
   <div class="s-inner">
-    <div class="s-label fade-up">Industrias</div>
-    <h2 class="s-title fade-up">Se adapta a tu negocio</h2>
-    <p class="s-sub fade-up">No es una solución genérica. Vai aprende tu negocio, tu tono y tus procesos.</p>
+    <div class="industry-head fade-up">
+      <div class="s-label">Industrias</div>
+      <h2 class="s-title">Se adapta a tu negocio</h2>
+      <p class="s-sub">No es una solución genérica. Vai aprende tu negocio, tu tono y tus procesos.</p>
+    </div>
 
     <div class="industry-tabs fade-up">
-      <button class="tab-btn active" onclick="showIndustry('restaurante', this)">Restaurante</button>
-      <button class="tab-btn" onclick="showIndustry('clinica', this)">Clínica</button>
-      <button class="tab-btn" onclick="showIndustry('tienda', this)">Tienda</button>
-      <button class="tab-btn" onclick="showIndustry('inmobiliaria', this)">Inmobiliaria</button>
-      <div class="indchat-switch" role="group" aria-label="Canal del chat">
-        <button type="button" class="indchat-btn is-on" data-canal="wa">WhatsApp</button>
-        <button type="button" class="indchat-btn" data-canal="web" data-i18n="channelWeb">Chat web</button>
-      </div>
+      <button class="tab-btn active" onclick="showIndustry('restaurante', this)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7h16M6 7v11a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2V7M9 4h6"/></svg><span class="tab-label">Restaurante</span></button>
+      <button class="tab-btn" onclick="showIndustry('clinica', this)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg><span class="tab-label">Clínica</span></button>
+      <button class="tab-btn" onclick="showIndustry('tienda', this)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 8h14l-1 12H6L5 8Zm3 0V6a4 4 0 0 1 8 0v2"/></svg><span class="tab-label">Tienda</span></button>
+      <button class="tab-btn" onclick="showIndustry('inmobiliaria', this)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 11 12 5l8 6v8a1 1 0 0 1-1 1h-4v-6H9v6H5a1 1 0 0 1-1-1v-8Z"/></svg><span class="tab-label">Inmobiliaria</span></button>
     </div>
 
     <!-- Restaurante -->
@@ -1311,14 +1351,13 @@
       <div class="industry-info">
         <h3>Restaurantes & bares</h3>
         <p>Vai gestiona reservas, pedidos para llevar y consultas de carta en tiempo real. Tu equipo solo se ocupa de cocinar y atender en sala.</p>
-        <ul class="industry-features">
-          <li><div class="feat-dot"></div>Reservas automáticas con confirmación instantánea</li>
-          <li><div class="feat-dot"></div>Gestión de pedidos para llevar y delivery</li>
-          <li><div class="feat-dot"></div>Carta digital interactiva con alérgenos</li>
-          <li><div class="feat-dot"></div>Recordatorios automáticos día antes</li>
-          <li><div class="feat-dot"></div>Notificación directa a cocina y sala</li>
-        </ul>
+        <div class="industry-note"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M8 12h8M12 8v8"/></svg>Mismo guion, dos canales</div>
       </div>
+      <div class="indchat-demo">
+        <div class="indchat-switch" role="group" aria-label="Canal del chat">
+          <button type="button" class="indchat-btn is-on" data-canal="wa">WhatsApp</button>
+          <button type="button" class="indchat-btn" data-canal="web" data-i18n="channelWeb">Chat web</button>
+        </div>
       <div class="indchat is-wa">
         <div class="indchat-statusbar indchat-solo-wa"><span>21:30</span><span>▋▋▋ WiFi ●</span></div>
         <div class="indchat-head">
@@ -1341,6 +1380,14 @@
           <div class="indchat-send" aria-hidden="true"><span class="indchat-solo-wa">🎤</span><svg class="indchat-solo-web" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M12 19V5m-6 6 6-6 6 6"/></svg></div>
         </div>
       </div>
+      </div>
+      <ul class="industry-features">
+          <li><div class="feat-dot"></div>Reservas automáticas con confirmación instantánea</li>
+          <li><div class="feat-dot"></div>Gestión de pedidos para llevar y delivery</li>
+          <li><div class="feat-dot"></div>Carta digital interactiva con alérgenos</li>
+          <li><div class="feat-dot"></div>Recordatorios automáticos día antes</li>
+          <li><div class="feat-dot"></div>Notificación directa a cocina y sala</li>
+      </ul>
     </div>
 
     <!-- Clínica -->
@@ -1348,14 +1395,13 @@
       <div class="industry-info">
         <h3>Clínicas & consultorios</h3>
         <p>Vai gestiona citas, recordatorios y consultas básicas. Tu recepcionista se libera de llamadas rutinarias.</p>
-        <ul class="industry-features">
-          <li><div class="feat-dot"></div>Agenda de citas en tiempo real</li>
-          <li><div class="feat-dot"></div>Recordatorios automáticos de citas</li>
-          <li><div class="feat-dot"></div>Triaje básico de urgencias</li>
-          <li><div class="feat-dot"></div>Información sobre servicios y precios</li>
-          <li><div class="feat-dot"></div>Seguimiento post-consulta</li>
-        </ul>
+        <div class="industry-note"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M8 12h8M12 8v8"/></svg>Mismo guion, dos canales</div>
       </div>
+      <div class="indchat-demo">
+        <div class="indchat-switch" role="group" aria-label="Canal del chat">
+          <button type="button" class="indchat-btn is-on" data-canal="wa">WhatsApp</button>
+          <button type="button" class="indchat-btn" data-canal="web" data-i18n="channelWeb">Chat web</button>
+        </div>
       <div class="indchat is-wa">
         <div class="indchat-statusbar indchat-solo-wa"><span>10:02</span><span>▋▋▋ WiFi ●</span></div>
         <div class="indchat-head">
@@ -1378,6 +1424,14 @@
           <div class="indchat-send" aria-hidden="true"><span class="indchat-solo-wa">🎤</span><svg class="indchat-solo-web" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M12 19V5m-6 6 6-6 6 6"/></svg></div>
         </div>
       </div>
+      </div>
+      <ul class="industry-features">
+          <li><div class="feat-dot"></div>Agenda de citas en tiempo real</li>
+          <li><div class="feat-dot"></div>Recordatorios automáticos de citas</li>
+          <li><div class="feat-dot"></div>Triaje básico de urgencias</li>
+          <li><div class="feat-dot"></div>Información sobre servicios y precios</li>
+          <li><div class="feat-dot"></div>Seguimiento post-consulta</li>
+      </ul>
     </div>
 
     <!-- Tienda -->
@@ -1385,14 +1439,13 @@
       <div class="industry-info">
         <h3>Tiendas & e-commerce</h3>
         <p>Vai convierte consultas en ventas, gestiona pedidos y hace seguimiento de envíos. Tu tienda vende mientras duermes.</p>
-        <ul class="industry-features">
-          <li><div class="feat-dot"></div>Catálogo de productos interactivo</li>
-          <li><div class="feat-dot"></div>Procesamiento de pedidos y pagos</li>
-          <li><div class="feat-dot"></div>Seguimiento de envíos en tiempo real</li>
-          <li><div class="feat-dot"></div>Gestión de devoluciones y reclamaciones</li>
-          <li><div class="feat-dot"></div>Recomendaciones personalizadas</li>
-        </ul>
+        <div class="industry-note"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M8 12h8M12 8v8"/></svg>Mismo guion, dos canales</div>
       </div>
+      <div class="indchat-demo">
+        <div class="indchat-switch" role="group" aria-label="Canal del chat">
+          <button type="button" class="indchat-btn is-on" data-canal="wa">WhatsApp</button>
+          <button type="button" class="indchat-btn" data-canal="web" data-i18n="channelWeb">Chat web</button>
+        </div>
       <div class="indchat is-wa">
         <div class="indchat-statusbar indchat-solo-wa"><span>23:14</span><span>▋▋▋ WiFi ●</span></div>
         <div class="indchat-head">
@@ -1415,6 +1468,14 @@
           <div class="indchat-send" aria-hidden="true"><span class="indchat-solo-wa">🎤</span><svg class="indchat-solo-web" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M12 19V5m-6 6 6-6 6 6"/></svg></div>
         </div>
       </div>
+      </div>
+      <ul class="industry-features">
+          <li><div class="feat-dot"></div>Catálogo de productos interactivo</li>
+          <li><div class="feat-dot"></div>Procesamiento de pedidos y pagos</li>
+          <li><div class="feat-dot"></div>Seguimiento de envíos en tiempo real</li>
+          <li><div class="feat-dot"></div>Gestión de devoluciones y reclamaciones</li>
+          <li><div class="feat-dot"></div>Recomendaciones personalizadas</li>
+      </ul>
     </div>
 
     <!-- Inmobiliaria -->
@@ -1422,14 +1483,13 @@
       <div class="industry-info">
         <h3>Inmobiliarias & agencias</h3>
         <p>Vai cualifica leads, agenda visitas y envía fichas automáticamente. Tu agente solo atiende a quien está listo para comprar.</p>
-        <ul class="industry-features">
-          <li><div class="feat-dot"></div>Cualificación automática de leads</li>
-          <li><div class="feat-dot"></div>Envío de fichas y fotografías</li>
-          <li><div class="feat-dot"></div>Agendado de visitas en tiempo real</li>
-          <li><div class="feat-dot"></div>Seguimiento de interesados</li>
-          <li><div class="feat-dot"></div>Alertas de nuevas propiedades</li>
-        </ul>
+        <div class="industry-note"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M8 12h8M12 8v8"/></svg>Mismo guion, dos canales</div>
       </div>
+      <div class="indchat-demo">
+        <div class="indchat-switch" role="group" aria-label="Canal del chat">
+          <button type="button" class="indchat-btn is-on" data-canal="wa">WhatsApp</button>
+          <button type="button" class="indchat-btn" data-canal="web" data-i18n="channelWeb">Chat web</button>
+        </div>
       <div class="indchat is-wa">
         <div class="indchat-statusbar indchat-solo-wa"><span>19:47</span><span>▋▋▋ WiFi ●</span></div>
         <div class="indchat-head">
@@ -1452,6 +1512,14 @@
           <div class="indchat-send" aria-hidden="true"><span class="indchat-solo-wa">🎤</span><svg class="indchat-solo-web" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M12 19V5m-6 6 6-6 6 6"/></svg></div>
         </div>
       </div>
+      </div>
+      <ul class="industry-features">
+          <li><div class="feat-dot"></div>Cualificación automática de leads</li>
+          <li><div class="feat-dot"></div>Envío de fichas y fotografías</li>
+          <li><div class="feat-dot"></div>Agendado de visitas en tiempo real</li>
+          <li><div class="feat-dot"></div>Seguimiento de interesados</li>
+          <li><div class="feat-dot"></div>Alertas de nuevas propiedades</li>
+      </ul>
     </div>
   </div>
 </section>
@@ -2188,7 +2256,8 @@
     setText('#industrias .s-label', t.indLabel);
     setText('#industrias .s-title', t.indTitle);
     setText('#industrias .s-sub', t.indSub);
-    var tabs = document.querySelectorAll('.tab-btn');
+    // El rótulo va en .tab-label: escribir sobre el botón entero se llevaría el icono.
+    var tabs = document.querySelectorAll('.tab-btn .tab-label');
     if (tabs[0]) tabs[0].textContent = t.tab1;
     if (tabs[1]) tabs[1].textContent = t.tab2;
     if (tabs[2]) tabs[2].textContent = t.tab3;
