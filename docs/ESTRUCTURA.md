@@ -130,6 +130,7 @@ dashboard, que es del dueño — pasos restantes y verificación en
 | [`TAREAS-PENDIENTES.md`](./TAREAS-PENDIENTES.md) | Pasos manuales pendientes de Juan (cuentas, IDs, terceros) |
 | [`CONTEXTOS-AMPLIOS.md`](./CONTEXTOS-AMPLIOS.md) | Fases 2–4 de contextos (fase 1 consolidada en IMPLEMENTADO.md) |
 | [`PLAN-PANEL.md`](./PLAN-PANEL.md) | Mapa del panel y decisiones cerradas («lo que NO se construye», vocabulario de métricas). El código lo cita como autoridad |
+| [`REVISION-CANALES.md`](./REVISION-CANALES.md) | Diagnóstico de la vista «Canales» y las tres opciones (retirar / completar / solo arreglar el refresco). Decisión pendiente |
 | [`H1-PANEL.md`](./H1-PANEL.md), [`H2-PANEL.md`](./H2-PANEL.md) | Horizontes con trabajo aún abierto (H1 §3-§5, H2 §1-§2-§3-§5). Lo cerrado salió a `IMPLEMENTADO.md` y se borró de aquí |
 | [`ALTACLIENTE.md`](./ALTACLIENTE.md) | Proceso de alta de un cliente nuevo |
 | [`DEMOS.md`](./DEMOS.md) | Catálogo de `site/demo/` y la convención de carpetas |
