@@ -1,5 +1,5 @@
 /* ══════════════════════════════════════════════════════════════════════════
-   VAI CHAT WIDGET — autocontenido (CSS + markup + lógica) · v19
+   VAI CHAT WIDGET — autocontenido (CSS + markup + lógica) · v20
    ──────────────────────────────────────────────────────────────────────────
    OJO CON LA VERSIÓN: este archivo se sirve con Cache-Control immutable durante un
    año (_headers, /*.js), así que el `?v=N` de la URL ES la clave de caché. Cambiar el
@@ -396,7 +396,7 @@
     el.msgs.innerHTML = '';
     addMsg('bot', script().greeting);
     history.forEach(function (m) {
-      addMsg(m.role === 'assistant' ? 'bot' : (m.role === 'agent' ? 'agent' : 'user'), m.content, m.t, m.agent_name, m.booking);
+      addMsg(m.role === 'assistant' ? 'bot' : (m.role === 'agent' ? 'agent' : 'user'), m.content, m.t, m.agent_name, m.booking, m.attachments);
     });
   }
 
@@ -660,7 +660,7 @@
   }
 
   /* ── 8. Mensajes ────────────────────────────────────────────────────── */
-  function addMsg(role, text, t, agentName, booking) {
+  function addMsg(role, text, t, agentName, booking, attachments) {
     el.win.classList.remove('is-empty');
     // 'agent' (v9) es una PERSONA del equipo: burbuja propia y con nombre. Disfrazarla de
     // bot sería mentirle al visitante sobre con quién está hablando.
@@ -684,6 +684,21 @@
         }
       } catch (_) {}
     }
+    if (role !== 'user' && Array.isArray(attachments)) attachments.slice(0, 2).forEach(function (item) {
+      try {
+        if (!item || typeof item.url !== 'string') return;
+        var mediaUrl = new URL(item.url);
+        if (['https://api.hirevai.com', 'https://vai-worker-staging.botnexo-ia.workers.dev', 'https://vai-worker.botnexo-ia.workers.dev'].indexOf(mediaUrl.origin) === -1 || mediaUrl.pathname.indexOf('/media/lib/') !== 0 || mediaUrl.username || mediaUrl.password || mediaUrl.hash || mediaUrl.search) return;
+        if (!/^\/media\/lib\/[0-9a-f-]{36}\/[0-9a-f-]+\.(png|jpg|webp|pdf|mp3|ogg|m4a|mp4)$/.test(mediaUrl.pathname)) return;
+        var block = document.createElement('div'); block.className = 'vai-attachment';
+        var visual = null;
+        if (item.kind === 'image') { visual = document.createElement('img'); visual.alt = String(item.name || '').slice(0, 120); visual.loading = 'lazy'; }
+        if (item.kind === 'audio' || item.kind === 'video') { visual = document.createElement(item.kind); visual.controls = true; visual.preload = 'none'; }
+        if (visual) { visual.src = mediaUrl.href; visual.style.maxWidth = '100%'; visual.style.display = 'block'; block.appendChild(visual); }
+        var link = document.createElement('a'); link.href = mediaUrl.href; link.target = '_blank'; link.rel = 'noopener noreferrer'; link.textContent = String(item.name || (LANG === 'en' ? 'Open file' : 'Abrir archivo')).slice(0, 120); block.appendChild(link);
+        row.querySelector('.vai-b-t').appendChild(block);
+      } catch (_) {}
+    });
     el.msgs.appendChild(row);
     el.msgs.scrollTop = el.msgs.scrollHeight;
   }
@@ -732,7 +747,7 @@
         // El cursor `lastId` es lo que evita duplicados, no el rol.
         var kind = m.role === 'agent' ? 'agent' : 'bot';
         history.push({ role: m.role === 'agent' ? 'agent' : 'assistant', content: m.text, t: Date.parse(m.at) || Date.now(), agent_name: m.role === 'agent' ? m.agent_name : null });
-        addMsg(kind, m.text, m.at, m.agent_name);
+        addMsg(kind, m.text, m.at, m.agent_name, null, m.attachments);
       }
       if (data.state !== liveState) applyLive(data.state);
       else saveState();
@@ -796,8 +811,8 @@
       // Sin reply el bot no ha hablado (lo lleva una persona): no se pinta una burbuja
       // vacía, se enseña el estado y el sondeo trae lo que escriba el equipo.
       if (data.reply) {
-        history.push({ role: 'assistant', content: data.reply, t: Date.now(), booking: data.booking || null });
-        addMsg('bot', data.reply, null, null, data.booking);
+        history.push({ role: 'assistant', content: data.reply, t: Date.now(), booking: data.booking || null, attachments: data.attachments || [] });
+        addMsg('bot', data.reply, null, null, data.booking, data.attachments);
         track('chat_reply', { n: sent });
       }
       applyLive(data.state);
@@ -903,6 +918,7 @@
     // worker no cede el turno — así un widget v8 cacheado en la web de un cliente sigue
     // funcionando igual que siempre en vez de dejar al visitante hablando a una pared.
     payload.live = true;
+    payload.media = true;
     if (!humanVerified) {
       payload.turnstileToken = await humanToken('chat');
     }

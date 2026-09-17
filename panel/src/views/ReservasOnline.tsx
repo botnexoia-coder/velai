@@ -84,7 +84,7 @@ export function ReservasOnline({ tenantId, dominios, isCliente = false }: { tena
   const slug = url ? new URL(url).pathname.split('/')[1] : '';
   const serviceAttr = snippetService ? ` data-servicio="${snippetService}"` : '';
   const originAttr = url && new URL(url).origin !== 'https://citas.hirevai.com' ? ` data-origen="${new URL(url).origin}"` : '';
-  const loader = '<script src="https://hirevai.com/assets/vai-citas.js?v=19" defer></script>';
+  const loader = '<script src="https://hirevai.com/assets/vai-citas.js?v=20" defer></script>';
   const chosenUrl = url ? url + (snippetService ? '?s=' + encodeURIComponent(snippetService) : '') : '';
   const inline = `<div data-vai-citas="${slug}"${serviceAttr}${originAttr} style="height:640px"></div>\n${loader}`;
   const popup = `<button data-vai-citas-popup="${slug}"${serviceAttr}${originAttr}>Reservar cita</button>\n${loader}`;
