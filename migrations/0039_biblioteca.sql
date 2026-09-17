@@ -49,7 +49,7 @@ BEGIN
   UPDATE tenants SET media_bytes_used=media_bytes_used+NEW.bytes,
     media_files_used=media_files_used+1
     WHERE id=NEW.tenant_id AND media_bytes_used+NEW.bytes <= COALESCE(media_quota_bytes,NEW.quota_default);
-  SELECT CASE WHEN changes()=0 THEN RAISE(ABORT,'quota_exceeded') END;
+  SELECT RAISE(ABORT,'quota_exceeded') WHERE changes()=0;
 END;
 
 ALTER TABLE conv_messages ADD COLUMN attachments_json TEXT;

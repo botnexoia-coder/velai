@@ -1,8 +1,8 @@
 # Biblioteca multimedia: implementación y verificación
 
 Estado del 2026-09-17: las fases 0–4 de [SPEC-BIBLIOTECA.md](SPEC-BIBLIOTECA.md)
-están implementadas en el árbol de trabajo. La publicación y la comprobación real
-de WhatsApp en staging siguen pendientes; no se consideran verificadas por los mocks.
+están implementadas y publicadas en staging. La publicación en producción y la
+comprobación real de WhatsApp siguen pendientes; no se consideran verificadas por los mocks.
 
 Cloudflare confirmó por `wrangler r2 bucket list` que existen `vai-media` y
 `vai-media-staging`, creados el 2026-09-17. La configuración local enlaza cada entorno
@@ -10,10 +10,22 @@ a su bucket y a su propio `PUBLIC_MEDIA_BASE`.
 
 Juan autorizó el número de Velai **+1 570 616 0059** para la prueba. La consulta remota
 confirmó que `tenant_channels` de staging ya lo asocia al tenant `velai`, aunque
-`tenants.channel_address` conserva el número ficticio del seed. `wrangler secret list
---env staging` confirmó que faltan `TWILIO_ACCOUNT_SID` y `TWILIO_AUTH_TOKEN`: el número
-por sí solo no habilita un envío ni la validación de firmas. No se cambió el webhook
-de producción ni se enviaron mensajes reales.
+`tenants.channel_address` conserva el número ficticio del seed. Juan proporcionó las
+credenciales mediante `.dev.vars`; la consulta de cuenta de Twilio autenticó correctamente
+y confirmó una cuenta activa. Se cargaron `TWILIO_ACCOUNT_SID` y `TWILIO_AUTH_TOKEN`
+como secretos de staging, sin mostrar sus valores. Twilio confirmó que el emisor está
+`ONLINE` y que su webhook sigue apuntando al Worker de producción. No se cambió ese
+webhook ni se enviaron mensajes reales todavía.
+
+La migración 0039 se aplicó en D1 remoto de staging. El primer intento falló con
+`incomplete input` en el `CASE ... END` del trigger; D1 revirtió todos los cambios.
+Se sustituyó por `SELECT RAISE(...) WHERE changes()=0`, conservando la misma reserva
+atómica. Las 17 pruebas backend pasaron otra vez y la migración remota terminó con éxito.
+
+Worker de staging publicado: versión `59d695ad-a89b-4e9a-a686-42220ea577f3`, con el
+panel del artefacto del CI verde [35253248210](https://github.com/botnexoia-coder/velai/actions/runs/35253248210).
+Prueba de humo remota: preflight `/chat` **204**, arranque del widget `demo-staging`
+**200** y API del panel anónima **302** a Access. Producción sigue pendiente.
 
 ## Evidencia por requisito
 
@@ -31,7 +43,7 @@ de producción ni se enviaron mensajes reales.
 | §6: historial y bandeja | `attachments_json`, marcador de texto, consultas de bandeja/transcripción/CSV, `/chat/poll` y chips | Pruebas de persistencia, consultas del panel, exportación y polling; helper `mediaHref` contra URLs hostiles |
 | §7: perímetro de archivos | Magic bytes, claves aleatorias nuevas, cabeceras nosniff/sandbox/noindex, descripciones de una línea | Pruebas de cada formato, HTML/SVG disfrazados, cabeceras con y sin caché, tamaño antes del buffer y límite de imagen |
 | §8, §11.1–3 | Catálogos de tests y scripts actualizados | `npm run check`, tests panel, typecheck, build y Playwright; PDF de 3 MB aceptado, MP4 anunciado de 20 MB rechazado antes del buffer |
-| §11.4–6: proveedor y métricas reales | Número de Velai autorizado y mapeado; faltan secretos Twilio en staging | Falta publicar y probar entrega real, desactivación y logs/cache de Anthropic en staging |
+| §11.4–6: proveedor y métricas reales | Staging desplegado, número de Velai autorizado y mapeado, secretos Twilio configurados | Falta probar entrega real, desactivación y logs/cache de Anthropic en staging |
 
 ## Detalles que protegen los datos
 
@@ -66,8 +78,8 @@ y [API de R2 para Workers](https://developers.cloudflare.com/r2/api/workers/work
    esas URLs tienen caché immutable.
 3. En staging, subir un logo y comprobar `store:r2`; subir un PDF de 3 MB, obtener su
    URL y confirmar Content-Type y cabeceras. La prueba local ya cubre ese recorrido.
-4. Configurar `TWILIO_ACCOUNT_SID` y `TWILIO_AUTH_TOKEN` como secretos de staging para
-   el número autorizado de Velai. Con ese canal operativo, pedir tarifas, confirmar entrega real,
+4. Con las credenciales de Twilio ya configuradas y un destinatario de prueba autorizado,
+   pedir tarifas, confirmar entrega real,
    marcador e histórico; repetir para comprobar que no se reenvía. Desactivar y abrir
    una conversación nueva para comprobar que ya no se ofrece.
 5. Revisar `media_send_failed` y `ai_usage.cache_r_tokens`/`cache_w_tokens` del mismo
