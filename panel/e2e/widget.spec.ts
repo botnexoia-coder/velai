@@ -1,38 +1,6 @@
 import { test, expect, type Page } from '@playwright/test';
 import { readFile } from 'node:fs/promises';
 
-test('widget v20: imágenes, PDF, audio y vídeo con URLs seguras y declaración media', async ({ page }) => {
-  await mountWidget(page, { tenant: 'biblioteca', delay: 60000 });
-  await page.evaluate(() => Object.assign(window, { VELAI_HUMAN: { execute: async () => 'human-test' } }));
-  const root = 'https://api.hirevai.com/media/lib/00000000-0000-4000-8000-00000000000a/00000000-0000-4000-8000-000000000001abcdefab';
-  const batches = [
-    [{ kind: 'image', name: 'Foto <img onerror=alert(1)>', url: root+'.png' }, { kind: 'pdf', name: 'Tarifas.pdf', url: root+'.pdf' }],
-    [{ kind: 'audio', name: 'Indicaciones.mp3', url: root+'.mp3' }, { kind: 'video', name: 'Visita.mp4', url: root+'.mp4' }],
-    [{ kind: 'image', name: 'Host ajeno', url: root.replace('api.hirevai.com','evil.test')+'.png' }, { kind: 'pdf', name: 'Script', url: 'javascript:alert(1)' }],
-    [{ kind: 'pdf', name: 'Fragmento', url: root+'.pdf#x' }, { kind: 'image', name: 'Credenciales', url: root.replace('api.hirevai.com','user@api.hirevai.com')+'.png' }],
-  ];
-  let calls = 0;
-  await page.route('**/chat', async (route) => {
-    expect(route.request().postDataJSON().media).toBe(true);
-    await route.fulfill({ json: { reply: 'Te comparto el material.', state: 'bot', attachments: batches[calls++] } });
-  });
-  await page.locator('#vaiBubble').click();
-  for (let i=0;i<4;i++) {
-    await page.locator('#vaiInput').fill('Material '+i);
-    await page.locator('#vaiSend').click();
-    await expect(page.locator('.vai-row.is-bot').filter({hasText:'Te comparto el material.'})).toHaveCount(i+1);
-  }
-  const attachments=page.locator('.vai-attachment');
-  await expect(attachments).toHaveCount(4);
-  await expect(attachments.locator('img')).toHaveCount(1);
-  await expect(attachments.locator('audio')).toHaveAttribute('controls','');
-  await expect(attachments.locator('video')).toHaveAttribute('controls','');
-  await expect(attachments.getByRole('link',{name:'Tarifas.pdf'})).toHaveAttribute('href',root+'.pdf');
-  await expect(attachments.getByRole('link',{name:'Foto <img onerror=alert(1)>'})).toHaveCount(1);
-  await expect(page.locator('[onerror]')).toHaveCount(0);
-  await page.screenshot({path:test.info().outputPath('widget-media.png')});
-});
-
 async function mountWidget(page: Page, { width = 1200, lang = 'es', tenant = '', brand = {}, delay = 50 }:
   { width?: number; lang?: string; tenant?: string; brand?: Record<string, unknown>; delay?: number } = {}) {
   await page.setViewportSize({ width, height: 800 });

@@ -92,6 +92,17 @@ y [API de R2 para Workers](https://developers.cloudflare.com/r2/api/workers/work
 
 ## Publicación y comprobación pendiente
 
+La publicación se divide en dos pasos para respetar el orden Worker → Pages:
+
+- Primer PR: backend, R2, migración, panel Biblioteca e historial. Los assets y el
+  snippet público conservan v19; el servidor entrega enlaces a ese widget.
+- Segundo PR: restaura el widget v20, su loader, HTML, `vai-citas.js`, snippet del
+  panel y su E2E. Se publica una vez confirmado el Worker nuevo en producción.
+
+El estado completo previo a esa separación quedó en el commit `844f1da`. Las pruebas
+del widget v20 citadas arriba corresponden a ese estado; el primer paso tiene 27 E2E
+y el conjunto completo tiene 28.
+
 1. Publicar mediante el CI/CD documentado en [OPERATIONS.md](OPERATIONS.md), que aplica
    migraciones antes del Worker. La 0039 no modifica las migraciones ya desplegadas.
    El token de despliegue debe poder enlazar ambos buckets R2.

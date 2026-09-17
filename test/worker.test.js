@@ -1215,7 +1215,7 @@ test('el widget pinta la marca del tenant desde /widget/boot, no la de Velai', a
   assert.match(widget, /BRAND && BRAND\.wa_number/);
   // bilingüe: el saludo EN del tenant se usa cuando la página está en inglés
   assert.match(widget, /BRAND\.greeting_en/);
-  for (const fragment of ['BRAND.portrait_url', "setProperty('--vai-acc'", '--vai-lift', 'aria-expanded', 'BRAND.teaser_title_en', '· v20']) assert.ok(widget.includes(fragment), fragment);
+  for (const fragment of ['BRAND.portrait_url', "setProperty('--vai-acc'", '--vai-lift', 'aria-expanded', 'BRAND.teaser_title_en', '· v19']) assert.ok(widget.includes(fragment), fragment);
   assert.equal(widget.includes('va-ui'), false);
   assert.equal(widget.includes('vaiPulse'), false);
 
@@ -6231,7 +6231,7 @@ test('widget: loader y cabecera en la misma versión, ventana nueva y cinco suge
   assert.match(widget, /TENANT \? \[\] : T\.chips/);
   // El telón y el bloqueo del fondo son de v19: en móvil la ventana deja 108 px para el
   // lanzador y por ese hueco se veía —y se movía— la web del cliente.
-  for (const token of ['.vai-hero', 'is-empty', 'is-open', 'prefers-color-scheme', '· v20', '#vaiScrim', 'bloquearFondo']) assert.ok(widget.includes(token));
+  for (const token of ['.vai-hero', 'is-empty', 'is-open', 'prefers-color-scheme', '· v19', '#vaiScrim', 'bloquearFondo']) assert.ok(widget.includes(token));
   const chips = ['Uno', 'Dos', 'Tres', 'Cuatro', 'Cinco'];
   assert.deepEqual(JSON.parse(testing.validateTenant({ chips_json: chips }, { partial: true }).chips_json), chips);
 });
