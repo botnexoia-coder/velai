@@ -13,6 +13,8 @@ import { leads as rutasLeads } from './routes/leads.js';
 import { conversaciones as rutasConversaciones } from './routes/conversaciones.js';
 import { tenants as rutasTenants } from './routes/tenants.js';
 import { configuracion as rutasConfig } from './routes/config.js';
+import { biblioteca as rutasBiblioteca } from './routes/biblioteca.js';
+import { purgeMedia, tenantMedia, mediaTools, mediaSystem, mediaExecutor, recordMediaSent } from './biblioteca.js';
 import { finanzas as rutasFinanzas } from './routes/finanzas.js';
 import { conexiones as rutasConexiones } from './routes/conexiones.js';
 import { calendario as rutasCalendario } from './routes/calendario.js';
@@ -30,7 +32,7 @@ const WORKER_PUBLIC_URL = 'https://vai-worker.botnexo-ia.workers.dev';
 // usa esas mismas filas para numerador y denominador; `conv_daily` empezó un día antes,
 // pero no permite saber qué conversación concreta acabó en lead.
 export const CONV_TRACKING_SINCE = '2026-08-26';
-export const PUBLIC_MEDIA_BASE = 'https://api.hirevai.com'; // dominio propio: no lo cortan los adblock
+export function publicMediaBase(env) { return String(env.PUBLIC_MEDIA_BASE || 'https://api.hirevai.com').replace(/\/$/, ''); }
 export const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 export const STATUSES = new Set(['new', 'contacted', 'qualified', 'won', 'lost', 'spam']);
 const UTM_KEYS = ['utm_source', 'utm_medium', 'utm_campaign', 'utm_content', 'utm_term', 'gclid', 'fbclid'];
@@ -756,8 +758,9 @@ export function validateTenant(body, { partial = false } = {}) {
 // las subidas NUEVAS van a R2 y las viejas se siguen sirviendo desde KV.
 export const MEDIA_KEY_RE = /^[a-z0-9][a-z0-9/_.-]{0,120}$/i;
 
-export async function mediaPut(env, key, bytes, contentType) {
+export async function mediaPut(env, key, bytes, contentType, { required = false } = {}) {
   if (env.MEDIA) { await env.MEDIA.put(key, bytes, { httpMetadata: { contentType } }); return 'r2'; }
+  if (required) throw new HttpError(503, 'media_store_required');
   if (!env.KV) throw new HttpError(503, 'media_not_configured');
   await env.KV.put(`media:${key}`, bytes, { metadata: { contentType } });
   return 'kv';
@@ -2295,7 +2298,7 @@ export async function handleChatPoll(request, env, cors, url) {
   // quien sondea uno recién creado.
   if (!row) return json({ state: 'bot', messages: [] }, 200, cors);
   const after = Math.max(0, Math.min(1e12, Number(url.searchParams.get('after')) || 0));
-  const rows = (await env.DB.prepare(`SELECT id, role, text, created_at, agent_email FROM conv_messages
+  const rows = (await env.DB.prepare(`SELECT id, role, text, created_at, agent_email, attachments_json FROM conv_messages
      WHERE conversation_id=? AND id > ? AND role <> 'user' ORDER BY id ASC LIMIT 20`)
     .bind(row.id, after).all()).results || [];
   // La marca de presencia: es lo que le dice al panel si el visitante sigue delante. Sin
@@ -2304,7 +2307,7 @@ export async function handleChatPoll(request, env, cors, url) {
   return json({
     state: row.state || 'bot',
     messages: rows.map((m) => ({ id: m.id, role: m.role, text: m.text, at: m.created_at,
-      agent_name: m.role === 'agent' ? publicAgentName(m.agent_email) : null })),
+      agent_name: m.role === 'agent' ? publicAgentName(m.agent_email) : null, attachments: parseAttachments(m.attachments_json) })),
   }, 200, cors);
 }
 
@@ -2358,14 +2361,15 @@ export async function handleChat(request, env, cors, ctx, config) {
   // legítimas por la mitad (una consulta de trámites en GOgestión, 2026-08-26). El JSON de
   // tool_use consume output, así que el camino del calendario necesita al menos tanto.
   const cal = isDemoKey(config, conv.demo) ? null : await tenantCalendar(env, tenant);
+  const media = isDemoKey(config, conv.demo) ? [] : await tenantMedia(env, tenant, 'web');
   let reply;
   const bookingMeta = { channel: 'web', conversationKey: body.conversationId, defaultPhone: '' };
-  if (cal) {
+  if (cal || media.length) {
     reply = await runToolLoop(env, {
       model: 'claude-sonnet-4-6', max_tokens: WEB_MAX_TOKENS,
-      system: calendarSystem(config, tenant, cal, hayAsesor), messages: history,
-    }, calendarTools(cal, Boolean(bookingOrigin(env))), calendarExecutor(env, tenant, cal, bookingMeta), { tenant, closing: 'cita' });
-    reply = reply || 'Ahora mismo no puedo consultar la agenda. Déjame tu nombre y teléfono y el equipo te confirma la cita enseguida.';
+      system: mediaSystem(cal ? calendarSystem(config, tenant, cal, hayAsesor) : systemWithHandoff(config, tenant, hayAsesor), media), messages: history,
+    }, [...(cal ? calendarTools(cal, Boolean(bookingOrigin(env))) : []), ...mediaTools(media.length > 0)], mediaExecutor(env, tenant, bookingMeta, conv, cal ? calendarExecutor(env, tenant, cal, bookingMeta) : null), { tenant, closing: cal ? 'cita' : 'equipo' });
+    reply = reply || (bookingMeta.attachment ? `Te comparto ${bookingMeta.attachment.name}.` : cal ? 'Ahora mismo no puedo consultar la agenda. Déjame tu nombre y teléfono y el equipo te confirma la cita enseguida.' : 'No puedo consultar el material ahora mismo. El equipo puede ayudarte.');
   } else {
     reply = await callAnthropic(env, {
       model: 'claude-sonnet-4-6', max_tokens: WEB_MAX_TOKENS,
@@ -2378,7 +2382,8 @@ export async function handleChat(request, env, cors, ctx, config) {
   // El centinela de handoff jamás llega al usuario, tampoco en el canal web.
   const wantsHuman = WANTS_HUMAN.test(reply);
   reply = reply.replace(WANTS_HUMAN, '').trim() || 'De acuerdo, aviso al equipo para que te contacten.';
-  await convAppend(env, conv, [{ role: 'user', content: message }, { role: 'assistant', content: reply }]);
+  await convAppend(env, conv, [{ role: 'user', content: message }, attachmentTurn(reply, bookingMeta.attachment)]);
+  if (bookingMeta.attachment) await noteMediaSent(env, tenant, bookingMeta.attachment);
   // Se cede el turno DESPUÉS de guardar, para que el panel abra el hilo con el último
   // mensaje ya dentro. assumeAvailable: la disponibilidad ya se resolvió arriba y no hace
   // falta volver a consultarla. stateOnly: en web manda el estado, no la clave de KV.
@@ -2397,7 +2402,7 @@ export async function handleChat(request, env, cors, ctx, config) {
   }
   // `state` y `lastId` los usa el widget para decidir si tiene que empezar a preguntar por
   // mensajes nuevos, y desde qué punto. Un widget viejo ignora los dos campos.
-  return json({ reply, ...(bookingMeta.bookingCard ? { booking: bookingMeta.bookingCard } : {}), state: wantsHuman && hayAsesor ? 'esperando' : 'bot', lastId: conv.lastId || 0 }, 200, cors);
+  return json({ reply: reply + (bookingMeta.attachment && body.media !== true ? `\n${bookingMeta.attachment.url}` : ''), ...(bookingMeta.attachment ? { attachments: [bookingMeta.attachment] } : {}), ...(bookingMeta.bookingCard ? { booking: bookingMeta.bookingCard } : {}), state: wantsHuman && hayAsesor ? 'esperando' : 'bot', lastId: conv.lastId || 0 }, 200, cors);
 }
 
 // Una conversación NUEVA (no cada mensaje): es el denominador de la tasa de captura.
@@ -2470,6 +2475,16 @@ async function convLoad(env, tenant, channel, externalId, inbox = null) {
 // ha pagado — devolverla sin memoria es malo, tirarla es peor.
 // `expires_at` se recalcula en cada turno para que el reloj de retención corra desde el
 // último mensaje: una conversación viva no se purga a media frase.
+export function parseAttachments(value) {
+  try { const data = JSON.parse(value || '[]'); return Array.isArray(data) ? data.slice(0, 2) : []; } catch (_) { return []; }
+}
+function attachmentTurn(reply, attachment) {
+  return { role: 'assistant', content: reply + (attachment ? `\n[enviado: ${attachment.name}]` : ''), ...(attachment ? { attachments: [attachment] } : {}) };
+}
+async function noteMediaSent(env, tenant, attachment) {
+  try { await recordMediaSent(env, tenant, attachment); } catch (error) { console.log(JSON.stringify({ level: 'error', code: 'media_count_failed', tenant: tenant.id, error: error.name })); }
+}
+
 export async function convAppend(env, conv, turns) {
   const list = (turns || []).filter((t) => t && t.content);
   if (!list.length) return false;
@@ -2492,8 +2507,8 @@ export async function convAppend(env, conv, turns) {
       .bind(list.length, unanswered, now, expires, conv.inbox || null, inbound, conv.id);
   try {
     const out = await env.DB.batch([head, ...list.map((t) => env.DB
-      .prepare('INSERT INTO conv_messages (conversation_id,role,agent_email,text,created_at) VALUES (?,?,?,?,?)')
-      .bind(conv.id, t.role, t.agentEmail || null, t.content, now))]);
+      .prepare('INSERT INTO conv_messages (conversation_id,role,agent_email,text,created_at,attachments_json) VALUES (?,?,?,?,?,?)')
+      .bind(conv.id, t.role, t.agentEmail || null, t.content, now, t.attachments?.length ? JSON.stringify(t.attachments) : null))]);
     const last = out && out[out.length - 1];
     if (last && last.meta && last.meta.last_row_id) conv.lastId = last.meta.last_row_id;
     else {
@@ -2759,7 +2774,7 @@ async function alertTenantMisconfigured(env, tenant, accountSid) {
 // historial en D1 y captura de lead — factorizado para que no diverjan.
 // El turno del USUARIO se guarda aquí, no antes: así el mensaje y su respuesta entran en
 // el mismo batch y no queda un mensaje huérfano si el modelo falla a mitad.
-async function settleTwilioReply(config, env, ctx, tenant, from, message, conv, rawReply) {
+async function settleTwilioReply(config, env, ctx, tenant, from, message, conv, rawReply, attachment = null) {
   let reply = String(rawReply || '');
   const wantsHuman = WANTS_HUMAN.test(reply);
   reply = reply.replace(WANTS_HUMAN, '').trim();
@@ -2769,7 +2784,7 @@ async function settleTwilioReply(config, env, ctx, tenant, from, message, conv, 
     }));
   }
   const turns = [{ role: 'user', content: message }];
-  if (reply) turns.push({ role: 'assistant', content: reply });
+  if (reply || attachment) turns.push(attachmentTurn(reply, attachment));
   const trail = [...conv.messages, ...turns].slice(-CONV_WINDOW);
   await convAppend(env, conv, turns);
   // Messenger usa un PSID de hasta 25 dígitos, no un E.164: pasarlo por
@@ -2794,21 +2809,28 @@ async function settleTwilioReply(config, env, ctx, tenant, from, message, conv, 
 // es legal aquí: la ventana de 24 h la abrió el mensaje entrante del usuario. From =
 // el To del webhook (la dirección del tenant). Credenciales de la subcuenta si existe
 // — regla de oro de deliver(): los recursos de una subcuenta se operan con SUS credenciales.
-export async function sendTwilioText(env, tenant, fromAddress, toAddress, body) {
+export async function sendTwilioText(env, tenant, fromAddress, toAddress, body, mediaUrls = []) {
   const sub = tenant && tenant.twilio_subaccount_sid;
   const sid = sub || env.TWILIO_ACCOUNT_SID;
   const token = sub ? await twilioAuthTokenFor(env, tenant) : env.TWILIO_AUTH_TOKEN;
   if (!sid || !token) return { skipped: true, error: 'not_configured' };
+  const form = new URLSearchParams({ From: fromAddress, To: toAddress, Body: waBody(body) });
+  for (const url of mediaUrls) form.append('MediaUrl', url);
   const response = await fetch(`https://api.twilio.com/2010-04-01/Accounts/${sid}/Messages.json`, {
     method: 'POST',
     headers: { Authorization: `Basic ${btoa(`${sid}:${token}`)}`, 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: new URLSearchParams({ From: fromAddress, To: toAddress, Body: waBody(body) }),
+    body: form,
     signal: AbortSignal.timeout(8000),
   });
   return response.ok ? { ok: true } : { error: `twilio_${response.status}` };
 }
 
+export function twiml(text, mediaUrls = []) {
+  const content = mediaUrls.length ? `<Body>${escapeHtml(waBody(text))}</Body>${mediaUrls.map((url) => `<Media>${escapeHtml(url)}</Media>`).join('')}` : escapeHtml(waBody(text));
+  return new Response(`<?xml version="1.0" encoding="UTF-8"?><Response><Message>${content}</Message></Response>`, { headers: { 'Content-Type': 'text/xml; charset=utf-8' } });
+}
 export async function handleTwilio(request, env, ctx, config) {
+  const startedAt = Date.now();
   const raw = await request.text();
   const params = new URLSearchParams(raw);
   const object = {}; params.forEach((value, key) => { object[key] = value; });
@@ -2861,7 +2883,8 @@ export async function handleTwilio(request, env, ctx, config) {
     } catch (_) { /* mejor riesgo de duplicado que webhook caído */ }
   }
   const from = clean(params.get('From'), 80);
-  const message = clean(params.get('Body'), 2000);
+  let message = clean(params.get('Body'), 2000);
+  const unsupportedMedia = !message;
   if (!from) throw new HttpError(400, 'invalid_twilio_payload');
   // Botón del recordatorio de cita (SPEC-CONFIRMACIONES F1): camino determinista
   // ANTES de Vai — ni modelo ni estado de conversación deciden aquí. Solo con el
@@ -2870,12 +2893,7 @@ export async function handleTwilio(request, env, ctx, config) {
   if (buttonMatch && UUID_RE.test(buttonMatch[2])) {
     return handleReminderButton(env, ctx, tenant, from, to, buttonMatch[1].toLowerCase(), buttonMatch[2], message);
   }
-  // Messenger manda adjuntos (stickers, fotos) sin Body: 200 con TwiML vacío en vez
-  // de 400, para no llenar los logs de Twilio de errores por cada sticker.
-  if (!message) {
-    console.log(JSON.stringify({ level: 'info', code: 'messenger_attachment_ignored', to }));
-    return new Response('<?xml version="1.0" encoding="UTF-8"?><Response></Response>', { headers: { 'Content-Type': 'text/xml; charset=utf-8' } });
-  }
+  if (unsupportedMedia) message = '[Archivo recibido sin texto]';
 
   // Historial en D1 (migración 0021), namespaceado por tenant: dos clientes distintos con
   // el mismo usuario final no comparten conversación. Y por SESIÓN de 72 h, no por vida
@@ -2911,42 +2929,68 @@ export async function handleTwilio(request, env, ctx, config) {
     console.log(JSON.stringify({ level: 'info', code: 'bot_paused', tenant: tenant.slug, state: conv.state }));
     return new Response(EMPTY_TWIML, { headers: { 'Content-Type': 'text/xml; charset=utf-8' } });
   }
-  // Se resuelve UNA vez por mensaje y viaja al modelo en el bloque volátil del system: así
-  // el bot no ofrece pasar con una persona cuando no hay nadie que pueda entrar.
+  if (unsupportedMedia) {
+    const reply = 'Todavía no puedo leer fotos, documentos ni notas de voz. Escríbeme tu consulta en texto y te ayudo.';
+    await convAppend(env, conv, [{ role: 'user', content: message }, { role: 'assistant', content: reply }]);
+    return twiml(reply);
+  }
   const hayAsesor = await advisorAvailable(env, tenant);
-  const twiml = (text) => new Response(`<?xml version="1.0" encoding="UTF-8"?><Response><Message>${escapeHtml(waBody(text))}</Message></Response>`, { headers: { 'Content-Type': 'text/xml; charset=utf-8' } });
   const cal = await tenantCalendar(env, tenant);
-  if (!cal) {
+  const media = await tenantMedia(env, tenant, channel);
+  if (!cal && !media.length) {
     const raw = await callAnthropic(env, { model: 'claude-sonnet-4-6', max_tokens: WA_MAX_TOKENS, system: systemWithHandoff(config, tenant, hayAsesor), messages: history }, { tenant, retries: 0, timeoutMs: 10000, closing: 'equipo', bodyLimit: WA_BODY_LIMIT });
     return twiml(await settleTwilioReply(config, env, ctx, tenant, from, message, conv, raw));
   }
-  // Con calendario: híbrido síncrono/asíncrono (SPEC-CALENDARIO §3.4). La primera
-  // llamada mantiene la latencia de siempre; si el modelo NO pide herramientas,
-  // TwiML como hoy. Si las pide, TwiML vacío YA (el bucle puede superar el corte
-  // de ~15 s de Twilio) y el resto sigue en waitUntil, entregando la respuesta
-  // final por la Messages API — el dedupe por MessageSid impide que el reintento
-  // de Twilio (si lo hubiera) duplique el trabajo.
-  const payload = { model: 'claude-sonnet-4-6', max_tokens: WA_TOOL_MAX_TOKENS, system: calendarSystem(config, tenant, cal, hayAsesor), messages: history };
-  const waOpts = { tenant, retries: 0, timeoutMs: 10000, closing: 'cita', bodyLimit: WA_BODY_LIMIT };
-  const first = await callAnthropicRaw(env, { ...payload, tools: calendarTools(cal, Boolean(bookingOrigin(env))) }, waOpts);
+  const meta = { channel, conversationKey: from, defaultPhone: normalizePhone(from.replace(/^whatsapp:/i, '')) };
+  const tools = [...(cal ? calendarTools(cal, Boolean(bookingOrigin(env))) : []), ...mediaTools(media.length > 0)];
+  const executor = mediaExecutor(env, tenant, meta, conv, cal ? calendarExecutor(env, tenant, cal, meta) : null);
+  let payload = { model: 'claude-sonnet-4-6', max_tokens: WA_TOOL_MAX_TOKENS, system: mediaSystem(cal ? calendarSystem(config, tenant, cal, hayAsesor) : systemWithHandoff(config, tenant, hayAsesor), media), messages: history };
+  const waOpts = { tenant, retries: 0, timeoutMs: media.length ? 8000 : 10000, closing: cal ? 'cita' : 'equipo', bodyLimit: WA_BODY_LIMIT };
+  let first = await callAnthropicRaw(env, { ...payload, tools }, waOpts);
+  // Solo adjuntos: una segunda llamada síncrona acotada al presupuesto del webhook.
+  // Si aparecen otras tools, continúa el mismo estado en el camino asíncrono.
+  const uses = (first.content || []).filter((b) => b.type === 'tool_use');
+  if (first.stop_reason === 'tool_use' && uses.length && uses.every((u) => u.name === 'enviar_archivo') && Date.now() - startedAt < 8500) {
+    const results = [];
+    for (const use of uses) {
+      try { results.push({ type: 'tool_result', tool_use_id: use.id, content: await executor(use.name, use.input) }); }
+      catch (_) { results.push({ type: 'tool_result', tool_use_id: use.id, content: '{"error":"herramienta_no_disponible"}', is_error: true }); }
+    }
+    payload = { ...payload, messages: [...history, { role: 'assistant', content: first.content }, { role: 'user', content: results }] };
+    try { first = await callAnthropicRaw(env, { ...payload, tools }, { ...waOpts, timeoutMs: Math.max(500, Math.min(4000, 12000 - (Date.now() - startedAt))) }); }
+    catch (_) { first = { stop_reason: 'end_turn', content: [{ type: 'text', text: meta.attachment ? `Te comparto ${meta.attachment.name}.` : 'No he podido consultar el archivo ahora mismo. Inténtalo de nuevo en un momento.' }] }; }
+  }
   if (first.stop_reason !== 'tool_use') {
-    return twiml(await settleTwilioReply(config, env, ctx, tenant, from, message, conv, settleReply(first, waOpts, contentText(first))));
+    const raw = settleReply(first, waOpts, contentText(first)) || (meta.attachment ? `Te comparto ${meta.attachment.name}.` : '¿En qué más puedo ayudarte?');
+    const reply = await settleTwilioReply(config, env, ctx, tenant, from, message, conv, raw, meta.attachment);
+    await noteMediaSent(env, tenant, meta.attachment);
+    return twiml(reply, meta.attachment ? [meta.attachment.url] : []);
   }
   ctx.waitUntil((async () => {
-    const executor = calendarExecutor(env, tenant, cal, {
-      channel,
-      conversationKey: from,
-      defaultPhone: normalizePhone(from.replace(/^whatsapp:/i, '')),
-    });
-    // Timeouts agresivos en el tramo asíncrono: waitUntil da ~30 s en total.
-    const raw = await runToolLoop(env, payload, calendarTools(cal, Boolean(bookingOrigin(env))), executor, waOpts, first)
-      || 'No he podido confirmar la agenda ahora mismo; el equipo te escribe enseguida para cerrarla.';
-    const reply = await settleTwilioReply(config, env, ctx, tenant, from, message, conv, raw);
-    if (reply) {
-      const sent = await sendTwilioText(env, tenant, to, from, reply);
-      if (!sent.ok) console.log(JSON.stringify({ level: 'error', code: 'calendar_reply_failed', tenant: tenant.slug, error: sent.error || 'skipped' }));
+    const raw = await runToolLoop(env, payload, tools, executor, { ...waOpts, timeoutMs: 5000 }, first)
+      || (meta.attachment ? `Te comparto ${meta.attachment.name}.` : 'No he podido completar la consulta ahora mismo; el equipo te escribe enseguida.');
+    if (!meta.attachment) {
+      const reply = await settleTwilioReply(config, env, ctx, tenant, from, message, conv, raw);
+      if (reply) {
+        const sent = await sendTwilioText(env, tenant, to, from, reply);
+        if (!sent.ok) console.log(JSON.stringify({ level: 'error', code: 'calendar_reply_failed', tenant: tenant.slug, error: sent.error || 'skipped' }));
+      }
+      return;
     }
-  })().catch((error) => console.log(JSON.stringify({ level: 'error', code: 'calendar_reply_failed', tenant: tenant.slug, error: error.name }))));
+    const outgoing = raw.replace(WANTS_HUMAN, '').trim();
+    const sent = await sendTwilioText(env, tenant, to, from, outgoing, meta.attachment ? [meta.attachment.url] : []);
+    if (!sent.ok) {
+      console.log(JSON.stringify({ level: 'error', code: meta.attachment ? 'media_send_failed' : 'calendar_reply_failed', tenant: tenant.slug, error: sent.error || 'skipped' }));
+      if (meta.attachment) {
+        const fallback = 'No he podido adjuntar el archivo ahora mismo. El equipo puede ayudarte a conseguirlo.';
+        const retried = await sendTwilioText(env, tenant, to, from, fallback);
+        if (retried.ok) await settleTwilioReply(config, env, ctx, tenant, from, message, conv, fallback);
+      }
+      return;
+    }
+    await settleTwilioReply(config, env, ctx, tenant, from, message, conv, raw, meta.attachment);
+    await noteMediaSent(env, tenant, meta.attachment);
+  })().catch((error) => console.log(JSON.stringify({ level: 'error', code: meta.attachment ? 'media_send_failed' : 'calendar_reply_failed', tenant: tenant.slug, error: error.name }))));
   return new Response(EMPTY_TWIML, { headers: { 'Content-Type': 'text/xml; charset=utf-8' } });
 }
 
@@ -4017,6 +4061,7 @@ async function scheduled(env, cron) {
     }
     return;
   }
+  try { await purgeMedia(env, now); } catch (error) { console.log(JSON.stringify({ level: 'error', code: 'media_purge_failed', error: error.name })); }
   await drainQueuedLeads(env);
   try { await pollProvisioning(env); } catch (_) {}
   try { await pollTemplateApprovals(env); } catch (error) {
@@ -4093,6 +4138,7 @@ function buildAdminApp() {
   admin.route('/', rutasLeads);
   admin.route('/', rutasConversaciones);
   admin.route('/', rutasConexiones);
+  admin.route('/', rutasBiblioteca);
   admin.route('/', rutasCalendario);
   admin.route('/', rutasSolicitudes);
   admin.route('/', rutasTenants);

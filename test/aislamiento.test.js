@@ -165,6 +165,8 @@ function makeEnv(db) {
 // ── Catálogo de casos: uno por ruta de clienteAllowed ────────────────────────
 // `t` es el tenant que va en la URL — el barrido lo sustituye por A y por B.
 const CASOS = [
+  { key: 'media$', m: ['GET', 'POST'], path: (t) => `/api/admin/tenants/${t}/media` },
+  { key: 'media\\/[0-9a-f-]+$', m: ['PATCH', 'DELETE'], path: (t) => `/api/admin/tenants/${t}/media/00000000-0000-4000-8000-000000000003`, body: { name: 'test' } },
   { key: 'booking$', m: ['GET', 'PATCH'], path: (t) => `/api/admin/tenants/${t}/booking`, body: { booking_note: 'test' } },
   { key: 'services$', m: ['GET', 'POST'], path: (t) => `/api/admin/tenants/${t}/services`, body: { slug: 'sesion', name: 'Sesión', minutes: 30 } },
   { key: 'services\\/[0-9a-f-]+$', m: ['PATCH', 'DELETE'], path: (t) => `/api/admin/tenants/${t}/services/00000000-0000-4000-8000-000000000003`, body: { name: 'test' } },

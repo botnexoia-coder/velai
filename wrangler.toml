@@ -45,6 +45,8 @@ run_worker_first = true
 ALLOWED_WEB_ORIGINS = "https://citas.hirevai.com,https://hirevai.com,https://www.hirevai.com,https://velai-dey.pages.dev,https://hiredatavision.com,https://www.hiredatavision.com,https://gogestion.es,https://www.gogestion.es,https://zoetravelspain.com,https://www.zoetravelspain.com,https://dialogosqueensenan.com,https://www.dialogosqueensenan.com,https://gogestion-demo.pages.dev"
 ADMIN_ORIGIN = "https://admin.hirevai.com"
 BOOKING_ORIGIN = "https://citas.hirevai.com"
+PUBLIC_MEDIA_BASE = "https://api.hirevai.com"
+MEDIA_QUOTA_BYTES = "524288000"
 LEAD_RETENTION_MONTHS = "24"
 # Retención de TRANSCRIPCIONES (migración 0021), aparte y más corta que la de los leads:
 # una conversación guardada es más sensible que una ficha de contacto. El cron la purga
@@ -139,14 +141,10 @@ head_sampling_rate = 1
 #    docs/VOLUMEN-Y-ALMACENAMIENTO.md). Además multiplicaría por 5 los reintentos a Twilio.
 crons = ["* * * * *", "*/5 * * * *"]
 
-# Medios (logos de marca → widget + foto de perfil de WhatsApp). Hoy viven en KV con
-# prefijo `media:`; R2 es el sitio natural pero exige activarlo UNA VEZ en el dashboard
-# (la API responde 10042 «Please enable R2» mientras no lo esté). Cuando se active:
-# `npx wrangler@4 r2 bucket create vai-media` y descomentar — las subidas nuevas irán a
-# R2 y las viejas se siguen sirviendo desde KV (mediaGet mira los dos).
-# [[r2_buckets]]
-# binding = "MEDIA"
-# bucket_name = "vai-media"
+# Biblioteca y logos nuevos en R2; los logos antiguos siguen accesibles en KV.
+[[r2_buckets]]
+binding = "MEDIA"
+bucket_name = "vai-media"
 
 [[kv_namespaces]]
 binding = "KV"
@@ -213,6 +211,8 @@ head_sampling_rate = 1
 ALLOWED_WEB_ORIGINS = "https://citas-staging.hirevai.com,http://localhost:8080,http://127.0.0.1:8080,https://velai-dey.pages.dev,https://example.com"
 ADMIN_ORIGIN = "https://admin-staging.hirevai.com"
 BOOKING_ORIGIN = "https://citas-staging.hirevai.com"
+PUBLIC_MEDIA_BASE = "https://vai-worker-staging.botnexo-ia.workers.dev"
+MEDIA_QUOTA_BYTES = "524288000"
 LEAD_RETENTION_MONTHS = "24"
 CONV_RETENTION_DAYS = "90"
 # Topes de gasto MUY por debajo de producción: staging usa una clave real de Anthropic y
@@ -254,3 +254,7 @@ id = "d522cc2ef3f54e1f91a35dc90d0df1bc"
 binding = "DB"
 database_name = "vai-leads-staging"
 database_id = "4fe5d8b0-17d8-4ac1-a3f7-216c5e085a75"
+
+[[env.staging.r2_buckets]]
+binding = "MEDIA"
+bucket_name = "vai-media-staging"

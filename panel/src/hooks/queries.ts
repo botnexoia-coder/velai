@@ -753,3 +753,24 @@ export function useFinMutacion<T>(recurso: 'movimientos' | 'conceptos' | 'repart
     onSuccess: () => client.invalidateQueries({ queryKey: ['finanzas'] }),
   });
 }
+
+export function useBiblioteca(id: string) {
+  return useQuery({ queryKey: ['biblioteca', id], queryFn: () => api<import('../api/types').BibliotecaResponse>(`/api/admin/tenants/${id}/media`) });
+}
+export function useMediaUpload(id: string) {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: ({ file, name, description, channels }: { file: File; name: string; description: string; channels: string[] }) => api<{ ok: true; duplicate?: boolean; item: import('../api/types').MediaItem }>(`/api/admin/tenants/${id}/media?${new URLSearchParams({ name, description, channels: channels.join(',') })}`, { method: 'POST', headers: { 'Content-Type': file.type || 'application/octet-stream' }, body: file }),
+    onSuccess: () => client.invalidateQueries({ queryKey: ['biblioteca', id] }),
+  });
+}
+export function useMediaMutation(tenantId: string) {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, method, body }: { id: string; method: 'PATCH' | 'DELETE' | 'POST'; body?: import('../api/types').MediaMetadata }) => {
+      const url = `/api/admin/tenants/${tenantId}/media/${encodeURIComponent(id)}`;
+      return method === 'DELETE' ? apiDelete<OkResponse>(url) : method === 'POST' ? apiPost<OkResponse>(url) : apiPatch<OkResponse>(url, body);
+    },
+    onSuccess: () => client.invalidateQueries({ queryKey: ['biblioteca', tenantId] }),
+  });
+}

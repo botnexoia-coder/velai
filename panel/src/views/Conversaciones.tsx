@@ -1,3 +1,4 @@
+import { messageAttachments, mediaHref } from '../lib/media';
 // Bandeja de conversaciones a pantalla completa: lista a la izquierda, hilo y cajón a
 // la derecha, contra /api/admin/inbox (UNA llamada con lista + hilo, sondeada por
 // TanStack Query cada 15 s cuando hay algo vivo y cada 60 s si no).
@@ -506,6 +507,7 @@ function Thread({
                 <div className={`bub ${kind}`}>
                   {m.role === 'agent' ? <span className="who">{m.agent_email || 'equipo'}</span> : null}
                   <span className="txt">{m.text}</span>
+                  {messageAttachments(m.attachments_json).map((a, index) => { const href = mediaHref(a.url); return href ? <a className="chip" key={index} href={href} target="_blank" rel="noopener noreferrer">📎 {a.name}</a> : null; })}
                   <time>{fmtHora(m.created_at)}</time>
                 </div>
               </div>

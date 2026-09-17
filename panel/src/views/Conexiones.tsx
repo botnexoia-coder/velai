@@ -3,6 +3,7 @@
 // cabecera. Tira de estado de canales arriba y dos columnas que fluyen por su cuenta.
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router';
+import { Biblioteca } from './Biblioteca';
 import { confirmar, pedirTexto } from '../components/Confirmar';
 import { traducir } from '../api/errors';
 import { ChIcon } from '../components/icons';
@@ -64,7 +65,7 @@ export function Conexiones() {
         {isVelai ? (
           <div className="actions actions0">
             <span className="sel">
-              <select value={tenantId ?? ''} onChange={(e) => setParams({ t: e.target.value })} aria-label="Cliente de las conexiones">
+              <select value={tenantId ?? ''} onChange={(e) => setParams((prev) => { const next = new URLSearchParams(prev); next.set('t', e.target.value); return next; })} aria-label="Cliente de las conexiones">
                 {selectedMissing ? <option value="">Selecciona un cliente</option> : null}
                 {(tenants?.tenants ?? []).map((t) => (
                   <option key={t.id} value={t.id}>
@@ -78,7 +79,8 @@ export function Conexiones() {
       </div>
       {tenantsError ? <p className="error">{traducir(tenantsError)}</p> : null}
       {selectedMissing ? <p className="error">El cliente del enlace ya no está disponible. Selecciona otro cliente.</p> : null}
-      {tenantId ? <ConexionesBody key={tenantId} tenantId={tenantId} isVelai={isVelai === true} isCliente={isCliente === true} /> : null}
+      <div className="chtabs" role="tablist" aria-label="Secciones de Conexiones">{['canales', 'biblioteca'].map((tab) => <button key={tab} className={`chtab${(params.get('tab') === 'biblioteca' ? 'biblioteca' : 'canales') === tab ? ' is-on' : ''}`} role="tab" aria-selected={(params.get('tab') === 'biblioteca' ? 'biblioteca' : 'canales') === tab} onClick={() => setParams((prev) => { const next = new URLSearchParams(prev); next.set('tab', tab); return next; })}>{tab === 'canales' ? 'Canales y avisos' : 'Biblioteca'}</button>)}</div>
+      {tenantId && params.get('tab') === 'biblioteca' ? <Biblioteca key={tenantId} tenantId={tenantId} isVelai={isVelai} /> : tenantId ? <ConexionesBody key={tenantId} tenantId={tenantId} isVelai={isVelai === true} isCliente={isCliente === true} /> : null}
     </div>
   );
 }
