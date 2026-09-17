@@ -1,4 +1,4 @@
-/* VAI CITAS · v19 — one public page, inline and popup placements. */
+/* VAI CITAS · v20 — one public page, inline and popup placements. */
 (function () {
   if (window.__vaiCitas) return;
   window.__vaiCitas = true;
