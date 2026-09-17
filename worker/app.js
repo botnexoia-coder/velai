@@ -13,6 +13,7 @@ import { leads as rutasLeads } from './routes/leads.js';
 import { conversaciones as rutasConversaciones } from './routes/conversaciones.js';
 import { tenants as rutasTenants } from './routes/tenants.js';
 import { configuracion as rutasConfig } from './routes/config.js';
+import { finanzas as rutasFinanzas } from './routes/finanzas.js';
 import { conexiones as rutasConexiones } from './routes/conexiones.js';
 import { calendario as rutasCalendario } from './routes/calendario.js';
 import { solicitudes as rutasSolicitudes } from './routes/solicitudes.js';
@@ -4088,6 +4089,7 @@ function buildAdminApp() {
   // La lista blanca del rol cliente, ANTES de cualquier handler (403 sin tocar datos).
   admin.use('/api/admin/*', clienteGate);
   admin.route('/', rutasConfig);
+  admin.route('/', rutasFinanzas);
   admin.route('/', rutasLeads);
   admin.route('/', rutasConversaciones);
   admin.route('/', rutasConexiones);

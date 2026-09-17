@@ -77,6 +77,11 @@ DEFAULT_TENANT_SLUG = "velai"
 # Admins de Velai en el panel (rol completo). Fuera de D1 a propósito: una fila
 # borrada en tenant_users no puede dejar a Velai fuera de su propio panel.
 ADMIN_EMAILS = "botnexo.ia@gmail.com"
+# Acceso a la contabilidad interna (Finanzas). Fuera de D1 por el mismo motivo que
+# ADMIN_EMAILS: si la lista de quién cobra viviera en una tabla editable desde el panel,
+# una sesión comprometida podría añadirse sola. Cada socio necesita ADEMÁS rol velai — por
+# eso está la cuenta raíz (botnexo), que lo tiene garantizado, y no solo el correo personal.
+SOCIOS_EMAILS = "botnexo.ia@gmail.com,juanesgarciag@gmail.com"
 # API de Cloudflare desde el worker (SPEC-ORIGENES-Y-TURNSTILE + SPEC-ACCESO):
 # el token va como SECRET (wrangler secret put CF_API_TOKEN) con permisos mínimos:
 # Account→Turnstile→Edit, Account→Access: Organizations/IdPs/Groups→Edit y
@@ -220,6 +225,7 @@ AI_TENANT_MONTHLY_TOKENS = "5000000"
 PANEL_V2 = "1"
 DEFAULT_TENANT_SLUG = "velai"
 ADMIN_EMAILS = "botnexo.ia@gmail.com"
+SOCIOS_EMAILS = "botnexo.ia@gmail.com,juanesgarciag@gmail.com"
 CF_ACCOUNT_ID = "6a5877b5637ec5fa28d05af46e894542"
 # Sitekey de PRUEBA de Turnstile (siempre válida). Su secreto va en el .dev.vars y como
 # secret de staging: 1x0000000000000000000000000000000AA.

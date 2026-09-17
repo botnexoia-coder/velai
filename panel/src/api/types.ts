@@ -10,6 +10,8 @@ export type Role = 'velai' | 'cliente';
 /** GET /api/admin/me */
 export interface Me {
   role: Role;
+  /** Ausente en workers anteriores: el panel mantiene cerrado el acceso. */
+  socio?: boolean;
   tenantName: string | null;
   tenantLogo: string | null;
   /** El cliente lo necesita para llamar a SUS rutas /tenants/:id/…; para velai es null. */
@@ -811,4 +813,41 @@ export interface PlantillasResponse {
      *  solicitud parten de lo actual). */
     hours?: number;
   }[];
+}
+
+// Finanzas internas; importes enteros (céntimos EUR, pesos COP).
+export type FinTipo = 'ingreso' | 'gasto' | 'egreso';
+export type FinMoneda = 'EUR' | 'COP';
+export interface FinConcepto {
+  id: number; tipo: FinTipo; nombre: string; activo: number; position: number;
+  /** 1 = lo usa el código (el egreso de los repartos): se reordena, pero no se renombra ni se apaga. */
+  sistema?: number;
+}
+export interface FinConceptos { conceptos: Record<FinTipo, FinConcepto[]> }
+export interface FinMovimiento {
+  id: string; tipo: FinTipo; concepto_id: number; concepto_nombre: string;
+  fecha: string; moneda: FinMoneda; importe: number; nota: string | null;
+  tenant_id: string | null; tenant_name: string | null;
+  beneficiario: string | null; reparto_id: string | null; created_by: string; created_at: string;
+}
+export interface FinMovimientos { movimientos: FinMovimiento[]; nextCursor: string | null }
+export interface FinTotales { ingresos: number; gastos: number; beneficio: number; egresos: number; caja: number; sin_repartir: number }
+export interface FinRepartido { email: string; nombre: string; moneda: FinMoneda; importe: number }
+export interface FinResumen {
+  monedas: Record<FinMoneda, FinTotales>;
+  conceptos: { concepto_id: number; nombre: string; tipo: FinTipo; moneda: FinMoneda; importe: number }[];
+  repartido: FinRepartido[];
+}
+export interface FinSocio { email: string; nombre: string }
+export interface FinReparto {
+  id: string; fecha: string; moneda: FinMoneda; nota: string | null;
+  created_by: string; created_at: string; lineas: (FinMovimiento & { nombre: string })[];
+}
+export interface FinRepartos { socios: FinSocio[]; repartido: FinRepartido[]; repartos: FinReparto[] }
+export interface FinMovimientoInput {
+  tipo: FinTipo; concepto_id: number; fecha: string; moneda: FinMoneda; importe: number;
+  nota: string; tenant_id: string | null;
+}
+export interface FinRepartoInput {
+  fecha: string; moneda: FinMoneda; nota: string; lineas: { beneficiario: string; importe: number }[];
 }

@@ -114,6 +114,14 @@ export function Shell() {
           {isCliente ? <Tab to="/plantillas" label="Plantillas" icon={<IcoTemplate />} /> : null}
           {isVelai ? <Tab to="/clientes" label="Clientes" icon={<IcoBriefcase />} /> : null}
         </nav>
+        {isVelai && me.socio === true ? (
+          <>
+            <div className="navlabel">Administración</div>
+            <nav className="tabs" aria-label="Administración">
+              <Tab to="/finanzas" label="Finanzas" icon={<IcoBriefcase />} />
+            </nav>
+          </>
+        ) : null}
         {isVelai ? (
           <>
             <div className="navlabel">Sistema</div>

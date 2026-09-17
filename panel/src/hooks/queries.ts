@@ -717,3 +717,36 @@ export function useWebhookCheck() {
     mutationFn: () => api<WebhookInfo>('/api/admin/config/telegram-webhook'),
   });
 }
+
+// ── Finanzas (solo socios) ────────────────────────────────────────────────
+export interface FinFilters {
+  desde?: string; hasta?: string; tipo?: string; moneda?: string; concepto?: string; tenant?: string;
+}
+export function useFinResumen(filters: FinFilters, enabled = true) {
+  return useQuery({ queryKey: ['finanzas', 'resumen', filters], queryFn: () => api<import('../api/types').FinResumen>(`/api/admin/finanzas/resumen${qs({ ...filters })}`), enabled });
+}
+export function useFinConceptos(todos = false, enabled = true) {
+  return useQuery({ queryKey: ['finanzas', 'conceptos', todos], queryFn: () => api<import('../api/types').FinConceptos>(`/api/admin/finanzas/conceptos${todos ? '?todos=1' : ''}`), enabled });
+}
+export function useFinMovimientos(filters: FinFilters, enabled = true) {
+  return useInfiniteQuery({
+    queryKey: ['finanzas', 'movimientos', filters],
+    queryFn: ({ pageParam }) => api<import('../api/types').FinMovimientos>(`/api/admin/finanzas/movimientos${qs({ ...filters, cursor: pageParam })}`),
+    initialPageParam: null as string | null, getNextPageParam: (last) => last.nextCursor, enabled,
+  });
+}
+export function useFinRepartos(enabled = true) {
+  return useQuery({ queryKey: ['finanzas', 'repartos'], queryFn: () => api<import('../api/types').FinRepartos>('/api/admin/finanzas/repartos'), enabled });
+}
+// Invalidar el dominio completo: una corrección también cambia caja, desglose y reparto.
+export function useFinMutacion<T>(recurso: 'movimientos' | 'conceptos' | 'repartos') {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: ({ method, id, body }: { method: 'POST' | 'PATCH' | 'DELETE'; id?: string | number; body?: T }) => {
+      const path = `/api/admin/finanzas/${recurso}${id === undefined ? '' : `/${id}`}`;
+      type Result = { ok: true; id?: string | number; aviso?: 'caja_negativa' };
+      return method === 'DELETE' ? apiDelete<Result>(path) : method === 'PATCH' ? apiPatch<Result>(path, body) : apiPost<Result>(path, body);
+    },
+    onSuccess: () => client.invalidateQueries({ queryKey: ['finanzas'] }),
+  });
+}

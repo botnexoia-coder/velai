@@ -82,3 +82,20 @@ describe('color estable por tenant', () => {
     expect(tenantColor('abc')).toMatch(/^#[0-9a-f]{6}$/i);
   });
 });
+
+import { finDinero, finImporte } from './format';
+describe('importes del libro interno', () => {
+  it('formatea céntimos EUR y pesos COP sin mezclarlos', () => {
+    expect(finDinero(150000, 'EUR')).toBe('€ 1.500,00');
+    expect(finDinero(150000, 'COP')).toBe('$ 150.000');
+    expect(finDinero(-29, 'EUR')).toBe('−€ 0,29');
+  });
+  it('lee decimales exactamente y rechaza precisión o cifras inválidas', () => {
+    expect(finImporte('0,29', 'EUR')).toBe(29);
+    expect(finImporte('1500.5', 'EUR')).toBe(150050);
+    expect(finImporte('150000', 'COP')).toBe(150000);
+    for (const s of ['0', '-1', '1.001', '1e3', '1,000.00', 'NaN']) expect(finImporte(s, 'EUR')).toBeNull();
+    expect(finImporte('1.5', 'COP')).toBeNull();
+    expect(finImporte('9007199254740992', 'COP')).toBeNull();
+  });
+});

@@ -89,6 +89,15 @@ export function envAdmins(env) {
   return clean(env.ADMIN_EMAILS, 500).split(',').map((x) => x.trim().toLowerCase()).filter(Boolean);
 }
 
+// Una fila de fin_socios solo da un nombre: nunca concede acceso al libro.
+export function envSocios(env) {
+  return [...new Set(String(env.SOCIOS_EMAILS || '').split(',').map((x) => x.trim().toLowerCase()).filter(Boolean))];
+}
+
+export function esSocio(env, scope) {
+  return scope.role === 'velai' && envSocios(env).includes(String(scope.email || '').toLowerCase());
+}
+
 export async function resolveScope(env, email) {
   const who = String(email).toLowerCase();
   if (envAdmins(env).includes(who)) return { role: 'velai', tenantId: null, email };

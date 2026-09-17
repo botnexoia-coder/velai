@@ -302,3 +302,17 @@ test('las rutas propias del cliente no se cierran como si fueran ajenas', async 
   for (const x of rotas) t.diagnostic('sin fila en el mock: ' + x);
   assert.ok(rotas.length < pares.length / 2, `demasiadas rutas propias cerradas (${rotas.length}/${pares.length})`);
 });
+
+// La superficie financiera completa queda fuera de clienteAllowed, incluidas las
+// nuevas rutas: recorrer el router evita que el barrido envejezca al añadir handlers.
+test('Finanzas: clienteGate rechaza cada ruta antes de tocar D1', async () => {
+  const { finanzas } = await import('../worker/routes/finanzas.js');
+  assert.equal(finanzas.routes.length, 13);
+  for (const route of finanzas.routes) {
+    const path = route.path.replace(':id', A);
+    const r = await ejecutar({ path: () => path, body: {} }, route.method, A);
+    assert.equal(r.status, 403, `${route.method} ${path}`);
+    assert.equal(r.error, 'not_authorized');
+    assert.equal(r.db.queries.length, 0, 'la puerta tiene que ir antes de D1');
+  }
+});
