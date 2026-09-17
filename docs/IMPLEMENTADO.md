@@ -20,6 +20,66 @@
 
 ---
 
+## Finanzas: el libro interno de Velai (`SPEC-FINANZAS.md`, 2026-09-17, migraciones 0037/0038)
+
+Pedido de Juan: «gastos, ingresos y egresos… qué queda en caja, y si repartimos algunos de los
+ingresos, los que hacemos parte del equipo que nos repartimos dineros». Contabilidad **de
+Velai**, no un módulo para clientes: ningún tenant la ve ni existe para el rol cliente.
+
+**Las cuatro decisiones que fijaron el modelo** (Juan, 2026-09-17): reparto **manual por
+evento**, sin porcentajes guardados; **egreso = salida que no es gasto**, de modo que
+`beneficio = ingresos − gastos` y repartir dinero no parezca una pérdida; **dos monedas, EUR y
+COP**, cada una con su caja y sin conversión; y acceso **solo para socios**, no para todo el
+rol velai.
+
+- **Esquema** (`0037_finanzas.sql`): `fin_conceptos` (el catálogo de los desplegables, cada
+  concepto de un solo tipo), `fin_movimientos` (un único libro: el tipo da el signo y el
+  importe va en la unidad MENOR —céntimos en EUR, pesos en COP— para que sumar cien filas no
+  arrastre redondeos), `fin_repartos` y `fin_socios`. Las líneas de un reparto son egresos con
+  `reparto_id`: **el dinero repartido sale de la caja por el mismo camino que todo lo demás**,
+  que es justo la resta que se olvida cuando vive aparte.
+- **Dos cerraduras, no una**: ninguna ruta entra en `clienteAllowed`, así que `clienteGate`
+  cierra al rol cliente ANTES de tocar D1; y cada uno de los 17 handlers exige `esSocio` en su
+  primera línea. `SOCIOS_EMAILS` vive en el entorno y no en D1 —mismo motivo que `ADMIN_EMAILS`:
+  si la lista de quién cobra fuera una tabla editable desde el panel, una sesión comprometida
+  podría añadirse sola—, y hace falta ADEMÁS rol velai. `/api/admin/me` devuelve `socio`.
+- **Las cuentas, escritas una sola vez**: la caja es SIEMPRE acumulada desde el origen aunque
+  el filtro diga «septiembre» (preguntar «qué queda» por periodo no significa nada), el
+  beneficio sí es del periodo y los egresos no lo tocan. Nunca se suman euros con pesos.
+- **Panel** (`views/Finanzas.tsx`, bloque «Administración» de la barra lateral, visible solo
+  con `me.socio`): Movimientos con tarjetas por moneda y la caja destacada, Repartos con el
+  acumulado por persona, Conceptos y Socios. `finImporte` lee «0,29» como 29 céntimos exactos,
+  sin multiplicar flotantes.
+- **El egreso que firma los repartos** se localiza por la marca `fin_conceptos.sistema` y nunca
+  por su nombre: renombrarlo desde el catálogo dejaba el reparto siguiente en un 409
+  inexplicable. La API rechaza renombrarlo, apagarlo y borrarlo; reordenarlo sí, porque moverlo
+  de sitio no rompe nada.
+- **Socios gestionables** (`0038_fin_socios_gestion.sql`): `SOCIOS_EMAILS` decidía dos cosas a
+  la vez, quién entra y quién cobra. Ahora `fin_socios` es el catálogo de beneficiarios,
+  editable desde la pestaña Socios, y la variable conserva EXCLUSIVAMENTE el permiso de
+  entrada: un alta del panel no concede acceso y hay test que lo prueba. Corregir un correo
+  reasigna sus repartos en la MISMA transacción, para que el acumulado de una persona no se
+  parta en dos por un error de dedo; quien tiene pagos no se borra, se desactiva. La carrera
+  entre validar un beneficiario y darlo de baja se cierra en la base con un trigger
+  `BEFORE INSERT` dentro del propio batch: si el socio deja de estar activo a mitad, cae
+  también la cabecera del reparto. Alta, cambio y baja dejan rastro (`created_by`/`created_at`
+  en la ficha y `fin_socio_alta` / `fin_socio_cambio` / `fin_socio_baja` en el log).
+- **Pruebas**: `test/finanzas.test.js` (18 casos sobre SQLite real, con todas las migraciones y
+  las claves ajenas activas) cubre la aritmética de las dos monedas, el 403 a un velai NO socio
+  sin permitirle una sola consulta, el rollback real de un reparto con una línea mala, la baja
+  concurrente y un replay de la 0038 sobre el estado ya desplegado que demuestra que no mueve
+  ni una fila. Además `Finanzas.test.tsx` y tres recorridos E2E que usan los handlers reales
+  contra SQLite efímera.
+
+**Desplegado el 2026-09-17 en dos tandas**, las dos por el CD y con la migración remota antes
+del worker: `033807f` (el libro, migración 0037) y `79cdfbe` (socios gestionables,
+migración 0038).
+
+**Lo que NO entra, a propósito**: conversión EUR↔COP y total combinado —exige una tasa, y una
+tasa envejece—; facturación, IVA, AEAT o DIAN; adjuntar justificantes; conciliación bancaria;
+presupuestos; y enganchar automáticamente el gasto de IA de `ai_usage`, que está en USD (una
+tercera moneda) y se apunta a mano.
+
 ## Autoagenda: página de reserva pública, servicios y embeds (`SPEC-AUTOAGENDA.md`, 2026-09-15/16, migraciones 0034/0035/0036)
 
 La **F3** que SPEC-CONFIRMACIONES dejó anotada: una superficie de reserva **sin

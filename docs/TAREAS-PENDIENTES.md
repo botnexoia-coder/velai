@@ -32,6 +32,9 @@ decide quién puede cerrar cada cosa:
       acabados de Google Calendar (página de integración y botón oficial).
 - [ ] Confirmaciones F3/F4 y unificación de la plantilla legacy de leads, solo cuando
       negocio priorice esas fases.
+- [ ] Finanzas: conversión EUR↔COP con total combinado, y proponer el movimiento mensual
+      del gasto de IA a partir de `ai_usage` (hoy en USD, se apunta a mano). Las dos cosas
+      se dejaron fuera a propósito; solo si negocio las pide.
 
 ### OPERACIÓN (código ya disponible; requiere entorno o una persona)
 
@@ -53,6 +56,15 @@ decide quién puede cerrar cada cosa:
       sucede y te ayudo a orientar el servicio y preparar tu cita.»; Faby: «¿Necesitas
       ayuda con tus trámites?» / «Cuéntame qué necesitas y te ayudo a orientar tu consulta
       con el equipo de GOgestión.»
+- [ ] **Juan: rol velai para `juanesgarciag@gmail.com`** si quiere abrir Finanzas con su
+      correo personal (Configuración → Admins, que escribe `admin_users`). Estar en
+      `SOCIOS_EMAILS` NO basta: `esSocio` exige las dos cosas. Hoy la pestaña solo la ve
+      `botnexo.ia@gmail.com`, que es admin raíz.
+- [ ] **Juan: nombre y papel de la cuenta raíz en Finanzas → Socios.** La migración 0038
+      sembró `botnexo.ia@gmail.com` con el correo como nombre. Decidir además si esa cuenta
+      debe COBRAR en los repartos o solo entrar: si son dos accesos de la misma persona,
+      repartir a los dos partiría su acumulado en dos filas. Se quita desde la propia
+      pestaña, sin tocar código.
 - [ ] **Logo de `tufisiooficial` fuera de `workers.dev`**: su `logo_url` apunta a
       `tufisiooficial.botnexo-ia.workers.dev`, justo el dominio que cortan los bloqueadores
       (el motivo del salto v7→v8). Resubirlo desde el panel para que quede en
