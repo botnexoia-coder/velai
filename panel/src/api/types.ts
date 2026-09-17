@@ -203,6 +203,7 @@ export interface ConversationHead {
 }
 
 export interface ConvMessage {
+  attachments_json?: string | null;
   role: MsgRole;
   agent_email?: string | null;
   text: string;
@@ -854,3 +855,9 @@ export interface FinMovimientoInput {
 export interface FinRepartoInput {
   fecha: string; moneda: FinMoneda; nota: string; lineas: { beneficiario: string; importe: number }[];
 }
+
+export type MediaKind = 'image' | 'pdf' | 'audio' | 'video';
+export interface MediaAttachment { id: string; slug: string; name: string; kind: MediaKind; mime: string; url: string }
+export interface MediaMetadata { name?: string; description?: string; channels?: string[]; active?: number; position?: number }
+export interface MediaItem extends MediaAttachment { ext: string; bytes: number; description: string; channels: string[]; active: number; position: number; sent_count: number; last_sent_at: string | null; created_at: string; updated_at: string }
+export interface BibliotecaResponse { items: MediaItem[]; quota: { bytes: number; used: number; files: number }; limits: Record<MediaKind, number>; storage_ready: boolean }

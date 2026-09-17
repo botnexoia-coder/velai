@@ -101,12 +101,13 @@ publico.get('/media/*', async (c) => {
   // vez por centro de datos en lugar de una vez por visitante del widget.
   const cache = caches.default;
   const cached = await cache.match(request);
-  if (cached) return cached;
+  const security = { 'X-Content-Type-Options': 'nosniff', 'Content-Security-Policy': "default-src 'none'; sandbox", 'X-Robots-Tag': 'noindex' };
+  if (cached) { const response = new Response(cached.body, cached); for (const [key, value] of Object.entries(security)) response.headers.set(key, value); return response; }
   const obj = await mediaGet(env, key);
   if (!obj) throw new HttpError(404, 'not_found');
   // La URL va versionada (?v=): cachear un año es seguro y la foto la lee
   // también Meta al aplicar el perfil de WhatsApp — tiene que ser pública.
-  const headers = { 'Content-Type': obj.contentType, 'Cache-Control': 'public, max-age=31536000, immutable', 'Access-Control-Allow-Origin': '*' };
+  const headers = { ...security, 'Content-Type': obj.contentType, 'Cache-Control': 'public, max-age=31536000, immutable', 'Access-Control-Allow-Origin': '*' };
   if (obj.etag) headers.ETag = obj.etag;
   const media = new Response(obj.body, { headers });
   c.executionCtx.waitUntil(cache.put(request, media.clone()).catch(() => {}));

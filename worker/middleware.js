@@ -155,6 +155,8 @@ export function clienteAllowed(path, method) {
   if (/^\/api\/admin\/tenants\/[0-9a-f-]+\/calendar\/connect$/i.test(path) && method === 'POST') return true;
   if (/^\/api\/admin\/tenants\/[0-9a-f-]+\/booking$/i.test(path) && ['GET', 'PATCH'].includes(method)) return true;
   if (/^\/api\/admin\/tenants\/[0-9a-f-]+\/services$/i.test(path) && ['GET', 'POST'].includes(method)) return true;
+  if (/^\/api\/admin\/tenants\/[0-9a-f-]+\/media$/i.test(path) && ['GET', 'POST'].includes(method)) return true;
+  if (/^\/api\/admin\/tenants\/[0-9a-f-]+\/media\/[0-9a-f-]+$/i.test(path) && ['PATCH', 'DELETE'].includes(method)) return true;
   if (/^\/api\/admin\/tenants\/[0-9a-f-]+\/services\/[0-9a-f-]+$/i.test(path) && ['PATCH', 'DELETE'].includes(method)) return true;
   // Telegram en autoservicio (SPEC-CONEXIONES PR1): mismo molde que el calendario.
   if (/^\/api\/admin\/tenants\/[0-9a-f-]+\/telegram$/i.test(path) && ['GET', 'DELETE'].includes(method)) return true;

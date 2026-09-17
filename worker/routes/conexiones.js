@@ -10,7 +10,7 @@ import {
   HttpError, json, NO_STORE, clean, readJson, rateLimited, sendTelegramText,
   escapeHtml, invalidateTenantCache, tenantChannelSummary, channelsForScope,
   routingChannelState,
-  leadAlertStatus, pushSenderProfile, mediaPut, PUBLIC_MEDIA_BASE, validateTenant,
+  leadAlertStatus, pushSenderProfile, mediaPut, publicMediaBase, validateTenant,
   assertTeamNotFrom, weeklyStats, weeklyReportText, tenantTelegramToken,
   telegramSetWebhook, telegramBotUsername, createTelegramTopic,
   UUID_RE, CONV_TRACKING_SINCE, TELEGRAM_BOT_TOKEN_RE,
@@ -58,7 +58,7 @@ conexiones.post('/api/admin/tenants/:id/logo', async (c) => {
     const key = `portraits/${tenantId}.${ext}`;
     const store = await mediaPut(env, key, body, mime);
     const now = new Date().toISOString();
-    const portraitUrl = `${PUBLIC_MEDIA_BASE}/media/${key}?v=${now.replace(/[^0-9]/g, '').slice(0, 14)}`;
+    const portraitUrl = `${publicMediaBase(env)}/media/${key}?v=${now.replace(/[^0-9]/g, '').slice(0, 14)}`;
     await env.DB.prepare('UPDATE tenants SET portrait_url=?, updated_at=? WHERE id=?').bind(portraitUrl, now, tenantId).run();
     await env.DB.prepare('INSERT INTO tenant_versions (tenant_id,actor_email,field,previous_value,note,created_at) VALUES (?,?,?,?,?,?)')
       .bind(tenantId, actor, 'config', JSON.stringify({ portrait_url: tenant.portrait_url ?? null }), `retrato subido a ${store} (${ext}, ${Math.round(body.byteLength / 1024)} KB)`, now).run();
@@ -77,7 +77,7 @@ conexiones.post('/api/admin/tenants/:id/logo', async (c) => {
   const key = `logos/${tenantId}${aWeb && aWa ? '' : (aWeb ? '-web' : '-wa')}.${ext}`;
   const store = await mediaPut(env, key, body, mime);
   const now = new Date().toISOString();
-  const logoUrl = `${PUBLIC_MEDIA_BASE}/media/${key}?v=${now.replace(/[^0-9]/g, '').slice(0, 14)}`;
+  const logoUrl = `${publicMediaBase(env)}/media/${key}?v=${now.replace(/[^0-9]/g, '').slice(0, 14)}`;
   const cols = [...(aWeb ? ['logo_url=?'] : []), ...(aWa ? ['logo_wa_url=?'] : [])];
   const vals = cols.map(() => logoUrl);
   await env.DB.prepare(`UPDATE tenants SET ${cols.join(',')}, updated_at=? WHERE id=?`).bind(...vals, now, tenantId).run();

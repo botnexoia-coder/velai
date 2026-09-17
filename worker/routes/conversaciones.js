@@ -80,12 +80,12 @@ conversaciones.get('/api/admin/conversations/export.csv', async (c) => {
   // Un mensaje por fila, con la conversación como columna: es el formato que sirve
   // para leer en una hoja de cálculo, y el que pide un cliente que quiere auditar.
   const rows = (await env.DB.prepare(`
-    SELECT c.id AS conversacion, c.channel AS canal, m.created_at AS fecha, m.role AS quien, m.text AS mensaje
+    SELECT c.id AS conversacion, c.channel AS canal, m.created_at AS fecha, m.role AS quien, m.text AS mensaje, m.attachments_json AS adjuntos
     FROM conversations c JOIN conv_messages m ON m.conversation_id = c.id
     LEFT JOIN leads l ON l.id = c.lead_id
     WHERE ${f.sql}${scc.sql} ORDER BY c.last_at DESC, c.id DESC, m.id ASC LIMIT 20000`)
     .bind(...f.values, ...scc.args).all()).results;
-  const keys = ['conversacion', 'canal', 'fecha', 'quien', 'mensaje'];
+  const keys = ['conversacion', 'canal', 'fecha', 'quien', 'mensaje', 'adjuntos'];
   const csv = [keys.join(','), ...rows.map((row) => keys.map((key) => csvCell(row[key])).join(','))].join('\r\n');
   return new Response('\uFEFF' + csv, { headers: { 'Content-Type': 'text/csv; charset=utf-8', 'Content-Disposition': 'attachment; filename="velai-conversaciones.csv"', 'Cache-Control': 'no-store' } });
 });
@@ -132,7 +132,7 @@ conversaciones.get('/api/admin/inbox', async (c) => {
     const head = await env.DB.prepare(`SELECT c.*, t.name AS tenant_name FROM conversations c
       LEFT JOIN tenants t ON t.id = c.tenant_id WHERE c.id=?${scc.sql}`).bind(wanted, ...scc.args).first();
     if (head) {
-      const messages = (await env.DB.prepare('SELECT role, agent_email, text, created_at FROM conv_messages WHERE conversation_id=? ORDER BY id ASC LIMIT 500').bind(head.id).all()).results;
+      const messages = (await env.DB.prepare('SELECT role, agent_email, text, created_at, attachments_json FROM conv_messages WHERE conversation_id=? ORDER BY id ASC LIMIT 500').bind(head.id).all()).results;
       const win = await replyWindow(env, head);
       // La misma puerta que el endpoint de respuesta, pero ANTES: el cajón se cierra con
       // el motivo escrito en vez de dejar que alguien escriba y se coma un 403.
@@ -319,7 +319,7 @@ conversaciones.get('/api/admin/conversations/:id', async (c) => {
     WHERE c.id = ?${scc.sql}`).bind(id, ...scc.args).first();
   if (!head) throw new HttpError(404, 'not_found');
   if (scope.role !== 'velai') delete head.tenant_name;
-  const messages = (await env.DB.prepare('SELECT role, text, created_at FROM conv_messages WHERE conversation_id=? ORDER BY id ASC LIMIT 500')
+  const messages = (await env.DB.prepare('SELECT role, text, created_at, attachments_json FROM conv_messages WHERE conversation_id=? ORDER BY id ASC LIMIT 500')
     .bind(head.id).all()).results;
   return json({ conversation: head, messages }, 200, NO_STORE);
 });
