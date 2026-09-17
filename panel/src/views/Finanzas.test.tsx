@@ -5,6 +5,7 @@ import { MemoryRouter, Route, Routes } from 'react-router';
 import { afterEach, expect, it, vi } from 'vitest';
 import { createQueryClient } from '../api/queryClient';
 import { ToastProvider } from '../components/Toasts';
+import { ConfirmarHost } from '../components/Confirmar';
 import { Shell } from '../shell/Shell';
 import { Finanzas } from './Finanzas';
 import type { FinConceptos, FinResumen } from '../api/types';
@@ -31,10 +32,14 @@ function mount({ socio = true, role = 'velai', path = '/finanzas' } = {}) {
       '/api/admin/finanzas/conceptos': conceptos,
       '/api/admin/finanzas/movimientos': { movimientos: [], nextCursor: null },
       '/api/admin/finanzas/repartos': { socios: [{ email: 'uno@velai.test', nombre: 'Uno' }], repartido: [], repartos: [] },
+      '/api/admin/finanzas/socios': { socios: [
+        { email: 'uno+fin@velai.test', nombre: 'Uno', activo: 1, tiene_repartos: 1 },
+        { email: 'dos@velai.test', nombre: 'Dos', activo: 0, tiene_repartos: 1 },
+      ] },
     };
     return Response.json(data[url.pathname] || {});
   }));
-  const result = render(<QueryClientProvider client={createQueryClient()}><ToastProvider><MemoryRouter initialEntries={[path]}><Routes><Route element={<Shell />}><Route path="/finanzas" element={<Finanzas />} /><Route path="/" element={<h1>Inicio</h1>} /></Route></Routes></MemoryRouter></ToastProvider></QueryClientProvider>);
+  const result = render(<QueryClientProvider client={createQueryClient()}><ToastProvider><MemoryRouter initialEntries={[path]}><Routes><Route element={<Shell />}><Route path="/finanzas" element={<Finanzas />} /><Route path="/" element={<h1>Inicio</h1>} /></Route></Routes><ConfirmarHost /></MemoryRouter></ToastProvider></QueryClientProvider>);
   return { ...result, calls, user: userEvent.setup() };
 }
 afterEach(() => { vi.unstubAllGlobals(); document.body.className = ''; sessionStorage.clear(); });
@@ -130,4 +135,44 @@ it('el catálogo permite añadir, renombrar y desactivar desde su pestaña', asy
   expect(egreso.queryByRole('button', { name: 'Borrar' })).not.toBeInTheDocument();
   expect(egreso.getByRole('button', { name: 'Subir Reparto a socios' })).toBeInTheDocument();
   expect(egreso.getByText('Lo usan los repartos del equipo: no se renombra ni se desactiva.')).toBeInTheDocument();
+});
+
+it('Socios permite dar de alta y corregir nombre/correo con URL codificada', async () => {
+  const { user, calls } = mount({ path: '/finanzas?tab=socios' });
+  await user.click(await screen.findByRole('button', { name: 'Añadir socio' }));
+  let modal = within(screen.getByRole('dialog', { name: 'Añadir socio' }));
+  await user.type(modal.getByLabelText('Nombre'), 'Eva');
+  await user.type(modal.getByLabelText('Correo electrónico'), 'eva@velai.test');
+  await user.click(modal.getByRole('button', { name: 'Guardar socio' }));
+  await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+  expect(calls.find((c) => c.method === 'POST' && c.path.endsWith('/socios'))?.body).toEqual({ nombre: 'Eva', email: 'eva@velai.test' });
+  const socio = within(screen.getByRole('article', { name: 'Socio Uno' }));
+  await user.click(socio.getByRole('button', { name: 'Editar' }));
+  modal = within(screen.getByRole('dialog', { name: 'Editar socio' }));
+  expect(modal.getByText(/sus repartos anteriores seguirán asociados/)).toBeInTheDocument();
+  await user.clear(modal.getByLabelText('Nombre'));
+  await user.type(modal.getByLabelText('Nombre'), 'Uno corregido');
+  await user.clear(modal.getByLabelText('Correo electrónico'));
+  await user.type(modal.getByLabelText('Correo electrónico'), 'nuevo@velai.test');
+  await user.click(modal.getByRole('button', { name: 'Guardar socio' }));
+  await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+  expect(calls.find((c) => c.method === 'PATCH')?.path).toBe('/api/admin/finanzas/socios/uno%2Bfin%40velai.test');
+  expect(calls.find((c) => c.method === 'PATCH')?.body).toEqual({ nombre: 'Uno corregido', email: 'nuevo@velai.test' });
+});
+
+it('la baja pide confirmación, permite cancelar y los socios inactivos se pueden reactivar', async () => {
+  const { user, calls } = mount({ path: '/finanzas?tab=socios' });
+  const socio = within(await screen.findByRole('article', { name: 'Socio Uno' }));
+  await user.click(socio.getByRole('button', { name: 'Quitar' }));
+  let dialog = within(screen.getByRole('dialog', { name: '¿Quitar a Uno?' }));
+  expect(dialog.getByText(/Sus pagos anteriores se conservan/)).toBeInTheDocument();
+  await user.click(dialog.getByRole('button', { name: 'Cancelar' }));
+  expect(calls.some((c) => c.method === 'DELETE')).toBe(false);
+  await user.click(socio.getByRole('button', { name: 'Quitar' }));
+  dialog = within(screen.getByRole('dialog', { name: '¿Quitar a Uno?' }));
+  await user.click(dialog.getByRole('button', { name: 'Quitar socio' }));
+  await waitFor(() => expect(calls.some((c) => c.method === 'DELETE' && c.path.endsWith('/uno%2Bfin%40velai.test'))).toBe(true));
+  const inactivo = within(screen.getByRole('article', { name: 'Socio Dos' }));
+  await user.click(inactivo.getByRole('button', { name: 'Reactivar' }));
+  await waitFor(() => expect(calls.some((c) => c.method === 'PATCH' && c.body?.activo === 1)).toBe(true));
 });

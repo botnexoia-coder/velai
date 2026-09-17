@@ -114,3 +114,67 @@ test('móvil, tema oscuro y acceso cerrado a un administrador no socio', async (
   await expect(page.getByRole('tab', { name: 'Finanzas' })).toHaveCount(0);
   expect(calls).toEqual([]);
 });
+
+test('Socios: alta, edición, reparto, baja conservando histórico y reactivación', async ({ page, fin }) => {
+  const errors: string[] = []; page.on('pageerror', (e) => errors.push(e.message));
+  await page.goto('/finanzas?tab=socios');
+  await expect(page.getByRole('heading', { name: 'Socios del equipo' })).toBeVisible();
+  await page.getByRole('button', { name: 'Añadir socio' }).click();
+  let dialog = page.getByRole('dialog', { name: 'Añadir socio' });
+  await dialog.getByLabel('Nombre', { exact: true }).fill('Eva');
+  await dialog.getByLabel('Correo electrónico').fill('eva+fin@velai.test');
+  await dialog.getByRole('button', { name: 'Guardar socio' }).click();
+  let card = page.getByRole('article', { name: 'Socio Eva', exact: true });
+  await expect(card).toContainText('eva+fin@velai.test');
+  await card.getByRole('button', { name: 'Editar' }).click();
+  dialog = page.getByRole('dialog', { name: 'Editar socio' });
+  await dialog.getByLabel('Nombre', { exact: true }).fill('Eva García');
+  await dialog.getByLabel('Correo electrónico').fill('eva@velai.test');
+  await dialog.getByRole('button', { name: 'Guardar socio' }).click();
+  card = page.getByRole('article', { name: 'Socio Eva García', exact: true });
+  await expect(card).toContainText('eva@velai.test');
+  await page.getByRole('button', { name: 'Repartos', exact: true }).click();
+  await page.getByRole('button', { name: 'Nuevo reparto' }).click();
+  dialog = page.getByRole('dialog', { name: 'Nuevo reparto' });
+  const line = dialog.locator('.fin-line').filter({ has: page.locator('select', { has: page.locator('option:checked', { hasText: /^Eva García$/ }) }) });
+  await line.getByRole('textbox').fill('12,34');
+  await dialog.getByRole('button', { name: 'Guardar reparto' }).click();
+  await expect(dialog).toHaveCount(0);
+  expect((await fin.DB.prepare('SELECT importe FROM fin_movimientos WHERE beneficiario=?').bind('eva@velai.test').first())?.importe).toBe(1234);
+
+  await page.getByRole('button', { name: 'Socios', exact: true }).click();
+  await card.getByRole('button', { name: 'Editar' }).click();
+  dialog = page.getByRole('dialog', { name: 'Editar socio' });
+  await dialog.getByLabel('Correo electrónico').fill('eva.nuevo@velai.test');
+  await dialog.getByRole('button', { name: 'Guardar socio' }).click();
+  await expect(card).toContainText('eva.nuevo@velai.test');
+  expect((await fin.DB.prepare('SELECT beneficiario FROM fin_movimientos').first())?.beneficiario).toBe('eva.nuevo@velai.test');
+  await card.getByRole('button', { name: 'Quitar', exact: true }).click();
+  await page.getByRole('dialog', { name: '¿Quitar a Eva García?' }).getByRole('button', { name: 'Quitar socio' }).click();
+  await expect(card).toContainText('Inactivo');
+  await expect(card.getByRole('button', { name: 'Reactivar' })).toBeVisible();
+  await page.screenshot({ path: test.info().outputPath('socios-desktop.png'), fullPage: true });
+
+  await page.getByRole('button', { name: 'Repartos', exact: true }).click();
+  await expect(page.locator('.fin-reparto')).toContainText('Eva García');
+  await expect(page.locator('.fin-reparto')).toContainText('€ 12,34');
+  await page.getByRole('button', { name: 'Nuevo reparto' }).click();
+  dialog = page.getByRole('dialog', { name: 'Nuevo reparto' });
+  await expect(dialog.getByRole('option', { name: 'Eva García', exact: true })).toHaveCount(0);
+  await dialog.getByRole('button', { name: 'Cerrar', exact: true }).click();
+  await page.getByRole('button', { name: 'Socios', exact: true }).click();
+  await card.getByRole('button', { name: 'Reactivar' }).click();
+  await expect(card.getByRole('button', { name: 'Quitar', exact: true })).toBeVisible();
+
+  // Una persona sin pagos se quita completamente y desaparece del selector.
+  const luis = page.getByRole('article', { name: 'Socio Luis', exact: true });
+  await luis.getByRole('button', { name: 'Quitar', exact: true }).click();
+  await page.getByRole('dialog', { name: '¿Quitar a Luis?' }).getByRole('button', { name: 'Quitar socio' }).click();
+  await expect(luis).toHaveCount(0);
+  await page.reload();
+  await expect(card).toContainText('eva.nuevo@velai.test');
+  await page.setViewportSize({ width: 390, height: 844 });
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  await page.screenshot({ path: test.info().outputPath('socios-mobile.png'), fullPage: true });
+  expect(errors).toEqual([]);
+});

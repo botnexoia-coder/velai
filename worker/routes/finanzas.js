@@ -1,7 +1,7 @@
 // Contabilidad interna: la guarda vive en CADA handler, además de clienteGate.
 import { Hono } from 'hono';
-import { esSocio, envSocios, partesAdmin } from '../middleware.js';
-import { HttpError, json, NO_STORE, readJson, csvCell } from '../app.js';
+import { esSocio, partesAdmin } from '../middleware.js';
+import { HttpError, json, NO_STORE, readJson, csvCell, PANEL_EMAIL_RE } from '../app.js';
 
 export const finanzas = new Hono();
 const TIPOS = ['ingreso', 'gasto', 'egreso'];
@@ -24,7 +24,18 @@ async function bodyOf(request) {
 }
 function writeError(e) {
   if (/UNIQUE constraint failed: fin_conceptos/.test(e.message)) throw new HttpError(409, 'concepto_duplicado');
+  if (/UNIQUE constraint failed:.*fin_socios/.test(e.message)) throw new HttpError(409, 'socio_duplicado');
+  if (e.message.includes('fin_beneficiario_inactivo')) fail('beneficiario_desconocido');
   throw e;
+}
+function socioEmail(value) {
+  if (typeof value !== 'string' || value.trim().length > 200 || !PANEL_EMAIL_RE.test(value.trim())) fail('email_invalido');
+  return value.trim().toLowerCase();
+}
+async function socioByEmail(env, email) {
+  const row = await env.DB.prepare('SELECT email,nombre,activo FROM fin_socios WHERE lower(email)=?').bind(socioEmail(email)).first();
+  if (!row) throw new HttpError(404, 'not_found');
+  return row;
 }
 async function exists(env, table, id) {
   const row = await env.DB.prepare(`SELECT * FROM ${table} WHERE id = ?`).bind(id).first();
@@ -89,6 +100,62 @@ function insertMovimiento(env, m, actor, now, repartoId = null, beneficiario = n
     VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`).bind(m.id, m.tipo, m.concepto_id, m.fecha, m.moneda, m.importe, m.nota, m.tenant_id, beneficiario, repartoId, actor, now);
 }
 const logBorrado = (id, actor) => console.log(JSON.stringify({ level: 'warn', code: 'fin_borrado', id, actor }));
+
+finanzas.get('/api/admin/finanzas/socios', async (c) => {
+  const { env, scope, url } = partesAdmin(c);
+  if (!esSocio(env, scope)) throw new HttpError(403, 'not_authorized');
+  const socios = (await env.DB.prepare(`SELECT s.email,s.nombre,s.activo,
+    EXISTS(SELECT 1 FROM fin_movimientos m WHERE m.beneficiario=s.email) AS tiene_repartos
+    FROM fin_socios s ${url.searchParams.get('todos') === '1' ? '' : 'WHERE s.activo=1'}
+    ORDER BY s.activo DESC,s.nombre COLLATE NOCASE,s.email`).all()).results;
+  return json({ socios }, 200, NO_STORE);
+});
+finanzas.post('/api/admin/finanzas/socios', async (c) => {
+  const { env, scope, request, actor } = partesAdmin(c);
+  if (!esSocio(env, scope)) throw new HttpError(403, 'not_authorized');
+  const b = await bodyOf(request), email = socioEmail(b.email), name = nombre(b.nombre);
+  try {
+    await env.DB.prepare('INSERT INTO fin_socios (email,nombre,created_by,created_at) VALUES (?,?,?,?)')
+      .bind(email, name, actor, new Date().toISOString()).run();
+  } catch (e) { writeError(e); }
+  console.log(JSON.stringify({ level: 'info', code: 'fin_socio_alta', email, actor }));
+  return json({ ok: true, email }, 201, NO_STORE);
+});
+finanzas.patch('/api/admin/finanzas/socios/:email', async (c) => {
+  const { env, scope, request, actor } = partesAdmin(c);
+  if (!esSocio(env, scope)) throw new HttpError(403, 'not_authorized');
+  const old = await socioByEmail(env, c.req.param('email')), b = await bodyOf(request);
+  if (Object.keys(b).some((k) => !['email', 'nombre', 'activo'].includes(k))) fail('campo_no_editable');
+  const email = b.email === undefined ? old.email : socioEmail(b.email);
+  const name = b.nombre === undefined ? old.nombre : nombre(b.nombre);
+  const activo = b.activo === undefined ? old.activo : b.activo;
+  if (![0, 1].includes(activo)) fail('socio_invalido');
+  try {
+    // El correo identifica al beneficiario en el libro: corregirlo conserva TODOS
+    // sus repartos y acumulados, sin cambiar importes ni partidas de caja.
+    await env.DB.batch([
+      env.DB.prepare('UPDATE fin_socios SET email=?,nombre=?,activo=? WHERE email=?').bind(email, name, activo, old.email),
+      env.DB.prepare('UPDATE fin_movimientos SET beneficiario=? WHERE beneficiario=?').bind(email, old.email),
+    ]);
+  } catch (e) { writeError(e); }
+  if (email !== old.email || name !== old.nombre || activo !== old.activo) {
+    console.log(JSON.stringify({ level: 'info', code: 'fin_socio_cambio', actor,
+      de: { email: old.email, nombre: old.nombre, activo: old.activo }, a: { email, nombre: name, activo } }));
+  }
+  return json({ ok: true, email }, 200, NO_STORE);
+});
+finanzas.delete('/api/admin/finanzas/socios/:email', async (c) => {
+  const { env, scope, actor } = partesAdmin(c);
+  if (!esSocio(env, scope)) throw new HttpError(403, 'not_authorized');
+  const old = await socioByEmail(env, c.req.param('email'));
+  const result = await env.DB.batch([
+    env.DB.prepare('UPDATE fin_socios SET activo=0 WHERE email=?').bind(old.email),
+    env.DB.prepare('DELETE FROM fin_socios WHERE email=? AND NOT EXISTS (SELECT 1 FROM fin_movimientos WHERE beneficiario=?)').bind(old.email, old.email),
+    env.DB.prepare('SELECT email FROM fin_socios WHERE email=?').bind(old.email),
+  ]);
+  console.log(JSON.stringify({ level: 'warn', code: 'fin_socio_baja', email: old.email, actor }));
+  return json({ ok: true, desactivado: result[2].results.length > 0 }, 200, NO_STORE);
+});
 
 finanzas.get('/api/admin/finanzas/conceptos', async (c) => {
   const { env, scope, url } = partesAdmin(c);
@@ -200,7 +267,7 @@ finanzas.get('/api/admin/finanzas/repartos', async (c) => {
     env.DB.prepare(`SELECT m.*,COALESCE(s.nombre,m.beneficiario) AS nombre FROM fin_movimientos m LEFT JOIN fin_socios s ON lower(s.email)=m.beneficiario WHERE m.reparto_id IS NOT NULL ORDER BY m.created_at,m.id`),
     env.DB.prepare(REPARTIDO), env.DB.prepare('SELECT email,nombre FROM fin_socios WHERE activo=1'),
   ]);
-  const socios = envSocios(env).map((email) => ({ email, nombre: nombres.results.find((s) => s.email.toLowerCase() === email)?.nombre || email }));
+  const socios = nombres.results;
   return json({ socios, repartido: repartido.results, repartos: cabeceras.results.map((r) => ({ ...r, lineas: lineas.results.filter((m) => m.reparto_id === r.id) })) }, 200, NO_STORE);
 });
 finanzas.post('/api/admin/finanzas/repartos', async (c) => {
@@ -208,7 +275,7 @@ finanzas.post('/api/admin/finanzas/repartos', async (c) => {
   if (!esSocio(env, scope)) throw new HttpError(403, 'not_authorized');
   const b = await bodyOf(request), dia = fecha(b.fecha), moneda = enumValue(b.moneda, MONEDAS, 'moneda_invalida'), note = nota(b.nota);
   if (!Array.isArray(b.lineas) || !b.lineas.length || b.lineas.length > 50) fail('lineas_invalidas');
-  const socios = envSocios(env);
+  const socios = (await env.DB.prepare('SELECT email FROM fin_socios WHERE activo=1').all()).results.map((s) => s.email);
   const lineas = b.lineas.map((l) => {
     if (!l || typeof l !== 'object') fail('lineas_invalidas');
     const beneficiario = String(l.beneficiario || '').trim().toLowerCase();
@@ -221,11 +288,12 @@ finanzas.post('/api/admin/finanzas/repartos', async (c) => {
   const concepto = await env.DB.prepare("SELECT id FROM fin_conceptos WHERE tipo='egreso' AND sistema=1").first();
   if (!concepto) throw new HttpError(409, 'concepto_reparto_no_disponible');
   const id = crypto.randomUUID(), now = new Date().toISOString();
-  const result = await env.DB.batch([
+  let result;
+  try { result = await env.DB.batch([
     env.DB.prepare('INSERT INTO fin_repartos (id,fecha,moneda,nota,created_by,created_at) VALUES (?,?,?,?,?,?)').bind(id, dia, moneda, note, actor, now),
     ...lineas.map((l) => insertMovimiento(env, { id: crypto.randomUUID(), tipo: 'egreso', concepto_id: concepto.id, fecha: dia, moneda, importe: l.importe, nota: note, tenant_id: null }, actor, now, id, l.beneficiario)),
     env.DB.prepare(`${TOTALS} GROUP BY moneda`),
-  ]);
+  ]); } catch (e) { writeError(e); }
   const caja = cuentas([], result.at(-1).results)[moneda].caja;
   return json({ ok: true, id, caja, ...(caja < 0 ? { aviso: 'caja_negativa' } : {}) }, 201, NO_STORE);
 });

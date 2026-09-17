@@ -89,7 +89,7 @@ export function envAdmins(env) {
   return clean(env.ADMIN_EMAILS, 500).split(',').map((x) => x.trim().toLowerCase()).filter(Boolean);
 }
 
-// Una fila de fin_socios solo da un nombre: nunca concede acceso al libro.
+// fin_socios gestiona beneficiarios del reparto; nunca concede acceso al libro.
 export function envSocios(env) {
   return [...new Set(String(env.SOCIOS_EMAILS || '').split(',').map((x) => x.trim().toLowerCase()).filter(Boolean))];
 }

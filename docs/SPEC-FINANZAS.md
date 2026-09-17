@@ -322,3 +322,29 @@ Reordenarlo sí se permite: cambiar su sitio en la lista no rompe nada.
    nombre se muestra; filtrar con él la lista de beneficiarios son seis líneas).
 3. Si el catálogo inicial de §7 le sirve tal cual o quiere quitar/añadir conceptos ahora
    (cambiarlo después es un clic, pero el `INSERT` de la migración se escribe una vez).
+
+
+## 12. Ampliación solicitada tras el despliegue: gestión de socios (2026-09-17)
+
+Juan pide poder **agregar, modificar y quitar socios** desde Finanzas. Esta ampliación
+sustituye el uso de `SOCIOS_EMAILS` como catálogo de beneficiarios descrito en §5:
+
+- Cuarta pestaña **Socios** (`?tab=socios`): alta por nombre y correo, edición de ambos,
+  baja con confirmación y reactivación.
+- `GET/POST /api/admin/finanzas/socios` y `PATCH/DELETE /api/admin/finanzas/socios/:email`,
+  con la misma guarda `esSocio` que las demás rutas. `?todos=1` incluye inactivos.
+- Los socios **activos de `fin_socios`** alimentan y validan los repartos. El índice
+  normalizado impide duplicar un correo cambiando mayúsculas/minúsculas.
+- Corregir un correo actualiza su ficha y todos sus movimientos en un `DB.batch`;
+  conserva el acumulado por persona y no modifica importes ni caja.
+- Quitar a alguien sin pagos elimina su ficha. Con pagos, desactiva la ficha y conserva
+  nombre e histórico. No vuelve a aparecer en nuevos repartos hasta reactivarlo.
+- La migración **0038**, adicional a la 0037 ya publicada, conserva los beneficiarios
+  originales y del histórico. Un trigger comprueba que el socio siga activo al insertar
+  cada línea de reparto; una baja concurrente revierte el batch completo.
+- **Permisos de entrada**: siguen siendo los de §2 (`SOCIOS_EMAILS` más rol `velai`).
+  Gestionar beneficiarios no da acceso al panel. No se han solicitado cambios en Access.
+
+Pruebas adicionales: CRUD, duplicados, permisos, conservación de caja y pagos al cambiar
+correo, rollback, baja/reactivación, migración con datos existentes y recorrido completo
+en navegador con backend real.

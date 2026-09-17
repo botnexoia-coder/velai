@@ -78,8 +78,8 @@ DEFAULT_TENANT_SLUG = "velai"
 # borrada en tenant_users no puede dejar a Velai fuera de su propio panel.
 ADMIN_EMAILS = "botnexo.ia@gmail.com"
 # Acceso a la contabilidad interna (Finanzas). Fuera de D1 por el mismo motivo que
-# ADMIN_EMAILS: si la lista de quién cobra viviera en una tabla editable desde el panel,
-# una sesión comprometida podría añadirse sola. Cada socio necesita ADEMÁS rol velai — por
+# ADMIN_EMAILS: una sesión sin permiso no puede concedérselo desde el panel.
+# Los beneficiarios se gestionan en Finanzas → Socios. Cada lector necesita ADEMÁS rol velai — por
 # eso está la cuenta raíz (botnexo), que lo tiene garantizado, y no solo el correo personal.
 SOCIOS_EMAILS = "botnexo.ia@gmail.com,juanesgarciag@gmail.com"
 # API de Cloudflare desde el worker (SPEC-ORIGENES-Y-TURNSTILE + SPEC-ACCESO):

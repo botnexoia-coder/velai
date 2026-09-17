@@ -5,7 +5,7 @@ export async function finanzasFixture() {
   const DB = await sqliteD1();
   await DB.exec('PRAGMA foreign_keys=ON;');
   const env = { DB, SOCIOS_EMAILS: 'uno@velai.test,dos@velai.test' };
-  await DB.exec("INSERT INTO fin_socios (email,nombre) VALUES ('uno@velai.test','Ana'),('dos@velai.test','Luis');");
+  await DB.exec("DELETE FROM fin_socios; INSERT INTO fin_socios (email,nombre) VALUES ('uno@velai.test','Ana'),('dos@velai.test','Luis');");
   const scope = { role: 'velai', tenantId: null, email: 'uno@velai.test' };
   const pending = [];
   return {

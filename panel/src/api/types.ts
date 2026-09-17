@@ -839,6 +839,9 @@ export interface FinResumen {
   repartido: FinRepartido[];
 }
 export interface FinSocio { email: string; nombre: string }
+export interface FinSocioRegistro extends FinSocio { activo: number; tiene_repartos: number }
+export interface FinSocios { socios: FinSocioRegistro[] }
+export interface FinSocioInput { email: string; nombre: string; activo?: number }
 export interface FinReparto {
   id: string; fecha: string; moneda: FinMoneda; nota: string | null;
   created_by: string; created_at: string; lineas: (FinMovimiento & { nombre: string })[];

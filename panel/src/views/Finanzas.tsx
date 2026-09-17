@@ -1,12 +1,12 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
-import { Navigate, useSearchParams } from 'react-router';
+import { Link, Navigate, useSearchParams } from 'react-router';
 import { qs } from '../api/client';
 import { traducir } from '../api/errors';
-import type { FinConcepto, FinMoneda, FinMovimiento, FinMovimientoInput, FinRepartoInput, FinResumen, FinSocio, FinTipo, TenantRow } from '../api/types';
+import type { FinConcepto, FinMoneda, FinMovimiento, FinMovimientoInput, FinRepartoInput, FinResumen, FinSocio, FinSocioInput, FinSocioRegistro, FinTipo, TenantRow } from '../api/types';
 import { confirmar } from '../components/Confirmar';
 import { TenantChip } from '../components/Pills';
 import { useToast } from '../components/Toasts';
-import { useMe, useTenants, useFinConceptos, useFinMovimientos, useFinMutacion, useFinRepartos, useFinResumen, type FinFilters } from '../hooks/queries';
+import { useMe, useTenants, useFinConceptos, useFinMovimientos, useFinMutacion, useFinRepartos, useFinResumen, useFinSocios, type FinFilters } from '../hooks/queries';
 import { finDinero, finImporte } from '../lib/format';
 
 const TIPOS: FinTipo[] = ['ingreso', 'gasto', 'egreso'];
@@ -24,6 +24,9 @@ const ERRORS: Record<string, string> = {
   fecha_invalida: 'La fecha debe ser real, desde 2025 y como máximo mañana.',
   linea_de_reparto: 'Esta línea pertenece a un reparto. Borra el reparto completo y vuelve a registrarlo.',
   beneficiario_desconocido: 'Ese correo ya no pertenece a la lista de socios. Actualiza la página.',
+  socio_duplicado: 'Ya hay un socio con ese correo. Si está inactivo, puedes reactivarlo.',
+  email_invalido: 'Introduce un correo electrónico válido.',
+  nombre_invalido: 'Introduce un nombre de hasta 120 caracteres.',
 };
 const mensaje = (e: unknown) => ERRORS[e instanceof Error ? e.message : ''] || traducir(e);
 const hoy = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };
@@ -47,7 +50,7 @@ export function Finanzas() {
 }
 function FinanzasSocio() {
   const [params, setParams] = useSearchParams();
-  const tab = ['repartos', 'conceptos'].includes(params.get('tab') || '') ? params.get('tab')! : 'movimientos';
+  const tab = ['repartos', 'conceptos', 'socios'].includes(params.get('tab') || '') ? params.get('tab')! : 'movimientos';
   const [p, setP] = useState('mes');
   const [custom, setCustom] = useState<FinFilters>(periodo('mes'));
   const dates = p === 'personalizado' ? custom : periodo(p);
@@ -55,7 +58,7 @@ function FinanzasSocio() {
   return <div className="finanzas">
     <div className="vhead"><div><h1>Finanzas</h1><p>El libro de Velai: ingresos, gastos, caja y repartos del equipo.</p></div></div>
     <nav className="fin-tabs" aria-label="Secciones de Finanzas">
-      {['movimientos', 'repartos', 'conceptos'].map((t) => <button type="button" key={t} className={`btn ${tab === t ? '' : 'alt'}`} aria-pressed={tab === t} onClick={() => setParams((prev) => { const next = new URLSearchParams(prev); next.set('tab', t); return next; })}>{t[0]!.toUpperCase() + t.slice(1)}</button>)}
+      {['movimientos', 'repartos', 'conceptos', 'socios'].map((t) => <button type="button" key={t} className={`btn ${tab === t ? '' : 'alt'}`} aria-pressed={tab === t} onClick={() => setParams((prev) => { const next = new URLSearchParams(prev); next.set('tab', t); return next; })}>{t[0]!.toUpperCase() + t.slice(1)}</button>)}
     </nav>
     {tab === 'movimientos' ? <>
       <div className="fin-overview">
@@ -73,7 +76,7 @@ function FinanzasSocio() {
       <ErrorFin error={resumen.error} />
       <Movimientos dates={dates} />
       {resumen.data ? <details className="fin-breakdown"><summary>Desglose por concepto · periodo seleccionado</summary><div className="fin-table"><table><thead><tr><th>Concepto</th><th>Tipo</th><th>Moneda</th><th>Importe</th></tr></thead><tbody>{resumen.data.conceptos.map((r) => <tr key={`${r.concepto_id}-${r.moneda}`}><td>{r.nombre}</td><td><TipoPill tipo={r.tipo} /></td><td>{r.moneda}</td><td><Dinero value={r.importe} moneda={r.moneda} /></td></tr>)}</tbody></table></div>{!resumen.data.conceptos.length ? <p className="empty">No hay movimientos en este periodo.</p> : null}</details> : null}
-    </> : tab === 'repartos' ? <Repartos /> : <Conceptos />}
+    </> : tab === 'repartos' ? <Repartos /> : tab === 'socios' ? <Socios /> : <Conceptos />}
   </div>;
 }
 function Movimientos({ dates }: { dates: FinFilters }) {
@@ -127,7 +130,7 @@ function MovimientoModal({ initial, tenants, onClose }: { initial: FinMovimiento
     try { await mutation.mutateAsync({ method: 'DELETE', id: initial.id }); toast('Movimiento borrado'); onClose(); } catch (e) { setError(e); }
   }
   return <Modal title={initial ? 'Detalle del movimiento' : 'Registrar movimiento'} close={onClose} busy={mutation.isPending}>
-    {initial?.reparto_id ? <><p>Esta línea pertenece a un reparto para {initial.beneficiario}.</p><p><Dinero value={initial.importe} moneda={initial.moneda} /> · {initial.fecha}</p><p>Para corregirla, borra el reparto completo y vuelve a registrarlo.</p><a className="btn" href="/finanzas?tab=repartos">Ver repartos</a></> : <form onSubmit={(e) => void guardar(e)}>
+    {initial?.reparto_id ? <><p>Esta línea pertenece a un reparto para {initial.beneficiario}.</p><p><Dinero value={initial.importe} moneda={initial.moneda} /> · {initial.fecha}</p><p>Para corregirla, borra el reparto completo y vuelve a registrarlo.</p><Link className="btn" to="/finanzas?tab=repartos">Ver repartos</Link></> : <form onSubmit={(e) => void guardar(e)}>
       <fieldset disabled={mutation.isPending} className="fin-fieldset"><legend>Tipo de movimiento</legend><div className="fin-segment">{TIPOS.map((t) => <button type="button" key={t} className={`btn ${t === tipo ? '' : 'alt'}`} disabled={Boolean(initial)} aria-pressed={t === tipo} onClick={() => { setTipo(t); setConcepto(''); }}>{LABEL[t]}</button>)}</div></fieldset>
       <div className="fin-form"><label>Concepto<select required value={conceptoId || ''} onChange={(e) => setConcepto(e.target.value)} disabled={mutation.isPending || !catalogo.data}>{!opciones.length ? <option value="">No hay conceptos activos</option> : null}{initial && !opciones.some((c) => c.id === initial.concepto_id) ? <option value={initial.concepto_id}>{initial.concepto_nombre} (inactivo)</option> : null}{opciones.map((c) => <option key={c.id} value={c.id}>{c.nombre}</option>)}</select></label>
         <label>Fecha<input type="date" required min="2025-01-01" value={fecha} onChange={(e) => setFecha(e.target.value)} /></label>
@@ -154,6 +157,7 @@ function Repartos() {
   return <>
     <div className="fin-toolbar"><div><h2>Repartos del equipo</h2><p className="muted">Acumulado por persona · desde el origen</p></div><button className="btn" disabled={!query.data || !resumen.data || !socios.length} onClick={() => setOpen(true)}>Nuevo reparto</button></div>
     <ErrorFin error={query.error || resumen.error} />
+    {query.data && !socios.length ? <p className="empty">Añade un socio en la pestaña <Link to="/finanzas?tab=socios">Socios</Link> para registrar repartos.</p> : null}
     {aviso ? <p className="fin-warning" role="alert">Reparto guardado. La caja ha quedado negativa.</p> : null}
     <div className="fin-socios">{personas.map((s) => <article key={s.email} className="fin-persona"><h3>{s.nombre}</h3><small className="muted">{s.email}</small>{MONEDAS.map((m) => <p key={m}><span>{m}</span><Dinero value={historicos.find((r) => r.email === s.email && r.moneda === m)?.importe || 0} moneda={m} /></p>)}</article>)}</div>
     {query.isPending ? <p role="status">Cargando repartos…</p> : null}
@@ -228,4 +232,87 @@ function ConceptoRow({ concepto: c, prev, next }: { concepto: FinConcepto; prev?
       {sistema ? null : <><button className="btn alt btnsm" disabled={mutation.isPending} onClick={() => void change({ activo: c.activo ? 0 : 1 })}>{c.activo ? 'Desactivar' : 'Activar'}</button><button className="btn alt btnsm" disabled={mutation.isPending} onClick={() => void borrar()}>Borrar</button></>}</div>
     <ErrorFin error={error} />
   </div>;
+}
+
+function Socios() {
+  const query = useFinSocios();
+  const mutation = useFinMutacion<Partial<FinSocioInput>>('socios');
+  const toast = useToast();
+  const [editing, setEditing] = useState<FinSocioRegistro | 'new' | null>(null);
+  const [error, setError] = useState<unknown>(null);
+
+  async function quitar(socio: FinSocioRegistro) {
+    if (!await confirmar({
+      titulo: `¿Quitar a ${socio.nombre}?`,
+      cuerpo: socio.tiene_repartos
+        ? 'Dejará de aparecer en los nuevos repartos. Sus pagos anteriores se conservan y podrás reactivarlo.'
+        : 'Se eliminará de la lista de socios para nuevos repartos.',
+      accion: 'Quitar socio', peligro: true,
+    })) return;
+    setError(null);
+    try {
+      const result = await mutation.mutateAsync({ method: 'DELETE', id: socio.email });
+      toast(result.desactivado ? 'Socio desactivado. Su histórico se conserva.' : 'Socio eliminado');
+    } catch (e) { setError(e); }
+  }
+  async function reactivar(socio: FinSocioRegistro) {
+    setError(null);
+    try {
+      await mutation.mutateAsync({ method: 'PATCH', id: socio.email, body: { activo: 1 } });
+      toast('Socio reactivado');
+    } catch (e) { setError(e); }
+  }
+
+  return <>
+    <div className="fin-toolbar">
+      <div><h2>Socios del equipo</h2><p className="muted">Gestiona las personas que reciben los repartos.</p></div>
+      <button className="btn" type="button" onClick={() => setEditing('new')}>Añadir socio</button>
+    </div>
+    <p className="muted">Dar de alta o quitar un socio aquí cambia la lista de beneficiarios. Los permisos para entrar al panel se gestionan por separado.</p>
+    <ErrorFin error={query.error || error} />
+    {query.isPending ? <p role="status">Cargando socios…</p> : null}
+    <div className="fin-socios">
+      {query.data?.socios.map((socio) => <article className="fin-persona" key={socio.email} aria-label={`Socio ${socio.nombre}`}>
+        <h3>{socio.nombre}</h3>
+        <div className="muted">{socio.email}</div>
+        <p><span className="chip">{socio.activo ? 'Activo' : 'Inactivo'}</span>
+          {socio.tiene_repartos ? <small className="muted">Con repartos registrados</small> : null}
+        </p>
+        <div className="fin-actions">
+          <button className="btn alt btnsm" type="button" disabled={mutation.isPending} onClick={() => setEditing(socio)}>Editar</button>
+          {socio.activo
+            ? <button className="btn alt btnsm" type="button" disabled={mutation.isPending} onClick={() => void quitar(socio)}>Quitar</button>
+            : <button className="btn alt btnsm" type="button" disabled={mutation.isPending} onClick={() => void reactivar(socio)}>Reactivar</button>}
+        </div>
+      </article>)}
+    </div>
+    {query.data && !query.data.socios.length ? <p className="empty">Todavía no hay socios. Añade el primero para comenzar a repartir.</p> : null}
+    {editing ? <SocioModal initial={editing === 'new' ? null : editing} onClose={() => setEditing(null)} /> : null}
+  </>;
+}
+
+function SocioModal({ initial, onClose }: { initial: FinSocioRegistro | null; onClose: () => void }) {
+  const mutation = useFinMutacion<FinSocioInput>('socios');
+  const toast = useToast();
+  const [nombre, setNombre] = useState(initial?.nombre || '');
+  const [email, setEmail] = useState(initial?.email || '');
+  const [error, setError] = useState<unknown>(null);
+  async function guardar(e: React.FormEvent) {
+    e.preventDefault(); setError(null);
+    try {
+      await mutation.mutateAsync({ method: initial ? 'PATCH' : 'POST', id: initial?.email, body: { nombre, email } });
+      toast(initial ? 'Socio actualizado' : 'Socio añadido'); onClose();
+    } catch (e) { setError(e); }
+  }
+  return <Modal title={initial ? 'Editar socio' : 'Añadir socio'} close={onClose} busy={mutation.isPending}>
+    <form onSubmit={(e) => void guardar(e)}>
+      <div className="fin-form">
+        <label>Nombre<input required autoFocus maxLength={120} autoComplete="name" value={nombre} disabled={mutation.isPending} onChange={(e) => setNombre(e.target.value)} /></label>
+        <label>Correo electrónico<input required type="email" maxLength={200} autoComplete="email" value={email} disabled={mutation.isPending} onChange={(e) => setEmail(e.target.value)} /></label>
+      </div>
+      {initial?.tiene_repartos ? <p className="muted">Al corregir el correo, sus repartos anteriores seguirán asociados a esta persona.</p> : null}
+      <ErrorFin error={error} />
+      <button className="btn" disabled={mutation.isPending}>Guardar socio</button>
+    </form>
+  </Modal>;
 }

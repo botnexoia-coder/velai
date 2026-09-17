@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
 import { testing } from '../worker/app.js';
 import { finanzas } from '../worker/routes/finanzas.js';
 import { esSocio } from '../worker/middleware.js';
@@ -11,6 +12,7 @@ async function fixture(t) {
   const DB = await sqliteD1(); t.after(() => DB.close());
   await DB.exec('PRAGMA foreign_keys=ON;');
   const env = { DB, SOCIOS_EMAILS: ' UNO@velai.test, dos@velai.test ' };
+  await DB.exec("DELETE FROM fin_socios; INSERT INTO fin_socios (email,nombre) VALUES ('uno@velai.test','Uno'),('dos@velai.test','Dos');");
   const call = async (path, method = 'GET', body, scope = SOCIO) => {
     const url = new URL(`https://admin.test/api/admin/${path}`);
     const req = new Request(url, { method, ...(body === undefined ? {} : { headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }) });
@@ -29,7 +31,7 @@ test('cada endpoint cierra a no-socios antes de consultar; fin_socios no concede
   await DB.prepare('INSERT INTO fin_socios (email,nombre) VALUES (?,?)').bind('intruso@velai.test', 'Intruso').run();
   for (const scope of [{ ...SOCIO, email: 'intruso@velai.test' }, { ...SOCIO, role: 'cliente' }]) {
     for (const route of finanzas.routes) {
-      const path = route.path.replace('/api/admin/', '').replace(':id', '1');
+      const path = route.path.replace('/api/admin/', '').replace(':id', '1').replace(':email', 'uno%40velai.test');
       const original = env.DB;
       env.DB = { prepare() { assert.fail('no debe tocar D1'); }, batch() { assert.fail('no debe tocar D1'); } };
       try { await assert.rejects(api(path, route.method, route.method === 'GET' ? undefined : {}, scope), error(403, 'not_authorized')); }
@@ -103,10 +105,9 @@ test('repartos: validación completa antes de escribir y rollback real si falla 
 
 test('reparto negativo se registra, no se edita ni borra una línea suelta; borrar conjunto restaura caja', async (t) => {
   const { reparto, api, DB } = await fixture(t);
-  await DB.prepare('INSERT INTO fin_socios (email,nombre) VALUES (?,?)').bind(SOCIO.email, 'Uno').run();
   const r = await reparto(); assert.equal(r.aviso, 'caja_negativa'); assert.equal(r.caja, -500);
   const h = await api('finanzas/repartos');
-  assert.equal(h.socios[0].nombre, 'Uno'); assert.equal(h.repartido[0].importe, 500);
+  assert.equal(h.socios.find((s) => s.email === SOCIO.email).nombre, 'Uno'); assert.equal(h.repartido[0].importe, 500);
   const linea = h.repartos[0].lineas[0];
   for (const method of ['PATCH', 'DELETE']) await assert.rejects(api(`finanzas/movimientos/${linea.id}`, method, { importe: 1 }), error(409, 'linea_de_reparto'));
   await DB.exec("CREATE TRIGGER fallo_borrado BEFORE DELETE ON fin_repartos BEGIN SELECT RAISE(ABORT,'no borrar'); END;");
@@ -187,4 +188,106 @@ test('sin el concepto marcado en el catálogo, el reparto falla sin escribir nad
   const nuevo = await api('finanzas/conceptos', 'POST', { tipo: 'egreso', nombre: 'Reparto a socios' });
   assert.equal((await DB.prepare('SELECT sistema FROM fin_conceptos WHERE id=?').bind(nuevo.id).first()).sistema, 0);
   await assert.rejects(reparto(), error(409, 'concepto_reparto_no_disponible'));
+});
+
+test('socios: alta desde el panel, normalización, duplicados y validación; no concede acceso', async (t) => {
+  const { api, reparto, env, DB } = await fixture(t);
+  const email = 'ana+fin@velai.test';
+  await api('finanzas/socios', 'POST', { email: ' ANA+FIN@velai.test ', nombre: ' Ana ' });
+  assert.deepEqual((await api('finanzas/socios')).socios.find((s) => s.email === email), { email, nombre: 'Ana', activo: 1, tiene_repartos: 0 });
+  // Quién dio de alta a quién queda en la ficha, no solo en el log.
+  const alta = await DB.prepare('SELECT created_by,created_at FROM fin_socios WHERE email=?').bind(email).first();
+  assert.equal(alta.created_by, SOCIO.email); assert.match(alta.created_at, /^20\d\d-/);
+  await assert.rejects(api('finanzas/socios', 'POST', { email: email.toUpperCase(), nombre: 'Otra' }), error(409, 'socio_duplicado'));
+  for (const b of [{ email: 'no-es-correo', nombre: 'Ana' }, { email: 7, nombre: 'Ana' }, { email, nombre: '' }]) {
+    await assert.rejects(api('finanzas/socios', 'POST', b), (e) => e.status === 400);
+  }
+  assert.equal(esSocio(env, { ...SOCIO, email }), false);
+  await assert.rejects(api('finanzas/socios', 'GET', undefined, { ...SOCIO, email }), error(403, 'not_authorized'));
+  await reparto([{ beneficiario: email, importe: 500 }]);
+  assert.equal((await api('finanzas/repartos')).repartido.find((s) => s.email === email).importe, 500);
+});
+
+test('editar nombre y correo conserva repartos, histórico y caja en ambas monedas', async (t) => {
+  const { api, reparto, env } = await fixture(t);
+  await reparto([{ beneficiario: SOCIO.email, importe: 100 }]);
+  await reparto([{ beneficiario: SOCIO.email, importe: 2000 }], { moneda: 'COP' });
+  const caja = (await api('finanzas/resumen')).monedas;
+  const nuevo = 'corregido+uno@velai.test';
+  await api(`finanzas/socios/${encodeURIComponent(SOCIO.email)}`, 'PATCH', { email: nuevo, nombre: 'Uno corregido' });
+  const r = await api('finanzas/repartos');
+  assert.deepEqual(r.repartido.map((s) => [s.email, s.nombre, s.moneda, s.importe]).sort(), [[nuevo, 'Uno corregido', 'COP', 2000], [nuevo, 'Uno corregido', 'EUR', 100]].sort());
+  assert.ok(r.repartos.every((r) => r.lineas.every((l) => l.beneficiario === nuevo)));
+  assert.deepEqual((await api('finanzas/resumen')).monedas, caja);
+  assert.equal(esSocio(env, SOCIO), true); assert.equal(esSocio(env, { ...SOCIO, email: nuevo }), false);
+  await api(`finanzas/socios/${encodeURIComponent(nuevo)}`, 'PATCH', { nombre: 'Nombre final' });
+  await assert.rejects(api(`finanzas/socios/${encodeURIComponent(nuevo)}`, 'PATCH', { email: 'dos@velai.test' }), error(409, 'socio_duplicado'));
+  assert.equal((await api('finanzas/repartos')).repartido[0].nombre, 'Nombre final');
+});
+
+test('la corrección de correo revierte también la ficha si falla el cambio del histórico', async (t) => {
+  const { api, reparto, DB } = await fixture(t);
+  await reparto();
+  await DB.exec("CREATE TRIGGER fallo_correo BEFORE UPDATE OF beneficiario ON fin_movimientos BEGIN SELECT RAISE(ABORT,'fallo historico'); END;");
+  await assert.rejects(api(`finanzas/socios/${SOCIO.email}`, 'PATCH', { email: 'nuevo@velai.test', nombre: 'Nuevo' }), /fallo historico/);
+  assert.equal((await api('finanzas/socios')).socios.some((s) => s.email === 'nuevo@velai.test'), false);
+  assert.equal((await api('finanzas/repartos')).repartido[0].email, SOCIO.email);
+});
+
+test('quitar socio con pagos lo desactiva y conserva el histórico; reactivar permite volver a repartir', async (t) => {
+  const { api, reparto, env } = await fixture(t);
+  await reparto();
+  const result = await api(`finanzas/socios/${SOCIO.email}`, 'DELETE');
+  assert.equal(result.desactivado, true);
+  assert.equal((await api('finanzas/socios')).socios.some((s) => s.email === SOCIO.email), false);
+  const todos = await api('finanzas/socios?todos=1');
+  assert.deepEqual(todos.socios.find((s) => s.email === SOCIO.email), { email: SOCIO.email, nombre: 'Uno', activo: 0, tiene_repartos: 1 });
+  const r = await api('finanzas/repartos');
+  assert.equal(r.socios.some((s) => s.email === SOCIO.email), false);
+  assert.equal(r.repartido[0].nombre, 'Uno'); assert.equal(r.repartido[0].importe, 500);
+  await assert.rejects(reparto(), error(400, 'beneficiario_desconocido'));
+  assert.equal(esSocio(env, SOCIO), true);
+  await api(`finanzas/socios/${SOCIO.email}`, 'PATCH', { activo: 1 });
+  await reparto();
+  assert.equal((await api('finanzas/resumen')).monedas.EUR.caja, -1000);
+});
+
+test('quitar socio sin pagos lo elimina incluso si su correo tiene permiso de acceso', async (t) => {
+  const { api, env } = await fixture(t);
+  assert.equal((await api(`finanzas/socios/${SOCIO.email}`, 'DELETE')).desactivado, false);
+  assert.equal((await api('finanzas/socios?todos=1')).socios.some((s) => s.email === SOCIO.email), false);
+  assert.equal((await api('finanzas/repartos')).socios.some((s) => s.email === SOCIO.email), false);
+  assert.equal(esSocio(env, SOCIO), true);
+});
+
+test('baja concurrente al reparto: se rechaza el batch sin dejar cabecera ni líneas', async (t) => {
+  const { DB, env, reparto } = await fixture(t);
+  env.DB = { ...DB, async batch(statements) {
+    await DB.prepare('UPDATE fin_socios SET activo=0 WHERE email=?').bind('dos@velai.test').run();
+    return DB.batch(statements);
+  } };
+  await assert.rejects(reparto([{ beneficiario: SOCIO.email, importe: 100 }, { beneficiario: 'dos@velai.test', importe: 100 }]), error(400, 'beneficiario_desconocido'));
+  assert.equal((await DB.prepare('SELECT count(*) AS n FROM fin_repartos').first()).n, 0);
+  assert.equal((await DB.prepare('SELECT count(*) AS n FROM fin_movimientos').first()).n, 0);
+});
+
+test('migración 0038 sobre el libro desplegado conserva nombres, pagos y beneficiarios anteriores', async (t) => {
+  const { DB } = await fixture(t);
+  // Recrea el estado previo a 0038: la tabla de socios ya existe, pero todavía no
+  // hay índice normalizado ni guarda de beneficiarios. Incluye un pago antiguo
+  // a un correo que antes solo existía en SOCIOS_EMAILS.
+  await DB.exec(`DROP TRIGGER fin_beneficiario_activo;
+    DROP INDEX fin_socios_email_normalizado; DROP INDEX fin_mov_beneficiario;
+    ALTER TABLE fin_socios DROP COLUMN created_by; ALTER TABLE fin_socios DROP COLUMN created_at;
+    INSERT INTO fin_socios (email,nombre) VALUES ('juanesgarciag@gmail.com','Nombre conservado');
+    INSERT INTO fin_repartos (id,fecha,moneda,created_by,created_at) VALUES ('legacy','2025-03-01','COP','test','2025-03-01');
+    INSERT INTO fin_movimientos (id,tipo,concepto_id,fecha,moneda,importe,beneficiario,reparto_id,created_by,created_at)
+    SELECT 'legacy','egreso',id,'2025-03-01','COP',150000,'historico@velai.test','legacy','test','2025-03-01'
+    FROM fin_conceptos WHERE sistema=1;`);
+  const before = await DB.prepare('SELECT * FROM fin_movimientos').all();
+  await DB.exec(await readFile(new URL('../migrations/0038_fin_socios_gestion.sql', import.meta.url), 'utf8'));
+  assert.deepEqual(await DB.prepare('SELECT * FROM fin_movimientos').all(), before);
+  assert.equal((await DB.prepare("SELECT nombre FROM fin_socios WHERE email='juanesgarciag@gmail.com'").first()).nombre, 'Nombre conservado');
+  assert.equal((await DB.prepare("SELECT activo FROM fin_socios WHERE email='historico@velai.test'").first()).activo, 1);
+  assert.equal((await DB.prepare("SELECT activo FROM fin_socios WHERE email='botnexo.ia@gmail.com'").first()).activo, 1);
 });

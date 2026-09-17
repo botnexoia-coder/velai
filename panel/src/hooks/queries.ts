@@ -738,13 +738,16 @@ export function useFinMovimientos(filters: FinFilters, enabled = true) {
 export function useFinRepartos(enabled = true) {
   return useQuery({ queryKey: ['finanzas', 'repartos'], queryFn: () => api<import('../api/types').FinRepartos>('/api/admin/finanzas/repartos'), enabled });
 }
+export function useFinSocios() {
+  return useQuery({ queryKey: ['finanzas', 'socios'], queryFn: () => api<import('../api/types').FinSocios>('/api/admin/finanzas/socios?todos=1') });
+}
 // Invalidar el dominio completo: una corrección también cambia caja, desglose y reparto.
-export function useFinMutacion<T>(recurso: 'movimientos' | 'conceptos' | 'repartos') {
+export function useFinMutacion<T>(recurso: 'movimientos' | 'conceptos' | 'repartos' | 'socios') {
   const client = useQueryClient();
   return useMutation({
     mutationFn: ({ method, id, body }: { method: 'POST' | 'PATCH' | 'DELETE'; id?: string | number; body?: T }) => {
-      const path = `/api/admin/finanzas/${recurso}${id === undefined ? '' : `/${id}`}`;
-      type Result = { ok: true; id?: string | number; aviso?: 'caja_negativa' };
+      const path = `/api/admin/finanzas/${recurso}${id === undefined ? '' : `/${encodeURIComponent(id)}`}`;
+      type Result = { ok: true; id?: string | number; aviso?: 'caja_negativa'; desactivado?: boolean };
       return method === 'DELETE' ? apiDelete<Result>(path) : method === 'PATCH' ? apiPatch<Result>(path, body) : apiPost<Result>(path, body);
     },
     onSuccess: () => client.invalidateQueries({ queryKey: ['finanzas'] }),
