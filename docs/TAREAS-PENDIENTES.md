@@ -60,11 +60,13 @@ decide quién puede cerrar cada cosa:
       correo personal (Configuración → Admins, que escribe `admin_users`). Estar en
       `SOCIOS_EMAILS` NO basta: `esSocio` exige las dos cosas. Hoy la pestaña solo la ve
       `botnexo.ia@gmail.com`, que es admin raíz.
-- [ ] **Juan: nombre y papel de la cuenta raíz en Finanzas → Socios.** La migración 0038
-      sembró `botnexo.ia@gmail.com` con el correo como nombre. Decidir además si esa cuenta
-      debe COBRAR en los repartos o solo entrar: si son dos accesos de la misma persona,
-      repartir a los dos partiría su acumulado en dos filas. Se quita desde la propia
-      pestaña, sin tocar código.
+- [ ] **Juan: quitar `botnexo.ia@gmail.com` de Finanzas → Socios.** Decidido el
+      2026-09-17: **la cuenta de nexo no cobra, solo entra**; los beneficiarios son
+      personas. La migración 0038 la sembró como beneficiario activo (con el correo como
+      nombre), así que hoy aparece en el selector de reparto. Como no tiene pagos, el botón
+      «Quitar» la borra del todo y desaparece del selector — un clic, sin tocar código ni
+      variables. Seguirá entrando a Finanzas: el acceso lo da `SOCIOS_EMAILS`, no esta
+      tabla.
 - [ ] **Logo de `tufisiooficial` fuera de `workers.dev`**: su `logo_url` apunta a
       `tufisiooficial.botnexo-ia.workers.dev`, justo el dominio que cortan los bloqueadores
       (el motivo del salto v7→v8). Resubirlo desde el panel para que quede en
