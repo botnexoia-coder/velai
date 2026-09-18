@@ -160,6 +160,57 @@ final result: passed
 
 ---
 
+# Design QA — escaparate de asistentes reales
+
+- Fuente visual: `/Users/johan/.codex/generated_images/01a0a552-b4a7-7140-8e31-47b131101cc4/exec-fb320f06-ed90-4a6a-87cd-6c20a6f97c79.png`.
+- Fuente original: 1487 × 1058 px; normalizada a 1440 × 1024 px en `audit/assistant-showcase-reference-1440.png`.
+- Implementación de escritorio: `audit/assistant-showcase-desktop.png`, viewport CSS 1440 × 1024, captura 1440 × 1024 px, DPR 1.
+- Implementación móvil: `audit/assistant-showcase-mobile.png`, viewport CSS y captura 390 × 844 px, DPR 1.
+- Comparación conjunta: `audit/assistant-showcase-comparison.png`.
+- Estado: tema oscuro, español, Vai seleccionado. Se verificaron también Digo seleccionado, traducción inglesa y regreso a español.
+
+## Evidencia comparada
+
+- Vista completa: la comparación conjunta conserva la jerarquía aprobada — titular editorial, reparto de asistentes, selección visual, historia expandida, resultado y CTA — dentro de la identidad existente de HireVai.
+- Región focal: el reparto y el detalle seleccionado quedan suficientemente grandes en la comparación 2880 × 1080 para revisar retratos, nombres, roles, selección, copy y CTA; no fue necesario otro recorte.
+- Diferencia intencional: el mock fusionaba retratos generados en una escena cinematográfica. La implementación conserva los assets reales y sus fondos; Zoe usa expresamente el favicon oficial de la gatita con gafas, sustituyendo la fotografía directa por indicación del usuario.
+
+## Superficies de fidelidad
+
+- Tipografía: Cabinet Grotesk/Satoshi, pesos, jerarquía, interlineado y wrapping mantienen el sistema del sitio; el titular recupera el recorrido naranja-coral-violeta de la referencia.
+- Espaciado y ritmo: la segunda captura reduce la altura del reparto para que el detalle aparezca dentro del mismo viewport y conserva una lectura continua, sin cuadrícula de tarjetas.
+- Colores: fondo `#09070a`, naranja de acción, coral-violeta del titular, bordes y opacidades corresponden a los tokens existentes de Velai.
+- Imágenes: Vai, Alma, Dara, Salo, Xu, Faby y Digo usan copias locales de sus retratos reales; Zoe usa el favicon oficial `zoe-logo.webp`. Todas conservan proporción, foco y nitidez; Dara se convirtió a WebP a 720 px para evitar una descarga PNG de 2,3 MB.
+- Copy: nombres, marcas, roles, resultados y destinos corresponden a cada proyecto. La sección tiene versión española e inglesa.
+
+## Interacción, responsive y accesibilidad
+
+- Selección de Vai y Digo comprobada; actualiza nombre, marca, explicación, resultado y CTA.
+- CTA de Vai abre el widget; los demás CTA y enlaces secundarios usan destinos reales con `noopener noreferrer` cuando abren otra pestaña.
+- Carrusel horizontal móvil, detalle apilado, foco visible y `aria-selected` comprobados.
+- Sin desbordamiento horizontal a 390 px (`scrollWidth = clientWidth = 390`).
+- Consola comprobada sin errores ni avisos.
+- Producción verificada en `https://hirevai.com/` tras el despliegue Pages `eac620d1`: sección cargada, favicon oficial de Zoe servido con HTTP 200, selección funcional y sin desbordamiento ni errores de consola.
+
+## Historial de comparación
+
+- Primera comparación: P2 — el reparto ocupaba demasiado alto y dejaba fuera del viewport gran parte del detalle; el titular perdía el matiz violeta de la referencia.
+- Corrección: altura máxima de retratos reducida de 410 a 335 px, espaciado vertical compactado y gradiente editorial aplicado al segundo renglón.
+- Ajuste final solicitado: se mantuvo el contenido aprobado y se mejoró únicamente su presentación — peso y balance del titular, regla lateral del texto introductorio, legibilidad de nombres/roles/enlaces, kicker del detalle y ritmo de la columna de resultados. Zoe pasó al favicon oficial.
+- Segunda revisión del usuario: la composición seguía percibiéndose plana. Se convirtió en una única escena editorial con el asset operativo real de Velai como profundidad ambiental, retratos escalonados, foco elevado para el asistente seleccionado y una transición tonal continua hacia el detalle; no se añadieron tarjetas.
+- Evidencia posterior: `audit/assistant-showcase-comparison.png`; el reparto y el comienzo completo del panel de resultado caben en el viewport de escritorio, sin P0/P1/P2 pendientes.
+- Ampliación final: se incorporó Mei con su imagen oficial usada por My Xu Costura y se fijó el cierre del reparto como Mei → Faby → Digo. Evidencia: `audit/assistant-showcase-xu-desktop.png`, `audit/assistant-showcase-xu-mobile.png` y `audit/assistant-showcase-xu-mobile-selected.png`.
+- QA de la ampliación: ocho asistentes y ocho fuentes de datos, selección de Xu, CTA a `https://myxucostura.com/`, traducción preparada, orden correcto y ausencia de desbordamiento horizontal a 1440 px y 390 px.
+
+## Hallazgos
+
+- P0/P1/P2 pendientes: ninguno.
+- P3 opcional: observar con datos reales si los usuarios prefieren seleccionar el retrato antes de abrir la página o ir directamente al proyecto; no bloquea el lanzamiento.
+
+final result: passed
+
+---
+
 # Design QA — red cinética en el hero
 
 - Fuente visual: `/Users/johan/.codex/visualizations/2026/09/15/01a0a659-0ca1-7732-9ccc-b62c564eedcc/velai-spline-review/01-current-home.png` (hero anterior).

@@ -1176,6 +1176,68 @@
     .hero-v2::after{background-image:linear-gradient(90deg,#09070a 0%,rgba(9,7,10,.96) 39%,rgba(9,7,10,.28) 72%,rgba(9,7,10,.08)),url("/assets/velai-operations-core-v2.webp?v=89cde51")}
     .human-photo{background-image:linear-gradient(90deg,transparent,rgba(23,18,27,.88)),url("/assets/velai-human-takeover-v2.webp?v=89cde51")}
     @media(max-width:900px){.hero-v2::after{background-image:linear-gradient(180deg,rgba(9,7,10,.28),#09070a 65%),url("/assets/velai-operations-core-v2.webp?v=89cde51")}}
+
+    /* ── ASISTENTES VELAI: reparto real en producción ── */
+    .assistant-showcase{max-width:1340px;margin:clamp(4.5rem,8vw,7.5rem) auto 1.5rem;padding:clamp(2.2rem,3.2vw,3.2rem) clamp(1.2rem,2.6vw,2.4rem) 0;position:relative;isolation:isolate;overflow:hidden;color:#fff;background:#0d0910;border:1px solid rgba(255,255,255,.12);border-radius:34px;box-shadow:0 34px 110px rgba(0,0,0,.46),0 0 80px rgba(132,85,196,.08);scroll-margin-top:86px}
+    .assistant-showcase::before{content:"";position:absolute;left:clamp(1.2rem,2.6vw,2.4rem);top:-1px;width:112px;height:3px;background:var(--orange);box-shadow:0 0 32px rgba(255,107,26,.8);z-index:2}
+    .assistant-showcase::after{content:"";position:absolute;inset:0;background:url("/assets/velai-operations-core-v2.webp?v=89cde51") 72% 45%/cover no-repeat;opacity:.12;mix-blend-mode:screen;z-index:-1;pointer-events:none}
+    .assistant-showcase>div{position:relative;z-index:1}
+    .assistant-showcase-head{display:grid;grid-template-columns:minmax(0,1.25fr) minmax(260px,.55fr);gap:clamp(2rem,7vw,7rem);align-items:end;margin-bottom:clamp(1.75rem,3vw,2.5rem)}
+    .assistant-showcase-head>div:last-child{padding:4px 0 4px 24px;border-left:1px solid rgba(255,255,255,.16)}
+    .assistant-showcase .s-label{margin-bottom:1rem}
+    .assistant-showcase-title{max-width:900px;font-family:var(--font-d);font-size:clamp(3rem,5.7vw,5.4rem);font-weight:700;line-height:.91;letter-spacing:-.052em;text-wrap:balance}
+    .assistant-showcase-title span{display:block;background:linear-gradient(95deg,#ff7b40 0%,#ef6674 56%,#9b79ff 100%);-webkit-background-clip:text;background-clip:text;color:transparent}
+    .assistant-showcase-intro{max-width:430px;color:#d0c8d2;font-size:clamp(.86rem,1.2vw,.98rem);line-height:1.62;text-wrap:pretty}
+    .assistant-showcase-note{display:block;margin-top:1rem;color:#ff9a6d;font-size:.62rem;font-weight:800;letter-spacing:.13em;text-transform:uppercase}
+    .assistant-roster{display:grid;grid-template-columns:repeat(8,minmax(0,1fr));gap:clamp(5px,.8vw,12px);align-items:end;padding:2rem 0 1.15rem;border-bottom:1px solid rgba(255,255,255,.14);perspective:1200px}
+    .assistant-person{min-width:0;position:relative;transform:translateY(var(--stage-y,0));transition:transform .35s ease}
+    .assistant-person:nth-child(1),.assistant-person:nth-child(8){--stage-y:14px}
+    .assistant-person:nth-child(2),.assistant-person:nth-child(7){--stage-y:8px}
+    .assistant-person:nth-child(3),.assistant-person:nth-child(6){--stage-y:2px}
+    .assistant-person:nth-child(4),.assistant-person:nth-child(5){--stage-y:-8px}
+    .assistant-portrait{display:block;width:100%;height:clamp(245px,23vw,335px);padding:0;border:0;border-bottom:3px solid transparent;background:#151117;overflow:hidden;cursor:pointer;position:relative;transition:transform .35s ease,border-color .25s ease,opacity .25s ease;opacity:.68}
+    .assistant-portrait::after{content:"";position:absolute;inset:0;border:1px solid rgba(255,255,255,.08);pointer-events:none}
+    .assistant-portrait img{display:block;width:100%;height:100%;object-fit:cover;object-position:center 24%;filter:saturate(.8) brightness(.78);transition:filter .35s ease,transform .55s cubic-bezier(.2,.75,.2,1)}
+    .assistant-person[data-assistant="zoe"] .assistant-portrait{background:#f3efe9}
+    .assistant-person[data-assistant="zoe"] .assistant-portrait img{object-fit:contain;object-position:center;padding:10px}
+    .assistant-person:hover,.assistant-person.is-active{transform:translateY(calc(var(--stage-y,0px) - 9px))}
+    .assistant-person:hover .assistant-portrait,.assistant-person.is-active .assistant-portrait{opacity:1;border-bottom-color:var(--orange);transform:scale(1.025)}
+    .assistant-person:hover .assistant-portrait img,.assistant-person.is-active .assistant-portrait img{filter:saturate(1) brightness(1);transform:scale(1.045)}
+    .assistant-person.is-active .assistant-portrait{box-shadow:0 28px 64px rgba(255,107,26,.24),0 0 0 1px rgba(255,147,95,.42)}
+    .assistant-meta{padding:16px 2px 18px;min-height:78px;position:relative}
+    .assistant-select{display:block;padding:0;border:0;background:none;color:#f6f0f5;font:800 clamp(.78rem,1vw,.94rem)/1 var(--font-d);letter-spacing:.035em;text-align:left;cursor:pointer}
+    .assistant-person.is-active .assistant-select{color:#ff8a53}
+    .assistant-role{display:block;margin-top:8px;color:#a69daa;font-size:clamp(.61rem,.75vw,.69rem);line-height:1.25;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    .assistant-page-link{display:inline-block;margin-top:9px;color:#d0c8d2;font-size:.61rem;font-weight:700;line-height:1.3;text-decoration:none;border-bottom:1px solid rgba(255,255,255,.3);text-underline-offset:4px}
+    .assistant-page-link:hover,.assistant-page-link:focus-visible{color:#fff;border-color:var(--orange)}
+    .assistant-detail{display:grid;grid-template-columns:minmax(0,1.12fr) minmax(300px,.72fr);gap:clamp(3rem,9vw,9rem);margin:0 clamp(-2.4rem,-2.6vw,-1.2rem);padding:clamp(2.4rem,3.8vw,3.7rem) clamp(1.2rem,2.6vw,2.4rem) clamp(2rem,3vw,2.8rem);align-items:end;background:rgba(9,7,10,.56);box-shadow:inset 0 24px 70px rgba(94,53,122,.08)}
+    .assistant-detail-kicker{display:flex;align-items:center;gap:10px;margin-bottom:1.1rem;color:#aaa0ad;font-size:.64rem;font-weight:800;letter-spacing:.16em;text-transform:uppercase}
+    .assistant-detail-kicker::before{content:"";width:28px;height:1px;background:#ff7138}
+    .assistant-detail h3{font-family:var(--font-d);font-size:clamp(2.35rem,4.2vw,4rem);font-weight:700;line-height:.93;letter-spacing:-.045em;text-wrap:balance}
+    .assistant-detail h3 strong{color:#ff7b40}
+    .assistant-detail-copy{max-width:650px;margin:1.25rem 0 1.4rem;color:#d0c8d2;font-size:clamp(.83rem,1vw,.95rem);line-height:1.68;text-wrap:pretty}
+    .assistant-outcome{display:flex;align-items:center;gap:10px;color:#ff9869;font-size:.68rem;font-weight:800;letter-spacing:.04em}
+    .assistant-outcome i{width:8px;height:8px;border-radius:50%;background:#ff7138;box-shadow:0 0 0 6px rgba(255,113,56,.11)}
+    .assistant-actions{display:flex;align-items:center;gap:1.35rem;margin-top:1.7rem;flex-wrap:wrap}
+    .assistant-primary{display:inline-flex;align-items:center;justify-content:center;min-height:52px;padding:0 24px;border:1px solid #ff7138;border-radius:11px;background:#ff7138;color:#fff;font:800 .72rem var(--font-d);text-decoration:none;cursor:pointer;transition:transform .2s ease,background .2s ease}
+    .assistant-primary:hover,.assistant-primary:focus-visible{transform:translateY(-2px);background:#e95f24}
+    .assistant-secondary{color:#d7cfd9;font-size:.67rem;font-weight:700;text-underline-offset:5px}
+    .assistant-results{border-left:1px solid rgba(255,255,255,.13);padding-left:clamp(1.5rem,4vw,3.2rem)}
+    .assistant-results>span{display:block;margin-bottom:1.2rem;color:#857d89;font-size:.59rem;font-weight:800;letter-spacing:.15em;text-transform:uppercase}
+    .assistant-results ul{list-style:none;margin:0;padding:0}
+    .assistant-results li{display:flex;justify-content:space-between;gap:1rem;padding:1.05rem 0;border-top:1px solid rgba(255,255,255,.1);color:#bcb3bf;font-size:.7rem;line-height:1.35}
+    .assistant-results li b{color:#fff;font-family:var(--font-d);font-size:.75rem;font-weight:700;text-align:right}
+    .assistant-portrait:focus-visible,.assistant-select:focus-visible{outline:2px solid #ff8a53;outline-offset:4px}
+    body.light .assistant-showcase{color:#171219;background:#f4eff3;border-color:rgba(33,21,36,.14)}
+    body.light .assistant-showcase-intro,body.light .assistant-detail-copy{color:#675e69}
+    body.light .assistant-select{color:#211824}
+    body.light .assistant-role{color:#756d77}
+    body.light .assistant-page-link,body.light .assistant-secondary{color:#554d58}
+    body.light .assistant-results{border-color:rgba(32,20,35,.14)}
+    body.light .assistant-results li{color:#625a65;border-color:rgba(32,20,35,.12)}
+    body.light .assistant-results li b{color:#211824}
+    @media(max-width:1050px){.assistant-roster{grid-template-columns:repeat(8,155px);overflow-x:auto;overflow-y:hidden;scroll-snap-type:x proximity;padding-bottom:20px;scrollbar-width:thin;scrollbar-color:#4d3a50 transparent}.assistant-person{scroll-snap-align:start;--stage-y:0!important}.assistant-portrait{height:300px}.assistant-showcase-head{grid-template-columns:1fr;gap:1.3rem}.assistant-showcase-head>div:last-child{max-width:680px}.assistant-showcase-intro{max-width:680px}.assistant-showcase-note{margin-top:.7rem}}
+    @media(max-width:760px){.assistant-showcase{margin-top:4rem;padding:2.4rem 1rem 0;border-radius:24px}.assistant-showcase::before{left:1rem}.assistant-showcase-title{font-size:clamp(2.65rem,13.5vw,4.15rem)}.assistant-showcase-head{margin-bottom:1.4rem}.assistant-showcase-head>div:last-child{padding-left:16px}.assistant-roster{grid-template-columns:repeat(8,136px);margin-right:-1rem}.assistant-portrait{height:245px}.assistant-meta{padding-top:13px}.assistant-detail{grid-template-columns:1fr;gap:2.5rem;margin:0 -1rem;padding:2.6rem 1rem 2.2rem}.assistant-results{border-left:0;border-top:1px solid rgba(255,255,255,.13);padding:1.5rem 0 0}.assistant-actions{align-items:stretch;flex-direction:column}.assistant-primary{width:100%}.assistant-secondary{text-align:center}.assistant-showcase-note{display:none}}
   </style>
 </head>
 <body>
@@ -1538,13 +1600,90 @@
     </div>
   </div>
 
-  <div class="proof-strip fade-up">
-    <div><small data-i18n="proofLabel">Asistentes creados con tecnología Velai</small><b data-i18n="proofTitle">Proyectos que ya operan con nuestra tecnología</b></div>
-    <span class="proof-brand">GOgestión</span>
-    <span class="proof-brand">Zoe Travel Spain</span>
-    <span class="proof-brand">Diálogos que Enseñan</span>
-    <span class="proof-brand">HireDataVision</span>
-  </div>
+  <section id="asistentes" class="assistant-showcase fade-up" aria-labelledby="assistantShowcaseTitle">
+    <div class="assistant-showcase-head">
+      <div>
+        <div class="s-label" data-i18n="rosterLabel">Asistentes creados con tecnología Velai</div>
+        <h2 class="assistant-showcase-title" id="assistantShowcaseTitle" data-i18n-html="rosterTitle">No son bots de catálogo.<span>Ya están trabajando.</span></h2>
+      </div>
+      <div>
+        <p class="assistant-showcase-intro" data-i18n="rosterIntro">Elige un asistente y descubre cómo convierte conversaciones reales en acciones para cada negocio.</p>
+        <small class="assistant-showcase-note" data-i18n="rosterNote">Ocho identidades · ocho operaciones reales</small>
+      </div>
+    </div>
+
+    <div class="assistant-roster" role="tablist" aria-label="Asistentes de Velai">
+      <article class="assistant-person is-active" data-assistant="vai">
+        <button class="assistant-portrait" type="button" role="tab" aria-selected="true" aria-controls="assistantDetail" aria-label="Conocer a Vai">
+          <img src="/assets/assistants/vai-v1.jpg?v=20260918" alt="Vai, asistente de Velai" width="256" height="256" loading="lazy" decoding="async">
+        </button>
+        <div class="assistant-meta"><button class="assistant-select" type="button">VAI</button><span class="assistant-role">Demos y ventas</span><a class="assistant-page-link" href="#assistantDetail">Ver historia</a></div>
+      </article>
+      <article class="assistant-person" data-assistant="zoe">
+        <button class="assistant-portrait" type="button" role="tab" aria-selected="false" aria-controls="assistantDetail" aria-label="Conocer a Zoe">
+          <img src="/assets/assistants/zoe.webp?v=20260918b" alt="Zoe, asistente de Zoe Travel Spain" width="338" height="338" loading="lazy" decoding="async">
+        </button>
+        <div class="assistant-meta"><button class="assistant-select" type="button">ZOE</button><span class="assistant-role">Viajes</span><a class="assistant-page-link" href="https://zoetravelspain.com/" target="_blank" rel="noopener noreferrer">Abrir página</a></div>
+      </article>
+      <article class="assistant-person" data-assistant="alma">
+        <button class="assistant-portrait" type="button" role="tab" aria-selected="false" aria-controls="assistantDetail" aria-label="Conocer a Alma">
+          <img src="/assets/assistants/alma.jpg?v=20260918" alt="Alma, asistente de Diálogos que Enseñan" width="400" height="400" loading="lazy" decoding="async">
+        </button>
+        <div class="assistant-meta"><button class="assistant-select" type="button">ALMA</button><span class="assistant-role">Comunidad</span><a class="assistant-page-link" href="https://dialogosqueensenan.com/" target="_blank" rel="noopener noreferrer">Abrir página</a></div>
+      </article>
+      <article class="assistant-person" data-assistant="dara">
+        <button class="assistant-portrait" type="button" role="tab" aria-selected="false" aria-controls="assistantDetail" aria-label="Conocer a Dara">
+          <img src="/assets/assistants/dara.webp?v=20260918" alt="Dara, asistente de HireDataVision" width="720" height="720" loading="lazy" decoding="async">
+        </button>
+        <div class="assistant-meta"><button class="assistant-select" type="button">DARA</button><span class="assistant-role">Datos</span><a class="assistant-page-link" href="https://hiredatavision.com/" target="_blank" rel="noopener noreferrer">Abrir página</a></div>
+      </article>
+      <article class="assistant-person" data-assistant="salo">
+        <button class="assistant-portrait" type="button" role="tab" aria-selected="false" aria-controls="assistantDetail" aria-label="Conocer a Salo">
+          <img src="/assets/assistants/salo.webp?v=20260918" alt="Salo, asistente de Tu Fisio Oficial" width="256" height="256" loading="lazy" decoding="async">
+        </button>
+        <div class="assistant-meta"><button class="assistant-select" type="button">SALO</button><span class="assistant-role">Fisioterapia</span><a class="assistant-page-link" href="https://tufisiooficial.com/" target="_blank" rel="noopener noreferrer">Abrir página</a></div>
+      </article>
+      <article class="assistant-person" data-assistant="xu">
+        <button class="assistant-portrait" type="button" role="tab" aria-selected="false" aria-controls="assistantDetail" aria-label="Conocer a Mei">
+          <img src="/assets/assistants/xu.webp?v=20260918" alt="Mei, asistente de My Xu Costura" width="256" height="256" loading="lazy" decoding="async">
+        </button>
+        <div class="assistant-meta"><button class="assistant-select" type="button">MEI</button><span class="assistant-role">Costura</span><a class="assistant-page-link" href="https://myxucostura.com/" target="_blank" rel="noopener noreferrer">Abrir página</a></div>
+      </article>
+      <article class="assistant-person" data-assistant="faby">
+        <button class="assistant-portrait" type="button" role="tab" aria-selected="false" aria-controls="assistantDetail" aria-label="Conocer a Faby">
+          <img src="/assets/assistants/faby.jpg?v=20260918" alt="Faby, asistente de GOgestión" width="256" height="256" loading="lazy" decoding="async">
+        </button>
+        <div class="assistant-meta"><button class="assistant-select" type="button">FABY</button><span class="assistant-role">Gestoría</span><a class="assistant-page-link" href="https://gogestion.es/es" target="_blank" rel="noopener noreferrer">Abrir página</a></div>
+      </article>
+      <article class="assistant-person" data-assistant="digo">
+        <button class="assistant-portrait" type="button" role="tab" aria-selected="false" aria-controls="assistantDetail" aria-label="Conocer a Digo">
+          <img src="/assets/assistants/digo.jpg?v=20260918" alt="Digo, asistente para telecomunicaciones" width="512" height="512" loading="lazy" decoding="async">
+        </button>
+        <div class="assistant-meta"><button class="assistant-select" type="button">DIGO</button><span class="assistant-role">Telecom</span><a class="assistant-page-link" href="/demo/quierodigi/" target="_blank" rel="noopener noreferrer">Abrir página</a></div>
+      </article>
+    </div>
+
+    <div class="assistant-detail" id="assistantDetail" role="tabpanel" aria-live="polite">
+      <div>
+        <span class="assistant-detail-kicker" id="assistantKicker">Asistente destacada · Velai</span>
+        <h3><strong id="assistantName">VAI</strong> <span id="assistantBrand">· VELAI</span></h3>
+        <p class="assistant-detail-copy" id="assistantCopy">Convierte una visita en una conversación y una conversación en una oportunidad.</p>
+        <div class="assistant-outcome"><i aria-hidden="true"></i><span id="assistantOutcome">Demo agendada</span></div>
+        <div class="assistant-actions">
+          <a class="assistant-primary" id="assistantPrimary" href="#contacto">Hablar con Vai</a>
+          <a class="assistant-secondary" id="assistantSecondary" href="#contacto">Conocer Velai</a>
+        </div>
+      </div>
+      <aside class="assistant-results" aria-label="Resultados de los asistentes Velai">
+        <span data-i18n="rosterResults">Lo que ocurre después de responder</span>
+        <ul>
+          <li><span data-i18n="rosterResult1">Conversaciones</span><b data-i18n="rosterResult1Value">Con contexto</b></li>
+          <li><span data-i18n="rosterResult2">Siguiente paso</span><b data-i18n="rosterResult2Value">Automatizado</b></li>
+          <li><span data-i18n="rosterResult3">Tu equipo</span><b data-i18n="rosterResult3Value">Siempre al mando</b></li>
+        </ul>
+      </aside>
+    </div>
+  </section>
 
   <div id="capacidades" class="capability-stage fade-up">
     <div class="capability-main capability-visual">
@@ -2064,6 +2203,7 @@
       humanLabel:'IA cuando conviene · personas cuando importan', humanTitle:'Vai sabe cuándo seguir y cuándo llamarte.', humanSub:'La automatización resuelve lo repetitivo. Tu equipo recibe las conversaciones delicadas con todo el historial, responde desde el mismo panel y devuelve el control a Vai cuando termina.',
       relay1H:'Detecta el momento', relay1P:'Vai reconoce dudas sensibles, excepciones o intención de compra.', relay2H:'Tu equipo toma el control', relay2P:'Una persona continúa con el contexto completo, sin pedir al cliente que repita nada.', relay3H:'Vai retoma el seguimiento', relay3P:'Confirmaciones, recordatorios y próximos pasos vuelven a quedar automatizados.',
       proofLabel:'Asistentes creados con tecnología Velai', proofTitle:'Proyectos que ya operan con nuestra tecnología',
+      rosterLabel:'Asistentes creados con tecnología Velai', rosterTitle:'No son bots de catálogo.<span>Ya están trabajando.</span>', rosterIntro:'Elige un asistente y descubre cómo convierte conversaciones reales en acciones para cada negocio.', rosterNote:'Ocho identidades · ocho operaciones reales', rosterResults:'Lo que ocurre después de responder', rosterResult1:'Conversaciones', rosterResult1Value:'Con contexto', rosterResult2:'Siguiente paso', rosterResult2Value:'Automatizado', rosterResult3:'Tu equipo', rosterResult3Value:'Siempre al mando',
       capLabel:'Mucho más que respuestas', capTitle:'De un mensaje a una operación terminada.', capSub:'Velai conecta conversación, datos y acción para que cada solicitud tenga un siguiente paso claro.', capFlow1:'Atiende', capFlow2:'Califica', capFlow3:'Agenda', capFlow4:'Avisa', capFlow5:'Sigue', cap1Label:'Visibilidad', cap1H:'Panel y métricas en tiempo real', cap1P:'Conversaciones, leads, citas, actividad y costes en un único centro de control.', cap2Label:'A tu medida', cap2H:'Tu marca, horarios y procesos', cap2P:'Vai aprende qué decir, cuándo actuar y a quién avisar según la operación real de tu negocio.',
       probLabel:'El problema', probTitle:'Tu negocio pierde dinero cada día', probSub:'Cada mensaje sin respuesta a las 11pm es una venta perdida. Para siempre.',
       problemStoryTag:'Mientras el local descansa', problemStoryTitle:'Las preguntas siguen llegando.', problemStoryP:'El cliente no distingue entre horario comercial y momento de decisión.', problemMessageTag:'Nuevo mensaje · 23:14', problemMessageText:'¿Tenéis disponibilidad para mañana?',
@@ -2141,6 +2281,7 @@
       humanLabel:'AI when it fits · people when they matter', humanTitle:'Vai knows when to continue and when to call you.', humanSub:'Automation handles the repetitive work. Your team receives sensitive conversations with the full history, replies from the same panel, and hands control back to Vai when finished.',
       relay1H:'Detects the moment', relay1P:'Vai recognizes sensitive questions, exceptions, or buying intent.', relay2H:'Your team takes control', relay2P:'A person continues with the full context, without asking the customer to repeat anything.', relay3H:'Vai resumes follow-up', relay3P:'Confirmations, reminders, and next steps become automated again.',
       proofLabel:'Assistants built with Velai technology', proofTitle:'Projects already operating with our technology',
+      rosterLabel:'Assistants built with Velai technology', rosterTitle:'Not catalogue bots.<span>Already at work.</span>', rosterIntro:'Choose an assistant and see how real conversations become actions for each business.', rosterNote:'Eight identities · eight real operations', rosterResults:'What happens after the reply', rosterResult1:'Conversations', rosterResult1Value:'With context', rosterResult2:'Next step', rosterResult2Value:'Automated', rosterResult3:'Your team', rosterResult3Value:'Always in control',
       capLabel:'Far beyond replies', capTitle:'From a message to a completed operation.', capSub:'Velai connects conversation, data, and action so every request has a clear next step.', capFlow1:'Serve', capFlow2:'Qualify', capFlow3:'Book', capFlow4:'Notify', capFlow5:'Follow up', cap1Label:'Visibility', cap1H:'Real-time dashboard and metrics', cap1P:'Conversations, leads, appointments, activity, and costs in one control center.', cap2Label:'Built for you', cap2H:'Your brand, hours, and processes', cap2P:'Vai learns what to say, when to act, and who to notify based on how your business truly operates.',
       probLabel:'The problem', probTitle:'Your business loses money every day', probSub:'Every unanswered message at 11pm is a lost sale. Forever.',
       problemStoryTag:'While the business rests', problemStoryTitle:'Questions keep coming in.', problemStoryP:'Customers do not distinguish between business hours and the moment they decide.', problemMessageTag:'New message · 11:14 PM', problemMessageText:'Do you have availability tomorrow?',
@@ -2205,6 +2346,128 @@
       rtBizLabel:'Channels in one panel: WhatsApp, web, Instagram and Messenger', rtRespLabel:'We get it live in your business', rtRespTag:'We set everything up'
     }
   };
+
+  var activeAssistant = 'vai';
+  var ASSISTANT_DATA = {
+    vai: {
+      name:'VAI', brand:'VELAI', role:{es:'Demos y ventas',en:'Demos and sales'},
+      kicker:{es:'Asistente destacada · Velai',en:'Featured assistant · Velai'},
+      copy:{es:'Convierte una visita en una conversación y una conversación en una oportunidad.',en:'Turns a visit into a conversation and a conversation into an opportunity.'},
+      outcome:{es:'Demo agendada',en:'Demo booked'}, primary:{es:'Hablar con Vai',en:'Talk to Vai'}, secondary:{es:'Conocer Velai',en:'Discover Velai'},
+      url:'#contacto', action:'chat'
+    },
+    zoe: {
+      name:'ZOE', brand:'ZOE TRAVEL SPAIN', role:{es:'Viajes',en:'Travel'},
+      kicker:{es:'Asistente de viajes · Zoe Travel Spain',en:'Travel assistant · Zoe Travel Spain'},
+      copy:{es:'Escucha cómo quieres viajar, ordena tus preferencias y ayuda a convertir una idea en un viaje preparado.',en:'Listens to how you want to travel, organizes your preferences, and turns an idea into a prepared trip.'},
+      outcome:{es:'Viaje preparado',en:'Trip prepared'}, primary:{es:'Visitar a Zoe',en:'Visit Zoe'}, secondary:{es:'Abrir su página',en:'Open her page'},
+      url:'https://zoetravelspain.com/'
+    },
+    alma: {
+      name:'ALMA', brand:'DIÁLOGOS QUE ENSEÑAN', role:{es:'Comunidad',en:'Community'},
+      kicker:{es:'Asistente de comunidad · Diálogos que Enseñan',en:'Community assistant · Diálogos que Enseñan'},
+      copy:{es:'Recibe cada historia con cercanía, orienta a quien escribe y conecta la conversación con el apoyo adecuado.',en:'Welcomes every story with care, guides each person, and connects the conversation with the right support.'},
+      outcome:{es:'Historia acompañada',en:'Story supported'}, primary:{es:'Visitar a Alma',en:'Visit Alma'}, secondary:{es:'Abrir su página',en:'Open her page'},
+      url:'https://dialogosqueensenan.com/'
+    },
+    dara: {
+      name:'DARA', brand:'HIREDATAVISION', role:{es:'Datos',en:'Data'},
+      kicker:{es:'Asistente de datos · HireDataVision',en:'Data assistant · HireDataVision'},
+      copy:{es:'Entiende el reto de cada empresa, reúne el contexto necesario y transforma una consulta en un proyecto cualificado.',en:'Understands each company challenge, gathers the right context, and turns an inquiry into a qualified project.'},
+      outcome:{es:'Proyecto cualificado',en:'Project qualified'}, primary:{es:'Visitar a Dara',en:'Visit Dara'}, secondary:{es:'Abrir su página',en:'Open her page'},
+      url:'https://hiredatavision.com/'
+    },
+    salo: {
+      name:'SALO', brand:'TU FISIO OFICIAL', role:{es:'Fisioterapia',en:'Physiotherapy'},
+      kicker:{es:'Asistente de salud · Tu Fisio Oficial',en:'Healthcare assistant · Tu Fisio Oficial'},
+      copy:{es:'Orienta la primera consulta, recoge la información importante y facilita que cada paciente encuentre su próxima cita.',en:'Guides the first inquiry, gathers key information, and helps every patient find their next appointment.'},
+      outcome:{es:'Cita coordinada',en:'Appointment arranged'}, primary:{es:'Visitar a Salo',en:'Visit Salo'}, secondary:{es:'Abrir su página',en:'Open her page'},
+      url:'https://tufisiooficial.com/'
+    },
+    xu: {
+      name:'MEI', brand:'MY XU COSTURA', role:{es:'Costura',en:'Tailoring'},
+      kicker:{es:'Asistente de costura · My Xu Costura',en:'Tailoring assistant · My Xu Costura'},
+      copy:{es:'Escucha qué necesita cada prenda, orienta el arreglo y ayuda a coordinar el presupuesto y la recogida.',en:'Understands what each garment needs, guides the alteration, and helps coordinate the quote and pickup.'},
+      outcome:{es:'Arreglo orientado',en:'Alteration guided'}, primary:{es:'Visitar My Xu',en:'Visit My Xu'}, secondary:{es:'Abrir su página',en:'Open her page'},
+      url:'https://myxucostura.com/'
+    },
+    faby: {
+      name:'FABY', brand:'GOGESTIÓN', role:{es:'Gestoría',en:'Advisory'},
+      kicker:{es:'Asistente de gestoría · GOgestión',en:'Advisory assistant · GOgestión'},
+      copy:{es:'Aclara el punto de partida de cada trámite, recopila la necesidad y conduce al cliente hacia el servicio correcto.',en:'Clarifies the starting point of each procedure, captures the need, and guides the client to the right service.'},
+      outcome:{es:'Trámite orientado',en:'Procedure guided'}, primary:{es:'Visitar a Faby',en:'Visit Faby'}, secondary:{es:'Abrir su página',en:'Open her page'},
+      url:'https://gogestion.es/es'
+    },
+    digo: {
+      name:'DIGO', brand:'QUIERODIGI', role:{es:'Telecom',en:'Telecom'},
+      kicker:{es:'Asistente de telecomunicaciones · QuieroDIGI',en:'Telecom assistant · QuieroDIGI'},
+      copy:{es:'Compara necesidades de fibra y móvil, organiza las opciones y ayuda a encontrar el plan adecuado sin perderse entre tarifas.',en:'Compares fiber and mobile needs, organizes the options, and helps find the right plan without getting lost in tariffs.'},
+      outcome:{es:'Plan recomendado',en:'Plan recommended'}, primary:{es:'Visitar a Digo',en:'Visit Digo'}, secondary:{es:'Abrir su demo',en:'Open his demo'},
+      url:'/demo/quierodigi/'
+    }
+  };
+
+  function renderAssistantRoster(id) {
+    var item = ASSISTANT_DATA[id] || ASSISTANT_DATA.vai;
+    activeAssistant = id in ASSISTANT_DATA ? id : 'vai';
+    var lang = _lang === 'en' ? 'en' : 'es';
+    document.querySelectorAll('.assistant-person').forEach(function(person) {
+      var key = person.getAttribute('data-assistant');
+      var data = ASSISTANT_DATA[key];
+      var selected = key === activeAssistant;
+      person.classList.toggle('is-active', selected);
+      var tab = person.querySelector('.assistant-portrait');
+      if (tab) tab.setAttribute('aria-selected', selected ? 'true' : 'false');
+      var role = person.querySelector('.assistant-role');
+      if (role && data) role.textContent = data.role[lang];
+      var page = person.querySelector('.assistant-page-link');
+      if (page) page.textContent = key === 'vai' ? (lang === 'en' ? 'View story' : 'Ver historia') : (lang === 'en' ? 'Open page' : 'Abrir página');
+    });
+    var kicker = document.getElementById('assistantKicker');
+    var name = document.getElementById('assistantName');
+    var brand = document.getElementById('assistantBrand');
+    var copy = document.getElementById('assistantCopy');
+    var outcome = document.getElementById('assistantOutcome');
+    var primary = document.getElementById('assistantPrimary');
+    var secondary = document.getElementById('assistantSecondary');
+    if (kicker) kicker.textContent = item.kicker[lang];
+    if (name) name.textContent = item.name;
+    if (brand) brand.textContent = '· ' + item.brand;
+    if (copy) copy.textContent = item.copy[lang];
+    if (outcome) outcome.textContent = item.outcome[lang];
+    if (primary) {
+      primary.textContent = item.primary[lang];
+      primary.href = item.url;
+      primary.target = item.action === 'chat' ? '' : '_blank';
+      primary.rel = item.action === 'chat' ? '' : 'noopener noreferrer';
+    }
+    if (secondary) { secondary.textContent = item.secondary[lang]; secondary.href = item.url; secondary.target = item.action === 'chat' ? '' : '_blank'; secondary.rel = item.action === 'chat' ? '' : 'noopener noreferrer'; }
+  }
+
+  function activateAssistant(id, moveFocus) {
+    renderAssistantRoster(id);
+    if (moveFocus) {
+      var detail = document.getElementById('assistantDetail');
+      if (detail && window.matchMedia('(max-width: 760px)').matches) detail.scrollIntoView({behavior:'smooth',block:'start'});
+    }
+  }
+
+  document.querySelectorAll('.assistant-person').forEach(function(person) {
+    var id = person.getAttribute('data-assistant');
+    var portrait = person.querySelector('.assistant-portrait');
+    var select = person.querySelector('.assistant-select');
+    if (portrait) portrait.addEventListener('click', function(){ activateAssistant(id, true); });
+    if (select) select.addEventListener('click', function(){ activateAssistant(id, true); });
+  });
+  var assistantPrimary = document.getElementById('assistantPrimary');
+  if (assistantPrimary) assistantPrimary.addEventListener('click', function(event) {
+    var item = ASSISTANT_DATA[activeAssistant];
+    if (item.action === 'chat') {
+      event.preventDefault();
+      if (window.VaiChat && typeof window.VaiChat.open === 'function') window.VaiChat.open({source:'assistant-showcase'});
+      else window.location.hash = 'contacto';
+    }
+  });
 
   function applyLang(lang) {
     var t = T[lang];
@@ -2375,6 +2638,7 @@
     document.documentElement.lang = lang;
     _lang = lang;
     localStorage.setItem('velai-lang', lang);
+    renderAssistantRoster(activeAssistant);
   }
 
   function setLang(lang) { applyLang(lang); }
