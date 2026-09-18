@@ -19,7 +19,7 @@
 ```
 vai-worker.js        entrypoint: SOLO configuración/prompts + createWorker(config)
 worker/app.js        ensamblador de la app Hono + helpers compartidos + scheduled +
-                     export testing (ver worker/MIGRACION-HONO.md)
+                     export testing (mapa completo en docs/ESTRUCTURA.md)
 worker/middleware.js perímetro del panel: host → CORS → identidad (Access) → scope →
                      clienteAllowed, como middlewares de TODO /api/admin/*
 worker/routes/       rutas por dominio: publico.js (chat/lead/webhooks/media) y el

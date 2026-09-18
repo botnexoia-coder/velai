@@ -1,0 +1,79 @@
+{
+  "artboards": [
+    {
+      "file": "Servicio.dc.html",
+      "x": 0,
+      "y": 0,
+      "w": 1040,
+      "h": 720
+    },
+    {
+      "file": "Main.dc.html",
+      "x": 1120,
+      "y": 0,
+      "w": 1040,
+      "h": 1200
+    },
+    {
+      "file": "Datos.dc.html",
+      "x": 2240,
+      "y": 0,
+      "w": 1040,
+      "h": 920
+    },
+    {
+      "file": "Confirmada.dc.html",
+      "x": 3360,
+      "y": 0,
+      "w": 1040,
+      "h": 740
+    },
+    {
+      "file": "Movil.dc.html",
+      "x": 0,
+      "y": 1340,
+      "w": 390,
+      "h": 900
+    },
+    {
+      "file": "Gestion.dc.html",
+      "x": 520,
+      "y": 1340,
+      "w": 1040,
+      "h": 660
+    },
+    {
+      "file": "Marca.dc.html",
+      "x": 0,
+      "y": 2380,
+      "w": 1400,
+      "h": 570
+    }
+  ],
+  "annotations": [
+    {
+      "id": "fila-flujo",
+      "x": 0,
+      "y": -150,
+      "w": 460,
+      "text": "El flujo de reserva, rediseñado.\nServicio → día y hora → datos → confirmación."
+    },
+    {
+      "id": "fila-dos",
+      "x": 0,
+      "y": 1220,
+      "w": 460,
+      "text": "Móvil y página de gestión. La columna única hace que el móvil sea la misma maqueta, no otra."
+    },
+    {
+      "id": "fila-marca",
+      "x": 0,
+      "y": 2260,
+      "w": 520,
+      "text": "La misma pantalla con la marca de tres clientes. Sin configuración nueva: los campos que ya rellena el alta del chat."
+    }
+  ],
+  "launch": {
+    "view": "canvas"
+  }
+}

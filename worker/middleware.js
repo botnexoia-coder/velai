@@ -89,6 +89,15 @@ export function envAdmins(env) {
   return clean(env.ADMIN_EMAILS, 500).split(',').map((x) => x.trim().toLowerCase()).filter(Boolean);
 }
 
+// fin_socios gestiona beneficiarios del reparto; nunca concede acceso al libro.
+export function envSocios(env) {
+  return [...new Set(String(env.SOCIOS_EMAILS || '').split(',').map((x) => x.trim().toLowerCase()).filter(Boolean))];
+}
+
+export function esSocio(env, scope) {
+  return scope.role === 'velai' && envSocios(env).includes(String(scope.email || '').toLowerCase());
+}
+
 export async function resolveScope(env, email) {
   const who = String(email).toLowerCase();
   if (envAdmins(env).includes(who)) return { role: 'velai', tenantId: null, email };
@@ -144,6 +153,11 @@ export function clienteAllowed(path, method) {
   // handler exige que el :id sea el suyo (ajeno = 404, nunca 403).
   if (/^\/api\/admin\/tenants\/[0-9a-f-]+\/calendar$/i.test(path) && ['GET', 'PATCH', 'DELETE'].includes(method)) return true;
   if (/^\/api\/admin\/tenants\/[0-9a-f-]+\/calendar\/connect$/i.test(path) && method === 'POST') return true;
+  if (/^\/api\/admin\/tenants\/[0-9a-f-]+\/booking$/i.test(path) && ['GET', 'PATCH'].includes(method)) return true;
+  if (/^\/api\/admin\/tenants\/[0-9a-f-]+\/services$/i.test(path) && ['GET', 'POST'].includes(method)) return true;
+  if (/^\/api\/admin\/tenants\/[0-9a-f-]+\/media$/i.test(path) && ['GET', 'POST'].includes(method)) return true;
+  if (/^\/api\/admin\/tenants\/[0-9a-f-]+\/media\/[0-9a-f-]+$/i.test(path) && ['PATCH', 'DELETE'].includes(method)) return true;
+  if (/^\/api\/admin\/tenants\/[0-9a-f-]+\/services\/[0-9a-f-]+$/i.test(path) && ['PATCH', 'DELETE'].includes(method)) return true;
   // Telegram en autoservicio (SPEC-CONEXIONES PR1): mismo molde que el calendario.
   if (/^\/api\/admin\/tenants\/[0-9a-f-]+\/telegram$/i.test(path) && ['GET', 'DELETE'].includes(method)) return true;
   if (/^\/api\/admin\/tenants\/[0-9a-f-]+\/telegram\/link$/i.test(path) && method === 'POST') return true;

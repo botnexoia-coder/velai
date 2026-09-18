@@ -6,8 +6,9 @@
 //
 // El rol decide la interfaz, pero la DEFENSA es del worker: cada endpoint valida el
 // scope por su cuenta.
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useSyncExternalStore } from 'react';
 import { NavLink, Outlet, useLocation } from 'react-router';
+import { isSessionExpired, subscribeSession } from '../api/session';
 import { useMe } from '../hooks/queries';
 import { useAvisos } from '../hooks/avisos';
 import { useToast } from '../components/Toasts';
@@ -88,6 +89,7 @@ export function Shell() {
 
   return (
     <>
+      <SessionExpired />
       <aside className="side">
         <div className={`brand${haslogo ? ' haslogo' : ''}`}>
           <i />
@@ -111,12 +113,20 @@ export function Shell() {
               tiene sección Sistema. Velai la sigue teniendo en Sistema, abajo. */}
           {isCliente ? <Tab to="/plantillas" label="Plantillas" icon={<IcoTemplate />} /> : null}
           {isVelai ? <Tab to="/clientes" label="Clientes" icon={<IcoBriefcase />} /> : null}
-          {isVelai ? <Tab to="/canales" label="Canales" icon={<IcoChannels />} /> : null}
         </nav>
+        {isVelai && me.socio === true ? (
+          <>
+            <div className="navlabel">Administración</div>
+            <nav className="tabs" aria-label="Administración">
+              <Tab to="/finanzas" label="Finanzas" icon={<IcoBriefcase />} />
+            </nav>
+          </>
+        ) : null}
         {isVelai ? (
           <>
             <div className="navlabel">Sistema</div>
-            <nav className="tabs">
+            <nav className="tabs" aria-label="Sistema">
+              <Tab to="/canales" label="Diagnóstico de canales" icon={<IcoChannels />} />
               <Tab to="/plantillas" label="Plantillas" icon={<IcoTemplate />} />
               <Tab to="/configuracion" label="Configuración" icon={<IcoSliders />} />
             </nav>
@@ -173,5 +183,23 @@ export function Shell() {
         </span>
       </div>
     </>
+  );
+}
+
+// Cloudflare Access caducó: un aviso para todo el panel, porque cuando la sesión cae,
+// cae para todas las vistas. Se entra en OTRA pestaña a propósito: recargar esta
+// perdería el formulario a medio escribir, que es justo lo que se estaba guardando
+// cuando saltó el aviso.
+function SessionExpired() {
+  const expired = useSyncExternalStore(subscribeSession, isSessionExpired);
+  if (!expired) return null;
+  return (
+    <div className="sessionbar" role="alert">
+      <b>Tu sesión caducó.</b>
+      <span>Entra de nuevo en otra pestaña y vuelve aquí para reintentar: así no pierdes lo que tengas escrito.</span>
+      <button type="button" className="btn btnsm" onClick={() => window.open(window.location.origin, '_blank', 'noopener')}>
+        Entrar en otra pestaña
+      </button>
+    </div>
   );
 }

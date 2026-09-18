@@ -182,6 +182,17 @@
     window.fbq('track', 'PageView');
   }
 
+  var cloudflareLoaded = false;
+  function loadCloudflareAnalytics() {
+    if (cloudflareLoaded || document.querySelector('script[data-cf-beacon]')) return;
+    cloudflareLoaded = true;
+    var s = document.createElement('script');
+    s.defer = true;
+    s.src = 'https://static.cloudflareinsights.com/beacon.min.js';
+    s.dataset.cfBeacon = JSON.stringify({ token: 'cfa66a7600f94512ac2e595181c8d04d' });
+    document.head.appendChild(s);
+  }
+
   // Google Consent Mode permite cargar gtag bajo 'denied' (pings sin cookies →
   // conversiones modeladas). Meta Pixel lo cargamos solo tras aceptación (RGPD).
   function applyConsent(state) {
@@ -192,6 +203,7 @@
       });
       loadGoogle();
       loadPixel();
+      loadCloudflareAnalytics();
     } else {
       // denegado explícito: cargamos Google en modo cookieless (opcional) y NO pixel
       loadGoogle();
@@ -241,11 +253,11 @@
   var TXT = {
     es: {
       msg: 'Usamos cookies propias y de terceros para medir el tráfico y mejorar nuestra publicidad. Puedes aceptarlas o seguir solo con las esenciales.',
-      accept: 'Aceptar', reject: 'Solo esenciales', more: 'Más info'
+      accept: 'Aceptar', reject: 'Solo esenciales', more: 'Más información sobre privacidad'
     },
     en: {
       msg: 'We use first- and third-party cookies to measure traffic and improve our advertising. You can accept them or keep only the essential ones.',
-      accept: 'Accept', reject: 'Essentials only', more: 'Learn more'
+      accept: 'Accept', reject: 'Essentials only', more: 'Privacy information'
     }
   };
 
@@ -265,11 +277,12 @@
       '#velai-consent .vc-btns{display:flex;gap:10px;flex-shrink:0;}' +
       '#velai-consent button{font-family:Satoshi,system-ui,sans-serif;font-weight:700;font-size:.85rem;' +
       'border-radius:9px;padding:.6rem 1.05rem;cursor:pointer;border:1px solid transparent;transition:all .18s ease;white-space:nowrap;}' +
-      '#velai-consent .vc-accept{background:#FF6B1A;color:#fff;}' +
-      '#velai-consent .vc-accept:hover{background:#FF8C40;}' +
+      '#velai-consent .vc-accept{background:#C74712;color:#fff;}' +
+      '#velai-consent .vc-accept:hover{background:#A83A0E;}' +
       '#velai-consent .vc-reject{background:transparent;color:inherit;border-color:rgba(255,107,26,0.4);}' +
       '#velai-consent .vc-reject:hover{background:rgba(255,107,26,0.1);}' +
-      '@media(max-width:560px){#velai-consent{flex-direction:column;align-items:stretch;}#velai-consent .vc-btns{justify-content:stretch;}#velai-consent button{flex:1;}}';
+      'html:has(#velai-consent.show) #vaiWidget{display:none!important;}' +
+      '@media(max-width:560px){#velai-consent{flex-direction:column;align-items:stretch;}#velai-consent p{flex:0 0 auto;}#velai-consent .vc-btns{justify-content:stretch;}#velai-consent button{flex:1;}}';
     var st = document.createElement('style');
     st.id = 'velai-consent-style';
     st.textContent = css;

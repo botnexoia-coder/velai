@@ -1,19 +1,21 @@
-// Canales (solo velai): la tabla de ENRUTADO, no la opinión de Twilio. Los estados los
-// decide el worker (misma pregunta que tenantByAddress); aquí solo se pintan, para que
-// panel y enrutado real no puedan discrepar. El filtrado es en cliente sobre lo ya
+// Diagnóstico (solo Velai): configuración de enrutado, sin prometer disponibilidad
+// del proveedor ni entrega de mensajes. Los estados los decide el worker.
+// El filtrado es en cliente sobre lo ya
 // cargado: la tabla cabe entera en una respuesta y filtrar sin ir al servidor es
 // instantáneo. La píldora de arriba sigue contando el TOTAL, no lo filtrado.
 import { useMemo, useState } from 'react';
+import { Link, useSearchParams } from 'react-router';
 import { traducir } from '../api/errors';
 import { IcoSearch } from '../components/icons';
 import { TenantChip } from '../components/Pills';
-import { CHST, channelCountLabel, channelsBad, filterChannels } from '../lib/canales';
+import { CHST, channelCountLabel, channelsBad, clientPath, connectionsPath, filterChannels } from '../lib/canales';
 import { fmt } from '../lib/format';
 import { useGlobalChannels } from '../hooks/queries';
 
 export function Canales() {
-  const { data, error } = useGlobalChannels();
-  const [q, setQ] = useState('');
+  const { data, error, isFetching, refetch, dataUpdatedAt } = useGlobalChannels();
+  const [params, setParams] = useSearchParams();
+  const q = params.get('q') ?? '';
   const [tenant, setTenant] = useState('');
   const [state, setState] = useState('');
 
@@ -30,23 +32,32 @@ export function Canales() {
   const isFiltered = Boolean(q.trim() || tenant || state);
 
   return (
-    <div>
+    <div className="channel-diagnostics">
       <div className="vhead">
         <div>
-          <h1>Canales</h1>
-          <p>Las direcciones que el worker atiende de verdad</p>
+          <h1>Diagnóstico de canales</h1>
+          <p>Configuración de enrutado de WhatsApp y Messenger</p>
         </div>
-        {data ? (
-          <span className={`stpill ${bad ? 'warn' : 'ok'}`}>
-            <i />
-            {bad ? `${bad}${bad === 1 ? ' canal requiere atención' : ' canales requieren atención'}` : 'todo atendido'}
-          </span>
-        ) : null}
+        <div className="actions actions0">
+          {data && !error ? (
+            <span className={`stpill ${bad ? 'warn' : 'ok'}`}>
+              <i />
+              {bad ? `${bad}${bad === 1 ? ' incidencia' : ' incidencias'}` : 'Sin incidencias de configuración'}
+            </span>
+          ) : null}
+          <button className="btn alt btnsm" type="button" disabled={isFetching} onClick={() => void refetch()}>
+            {isFetching ? 'Actualizando…' : 'Actualizar'}
+          </button>
+        </div>
       </div>
+      <p className="muted channel-freshness">
+        {dataUpdatedAt ? <>Última consulta: <time dateTime={new Date(dataUpdatedAt).toISOString()}>{new Date(dataUpdatedAt).toLocaleTimeString('es-ES')}</time>. </> : null}
+        Actualización automática cada 30 s mientras esta vista esté visible.
+      </p>
       <div className="filters">
         <label className="search">
           <IcoSearch />
-          <input className="q" placeholder="Buscar número, cliente o tipo…" value={q} onChange={(e) => setQ(e.target.value)} />
+          <input className="q" placeholder="Buscar número, cliente o tipo…" value={q} onChange={(e) => setParams((p) => { if (e.target.value) p.set('q', e.target.value); else p.delete('q'); return p; }, { replace: true })} />
         </label>
         <span className="sel">
           <select value={tenant} onChange={(e) => setTenant(e.target.value)} aria-label="Cliente">
@@ -62,39 +73,41 @@ export function Canales() {
           <select value={state} onChange={(e) => setState(e.target.value)} aria-label="Estado">
             <option value="">Todos los estados</option>
             <option value="alert">Solo los que requieren atención</option>
-            <option value="live">Atendidos</option>
+            <option value="live">Enrutados</option>
+            <option value="inactive">Clientes inactivos</option>
           </select>
         </span>
         <span className="result-count">{data ? channelCountLabel(filtered?.rows.length ?? 0, total, isFiltered) : ''}</span>
       </div>
-      {/* Los sin enrutar son SIEMPRE «requieren atención»: nunca los esconde el filtro. */}
+      {/* Los números sin enrutar no desaparecen al filtrar el estado de la tabla. */}
       {filtered && filtered.unrouted.length ? (
         <div className="panelcard mt12">
           <b>
-            Números vivos en Twilio que el worker NO atiende<span className="pt-count">{filtered.unrouted.length}</span>
+            Números de WhatsApp sin enrutar<span className="pt-count">{filtered.unrouted.length}</span>
           </b>
           <p className="muted mt6">
-            El sender está de alta y en verde, pero ninguna fila lo enruta: el webhook responde 404 y el bot calla. Se
-            arregla con «Sincronizar sender» en Conexiones → WhatsApp de esa ficha, que registra el canal.
+            Estos números están registrados en la ficha y no tienen una ruta asignada al cliente.
+            Revisa su conexión y usa «Sincronizar desde Twilio» para comprobar el registro.
           </p>
           {filtered.unrouted.map((u) => (
-            <div className="mb6" key={`${u.tenant_id}:${u.twilio_from}`}>
+            <div className="cxrow" key={`${u.tenant_id}:${u.twilio_from}`}>
               <span className="flag off">{String(u.twilio_from).replace('whatsapp:', '')}</span>{' '}
               <TenantChip id={u.tenant_id} name={u.name} />{' '}
               <span className="muted">
                 · sender {u.sender_status ?? '—'}
                 {u.active ? '' : ' · cliente inactivo'}
               </span>
+              <Link className="btn alt btnsm" to={`${connectionsPath(u.tenant_id)}#whatsapp`}>Revisar WhatsApp de {u.name}</Link>
             </div>
           ))}
         </div>
       ) : null}
       <p className="muted mt12">
-        Cada mensaje entrante se enruta por su dirección: el worker la busca en esta tabla (y en el canal primario de la
-        ficha) y exige que el cliente esté activo. Si una dirección no sale aquí, ese número no lo atiende nadie — por
-        muy verde que esté en Twilio. La web no aparece: entra por slug y funciona siempre.
+        «Enrutado» indica que la dirección está asignada a un cliente activo. No verifica la entrega de mensajes ni
+        la disponibilidad del proveedor. También puede existir una ruta por el canal primario de la ficha.
+        El resumen de Web y de los avisos por Telegram está en <Link to="/clientes">Clientes</Link>.
       </p>
-      {error ? <p className="error">{traducir(error)}</p> : null}
+      {error ? <p className="error">No se pudo actualizar: {traducir(error)}{data ? '. Se muestran los últimos datos disponibles.' : ''}</p> : null}
       <div className="table mt6">
         <table>
           <thead>
@@ -104,6 +117,7 @@ export function Canales() {
               <th>Tipo</th>
               <th>Estado</th>
               <th>Enrutado desde</th>
+              <th>Revisar</th>
             </tr>
           </thead>
           <tbody>
@@ -128,12 +142,18 @@ export function Canales() {
                       ) : null}
                     </td>
                     <td className="muted">{fmt(c.created_at)}</td>
+                    <td>{c.tenant_id && c.state !== 'orphan' ? (
+                      <div className="channel-row-actions">
+                        <Link to={connectionsPath(c.tenant_id)}>Conexiones</Link>
+                        <Link to={clientPath(c.tenant_id)}>Ficha</Link>
+                      </div>
+                    ) : <span className="muted">Revisar asignación: el cliente ya no existe.</span>}</td>
                   </tr>
                 );
               })
             ) : data ? (
               <tr>
-                <td colSpan={5} className="empty">
+                <td colSpan={6} className="empty">
                   {data.channels.length ? 'Ningún canal casa con el filtro.' : 'Ninguna dirección enrutada todavía.'}
                 </td>
               </tr>
@@ -144,7 +164,7 @@ export function Canales() {
       <div className="legend cfglegend">
         <span>
           <i className="lg-ok" />
-          atendido
+          enrutado
         </span>
         <span>
           <i className="lg-warn" />
@@ -152,7 +172,7 @@ export function Canales() {
         </span>
         <span>
           <i className="lg-bad" />
-          no atendido
+          cliente inexistente
         </span>
       </div>
     </div>

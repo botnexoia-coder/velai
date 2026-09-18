@@ -7,10 +7,316 @@
 > terceros) y en [`CONTEXTOS-AMPLIOS.md`](./CONTEXTOS-AMPLIOS.md) (fases 2–4).
 >
 > Docs vivos que NO se consolidan: `OPERATIONS.md`, `GUIA-WORKERS.md`,
-> `STACK-TECNOLOGICO.md`, `ALTACLIENTE.md`, `PARA-JOHAN-widget-en-webs-cliente.md`
-> y los de marketing (`links-strategy.md`, `backlinks-plan.md`, `pauta-anuncios.md`).
+> `STACK-TECNOLOGICO.md`, `ESTRUCTURA.md`, `ALTACLIENTE.md`, `DEMOS.md`,
+> `VOLUMEN-Y-ALMACENAMIENTO.md`, `VERIFICACION-GOOGLE.md`,
+> `PARA-JOHAN-widget-en-webs-cliente.md` y los de marketing (`links-strategy.md`,
+> `backlinks-plan.md`, `pauta-anuncios.md`).
+>
+> **Repaso del 2026-09-16**: la regla se aplicó también DENTRO de los docs. Se borró
+> `SPEC-AUTOAGENDA.md` entera y se retiraron de `H1-PANEL.md` sus §1 y §2 y de
+> `H2-PANEL.md` su §4; las tres cosas están resumidas abajo. Fuera de `docs/` se borró
+> `worker/MIGRACION-HONO.md`: la migración está hecha y el mapa del worker vive en
+> `ESTRUCTURA.md` §Arquitectura y en `GUIA-WORKERS.md` §2.
 
 ---
+
+## Finanzas: el libro interno de Velai (`SPEC-FINANZAS.md`, 2026-09-17, migraciones 0037/0038)
+
+Pedido de Juan: «gastos, ingresos y egresos… qué queda en caja, y si repartimos algunos de los
+ingresos, los que hacemos parte del equipo que nos repartimos dineros». Contabilidad **de
+Velai**, no un módulo para clientes: ningún tenant la ve ni existe para el rol cliente.
+
+**Las cuatro decisiones que fijaron el modelo** (Juan, 2026-09-17): reparto **manual por
+evento**, sin porcentajes guardados; **egreso = salida que no es gasto**, de modo que
+`beneficio = ingresos − gastos` y repartir dinero no parezca una pérdida; **dos monedas, EUR y
+COP**, cada una con su caja y sin conversión; y acceso **solo para socios**, no para todo el
+rol velai.
+
+- **Esquema** (`0037_finanzas.sql`): `fin_conceptos` (el catálogo de los desplegables, cada
+  concepto de un solo tipo), `fin_movimientos` (un único libro: el tipo da el signo y el
+  importe va en la unidad MENOR —céntimos en EUR, pesos en COP— para que sumar cien filas no
+  arrastre redondeos), `fin_repartos` y `fin_socios`. Las líneas de un reparto son egresos con
+  `reparto_id`: **el dinero repartido sale de la caja por el mismo camino que todo lo demás**,
+  que es justo la resta que se olvida cuando vive aparte.
+- **Dos cerraduras, no una**: ninguna ruta entra en `clienteAllowed`, así que `clienteGate`
+  cierra al rol cliente ANTES de tocar D1; y cada uno de los 17 handlers exige `esSocio` en su
+  primera línea. `SOCIOS_EMAILS` vive en el entorno y no en D1 —mismo motivo que `ADMIN_EMAILS`:
+  si la lista de quién cobra fuera una tabla editable desde el panel, una sesión comprometida
+  podría añadirse sola—, y hace falta ADEMÁS rol velai. `/api/admin/me` devuelve `socio`.
+- **Las cuentas, escritas una sola vez**: la caja es SIEMPRE acumulada desde el origen aunque
+  el filtro diga «septiembre» (preguntar «qué queda» por periodo no significa nada), el
+  beneficio sí es del periodo y los egresos no lo tocan. Nunca se suman euros con pesos.
+- **Panel** (`views/Finanzas.tsx`, bloque «Administración» de la barra lateral, visible solo
+  con `me.socio`): Movimientos con tarjetas por moneda y la caja destacada, Repartos con el
+  acumulado por persona, Conceptos y Socios. `finImporte` lee «0,29» como 29 céntimos exactos,
+  sin multiplicar flotantes.
+- **El egreso que firma los repartos** se localiza por la marca `fin_conceptos.sistema` y nunca
+  por su nombre: renombrarlo desde el catálogo dejaba el reparto siguiente en un 409
+  inexplicable. La API rechaza renombrarlo, apagarlo y borrarlo; reordenarlo sí, porque moverlo
+  de sitio no rompe nada.
+- **Socios gestionables** (`0038_fin_socios_gestion.sql`): `SOCIOS_EMAILS` decidía dos cosas a
+  la vez, quién entra y quién cobra. Ahora `fin_socios` es el catálogo de beneficiarios,
+  editable desde la pestaña Socios, y la variable conserva EXCLUSIVAMENTE el permiso de
+  entrada: un alta del panel no concede acceso y hay test que lo prueba. Corregir un correo
+  reasigna sus repartos en la MISMA transacción, para que el acumulado de una persona no se
+  parta en dos por un error de dedo; quien tiene pagos no se borra, se desactiva. La carrera
+  entre validar un beneficiario y darlo de baja se cierra en la base con un trigger
+  `BEFORE INSERT` dentro del propio batch: si el socio deja de estar activo a mitad, cae
+  también la cabecera del reparto. Alta, cambio y baja dejan rastro (`created_by`/`created_at`
+  en la ficha y `fin_socio_alta` / `fin_socio_cambio` / `fin_socio_baja` en el log).
+- **Pruebas**: `test/finanzas.test.js` (18 casos sobre SQLite real, con todas las migraciones y
+  las claves ajenas activas) cubre la aritmética de las dos monedas, el 403 a un velai NO socio
+  sin permitirle una sola consulta, el rollback real de un reparto con una línea mala, la baja
+  concurrente y un replay de la 0038 sobre el estado ya desplegado que demuestra que no mueve
+  ni una fila. Además `Finanzas.test.tsx` y tres recorridos E2E que usan los handlers reales
+  contra SQLite efímera.
+
+**Desplegado el 2026-09-17 en dos tandas**, las dos por el CD y con la migración remota antes
+del worker: `033807f` (el libro, migración 0037) y `79cdfbe` (socios gestionables,
+migración 0038).
+
+**Lo que NO entra, a propósito**: conversión EUR↔COP y total combinado —exige una tasa, y una
+tasa envejece—; facturación, IVA, AEAT o DIAN; adjuntar justificantes; conciliación bancaria;
+presupuestos; y enganchar automáticamente el gasto de IA de `ai_usage`, que está en USD (una
+tercera moneda) y se apunta a mano.
+
+## Autoagenda: página de reserva pública, servicios y embeds (`SPEC-AUTOAGENDA.md`, 2026-09-15/16, migraciones 0034/0035/0036)
+
+La **F3** que SPEC-CONFIRMACIONES dejó anotada: una superficie de reserva **sin
+conversación**, para el visitante que no quiere escribir. El chat sigue agendando
+conversando — eso es lo que nos distingue de Calendly y no se toca; el enlace es la otra
+mitad del mismo embudo. Las cuatro fases de la spec están construidas y desplegadas:
+
+- **Núcleo** (`worker/agenda.js`): `monthAvailability()` y `bookAppointment()` extraídos de
+  `calendarExecutor` — el chat y la página llaman al MISMO código. Un mes entero se resuelve
+  con **una** lectura de `events.list` (paginada) y `freeSlots()` puro día a día, con caché KV
+  `calfree:<tenant>:<servicio>:<mes>` de 90 s que `bookAppointment` invalida al reservar. Se
+  siguen leyendo solo `start/end/status/transparency`: ni un título de evento sale de Google.
+- **Servicios** (`0034_servicios.sql`, tab «Reservas online» del panel): catálogo por negocio
+  con duración, modo (presencial/vídeo/teléfono), lugar y descanso. El bot usa la duración del
+  servicio. Horas de inicio **solo a :00 y :30**, nunca hora libre.
+- **Página pública** en `citas.hirevai.com/{cliente}/reservas` (`worker/reserva-page.js` +
+  `worker/routes/reserva.js`): HTML autocontenido con nonce, móvil primero, ES/EN, marca del
+  tenant y marca Velai fija; stepper de tres pasos, .ics propio y `/{cliente}/cita/<token>`
+  para cancelar y **reagendar** (lo que hasta ahora no existía por ningún camino).
+- **Embeds** (`site/assets/vai-citas.js`): iframe inline y popup con la misma página, altura
+  por `postMessage` con origen verificado, y el snippet listo para copiar en el panel. En el
+  chat, la tool `enviar_enlace_reserva` (`worker/calendar.js`) hace que Vai **pregunte una vez**
+  cómo prefiere reservar el visitante en vez de recitar horas.
+
+**El aislamiento se escribió como estructura, no como disciplina** — que era el riesgo real
+de añadir un hostname al mismo worker con `run_worker_first`: `BOOKING_ORIGIN` en los dos
+entornos (fail-closed: sin ella las rutas de reserva **no existen**), `mwBookingHost`
+(`worker/booking-security.js`) delante de todas ellas, el perímetro del panel intacto y tres
+tests que lo clavan: los assets del panel **no** son alcanzables desde el host de citas, las
+rutas admin dan 404 dentro de él, y las de reserva dan 404 fuera. `admin.hirevai.com` quedó
+descartado con la prueba delante (Access corta antes que nuestro código) y el atajo del
+**Bypass de Access no se reabre**: pondría la cerradura del panel de todos los clientes a
+depender de un patrón de path escrito en el dashboard, que ningún test puede ver.
+
+Anti-doble-reserva en tres barreras: relectura del hueco, claim atómico en `booking_claims`
+(0035) que cubre duración **y** descanso, y `UNIQUE(request_id)` con id determinista de evento
+para que un reintento de red no cree una cita gemela. Tope de 3 citas futuras por teléfono —
+una página pública sin eso es un formulario abierto para llenarle la agenda al cliente. El
+`manage_token` es un HMAC truncado: sin token válido, 404, y el id nunca viaja en claro.
+
+**Verificado**: suite **244/244** (incluidos los tres de aislamiento de host, los de
+`monthAvailability` con DST y horario partido, y los del hold que caduca) y la página real
+**mirada** en `citas.hirevai.com/dialogos/reservas` — cabecera de Diálogos, marca Velai y el
+paso 1 de 3 con sus tres modalidades. Migración 0036 preparó el piloto de Diálogos.
+
+**Añadido el 2026-09-16**: quien abre un enlace de reservas de un negocio que no las tiene
+encendidas ya no recibe el JSON de error del worker, sino una página con la marca de Velai
+(«Aquí todavía no se puede reservar») y por dónde escribirnos. Sigue siendo un 404 y sigue
+siendo **la misma respuesta byte a byte** que para un slug inexistente —con el nonce del CSP
+como única diferencia, que es aleatorio por respuesta—: el aviso no puede convertirse en una
+forma de averiguar qué clientes existen. Un test lo compara.
+
+**Abierto** (en TAREAS-PENDIENTES): el precio, la plantilla `confirmacion_reserva` por
+aprobar antes de que la confirmación salga por WhatsApp, y colocar el embed en la web de
+Diálogos cuando el enlace lleve una semana sin sustos.
+
+## Las tres webs que faltaban pasan al loader — 2026-09-16
+
+Con los repos de los seis sitios ya accesibles se revisó página por página quién servía
+qué. Diálogos, hiredatavision y Zoe estaban al día (loader en todas sus páginas salvo
+`404.html`). Faltaban tres, y cada una por un motivo distinto:
+
+- **`CronoSeb/gogestion-demo`** (portada y privacidad) seguía en `vai-widget.js?v=14`,
+  la única versión viva que no sabe recibir la conversación en vivo del panel. Se
+  borraron además `assets/assistant-brand.js` y `assets/velai-assistant-polish.js`
+  (248 líneas): ambos se apoyaban en `window.VELAI_ASSISTANT_UI`, que el widget dejó de
+  leer en la v15 — pintaban su propio lanzador y su propia tarjeta por encima del
+  nuestro. Commit `f2de36c`.
+- **`botnexoia-coder/MyXuCostura`** estaba en `?v=17`. Cambio de dos líneas. Commit `d18bc4c`.
+- **`botnexoia-coder/TuFisioOficial`** era el caso sucio: `?v=20260913-salo`, más un
+  `velai-assistant-polish.js` pedido a hirevai.com que **respondía 404** (ese archivo
+  nunca se publicó en nuestro sitio, solo existía en el repo de gogestion), más 69 líneas
+  inline de `VELAI_ASSISTANT_UI` y un `MutationObserver` que reescribía nombre, saludo y
+  chips del widget ya montado y añadía su propia tarjeta en móvil. Todo eso llega hoy de
+  Marca. Commit `77a9629`.
+
+Las tres publicaron solas: `myxucostura` y `gogestion-demo` son proyectos de Pages con
+Git, y `tufisiooficial` es un Worker con assets que también despliega desde el repo. **Las
+tres verificadas mirándolas** (captura con chrome-headless-shell a 1280×900 sobre el
+dominio real, no sobre el repo): lanzador, tarjeta de bienvenida y `assets/vai.js` sin
+versión en el HTML servido.
+
+`ArteYMotor` queda fuera a propósito: ese sitio no lleva widget. `gogestion.es` es la web
+real del cliente y no es nuestra — nuestro repo solo sirve el demo en `gogestion-demo.pages.dev`.
+
+**Lo que la limpieza dejó a la vista:** Salo y Faby salen con la inicial del bot y la
+tarjeta genérica, porque sus fichas de Marca tienen `portrait_url` y teaser a NULL —
+antes eso lo tapaba el andamiaje local. Mei, que sí los tiene cargados, sale perfecta. Es
+trabajo de panel, no de código: queda en TAREAS-PENDIENTES.
+
+## Loader sin versión — 2026-09-14
+
+`site/assets/vai.js` resuelve el widget contra su propio `currentScript.src`, con
+versión vigente 16 y doble guarda para evitar inyecciones repetidas o un widget
+ya montado. Los clientes incluyen el loader sin query; hirevai conserva las
+27 referencias directas `vai-widget.js?v=16`. La excepción de `_headers` retira
+Cache-Control heredado y fija `public, max-age=300, must-revalidate`.
+`check:js` valida el loader y `check-site` exige coincidencia loader/widget/HTML
+y la regla de caché corta. ALTACLIENTE y PARA-JOHAN v6 incluyen el snippet definitivo.
+La propagación aplica a posteriores cargas, no a sesiones abiertas.
+
+Desplegado el 2026-09-14 (commit `953d020`, CI `34853146142`, Pages publicado con el
+mismo push). El `!` de `_headers` retiró el `immutable`, pero la cabecera real llegaba
+como `max-age=14400`: el ajuste de zona **TTL de caché del navegador** estaba en 4 h y
+elevaba cualquier max-age inferior. Juan lo pasó a «Respetar los encabezados
+existentes» el mismo día y el loader quedó en `public, max-age=300, must-revalidate`.
+Desde entonces `_headers` es la única fuente de la política de caché de hirevai.com, y
+lo que hay en git es lo que sirve el borde. Único efecto lateral: `robots.txt`, sin
+regla propia en el archivo, pasó de 4 h a la cabecera de Pages (`max-age=0`).
+
+## Sesión de Access caducada: el panel lo dice — 2026-09-15
+
+Access no responde 401 a las peticiones del panel: responde 302 hacia su login, en otro
+origen. Con el redirect por defecto el navegador intentaba seguirlo, la CSP del panel
+(`connect-src 'self'`) lo bloqueaba y `fetch` caía con un TypeError genérico. La ficha
+mostraba «la petición falló» y parecía un botón roto, con la consola llena de avisos de
+CSP que no señalaban la causa. Le pasó a Juan subiendo el retrato de Dara.
+
+`api()` pide ahora `redirect:'manual'` —puesto después del spread, para que ninguna
+llamada pueda volver a esconderlo— y trata la respuesta opaca como lo que es:
+`session_expired`. Un módulo `api/session.ts` avisa una sola vez, y el marco pinta una
+barra que ofrece **entrar en otra pestaña**, no recargar: recargar tiraría el formulario
+a medio escribir, que es justo lo que se estaba guardando cuando saltó. De paso, un
+fallo de red se traduce a `network_failed` en vez de propagarse crudo, y un abort de los
+sondeos de fondo sigue siendo un abort.
+
+Cubierto por `src/api/session.test.ts` (respuesta opaca, aviso único, redirect manual,
+red frente a abort) y por un caso en `Shell.test.tsx`. Panel v2.7.0.
+
+## Widget v17: el copy de Velai no viaja a webs de cliente — 2026-09-14
+
+Al absorber la capa cosmética en el widget, cada web de cliente dejó de traer su propio
+`assistant-brand.js` y pasó a depender de la ficha en admin.hirevai.com, que es lo
+correcto. Pero la cascada del teaser y de las sugerencias caía al texto de Velai cuando
+la ficha no tenía los suyos: zoetravelspain.com y hiredatavision.com llegaron a mostrar
+«¿Tu negocio necesita más tiempo? Cuéntame qué tarea te gustaría automatizar». Con
+tenant, el teaser usa ahora copy genérico («¿En qué puedo ayudarte?») y las sugerencias
+quedan vacías; sin tenant, hirevai.com conserva el suyo. Misma regla que el retrato.
+
+Diálogos además conservaba su propia capa, `dialogos-widget-polish.js`, escrita para
+Alma porque el polish compartido excluía ese tenant: con v17 duplicaba cara y etiqueta
+dentro del mismo botón. Retirada en el repo `Dialogos` (`9ca194c`), conservando su única
+regla propia, subir el botón sobre el FAB de la página de CV.
+
+Desplegado el 2026-09-14 (commit `595ffbf`, CI `34859408570`, deploy `34859554503`).
+Verificado en los tres sitios en vivo: un solo botón, una sola cara, `?v=17` y consola
+limpia. Los tests de versión dejaron de clavar el número y comparan loader contra
+cabecera del widget; check-site sigue añadiendo los 27 HTML.
+
+Pendiente de datos, no de código: los retratos, acentos y textos de tarjeta de los tres
+clientes se recuperaron de git y hay que cargarlos en el panel (ver TAREAS-PENDIENTES).
+
+## Ventana del chat v16 — 2026-09-14
+
+Panel fijo lateral de 400 px y márgenes de 16 px en escritorio; oculta el lanzador
+mientras está abierto y devuelve el foco al cerrarse. En <768 px conserva el sheet
+y el botón. Ambos respetan `--vai-lift`; el cálculo contempla el panel visible
+cuando el botón está oculto. Lanzador y teaser v15 conservan su aspecto.
+
+Bienvenida con retrato de 84 px, saludo y estado; identidad compacta con retrato
+al comenzar el hilo. El logo empresarial continúa configurable, pero la cabecera
+v16 usa el retrato según esta nueva especificación (sustituye la decisión v15).
+El saludo se pinta una sola vez como primera burbuja al enviar y se reconstruye
+al restaurar, sin añadirlo al payload/historial que recibe el servidor. Mensajes
+anclados abajo con `margin-top:auto`, bot según tema, usuario en gradiente,
+equipo con acento y marca. Por indicación posterior de Juan, `/chat/poll` añade
+`agent_name` por mensaje: alias del autor anterior a @, sin dominio ni etiquetas
++tag, como identidad visible del panel. No devuelve el correo completo. El widget
+pinta «Nombre · Equipo {marca}» y conserva el nombre en la sesión restaurada;
+mensajes sin autor conocido caen a «Equipo {marca}». Nombre público editable,
+independiente del alias, anotado como mejora en pendientes.
+
+Temas claro y oscuro explícitos y automático mediante prefers-color-scheme, que
+responde a cambios del sistema; sin tenant se fija oscuro. Vista previa del panel
+con bienvenida, retrato, entrada y sugerencias; selector Automático/Claro/Oscuro.
+Hasta cinco chips en validación, boot, formulario, preview y render. Botón Enviar
+inactivo sin texto o durante envío. No hay nuevas migraciones para v16 (0033 sigue
+siendo parte del lote v15 pendiente). Turnstile, demos, mecánica de poll y VaiChat se conservan.
+
+Validación local: `npm run check`, 219/219 worker + 5/5 aislamiento, 138/138
+panel, tipos y build. Chromium: 12/12 recorridos, incluido loader desde un origen
+distinto, temas, geometría, transcript restaurado y nombre de cada agente. Referencia externa
+de Claude inaccesible en esta sesión; diseño comprobado contra las medidas y tokens
+del MD, con capturas y recorridos en Chromium.
+
+Desplegado el 2026-09-14 (commit `953d020`, CI `34853146142`, deploy worker
+`34853293426` con gate y deploy en verde, Pages con el mismo push; suite 224/224,
+panel 138/138, Chromium 11/11). Verificado en hirevai.com real con Chromium: ventana
+de 400×768 desde `top:16px`, botón oculto al abrir, «Hablar con Vai» al cerrar, sin
+errores de consola y una sola petición `vai-widget.js?v=16`. Queda por mirar en una
+web cliente con cabecera fija. Rollback visual a v15: restaurar juntos widget, HTML y
+loader con `V='15'`; no revertir 0033.
+
+
+## Lanzador de marca en el widget (v15) — 2026-09-14
+
+Absorbida la capa cosmética de `36c28a2` dentro de `vai-widget.js`: pill de 64 px,
+retrato o inicial, «Hablar con {bot_name}» / «Cerrar conversación», kicker fijo
+«ASISTENTE IA · VELAI» y tarjeta oscura ES/EN. Es el único lanzador para todos
+los tenants, incluido dialogos. Hirevai sin tenant conserva retrato absoluto
+`https://hirevai.com/assets/assistants/vai-v1.jpg`, colores
+`#b83e08 / #662a16 / #ff914f` y textos Vai. El logo sigue en la cabecera del chat.
+Retirados los dos scripts externos y sus etiquetas; 27 HTML usan `?v=15`.
+
+Migración aditiva 0033: `portrait_url`, `accent_color`, `teaser_title`,
+`teaser_copy`, `teaser_title_en`, `teaser_copy_en`. Validación, alta, ficha,
+versionado PATCH, caché KV y boot público cubren los campos. El acento vacío
+se deriva del primario; los textos EN caen a ES y después al default.
+`POST /api/admin/tenants/:id/logo?kind=portrait` reutiliza almacenamiento,
+validación por magic bytes y límite 2 MB; guarda retrato y versión config,
+invalida caché y no sincroniza WhatsApp ni valida canales. Marca del widget
+incluye subida, URLs, acento, textos y previsualización. Conexiones cliente,
+admin v1, middleware y pruebas de aislamiento quedan sin cambios.
+
+El teaser no se crea ni registra impresiones en <768 px. Un solo `--vai-lift`
+resuelve los banners visibles con solape horizontal (`velai-consent` solo
+<900 px, `cookieBanner`, `ckb`), con observación de tamaño, atributos y viewport.
+La API VaiChat, sesiones, demos, Turnstile y live-poll se conservan.
+
+Desplegado el 2026-09-14 en el mismo push que el loader y la ventana v16 (commit
+`953d020`, deploy worker `34853293426`, migración 0033 aplicada por CD en staging y
+producción). Verificado: `GET /widget/boot` en producción devuelve los seis campos
+nuevos; hirevai.com sirve el widget v16 sin rastro de los scripts polish.
+Validación local: `npm run check`, 218/218 pruebas worker + 5/5 aislamiento,
+137/137 panel, tipos (incluido E2E), build y 5/5 pruebas Chromium (smoke del
+panel y cuatro recorridos del widget). Las 33 migraciones se aplicaron en SQLite.
+La subida devuelve además `updated_at`: la ficha conserva el borrador y renueva
+su versión optimista para permitir Guardar después sin un falso 409.
+
+Tras publicar, `?v=14` queda en estado mixto: Pages ignora el query en origen
+y purga edge, por lo que nuevos visitantes reciben v15; los recurrentes pueden
+retener v14 hasta un año. Es funcionalmente seguro, pero exige bumpear snippets
+para uniformidad. Loader sin versión, retrato en Conexiones y cambios de idioma
+en caliente pasan a pendientes. Rollback: revertir Pages a v14 con sus scripts;
+no revertir la migración aditiva; el worker puede mantenerse. Colores muy claros
+pueden reducir contraste; el preview permite ajustar el secundario oscuro.
+
 
 ## Vista «Plantillas» — catálogo de plantillas por cliente (2026-09-01)
 
@@ -794,6 +1100,170 @@ principal) — y con la página de WhatsApp senders ya sabemos que el menú de l
 ofrecerla. Meta decide de verdad, pero con Self Sign-up la WABA vive en el Business Manager DEL
 CLIENTE, así que Velai normalmente no la ve: Twilio es la ventana práctica, y el botón del panel evita
 depender de ella.
+## Historial de conversaciones en D1 (`H1-PANEL.md` §1, 2026-08-26, migración 0021)
+
+El cimiento del que colgaba medio plan del panel. La conversación vivía en KV con TTL de 24 h
+y solo los últimos 20 mensajes: cuando un lead salía mal no había forma de mirar qué pasó.
+
+`conversations` + `conv_messages` **sustituyen** a KV, no lo acompañan: los `conv:web:*` y
+`conv:wa:*` se borraron. Repartir el estado entre un almacén caliente y otro frío obliga a
+decidir cuál manda cuando discrepan — el mismo patrón que produjo el «verde en Twilio y mudo
+a la vez» de GOgestión. Además el cuello del sistema estaba en KV (1.000 escrituras/día), no
+en D1, así que el cambio **subió** el techo de conversaciones al día.
+
+Decisiones que sostienen la tabla: `id` propio y no el `conversationId` del widget (lo elige
+el navegador: es entrada de usuario y no puede ser clave primaria), `UNIQUE(tenant_id,
+channel, external_id)` para que el upsert sea idempotente, `unanswered` contado al escribir
+en vez de reprocesando transcripciones, y **sin tope de mensajes por conversación**: en
+WhatsApp la dirección es el teléfono, y un tope enmudecería para siempre a un cliente real.
+Lo que acota ya es suficiente — sesión de 72 h, limitador de 20/min y cupo diario de IA.
+
+Se escribe **por turno** y con `await`, no en `waitUntil`: contar puede fallar sin daño, pero
+recordar no. Sin `env.DB` el chat responde 503 (el mismo contrato que tenía KV: responder sin
+memoria es peor que no responder); si el `batch` falla con la base presente, la respuesta se
+devuelve igual —ya está pagada— y queda `conv_state_not_saved` en los logs. Retención de 90
+días desde el último mensaje, uniforme, con `/privacidad/` actualizada el mismo día.
+
+## Informe semanal al Telegram del cliente (`H1-PANEL.md` §2, 2026-08-26, migración 0022)
+
+El hueco más grande del análisis competitivo: ni un solo proveedor español o latinoamericano
+manda un resumen periódico automático, y los de fuera lo mandan por correo, donde una pyme no
+vive. Velai ya entrega en el Telegram del cliente, así que era infraestructura de salida ya
+pagada.
+
+Cada lunes por la mañana, en la ventana de 24 h que abre a las 07:00 UTC: conversaciones,
+leads, citas y preguntas sin respuesta, **con la comparación de la semana anterior** cuando la
+hay. Cuando no la hay lo dice en vez de pintar un cero — el historial arrancó el 2026-08-26 y
+comparar contra una semana que no existió sería un -100% falso.
+
+Sin cron nuevo: viaja en el de 5 minutos. La idempotencia es una fila de `tenant_reports`
+reservada ANTES de enviar (`status='sending'`) con tope de `attempts`, porque un cron que se
+dispara dos veces no puede mandar dos informes ni reintentar un fallo permanente en cada tick.
+Un cliente sin Telegram vinculado es un `skipped` **visible con su motivo**, no un silencio.
+Interruptor de baja en Conexiones, encendido por defecto. Y el botón **«Enviar informe de
+prueba»** (últimos 7 días, marcado como prueba, sin consumir el envío real de la semana):
+sin él, la única forma de comprobar que funciona era esperar al lunes.
+
+## Bandeja de conversaciones — responder desde el panel (2026-08-26, `H2-BANDEJA.md`, migraciones 0023/0026/0029)
+
+Pedido de Juan el 2026-08-26: lista de conversaciones con filtros por canal, hilo a la
+derecha y cajón de escritura. Es paridad, no diferenciador; lo diferenciador fue hacerla
+honesta, y de eso iba casi toda la spec.
+
+**La ventana de 24 h de Meta se dice antes de escribir, no después de fallar.** El texto
+libre solo es legal dentro de la ventana que abre el último mensaje entrante; fuera,
+WhatsApp responde `63016`. Dentro, el cajón enseña las horas que quedan; fuera, se
+deshabilita con el motivo escrito. El canal web no tiene ventana pero sí el problema
+opuesto: si el visitante cerró la pestaña la respuesta no llega, así que `visitor_seen_at`
+avisa en vez de bloquear.
+
+**Por qué número se responde** (`conversations.inbox_address`, el `To` del webhook): con
+dos números por cliente, `tenants.twilio_from` puede no ser el de llegada y el cliente
+final vería la respuesta desde otro número. Se rellena con `COALESCE` en cada entrante,
+así que las conversaciones anteriores a la migración se reparan solas con el siguiente
+mensaje; mientras esté a `NULL` el cajón se cierra diciendo por qué.
+
+**`role='agent'` se reconstruyó con la tabla casi vacía**, que era el momento más barato:
+SQLite no amplía un `CHECK` con `ALTER`. Al modelo se le presenta como `assistant` porque
+la API solo conoce dos roles y el modelo TIENE que ver lo que dijo la persona: si no, al
+expirar la pausa retomaría contradiciéndola. La burbuja del panel sí los distingue, con el
+correo de quien respondió; sin eso la tasa de resolución mentiría.
+
+**El sondeo se midió antes de escribirlo.** Un panel abierto 8 h refrescando cada 5 s con
+dos llamadas son ~5.800 peticiones/día por panel, y con seis clientes 35.000: un tercio del
+presupuesto gratuito en refrescar una pantalla. Con un solo endpoint cada 15 s y solo con la
+pestaña visible son ~1.900 por panel y ~11.500 con seis, el 11%. Se marca leído solo cuando
+hay algo nuevo: un `UPDATE` incondicional serían ~1.900 escrituras diarias para nada. El
+scroll no salta si el lector no estaba abajo, y el tope de 40 conversaciones se dice en voz
+alta, porque un tope callado se lee como «esto es todo».
+
+**Responder por el canal web** llegó el mismo día (migración 0026, widget v9): el widget
+declara `live:true` y pregunta cada 6 s solo cuando la conversación no la lleva el bot. Un
+widget cacheado sin la bandera no recibe el turno y se comporta como antes, y por eso se
+pudo desplegar sin tocar las webs de los clientes.
+
+**Avisos de mensajes nuevos** (migración 0029): el sonido va con un oscilador de Web Audio,
+no con `<audio>`, porque la CSP del panel no declara `media-src` y cualquier archivo
+—incluido un `data:`— quedaría bloqueado; hay un test que falla si alguien mete un
+`new Audio()`. Ese sondeo, al revés que el de la bandeja, NO mira `visibilityState`: el caso
+a cubrir es justamente la pestaña en segundo plano, así que va cada 30 s con una sola
+consulta agregada. Mira `conversations.last_inbound_at` y no `last_at`, porque con `last_at`
+una respuesta del propio equipo se avisaría a sí misma. El permiso y el `AudioContext` solo
+se pueden pedir dentro de un gesto, así que viven en el clic del botón, y la preferencia se
+recuerda por pestaña.
+
+**Fuera de alcance, con motivo:** enviar plantillas fuera de la ventana (comparte maquinaria
+con el informe semanal por WhatsApp), Instagram (no se pinta una pestaña de un canal que no
+existe: un filtro que no filtra es la clase de mentira que este panel no se permite),
+asignación, etiquetas y adjuntos.
+
+## Handoff con toma de control (2026-08-26, `H2-HANDOFF.md`, migraciones 0025/0027)
+
+Pedido de Juan: «el chat solo se habilita cuando el usuario pida hablar con un asesor y
+haya alguien conectado; si no, envía un lead y sigue la IA». Antes, `[[HUMANO]]` escribía
+una pausa de 4 h y avisaba a Telegram sin que nada garantizara respuesta: si el aviso
+llegaba de noche, el cliente final se quedaba mudo cuatro horas justo después de pedir
+ayuda. **Si no hay nadie disponible ya no se escala:** se captura el lead y la IA sigue.
+
+**Cuatro estados** (`conversations.state`): `bot`, `esperando`, `humano` y vuelta a `bot`.
+En `esperando`, a los 5 minutos se avisa de que se sigue buscando y a los 15 la IA retoma y
+pide el teléfono. Los 5 minutos eran el final en la primera versión y estaba mal: con un
+asesor ocupado en otra conversación saltaba casi siempre y el visitante leía «no hay nadie
+disponible» cuando sí lo había. La disponibilidad nunca fue exclusiva, así que atender
+varias a la vez ya funcionaba; lo que faltaba era verlas, y por eso la bandeja pone lo que
+espera primero con un contador «N esperando asesor».
+
+**La vuelta al bot se avisa siempre.** Al principio «Devolver a Vai» no mandaba nada,
+razonando que sobraba; estaba mal: el visitante venía hablando con una persona y se quedaba
+esperando a alguien que ya no estaba. Ahora se avisa con el nombre del asistente de ese
+cliente, el aviso queda en el hilo, y si el envío falla la conversación se devuelve igual,
+porque quedarse en `humano` sin nadie es peor.
+
+**Disponible = interruptor Y horario.** El interruptor es por usuario del panel; el horario
+es del cliente y lo cierra por fuera. `support_hours` a `NULL` cae al mismo default que el
+calendario: se propuso que `NULL` fuera «sin restricción» y Juan lo corrigió, porque si la
+interacción humana va con horario, un `NULL` sin límite es lo contrario de lo pedido. Un
+`{}` explícito sí significa «nunca se ofrece asesor», y el panel lo dice con esas palabras.
+Lo edita el cliente en Conexiones con una rejilla de siete días y dos tramos: la primera
+versión fue un textarea de JSON y Juan la paró, porque eso es para nosotros, no para un
+cliente.
+
+**Velai atiende SOLO lo de Velai.** Un admin de Velai podía tomar el control de la
+conversación de un cliente, y la burbuja lleva el correo de quien escribe: el cliente final
+de una gestoría habría visto `botnexo.ia@gmail.com` dentro de su chat. Ver sí, atender no.
+El cajón se cierra antes con el motivo escrito y el endpoint devuelve **403, no 404**,
+porque fingir que la conversación no existe sería mentirle al panel que la está enseñando.
+La disponibilidad de un admin de Velai es siempre la del tenant `velai` y el `?tenant=` se
+ignora: antes dependía del selector de la bandeja y con «Todos los clientes» dejaba el botón
+mudo.
+
+**Detalles que no se disimularon:** el cron es `*/5`, así que «5 minutos» son entre 5 y 10;
+se compensa porque si la persona vuelve a escribir con el plazo vencido la IA contesta en
+ese mismo mensaje, y el cron solo hace falta cuando el cliente final se queda callado. El
+lead se captura sí o sí al pedir asesor, saltándose el mínimo de dos turnos, porque pedir
+hablar con una persona ya es intención comercial. Quién tomó el control se guarda y se
+enseña, para que dos personas no se pisen. Los dos cambios de riesgo alto, `escalateToHuman`
+y la guarda de pausa del webhook, se hicieron al final y manteniendo la clave `pause:` en
+paralelo.
+
+## Cupo de IA visible, sin corte (2026-08-26, `H3-PANEL.md` §4, migración 0024)
+
+Decisión de Juan: **visible sí, corte no**, que son dos cosas distintas y el panel las
+separa. El saldo mensual de tokens (`tenants.ai_monthly_tokens`) lo ve el cliente, baja
+hasta cero y no corta nada; es un contador, y la tarjeta lo dice con letra clara, porque un
+saldo a cero sin explicación haría pensar en una factura. El cupo diario de llamadas
+(`ai_daily_limit`) sí corta con un 429: es la guarda anti-abuso, y subió de 300 a 1.500
+porque 300 llamadas son unas 37 conversaciones al día y un cliente que creciera se comía un
+corte duro antes de que su saldo dijera nada. Avisa a Velai al 80%, porque el punto de
+subirlo es ver venir el problema, no solo retrasarlo.
+
+Dos decisiones que aparecieron al construirlo. **Al cliente no se le enseña el coste:** la
+tarjeta en dólares es solo para Velai, porque enseñarle lo que pagamos por él es enseñarle
+el margen; su tarjeta lleva tokens y porcentaje, y hay un test que falla si se cuela
+cualquier rastro de coste. Y **el cupo se dimensionó con consumo real**, no a ojo: 3.148
+tokens por llamada en Diálogos frente a 4.872 en GOgestión, y la diferencia no es el tráfico
+sino el prompt, que en GOgestión son 12.858 caracteres viajando en cada turno.
+
 ## Conversaciones a pantalla completa (2026-08-27, del canvas «Conversaciones · Panel Velai»)
 
 La bandeja vivía en una caja de `min(72vh,760px)` con la cabecera, la nota de disponibilidad y seis

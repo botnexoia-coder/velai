@@ -80,17 +80,18 @@ conversaciones.get('/api/admin/conversations/export.csv', async (c) => {
   // Un mensaje por fila, con la conversación como columna: es el formato que sirve
   // para leer en una hoja de cálculo, y el que pide un cliente que quiere auditar.
   const rows = (await env.DB.prepare(`
-    SELECT c.id AS conversacion, c.channel AS canal, m.created_at AS fecha, m.role AS quien, m.text AS mensaje
+    SELECT c.id AS conversacion, c.channel AS canal, m.created_at AS fecha, m.role AS quien, m.text AS mensaje, m.attachments_json AS adjuntos
     FROM conversations c JOIN conv_messages m ON m.conversation_id = c.id
     LEFT JOIN leads l ON l.id = c.lead_id
     WHERE ${f.sql}${scc.sql} ORDER BY c.last_at DESC, c.id DESC, m.id ASC LIMIT 20000`)
     .bind(...f.values, ...scc.args).all()).results;
-  const keys = ['conversacion', 'canal', 'fecha', 'quien', 'mensaje'];
+  const keys = ['conversacion', 'canal', 'fecha', 'quien', 'mensaje', 'adjuntos'];
   const csv = [keys.join(','), ...rows.map((row) => keys.map((key) => csvCell(row[key])).join(','))].join('\r\n');
   return new Response('\uFEFF' + csv, { headers: { 'Content-Type': 'text/csv; charset=utf-8', 'Content-Disposition': 'attachment; filename="velai-conversaciones.csv"', 'Cache-Control': 'no-store' } });
 });
 
-// ── Bandeja: lista + hilo abierto en UNA llamada (docs/H2-BANDEJA.md §5) ────
+// ── Bandeja: lista + hilo abierto en UNA llamada; el porqué del sondeo de 15 s
+// con la pestaña visible está en docs/IMPLEMENTADO.md ───────────────────────
 // Un solo endpoint porque el panel hace polling: dos llamadas cada 5 s con seis paneles
 // abiertos son 35.000 peticiones/día, un tercio del plan gratuito de Workers en
 // refrescar una pantalla. Con una cada 15 s y solo con la pestaña visible, ~11.500.
@@ -131,7 +132,7 @@ conversaciones.get('/api/admin/inbox', async (c) => {
     const head = await env.DB.prepare(`SELECT c.*, t.name AS tenant_name FROM conversations c
       LEFT JOIN tenants t ON t.id = c.tenant_id WHERE c.id=?${scc.sql}`).bind(wanted, ...scc.args).first();
     if (head) {
-      const messages = (await env.DB.prepare('SELECT role, agent_email, text, created_at FROM conv_messages WHERE conversation_id=? ORDER BY id ASC LIMIT 500').bind(head.id).all()).results;
+      const messages = (await env.DB.prepare('SELECT role, agent_email, text, created_at, attachments_json FROM conv_messages WHERE conversation_id=? ORDER BY id ASC LIMIT 500').bind(head.id).all()).results;
       const win = await replyWindow(env, head);
       // La misma puerta que el endpoint de respuesta, pero ANTES: el cajón se cierra con
       // el motivo escrito en vez de dejar que alguien escriba y se coma un 403.
@@ -170,7 +171,7 @@ conversaciones.get('/api/admin/alerts', async (c) => {
 });
 
 // Disponibilidad de la persona que mira el panel. El interruptor es POR PERSONA; el
-// horario es del cliente y lo cierra por fuera (docs/H2-HANDOFF.md).
+// horario es del cliente y lo cierra por fuera (docs/IMPLEMENTADO.md).
 conversaciones.on(['GET', 'PATCH'], '/api/admin/availability', async (c) => {
   const { request, env, url, scope, actor } = partesAdmin(c);
   // Velai solo puede estar disponible para SUS conversaciones: el ?tenant= se ignora a
@@ -264,7 +265,8 @@ conversaciones.post('/api/admin/conversations/:id/:accion{takeover|release}', as
 });
 
 // Responder desde el panel. La parte difícil no es enviar: es NO enviar cuando no se
-// puede, y decir por qué (docs/H2-BANDEJA.md §1 y §2).
+// puede, y decir por qué: la ventana de 24 h y el número de llegada, en
+// docs/IMPLEMENTADO.md.
 conversaciones.post('/api/admin/conversations/:id/reply', async (c) => {
   const { request, env, scope, actor } = partesAdmin(c);
   const id = c.req.param('id');
@@ -317,7 +319,7 @@ conversaciones.get('/api/admin/conversations/:id', async (c) => {
     WHERE c.id = ?${scc.sql}`).bind(id, ...scc.args).first();
   if (!head) throw new HttpError(404, 'not_found');
   if (scope.role !== 'velai') delete head.tenant_name;
-  const messages = (await env.DB.prepare('SELECT role, text, created_at FROM conv_messages WHERE conversation_id=? ORDER BY id ASC LIMIT 500')
+  const messages = (await env.DB.prepare('SELECT role, text, created_at, attachments_json FROM conv_messages WHERE conversation_id=? ORDER BY id ASC LIMIT 500')
     .bind(head.id).all()).results;
   return json({ conversation: head, messages }, 200, NO_STORE);
 });

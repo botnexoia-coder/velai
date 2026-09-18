@@ -98,3 +98,19 @@ export function windowHoursLeft(closesAt: string | undefined, nowMs = Date.now()
   if (!closesAt) return 0;
   return Math.max(0, Math.round((new Date(closesAt).getTime() - nowMs) / 3600000));
 }
+
+/** Unidad menor: céntimos EUR, pesos COP. Nunca mezcla ni convierte monedas. */
+export function finDinero(importe: number, moneda: 'EUR' | 'COP'): string {
+  const decimales = moneda === 'EUR' ? 2 : 0;
+  const numero = new Intl.NumberFormat('es-ES', { minimumFractionDigits: decimales, maximumFractionDigits: decimales, useGrouping: true }).format(Math.abs(importe) / (moneda === 'EUR' ? 100 : 1));
+  return `${importe < 0 ? '−' : ''}${moneda === 'EUR' ? '€' : '$'} ${numero}`;
+}
+
+/** Parseo decimal exacto, sin multiplicar flotantes (0,29 EUR son 29 céntimos). */
+export function finImporte(texto: string, moneda: 'EUR' | 'COP'): number | null {
+  const v = texto.trim().replace(',', '.');
+  if (!(moneda === 'EUR' ? /^\d+(?:\.\d{1,2})?$/ : /^\d+$/).test(v)) return null;
+  const [entero = '', decimal = ''] = v.split('.');
+  const n = Number(entero + (moneda === 'EUR' ? decimal.padEnd(2, '0') : ''));
+  return Number.isSafeInteger(n) && n > 0 ? n : null;
+}

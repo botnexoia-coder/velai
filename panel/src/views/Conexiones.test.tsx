@@ -73,7 +73,7 @@ describe('la tira de canales (dos vocabularios)', () => {
     // Velai ve el diagnóstico crudo si el worker lo manda sin colapsar.
     expect(cxTiles([{ kind: 'whatsapp', address: 'whatsapp:+34', state: 'unrouted' }])[1]?.stateLabel).toBe('Sin enrutar');
     expect(cxTiles([{ kind: 'messenger', address: 'messenger:1077804955422697', state: 'live', managed_by: 'Velai (Messenger)' }])[3])
-      .toMatchObject({ address: '1077804955422697', stateLabel: 'Atendido', managedBy: 'Velai (Messenger)' });
+      .toMatchObject({ address: '1077804955422697', stateLabel: 'Configurado', managedBy: 'Velai (Messenger)' });
   });
 });
 
@@ -175,6 +175,9 @@ describe('vista Conexiones (rol cliente)', () => {
     await waitFor(() => expect(screen.getByText('Recibe tus leads en Telegram')).toBeInTheDocument());
     // Tira: el canal web activo y los que faltan, apagados pero visibles.
     expect(screen.getByText('barberia.com')).toBeInTheDocument();
+    expect(screen.getByRole('region', { name: 'Canales de conversación' })).toHaveTextContent('Tu web');
+    expect(screen.getByRole('region', { name: 'Canales de conversación' })).not.toHaveTextContent('Telegram');
+    expect(screen.getByRole('region', { name: 'Destinos de avisos' })).toHaveTextContent('Telegram');
     expect(screen.getByText('Sin activar')).toBeInTheDocument();
     // Asistente básico: abre en «El grupo» (paso 1 de 2) — sin marca blanca no hay bot.
     expect(screen.getByText('Paso 1 de 2')).toBeInTheDocument();

@@ -5,6 +5,7 @@
 // helpers con el cron y con el panel (convLoad, storeLead, publicCors…). Cada rama
 // conserva el orden y las guardas del router monolítico original — mismo contrato,
 // verificado por test/worker.test.js.
+import { bookingOrigin } from '../booking-security.js';
 import { Hono } from 'hono';
 import { adminHost, adminIdentity } from '../middleware.js';
 import {
@@ -36,7 +37,7 @@ async function panelV2Assets(request, env, url) {
   const out = new Response(res.body, res);
   // CSP SIN nonce ni inline: el v2 son ficheros externos del mismo origen y React aplica
   // estilos por CSSOM. Más estricta que la del v1, no menos.
-  out.headers.set('Content-Security-Policy', PANEL_V2_CSP);
+  out.headers.set('Content-Security-Policy', PANEL_V2_CSP + (bookingOrigin(env) ? `; frame-src ${bookingOrigin(env)}` : ''));
   out.headers.set('X-Robots-Tag', 'noindex, nofollow');
   out.headers.set('X-Frame-Options', 'DENY');
   out.headers.set('Referrer-Policy', 'no-referrer');
@@ -100,12 +101,13 @@ publico.get('/media/*', async (c) => {
   // vez por centro de datos en lugar de una vez por visitante del widget.
   const cache = caches.default;
   const cached = await cache.match(request);
-  if (cached) return cached;
+  const security = { 'X-Content-Type-Options': 'nosniff', 'Content-Security-Policy': "default-src 'none'; sandbox", 'X-Robots-Tag': 'noindex' };
+  if (cached) { const response = new Response(cached.body, cached); for (const [key, value] of Object.entries(security)) response.headers.set(key, value); return response; }
   const obj = await mediaGet(env, key);
   if (!obj) throw new HttpError(404, 'not_found');
   // La URL va versionada (?v=): cachear un año es seguro y la foto la lee
   // también Meta al aplicar el perfil de WhatsApp — tiene que ser pública.
-  const headers = { 'Content-Type': obj.contentType, 'Cache-Control': 'public, max-age=31536000, immutable', 'Access-Control-Allow-Origin': '*' };
+  const headers = { ...security, 'Content-Type': obj.contentType, 'Cache-Control': 'public, max-age=31536000, immutable', 'Access-Control-Allow-Origin': '*' };
   if (obj.etag) headers.ETag = obj.etag;
   const media = new Response(obj.body, { headers });
   c.executionCtx.waitUntil(cache.put(request, media.clone()).catch(() => {}));

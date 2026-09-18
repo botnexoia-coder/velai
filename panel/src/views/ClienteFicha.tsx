@@ -48,6 +48,13 @@ const TF_KEYS = [
   'bot_name',
   'brand_name',
   'logo_url',
+  'portrait_url',
+  'accent_color',
+  'teaser_title',
+  'teaser_copy',
+  'teaser_title_en',
+  'teaser_copy_en',
+
   'brand_color',
   'brand_color_2',
   'agent_color',
@@ -63,7 +70,9 @@ type TFKey = (typeof TF_KEYS)[number];
 type Form = Record<TFKey, string>;
 
 function emptyForm(): Form {
-  return Object.fromEntries(TF_KEYS.map((k) => [k, ''])) as Form;
+  const form = Object.fromEntries(TF_KEYS.map((k) => [k, ''])) as Form;
+  form.meta_partner_status = 'pendiente';
+  return form;
 }
 
 function formFrom(t: TenantDetail): Form {
@@ -163,7 +172,7 @@ export function ClienteFicha({ id, onClose }: { id: string | null; onClose: () =
   async function saveTenant(): Promise<boolean> {
     setFieldErrs({});
     const body: TenantSaveBody = { ...form };
-    body['chips_json'] = linesFrom(chipsText, 3);
+    body['chips_json'] = linesFrom(chipsText, 5);
     body['web_origins'] = linesFrom(originsText, 6);
     body['active'] = active;
     body['note'] = note;
@@ -338,7 +347,7 @@ export function ClienteFicha({ id, onClose }: { id: string | null; onClose: () =
           />
         ) : null}
         {(wizard ? WIZ[wizStep] : pane) === 'marca' ? (
-          <MarcaPane form={form} set={set} chipsText={chipsText} setChipsText={setChipsText} originsText={originsText} setOriginsText={setOriginsText} markDirty={() => markDirty('marca')} err={err} editingId={editing?.id ?? null} />
+          <MarcaPane form={form} set={set} chipsText={chipsText} setChipsText={setChipsText} originsText={originsText} setOriginsText={setOriginsText} markDirty={() => markDirty('marca')} err={err} editingId={editing?.id ?? null} onPortraitSaved={(updated_at) => setEditing((current) => current ? { ...current, updated_at } : current)} />
         ) : null}
         {(wizard ? WIZ[wizStep] : pane) === 'prov' && editing ? <ProvPane tenantId={editing.id} form={form} /> : null}
         {(wizard ? WIZ[wizStep] : pane) === 'usuarios' && editing ? <UsersPane tenantId={editing.id} err={err} setFieldErrs={setFieldErrs} /> : null}
@@ -562,6 +571,7 @@ function MarcaPane({
   markDirty,
   err,
   editingId,
+  onPortraitSaved,
 }: {
   form: Form;
   set: (k: TFKey) => (v: string) => void;
@@ -572,15 +582,19 @@ function MarcaPane({
   markDirty: () => void;
   err: (f: string) => ReactNode;
   editingId: string | null;
+  onPortraitSaved: (updatedAt: string) => void;
 }) {
   const toast = useToast();
   const upload = useLogoUpload();
+  const portraitUpload = useLogoUpload<'portrait'>();
+  const [portraitFile, setPortraitFile] = useState<File | null>(null);
+  const [portraitOut, setPortraitOut] = useState('');
   const provStep = useProvisionStep();
   const [file, setFile] = useState<File | null>(null);
   const [logoOut, setLogoOut] = useState('');
 
   return (
-    <section onInput={markDirty}>
+    <section onChange={markDirty}>
       <div className="card">
         <b>Marca del widget (chat en la web del cliente)</b>
         <p className="muted mt6">
@@ -637,6 +651,47 @@ function MarcaPane({
               </small>
               {err('logo_url')}
             </Card>
+            <Card label="Retrato del asistente (botón del chat)">
+              <input value={form.portrait_url} onChange={(e) => set('portrait_url')(e.target.value)} placeholder="https://… o sube una imagen aquí abajo" aria-label="URL del retrato" />
+              <div className="note mt6">
+                <input type="file" id="tPortraitFile" accept="image/png,image/jpeg,image/webp" className="filein" onChange={(e) => setPortraitFile(e.target.files?.[0] ?? null)} />
+                <label className="btn alt btnsm" htmlFor="tPortraitFile">
+                  Elegir imagen
+                </label>
+                <span className="fname muted">{portraitFile ? portraitFile.name : 'ninguna elegida'}</span>
+                <button
+                  className="btn btnsm"
+                  type="button"
+                  disabled={portraitUpload.isPending}
+                  onClick={() => {
+                    if (!portraitFile) return setPortraitOut('Elige una imagen primero.');
+                    if (!editingId) return setPortraitOut('Guarda el cliente antes de subir su retrato.');
+                    if (portraitFile.size > 2 * 1024 * 1024) return setPortraitOut('Máximo 2 MB.');
+                    setPortraitOut('subiendo…');
+                    portraitUpload.mutate(
+                      { id: editingId, file: portraitFile, kind: 'portrait' },
+                      {
+                        onSuccess: (d) => {
+                          set('portrait_url')(d.portrait_url);
+                          onPortraitSaved(d.updated_at);
+                          setPortraitOut('Subido ✓');
+                          toast('Retrato guardado');
+                        },
+                        onError: (e) => setPortraitOut(`Error: ${traducir(e)}`),
+                      },
+                    );
+                  }}
+                >
+                  Guardar retrato
+                </button>
+                <span className="muted">{portraitOut}</span>
+              </div>
+              <small className="muted">
+                Se muestra en el botón del chat. Sin retrato se usa la inicial del bot.
+                Cuadrada, 640×640 o más, máx. 2 MB (PNG/JPG/WebP).
+              </small>
+              {err('portrait_url')}
+            </Card>
             <Card label="Colores (#rrggbb · el 2º opcional, degradado)">
               <div className="note mt6">
                 <input value={form.brand_color} onChange={(e) => set('brand_color')(e.target.value)} placeholder="#1a4fd0" className="w150" aria-label="Color de marca" />
@@ -644,6 +699,9 @@ function MarcaPane({
               </div>
               {err('brand_color')}
               {err('brand_color_2')}
+              <input value={form.accent_color} onChange={(e) => set('accent_color')(e.target.value)} placeholder="#ff914f" className="w150" aria-label="Color de acento" />
+              <small className="muted">vacío = derivado del color de marca</small>
+              {err('accent_color')}
             </Card>
             <Card label="Color de la burbuja del equipo">
               <p className="muted mt6">
@@ -655,6 +713,16 @@ function MarcaPane({
               </div>
               {err('agent_color')}
             </Card>
+            <Card label="Tarjeta de bienvenida (ES)">
+              <input value={form.teaser_title} onChange={(e) => set('teaser_title')(e.target.value)} maxLength={80} placeholder="¿Tu negocio necesita más tiempo?" aria-label="Título de la tarjeta" />
+              <textarea value={form.teaser_copy} onChange={(e) => set('teaser_copy')(e.target.value)} maxLength={200} rows={3} placeholder="Cuéntame qué tarea te gustaría automatizar y te ayudo a explorar las opciones." aria-label="Texto de la tarjeta" />
+              {err('teaser_title')}{err('teaser_copy')}
+            </Card>
+            <Card label="Tarjeta de bienvenida (EN, opcional)">
+              <input value={form.teaser_title_en} onChange={(e) => set('teaser_title_en')(e.target.value)} maxLength={80} placeholder="Does your business need more time?" aria-label="Título de la tarjeta en inglés" />
+              <textarea value={form.teaser_copy_en} onChange={(e) => set('teaser_copy_en')(e.target.value)} maxLength={200} rows={3} placeholder="Tell me what you would like to automate and I can help you explore your options." aria-label="Texto de la tarjeta en inglés" />
+              {err('teaser_title_en')}{err('teaser_copy_en')}
+            </Card>
             <Card label="Saludo (ES)">
               <textarea rows={2} value={form.greeting} onChange={(e) => set('greeting')(e.target.value)} placeholder="¡Hola! Soy Zoe 🐱 ¿A dónde sueñas viajar?" aria-label="Saludo" />
               {err('greeting')}
@@ -663,7 +731,7 @@ function MarcaPane({
               <textarea rows={2} value={form.greeting_en} onChange={(e) => set('greeting_en')(e.target.value)} aria-label="Saludo en inglés" />
               {err('greeting_en')}
             </Card>
-            <Card label="Sugerencias (hasta 3, una por línea)">
+            <Card label="Sugerencias (una por línea, hasta 5)">
               <textarea rows={3} value={chipsText} onChange={(e) => setChipsText(e.target.value)} placeholder={'Vuelos a Colombia\nPaquetes con hotel'} aria-label="Sugerencias" />
               {err('chips_json')}
             </Card>
@@ -676,10 +744,10 @@ function MarcaPane({
               {err('wa_number')}
             </Card>
             <Card label="Tema del chat">
-              <select value={form.theme} onChange={(e) => set('theme')(e.target.value)} aria-label="Tema del chat">
-                <option value="">auto (según el visitante)</option>
-                <option value="light">light</option>
-                <option value="dark">dark</option>
+              <select value={form.theme || 'auto'} onChange={(e) => set('theme')(e.target.value)} aria-label="Tema del chat">
+                <option value="auto">Automático (según el visitante)</option>
+                <option value="light">Claro</option>
+                <option value="dark">Oscuro</option>
               </select>
             </Card>
             <Card label="Dominios de la web (https, uno por línea, máx. 6)">
@@ -720,33 +788,43 @@ function MarcaPane({
 
 // Previsualización de la marca: mini-mock del chat con los valores actuales del form.
 function BrandPreview({ form, chipsText }: { form: Form; chipsText: string }) {
-  const c1 = form.brand_color.trim() || '#FF6B1A';
-  const c2 = form.brand_color_2.trim() || c1;
+  const c1 = form.brand_color.trim() || '#b83e08';
+  const c2 = form.brand_color.trim() ? form.brand_color_2.trim() || c1 : '#662a16';
+  const acc = form.accent_color.trim() || `color-mix(in srgb,${c1} 55%,#fff)`;
   const bot = form.bot_name.trim() || 'Vai';
-  const brand = form.brand_name.trim() || 'Velai';
-  const logo = form.logo_url.trim();
-  const greet = form.greeting.trim() || `¡Hola! Soy ${bot} 👋 ¿En qué te puedo ayudar?`;
-  const chips = linesFrom(chipsText, 3);
+  const greet = form.greeting.trim() || `Hola, soy ${bot}. ¿En qué puedo ayudarte?`;
+  const chips = linesFrom(chipsText, 5);
   return (
-    <div className={`brandprev${form.theme === 'dark' ? ' bp-dark' : ''}`}>
-      <div className="bp-h" style={{ background: `linear-gradient(135deg,${c1},${c2})` }}>
-        <span className="bp-av" style={{ background: c1 }}>
-          {/^https:\/\//i.test(logo) ? <img src={logo} alt="" /> : bot.charAt(0).toUpperCase()}
-        </span>
-        <span className="bp-n">
-          {bot} · {brand}
-        </span>
+    <div className={`brandprev${form.theme === 'dark' ? ' bp-dark' : form.theme === 'light' ? ' bp-light' : ''}`}>
+      <div className="bp-teaser" style={{ borderColor: acc }}>
+        <small>{bot} · ASISTENTE IA · VELAI</small>
+        <strong>{form.teaser_title.trim() || '¿Tu negocio necesita más tiempo?'}</strong>
+        <p>{form.teaser_copy.trim() || 'Cuéntame qué tarea te gustaría automatizar y te ayudo a explorar las opciones.'}</p>
+        <span>Iniciar conversación →</span>
       </div>
-      <div className="bp-g">{greet}</div>
-      {chips.length ? (
+      <div className="bp-launcher" style={{ background: `linear-gradient(135deg,${c1},${c2})`, borderColor: acc }}>
+        <span className="bp-face">{bot.charAt(0).toUpperCase()}
+          {/^https:\/\/[^\s]+$/i.test(form.portrait_url.trim()) ? <img key={form.portrait_url} src={form.portrait_url.trim()} alt="" onError={(e) => { e.currentTarget.style.display = 'none'; }} /> : null}
+          <i style={{ background: acc }} />
+        </span>
+        <span>Hablar con {bot}<small>ASISTENTE IA · VELAI</small></span>
+      </div>
+      <div className="bp-window" style={{ borderColor: acc }}>
+        <div className="bp-h"><span>{bot} · ASISTENTE IA · VELAI</span><span aria-hidden="true">×</span></div>
+        <div className="bp-hero">
+          <span className="bp-face bp-portrait" style={{ background: c1, borderColor: acc }}>{bot.charAt(0).toUpperCase()}
+            {/^https:\/\/[^\s]+$/i.test(form.portrait_url.trim()) ? <img key={form.portrait_url} src={form.portrait_url.trim()} alt="" onError={(e) => { e.currentTarget.style.display = 'none'; }} /> : null}
+            <i style={{ background: acc }} />
+          </span>
+          <strong>{greet}</strong><small>En línea · respondo al momento</small>
+        </div>
         <div className="bp-c">
-          {chips.map((c) => (
-            <span key={c} style={{ color: c1 }}>
-              {c}
-            </span>
+          {(chips.length ? chips : ['¿Cuánto cuesta?', 'Enséñame una demo', '¿Sirve para mi negocio?']).map((c) => (
+            <span key={c}><b style={{ color: acc }} aria-hidden="true">→</b>{c}</span>
           ))}
         </div>
-      ) : null}
+        <div className="bp-input"><span>{form.placeholder.trim() || 'Cuéntame qué necesitas…'}</span><b aria-hidden="true">↑</b></div>
+      </div>
     </div>
   );
 }

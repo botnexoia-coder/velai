@@ -1,4 +1,4 @@
--- Bandeja de conversaciones: responder desde el panel (docs/H2-BANDEJA.md).
+-- Bandeja de conversaciones: responder desde el panel (docs/IMPLEMENTADO.md).
 --
 -- 1) role='agent'. Una respuesta humana no es el bot ni el cliente, y confundirla con la
 --    del bot rompe todo lo que viene después: tasa de resolución, «lo que el bot no supo

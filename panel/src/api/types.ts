@@ -10,6 +10,8 @@ export type Role = 'velai' | 'cliente';
 /** GET /api/admin/me */
 export interface Me {
   role: Role;
+  /** Ausente en workers anteriores: el panel mantiene cerrado el acceso. */
+  socio?: boolean;
   tenantName: string | null;
   tenantLogo: string | null;
   /** El cliente lo necesita para llamar a SUS rutas /tenants/:id/…; para velai es null. */
@@ -135,6 +137,8 @@ export interface TenantRow {
   meta_partner_status: string | null;
   sender_status: string | null;
   channels: string | null;
+  /** Mismo resumen que Conexiones; opcional durante la transición de versiones. */
+  connection_summary?: TenantChannel[];
   prompt_len: number;
   lead_count: number;
 }
@@ -199,6 +203,7 @@ export interface ConversationHead {
 }
 
 export interface ConvMessage {
+  attachments_json?: string | null;
   role: MsgRole;
   agent_email?: string | null;
   text: string;
@@ -347,6 +352,12 @@ export interface TenantDetail {
   bot_name: string | null;
   brand_name: string | null;
   logo_url: string | null;
+  portrait_url: string | null;
+  accent_color: string | null;
+  teaser_title: string | null;
+  teaser_copy: string | null;
+  teaser_title_en: string | null;
+  teaser_copy_en: string | null;
   brand_color: string | null;
   brand_color_2: string | null;
   agent_color: string | null;
@@ -555,6 +566,15 @@ export interface WhatsappInfoResponse {
   whatsapp: WhatsappRow;
   alerts: LeadAlerts;
   profileSync: ProfileSync | null;
+}
+
+/** POST /api/admin/tenants/:id/logo?kind=portrait */
+export interface PortraitUploadResponse {
+  ok: true;
+  kind: 'portrait';
+  portrait_url: string;
+  updated_at: string;
+  store: string;
 }
 
 /** POST /api/admin/tenants/:id/logo?channels=web,whatsapp */
@@ -795,3 +815,49 @@ export interface PlantillasResponse {
     hours?: number;
   }[];
 }
+
+// Finanzas internas; importes enteros (céntimos EUR, pesos COP).
+export type FinTipo = 'ingreso' | 'gasto' | 'egreso';
+export type FinMoneda = 'EUR' | 'COP';
+export interface FinConcepto {
+  id: number; tipo: FinTipo; nombre: string; activo: number; position: number;
+  /** 1 = lo usa el código (el egreso de los repartos): se reordena, pero no se renombra ni se apaga. */
+  sistema?: number;
+}
+export interface FinConceptos { conceptos: Record<FinTipo, FinConcepto[]> }
+export interface FinMovimiento {
+  id: string; tipo: FinTipo; concepto_id: number; concepto_nombre: string;
+  fecha: string; moneda: FinMoneda; importe: number; nota: string | null;
+  tenant_id: string | null; tenant_name: string | null;
+  beneficiario: string | null; reparto_id: string | null; created_by: string; created_at: string;
+}
+export interface FinMovimientos { movimientos: FinMovimiento[]; nextCursor: string | null }
+export interface FinTotales { ingresos: number; gastos: number; beneficio: number; egresos: number; caja: number; sin_repartir: number }
+export interface FinRepartido { email: string; nombre: string; moneda: FinMoneda; importe: number }
+export interface FinResumen {
+  monedas: Record<FinMoneda, FinTotales>;
+  conceptos: { concepto_id: number; nombre: string; tipo: FinTipo; moneda: FinMoneda; importe: number }[];
+  repartido: FinRepartido[];
+}
+export interface FinSocio { email: string; nombre: string }
+export interface FinSocioRegistro extends FinSocio { activo: number; tiene_repartos: number }
+export interface FinSocios { socios: FinSocioRegistro[] }
+export interface FinSocioInput { email: string; nombre: string; activo?: number }
+export interface FinReparto {
+  id: string; fecha: string; moneda: FinMoneda; nota: string | null;
+  created_by: string; created_at: string; lineas: (FinMovimiento & { nombre: string })[];
+}
+export interface FinRepartos { socios: FinSocio[]; repartido: FinRepartido[]; repartos: FinReparto[] }
+export interface FinMovimientoInput {
+  tipo: FinTipo; concepto_id: number; fecha: string; moneda: FinMoneda; importe: number;
+  nota: string; tenant_id: string | null;
+}
+export interface FinRepartoInput {
+  fecha: string; moneda: FinMoneda; nota: string; lineas: { beneficiario: string; importe: number }[];
+}
+
+export type MediaKind = 'image' | 'pdf' | 'audio' | 'video';
+export interface MediaAttachment { id: string; slug: string; name: string; kind: MediaKind; mime: string; url: string }
+export interface MediaMetadata { name?: string; description?: string; channels?: string[]; active?: number; position?: number }
+export interface MediaItem extends MediaAttachment { ext: string; bytes: number; description: string; channels: string[]; active: number; position: number; sent_count: number; last_sent_at: string | null; created_at: string; updated_at: string }
+export interface BibliotecaResponse { items: MediaItem[]; quota: { bytes: number; used: number; files: number }; limits: Record<MediaKind, number>; storage_ready: boolean }

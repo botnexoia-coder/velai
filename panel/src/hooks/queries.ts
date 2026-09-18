@@ -31,6 +31,7 @@ import type {
   PlantillasResponse,
   SolicitudesResponse,
   LogoUploadResponse,
+  PortraitUploadResponse,
   Me,
   OkResponse,
   PreviewResponse,
@@ -67,12 +68,17 @@ export function useMe() {
 }
 
 /** Lista de clientes — SOLO para velai (clienteAllowed no incluye GET /tenants). */
-export function useTenants(enabled: boolean) {
+export const CONNECTIONS_POLL_MS = 30_000;
+
+export function useTenants(enabled: boolean, live = false) {
+  const client = useQueryClient();
   return useQuery({
     queryKey: ['tenants'],
-    queryFn: () => api<TenantsResponse>('/api/admin/tenants'),
+    queryFn: () => api<TenantsResponse>('/api/admin/tenants', undefined, { quiet: quietRefetch(client, ['tenants']) }),
     enabled,
-    staleTime: 60_000,
+    staleTime: live ? 15_000 : 60_000,
+    refetchInterval: live ? CONNECTIONS_POLL_MS : false,
+    refetchOnWindowFocus: live,
   });
 }
 
@@ -293,11 +299,14 @@ export function useTenantDetail(id: string | null) {
 }
 
 function invalidateTenant(client: QueryClient, id: string | null | undefined) {
-  void client.invalidateQueries({ queryKey: ['tenants'] });
   if (id) {
+    invalidateConexiones(client, id);
     void client.invalidateQueries({ queryKey: ['tenant-detail', id] });
     void client.invalidateQueries({ queryKey: ['tenant-versions', id] });
     void client.invalidateQueries({ queryKey: ['tenant-provision', id] });
+  } else {
+    void client.invalidateQueries({ queryKey: ['tenants'] });
+    void client.invalidateQueries({ queryKey: ['channels'] });
   }
 }
 
@@ -395,26 +404,35 @@ export function useProvisionStep() {
 
 // ── Conexiones: Telegram, WhatsApp, canales del tenant, avisos, logo ─────────
 export function useTenantTelegram(id: string | null) {
+  const client = useQueryClient();
   return useQuery({
     queryKey: ['tenant-telegram', id],
-    queryFn: () => api<TelegramInfoResponse>(`/api/admin/tenants/${id}/telegram`),
+    queryFn: () => api<TelegramInfoResponse>(`/api/admin/tenants/${id}/telegram`, undefined, { quiet: quietRefetch(client, ['tenant-telegram', id]) }),
     enabled: Boolean(id),
+    refetchInterval: CONNECTIONS_POLL_MS,
+    refetchOnWindowFocus: true,
   });
 }
 
 export function useTenantChannels(id: string | null) {
+  const client = useQueryClient();
   return useQuery({
     queryKey: ['tenant-channels', id],
-    queryFn: () => api<{ channels: TenantChannel[] }>(`/api/admin/tenants/${id}/channels`),
+    queryFn: () => api<{ channels: TenantChannel[] }>(`/api/admin/tenants/${id}/channels`, undefined, { quiet: quietRefetch(client, ['tenant-channels', id]) }),
     enabled: Boolean(id),
+    refetchInterval: CONNECTIONS_POLL_MS,
+    refetchOnWindowFocus: true,
   });
 }
 
 export function useTenantWhatsapp(id: string | null) {
+  const client = useQueryClient();
   return useQuery({
     queryKey: ['tenant-whatsapp', id],
-    queryFn: () => api<WhatsappInfoResponse>(`/api/admin/tenants/${id}/whatsapp`),
+    queryFn: () => api<WhatsappInfoResponse>(`/api/admin/tenants/${id}/whatsapp`, undefined, { quiet: quietRefetch(client, ['tenant-whatsapp', id]) }),
     enabled: Boolean(id),
+    refetchInterval: CONNECTIONS_POLL_MS,
+    refetchOnWindowFocus: true,
   });
 }
 
@@ -431,7 +449,11 @@ export function useTenantHours(id: string | null, isCliente: boolean) {
 }
 
 function invalidateConexiones(client: QueryClient, id: string) {
-  for (const k of ['tenant-telegram', 'tenant-channels', 'tenant-whatsapp', 'tenant-hours'] as const) {
+  void client.invalidateQueries({ queryKey: ['channels'] });
+  void client.invalidateQueries({ queryKey: ['tenants'] });
+  // Un alias de Messenger también cambia el resumen de su negocio principal.
+  void client.invalidateQueries({ queryKey: ['tenant-channels'] });
+  for (const k of ['tenant-telegram', 'tenant-whatsapp', 'tenant-hours'] as const) {
     void client.invalidateQueries({ queryKey: [k, id] });
   }
 }
@@ -499,9 +521,9 @@ export function useTelegramSetup() {
   });
 }
 /** Subida del logo: cuerpo binario con el Content-Type del archivo. */
-export function useLogoUpload() {
-  return useConexionMutation(({ id, file, channels }: { id: string; file: File; channels: string[] }) =>
-    api<LogoUploadResponse>(`/api/admin/tenants/${id}/logo${channels.length ? `?channels=${channels.join(',')}` : ''}`, {
+export function useLogoUpload<K extends 'portrait' | undefined = undefined>() {
+  return useConexionMutation(({ id, file, channels = [], kind }: { id: string; file: File; channels?: string[]; kind?: K }) =>
+    api<K extends 'portrait' ? PortraitUploadResponse : LogoUploadResponse>(`/api/admin/tenants/${id}/logo${kind === 'portrait' ? '?kind=portrait' : channels.length ? `?channels=${channels.join(',')}` : ''}`, {
       method: 'POST',
       headers: { 'Content-Type': file.type || 'application/octet-stream' },
       body: file,
@@ -634,9 +656,12 @@ export function useAppointments(tenant: string | null, from: string, to: string,
 
 // ── Canales (vista global, solo velai) ───────────────────────────────────────
 export function useGlobalChannels() {
+  const client = useQueryClient();
   return useQuery({
     queryKey: ['channels'],
-    queryFn: () => api<ChannelsResponse>('/api/admin/channels'),
+    queryFn: () => api<ChannelsResponse>('/api/admin/channels', undefined, { quiet: quietRefetch(client, ['channels']) }),
+    refetchInterval: CONNECTIONS_POLL_MS,
+    refetchOnWindowFocus: true,
   });
 }
 
@@ -690,5 +715,62 @@ export function useCfTokenClear() {
 export function useWebhookCheck() {
   return useMutation({
     mutationFn: () => api<WebhookInfo>('/api/admin/config/telegram-webhook'),
+  });
+}
+
+// ── Finanzas (solo socios) ────────────────────────────────────────────────
+export interface FinFilters {
+  desde?: string; hasta?: string; tipo?: string; moneda?: string; concepto?: string; tenant?: string;
+}
+export function useFinResumen(filters: FinFilters, enabled = true) {
+  return useQuery({ queryKey: ['finanzas', 'resumen', filters], queryFn: () => api<import('../api/types').FinResumen>(`/api/admin/finanzas/resumen${qs({ ...filters })}`), enabled });
+}
+export function useFinConceptos(todos = false, enabled = true) {
+  return useQuery({ queryKey: ['finanzas', 'conceptos', todos], queryFn: () => api<import('../api/types').FinConceptos>(`/api/admin/finanzas/conceptos${todos ? '?todos=1' : ''}`), enabled });
+}
+export function useFinMovimientos(filters: FinFilters, enabled = true) {
+  return useInfiniteQuery({
+    queryKey: ['finanzas', 'movimientos', filters],
+    queryFn: ({ pageParam }) => api<import('../api/types').FinMovimientos>(`/api/admin/finanzas/movimientos${qs({ ...filters, cursor: pageParam })}`),
+    initialPageParam: null as string | null, getNextPageParam: (last) => last.nextCursor, enabled,
+  });
+}
+export function useFinRepartos(enabled = true) {
+  return useQuery({ queryKey: ['finanzas', 'repartos'], queryFn: () => api<import('../api/types').FinRepartos>('/api/admin/finanzas/repartos'), enabled });
+}
+export function useFinSocios() {
+  return useQuery({ queryKey: ['finanzas', 'socios'], queryFn: () => api<import('../api/types').FinSocios>('/api/admin/finanzas/socios?todos=1') });
+}
+// Invalidar el dominio completo: una corrección también cambia caja, desglose y reparto.
+export function useFinMutacion<T>(recurso: 'movimientos' | 'conceptos' | 'repartos' | 'socios') {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: ({ method, id, body }: { method: 'POST' | 'PATCH' | 'DELETE'; id?: string | number; body?: T }) => {
+      const path = `/api/admin/finanzas/${recurso}${id === undefined ? '' : `/${encodeURIComponent(id)}`}`;
+      type Result = { ok: true; id?: string | number; aviso?: 'caja_negativa'; desactivado?: boolean };
+      return method === 'DELETE' ? apiDelete<Result>(path) : method === 'PATCH' ? apiPatch<Result>(path, body) : apiPost<Result>(path, body);
+    },
+    onSuccess: () => client.invalidateQueries({ queryKey: ['finanzas'] }),
+  });
+}
+
+export function useBiblioteca(id: string) {
+  return useQuery({ queryKey: ['biblioteca', id], queryFn: () => api<import('../api/types').BibliotecaResponse>(`/api/admin/tenants/${id}/media`) });
+}
+export function useMediaUpload(id: string) {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: ({ file, name, description, channels }: { file: File; name: string; description: string; channels: string[] }) => api<{ ok: true; duplicate?: boolean; item: import('../api/types').MediaItem }>(`/api/admin/tenants/${id}/media?${new URLSearchParams({ name, description, channels: channels.join(',') })}`, { method: 'POST', headers: { 'Content-Type': file.type || 'application/octet-stream' }, body: file }),
+    onSuccess: () => client.invalidateQueries({ queryKey: ['biblioteca', id] }),
+  });
+}
+export function useMediaMutation(tenantId: string) {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, method, body }: { id: string; method: 'PATCH' | 'DELETE' | 'POST'; body?: import('../api/types').MediaMetadata }) => {
+      const url = `/api/admin/tenants/${tenantId}/media/${encodeURIComponent(id)}`;
+      return method === 'DELETE' ? apiDelete<OkResponse>(url) : method === 'POST' ? apiPost<OkResponse>(url) : apiPatch<OkResponse>(url, body);
+    },
+    onSuccess: () => client.invalidateQueries({ queryKey: ['biblioteca', tenantId] }),
   });
 }

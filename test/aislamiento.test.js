@@ -165,6 +165,11 @@ function makeEnv(db) {
 // ── Catálogo de casos: uno por ruta de clienteAllowed ────────────────────────
 // `t` es el tenant que va en la URL — el barrido lo sustituye por A y por B.
 const CASOS = [
+  { key: 'media$', m: ['GET', 'POST'], path: (t) => `/api/admin/tenants/${t}/media` },
+  { key: 'media\\/[0-9a-f-]+$', m: ['PATCH', 'DELETE'], path: (t) => `/api/admin/tenants/${t}/media/00000000-0000-4000-8000-000000000003`, body: { name: 'test' } },
+  { key: 'booking$', m: ['GET', 'PATCH'], path: (t) => `/api/admin/tenants/${t}/booking`, body: { booking_note: 'test' } },
+  { key: 'services$', m: ['GET', 'POST'], path: (t) => `/api/admin/tenants/${t}/services`, body: { slug: 'sesion', name: 'Sesión', minutes: 30 } },
+  { key: 'services\\/[0-9a-f-]+$', m: ['PATCH', 'DELETE'], path: (t) => `/api/admin/tenants/${t}/services/00000000-0000-4000-8000-000000000003`, body: { name: 'test' } },
   { key: '/api/admin/leads', m: 'GET', path: () => '/api/admin/leads' },
   { key: '/api/admin/leads/export.csv', m: 'GET', path: () => '/api/admin/leads/export.csv' },
   { key: '/api/admin/appointments', m: 'GET', path: () => '/api/admin/appointments' },
@@ -298,4 +303,18 @@ test('las rutas propias del cliente no se cierran como si fueran ajenas', async 
   // cambio futuro que las cierre de verdad se vea, sin bloquear CI por el mock.
   for (const x of rotas) t.diagnostic('sin fila en el mock: ' + x);
   assert.ok(rotas.length < pares.length / 2, `demasiadas rutas propias cerradas (${rotas.length}/${pares.length})`);
+});
+
+// La superficie financiera completa queda fuera de clienteAllowed, incluidas las
+// nuevas rutas: recorrer el router evita que el barrido envejezca al añadir handlers.
+test('Finanzas: clienteGate rechaza cada ruta antes de tocar D1', async () => {
+  const { finanzas } = await import('../worker/routes/finanzas.js');
+  assert.equal(finanzas.routes.length, 17);
+  for (const route of finanzas.routes) {
+    const path = route.path.replace(':id', A).replace(':email', 'socio%40velai.test');
+    const r = await ejecutar({ path: () => path, body: {} }, route.method, A);
+    assert.equal(r.status, 403, `${route.method} ${path}`);
+    assert.equal(r.error, 'not_authorized');
+    assert.equal(r.db.queries.length, 0, 'la puerta tiene que ir antes de D1');
+  }
 });

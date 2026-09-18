@@ -19,7 +19,8 @@ El proyecto Pages `velai` (dominio `hirevai.com`) despliega en cada push a
 2. **Todo lo commiteado dentro de `site/` es públicamente descargable.**
    El resto del repo (worker/, docs/, seed/, tenants/…) ya NO lo publica
    Pages — esa era la exposición que cerró el plan de `site/`
-   ([`PLAN-SITE.md`](./PLAN-SITE.md)). Aun así: **nunca commitear nada
+   (consolidación del marketing en `site/`, cerrada el 2026-09-01 y resumida en
+   [`IMPLEMENTADO.md`](./IMPLEMENTADO.md)). Aun así: **nunca commitear nada
    sensible, en ninguna carpeta** (los secretos van en `.dev.vars` local y
    en secrets de wrangler/GitHub).
 3. `.gitignore` no protege de Pages: ignora lo no commiteado, pero Pages
@@ -115,7 +116,7 @@ tenants/           prompts de negocio versionados
 La consolidación en `site/` está EN EJECUCIÓN: el repo ya está listo (copia +
 retirada de la raíz) y falta el flip del *build output directory* en el
 dashboard, que es del dueño — pasos restantes y verificación en
-[`PLAN-SITE.md`](./PLAN-SITE.md).
+[`IMPLEMENTADO.md`](./IMPLEMENTADO.md), sección «Marketing consolidado en site/».
 
 ## docs/ — qué doc es la fuente de verdad de qué
 
@@ -125,12 +126,14 @@ dashboard, que es del dueño — pasos restantes y verificación en
 | [`GUIA-WORKERS.md`](./GUIA-WORKERS.md) | ★ Cómo crear/consumir Workers (arquitectura vigente, para el equipo) |
 | [`STACK-TECNOLOGICO.md`](./STACK-TECNOLOGICO.md) | Referencia de stack y servicios (incl. SCSS → CSS) |
 | [`ESTRUCTURA.md`](./ESTRUCTURA.md) | Este doc: mapa del repo y decisión de arquitectura |
-| [`PLAN-SITE.md`](./PLAN-SITE.md) | Consolidación del marketing en `site/` — EN EJECUCIÓN (falta el flip del dashboard) |
 | [`IMPLEMENTADO.md`](./IMPLEMENTADO.md) | Registro consolidado de specs cerradas (el texto íntegro vive en el historial de git) |
 | [`TAREAS-PENDIENTES.md`](./TAREAS-PENDIENTES.md) | Pasos manuales pendientes de Juan (cuentas, IDs, terceros) |
 | [`CONTEXTOS-AMPLIOS.md`](./CONTEXTOS-AMPLIOS.md) | Fases 2–4 de contextos (fase 1 consolidada en IMPLEMENTADO.md) |
-| [`PLAN-PANEL.md`](./PLAN-PANEL.md) + [`H1-PANEL.md`](./H1-PANEL.md)/[`H2-PANEL.md`](./H2-PANEL.md)/[`H3-PANEL.md`](./H3-PANEL.md)/[`H2-BANDEJA.md`](./H2-BANDEJA.md)/[`H2-HANDOFF.md`](./H2-HANDOFF.md) | Especificaciones e historial por hitos del panel; el estado pendiente vigente se consolida en `TAREAS-PENDIENTES.md` |
+| [`PLAN-PANEL.md`](./PLAN-PANEL.md) | Mapa del panel y decisiones cerradas («lo que NO se construye», vocabulario de métricas). El código lo cita como autoridad |
+| [`REVISION-CANALES.md`](./REVISION-CANALES.md) | Diagnóstico de la vista «Canales» y las tres opciones (retirar / completar / solo arreglar el refresco). Decisión pendiente |
+| [`H1-PANEL.md`](./H1-PANEL.md), [`H2-PANEL.md`](./H2-PANEL.md) | Horizontes con trabajo aún abierto (H1 §3-§5, H2 §1-§2-§3-§5). Lo cerrado salió a `IMPLEMENTADO.md` y se borró de aquí |
 | [`ALTACLIENTE.md`](./ALTACLIENTE.md) | Proceso de alta de un cliente nuevo |
+| [`DEMOS.md`](./DEMOS.md) | Catálogo de `site/demo/` y la convención de carpetas |
 | [`PARA-JOHAN-widget-en-webs-cliente.md`](./PARA-JOHAN-widget-en-webs-cliente.md) | Instrucciones de integración del widget para terceros |
 | [`VOLUMEN-Y-ALMACENAMIENTO.md`](./VOLUMEN-Y-ALMACENAMIENTO.md) | Estimaciones de volumen y límites de almacenamiento |
 | [`VERIFICACION-GOOGLE.md`](./VERIFICACION-GOOGLE.md) | Verificación del OAuth de Google Calendar |
@@ -139,7 +142,16 @@ dashboard, que es del dueño — pasos restantes y verificación en
 Regla del flujo de specs: al terminar el trabajo de un MD, se borra el MD, el
 resumen va a `IMPLEMENTADO.md` y lo que quede pendiente a `TAREAS-PENDIENTES.md`.
 
-Coherencia revisada el 2026-09-03: `IMPLEMENTADO.md` registra lo desplegado,
-`TAREAS-PENDIENTES.md` decide qué trabajo sigue activo y los documentos H*-PANEL/
-PLAN-PANEL quedan como especificaciones e historial, no como indicador del estado del
-despliegue.
+Coherencia revisada el 2026-09-15: `IMPLEMENTADO.md` registra lo desplegado y
+`TAREAS-PENDIENTES.md` decide qué trabajo sigue activo. Ese día se aplicó la regla a los
+horizontes cerrados: `H2-BANDEJA.md`, `H2-HANDOFF.md` y `H3-PANEL.md` se borraron con su
+resumen volcado a `IMPLEMENTADO.md` y sus decisiones abiertas bajadas al backlog.
+`PLAN-PANEL.md` se queda porque es referencia viva, y `H1-PANEL.md`/`H2-PANEL.md` porque
+aún tienen secciones sin construir.
+
+Repasada de nuevo el 2026-09-16, esta vez **dentro** de los docs: se borró
+`SPEC-AUTOAGENDA.md` (construida y desplegada entera), se borró `worker/MIGRACION-HONO.md`
+(migración hecha; el mapa del worker vive en este doc §Arquitectura y en `GUIA-WORKERS.md`
+§2), y de `H1-PANEL.md` y `H2-PANEL.md` se retiraron las secciones ya construidas —
+H1 §1 y §2, H2 §4 — que pasaron a `IMPLEMENTADO.md`. La regla vale también dentro de un
+MD: una sección hecha no se queda ahí marcada como hecha, se va.

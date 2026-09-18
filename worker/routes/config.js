@@ -3,7 +3,7 @@
 // infraestructura, la Configuración de admins raíz (token de Cloudflare, webhook de
 // Telegram) y los admins gestionados. Migrado tal cual del adminRouter monolítico.
 import { Hono } from 'hono';
-import { partesAdmin, envAdmins } from '../middleware.js';
+import { partesAdmin, envAdmins, esSocio } from '../middleware.js';
 import { verifyCfToken } from '../cloudflare.js';
 import {
   HttpError, json, NO_STORE, clean, readJson, getSetting, setSetting,
@@ -24,7 +24,7 @@ configuracion.get('/api/admin/me', async (c) => {
   }
   // tenantId: el cliente lo necesita para llamar a SUS rutas de calendario
   // (/tenants/:id/calendar); es su propio id, no filtra nada ajeno.
-  return json({ role: scope.role, tenantName, tenantLogo, tenantId: scope.tenantId }, 200, NO_STORE);
+  return json({ role: scope.role, socio: esSocio(env, scope), tenantName, tenantLogo, tenantId: scope.tenantId }, 200, NO_STORE);
 });
 
 configuracion.get('/api/admin/stats', async (c) => {

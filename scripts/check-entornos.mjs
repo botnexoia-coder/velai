@@ -62,6 +62,12 @@ if (!dbStg.length) fallos.push('[env.staging] sin d1_databases propio');
 for (const id of kvStg) if (kvProd.includes(id)) fallos.push(`staging usa la KV de PRODUCCIÓN (${id})`);
 for (const id of dbStg) if (dbProd.includes(id)) fallos.push(`staging usa la D1 de PRODUCCIÓN (${id})`);
 
+const r2Prod = (t['r2_buckets[]'] || []).map((x) => x.bucket_name);
+const r2Stg = (t['env.staging.r2_buckets[]'] || []).map((x) => x.bucket_name);
+if (!r2Prod.length || !r2Stg.length) fallos.push('R2 requiere bucket propio en producción y staging');
+for (const bucket of r2Stg) if (r2Prod.includes(bucket)) fallos.push(`staging usa el bucket R2 de PRODUCCIÓN (${bucket})`);
+if (!prodVars.PUBLIC_MEDIA_BASE || !stgVars.PUBLIC_MEDIA_BASE || prodVars.PUBLIC_MEDIA_BASE === stgVars.PUBLIC_MEDIA_BASE) fallos.push('PUBLIC_MEDIA_BASE debe existir y ser distinto en cada entorno');
+
 // 2. Dominios: el fallo caro. `routes` SE HEREDA, así que su ausencia no es neutra.
 const rutasProd = t['']?.routes || '';
 // Si producción "no tiene" rutas, lo roto es este análisis o el TOML, no la realidad:

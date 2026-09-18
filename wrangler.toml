@@ -20,7 +20,8 @@ routes = [
   # bloqueo (EasyPrivacy y afines) y a los visitantes con adblock el widget les salía
   # sin marca y con el chat muerto (descubierto en dialogosqueensenan.com, 2026-08-22).
   # workers_dev sigue true: los widgets v<=7 cacheados (immutable, 1 año) siguen vivos.
-  { pattern = "api.hirevai.com", custom_domain = true }
+  { pattern = "api.hirevai.com", custom_domain = true },
+  { pattern = "citas.hirevai.com", custom_domain = true }
 ]
 
 # Panel v2 (React): la SPA compilada viaja con el worker como estáticos. run_worker_first
@@ -41,8 +42,11 @@ run_worker_first = true
 # lista en allowedOrigins() — esta var sostiene nuestro sitio si D1 cae. Los de cliente
 # de aquí abajo pueden migrarse a sus fichas y retirarse de esta línea con calma.
 # El botón «Sincronizar Turnstile» del panel reescribe los hostnames del widget desde D1.
-ALLOWED_WEB_ORIGINS = "https://hirevai.com,https://www.hirevai.com,https://velai-dey.pages.dev,https://hiredatavision.com,https://www.hiredatavision.com,https://gogestion.es,https://www.gogestion.es,https://zoetravelspain.com,https://www.zoetravelspain.com,https://dialogosqueensenan.com,https://www.dialogosqueensenan.com,https://gogestion-demo.pages.dev"
+ALLOWED_WEB_ORIGINS = "https://citas.hirevai.com,https://hirevai.com,https://www.hirevai.com,https://velai-dey.pages.dev,https://hiredatavision.com,https://www.hiredatavision.com,https://gogestion.es,https://www.gogestion.es,https://zoetravelspain.com,https://www.zoetravelspain.com,https://dialogosqueensenan.com,https://www.dialogosqueensenan.com,https://gogestion-demo.pages.dev"
 ADMIN_ORIGIN = "https://admin.hirevai.com"
+BOOKING_ORIGIN = "https://citas.hirevai.com"
+PUBLIC_MEDIA_BASE = "https://api.hirevai.com"
+MEDIA_QUOTA_BYTES = "524288000"
 LEAD_RETENTION_MONTHS = "24"
 # Retención de TRANSCRIPCIONES (migración 0021), aparte y más corta que la de los leads:
 # una conversación guardada es más sensible que una ficha de contacto. El cron la purga
@@ -75,6 +79,11 @@ DEFAULT_TENANT_SLUG = "velai"
 # Admins de Velai en el panel (rol completo). Fuera de D1 a propósito: una fila
 # borrada en tenant_users no puede dejar a Velai fuera de su propio panel.
 ADMIN_EMAILS = "botnexo.ia@gmail.com"
+# Acceso a la contabilidad interna (Finanzas). Fuera de D1 por el mismo motivo que
+# ADMIN_EMAILS: una sesión sin permiso no puede concedérselo desde el panel.
+# Los beneficiarios se gestionan en Finanzas → Socios. Cada lector necesita ADEMÁS rol velai — por
+# eso está la cuenta raíz (botnexo), que lo tiene garantizado, y no solo el correo personal.
+SOCIOS_EMAILS = "botnexo.ia@gmail.com,juanesgarciag@gmail.com"
 # API de Cloudflare desde el worker (SPEC-ORIGENES-Y-TURNSTILE + SPEC-ACCESO):
 # el token va como SECRET (wrangler secret put CF_API_TOKEN) con permisos mínimos:
 # Account→Turnstile→Edit, Account→Access: Organizations/IdPs/Groups→Edit y
@@ -123,7 +132,8 @@ head_sampling_rate = 1
 
 [triggers]
 # DOS relojes a propósito:
-#  - cada MINUTO: solo los tiempos de la cola de espera (docs/H2-HANDOFF.md). Con */5, «5
+#  - cada MINUTO: solo los tiempos de la cola de espera (handoff con toma de control,
+#    en docs/IMPLEMENTADO.md). Con */5, «5
 #    minutos» eran en realidad 5-10 y «15» eran 15-20.
 #  - cada 5 MINUTOS: todo lo demás. No se puede subir a un minuto porque drainQueuedLeads
 #    hace un LISTADO de KV por tick y el plan gratuito da 1.000 listados/día: a 1.440 ticks
@@ -131,14 +141,10 @@ head_sampling_rate = 1
 #    docs/VOLUMEN-Y-ALMACENAMIENTO.md). Además multiplicaría por 5 los reintentos a Twilio.
 crons = ["* * * * *", "*/5 * * * *"]
 
-# Medios (logos de marca → widget + foto de perfil de WhatsApp). Hoy viven en KV con
-# prefijo `media:`; R2 es el sitio natural pero exige activarlo UNA VEZ en el dashboard
-# (la API responde 10042 «Please enable R2» mientras no lo esté). Cuando se active:
-# `npx wrangler@4 r2 bucket create vai-media` y descomentar — las subidas nuevas irán a
-# R2 y las viejas se siguen sirviendo desde KV (mediaGet mira los dos).
-# [[r2_buckets]]
-# binding = "MEDIA"
-# bucket_name = "vai-media"
+# Biblioteca y logos nuevos en R2; los logos antiguos siguen accesibles en KV.
+[[r2_buckets]]
+binding = "MEDIA"
+bucket_name = "vai-media"
 
 [[kv_namespaces]]
 binding = "KV"
@@ -172,12 +178,13 @@ database_id = "4b3056eb-6dee-44a4-8d17-5a80af740ca5"
 name = "vai-worker-staging"
 workers_dev = true
 
-# El único dominio de staging. Vacío no vale: sin la lista, hereda la de producción.
+# Los únicos dominios de staging. Vacío no vale: sin la lista, hereda la de producción.
 # admin-staging.hirevai.com FALLA CERRADO mientras no tenga Cloudflare Access delante:
 # adminIdentity() exige la cabecera Cf-Access-Jwt-Assertion y sin ella todo /api/admin/*
 # responde 401. No hay ventana de panel abierto (ver docs/OPERATIONS.md §Staging).
 routes = [
-  { pattern = "admin-staging.hirevai.com", custom_domain = true }
+  { pattern = "admin-staging.hirevai.com", custom_domain = true },
+  { pattern = "citas-staging.hirevai.com", custom_domain = true }
 ]
 
 # Sin cron en staging, a propósito. drainQueuedLeads hace un LISTADO de KV por tick y el
@@ -201,8 +208,11 @@ head_sampling_rate = 1
 # token cuyo hostname no esté en esta lista (worker/app.js:168). Sin esta entrada, POST
 # /chat en staging responde 403 human_verification_failed SIEMPRE y el entorno no puede
 # probar el chat — que es la mitad del producto. En producción no aparece ni debe aparecer.
-ALLOWED_WEB_ORIGINS = "http://localhost:8080,http://127.0.0.1:8080,https://velai-dey.pages.dev,https://example.com"
+ALLOWED_WEB_ORIGINS = "https://citas-staging.hirevai.com,http://localhost:8080,http://127.0.0.1:8080,https://velai-dey.pages.dev,https://example.com"
 ADMIN_ORIGIN = "https://admin-staging.hirevai.com"
+BOOKING_ORIGIN = "https://citas-staging.hirevai.com"
+PUBLIC_MEDIA_BASE = "https://vai-worker-staging.botnexo-ia.workers.dev"
+MEDIA_QUOTA_BYTES = "524288000"
 LEAD_RETENTION_MONTHS = "24"
 CONV_RETENTION_DAYS = "90"
 # Topes de gasto MUY por debajo de producción: staging usa una clave real de Anthropic y
@@ -215,12 +225,14 @@ AI_TENANT_MONTHLY_TOKENS = "5000000"
 PANEL_V2 = "1"
 DEFAULT_TENANT_SLUG = "velai"
 ADMIN_EMAILS = "botnexo.ia@gmail.com"
+SOCIOS_EMAILS = "botnexo.ia@gmail.com,juanesgarciag@gmail.com"
 CF_ACCOUNT_ID = "6a5877b5637ec5fa28d05af46e894542"
 # Sitekey de PRUEBA de Turnstile (siempre válida). Su secreto va en el .dev.vars y como
 # secret de staging: 1x0000000000000000000000000000000AA.
 TURNSTILE_SITEKEY = "1x00000000000000000000AA"
 # Calendario APAGADO en staging: sin client id, los endpoints responden 503 y el chat
-# funciona igual. Rellenar solo para probar el flujo OAuth, con el proyecto de pruebas.
+# funciona igual. Para la prueba real de autoagenda se necesita el cliente OAuth de
+# pruebas y una conexión de calendario propia de staging; nunca usar la de producción.
 GOOGLE_OAUTH_CLIENT_ID = ""
 # ⚠️ VACÍOS A PROPÓSITO, Y NO SE RELLENAN. Son los ids de los grupos de Cloudflare Access
 # de PRODUCCIÓN. Con ellos puestos, gestionar usuarios desde el panel de staging
@@ -242,3 +254,7 @@ id = "d522cc2ef3f54e1f91a35dc90d0df1bc"
 binding = "DB"
 database_name = "vai-leads-staging"
 database_id = "4fe5d8b0-17d8-4ac1-a3f7-216c5e085a75"
+
+[[env.staging.r2_buckets]]
+binding = "MEDIA"
+bucket_name = "vai-media-staging"

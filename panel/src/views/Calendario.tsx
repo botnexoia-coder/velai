@@ -2,7 +2,8 @@
 // número del día en círculo (hoy relleno), citas como chips y el detalle del día en
 // modal. El cliente abre SU calendario; Velai abre el del tenant velai con selector
 // para saltar al de cualquier cliente.
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
+import { ReservasOnline } from './ReservasOnline';
 import { confirmar } from '../components/Confirmar';
 import { useNavigate, useSearchParams } from 'react-router';
 import { traducir } from '../api/errors';
@@ -189,59 +190,105 @@ function CalendarConnected({
   const range = monthRange(month.y, month.m);
   const { data: appts } = useAppointments(tenantId, range.from, range.to, isCliente);
   const byDay = useMemo(() => apptsByDay(appts?.appointments ?? [], tz), [appts, tz]);
+  const [tab, setTab] = useState<'agenda' | 'booking' | 'ajustes'>('agenda');
   const [openDay, setOpenDay] = useState<string | null>(null);
 
   const shape = monthShape(month.y, month.m);
   const today = calTzDay(new Date().toISOString(), tz);
-  const monthTitle = new Intl.DateTimeFormat('es-ES', { month: 'long', year: 'numeric' }).format(new Date(month.y, month.m, 1));
+  const monthTitle = (() => {
+    const t = new Intl.DateTimeFormat('es-ES', { month: 'long', year: 'numeric' }).format(new Date(month.y, month.m, 1));
+    return t.charAt(0).toUpperCase() + t.slice(1);
+  })();
   const total = appts?.appointments.length ?? 0;
 
+  // Métricas de la semana en curso: lo que antes había que contar a ojo en la rejilla.
+  const lista = appts?.appointments ?? [];
+  const inicioSemana = (() => { const d = new Date(); const dow = (d.getDay() + 6) % 7; d.setHours(0, 0, 0, 0); d.setDate(d.getDate() - dow); return d.toISOString(); })();
+  const finSemana = (() => { const d = new Date(inicioSemana); d.setDate(d.getDate() + 7); return d.toISOString(); })();
+  const semana = lista.filter((a) => a.starts_at >= inicioSemana && a.starts_at < finSemana);
+  const kpis = {
+    semana: semana.length,
+    confirmadas: semana.filter((a) => a.customer_confirmed_at && a.status !== 'cancelled').length,
+    sinConfirmar: semana.filter((a) => !a.customer_confirmed_at && a.status !== 'cancelled').length,
+    canceladas: semana.filter((a) => a.status === 'cancelled').length,
+  };
+  const diaElegido = openDay ?? today;
+  const citasDelDia = byDay.get(diaElegido) ?? [];
+
+  const pestanas = (
+    <div className="chtabs mb12" role="tablist" aria-label="Secciones del calendario">
+      {([['agenda', 'Agenda'], ['booking', 'Reservas online'], ['ajustes', 'Ajustes']] as const).map(([k, label]) => (
+        <button key={k} type="button" role="tab" aria-selected={tab === k} className={`chtab${tab === k ? ' is-on' : ''}`} onClick={() => setTab(k)}>
+          {label}
+        </button>
+      ))}
+    </div>
+  );
+
+  if (tab === 'booking') {
+    return <div>{pestanas}<ReservasOnline key={tenantId} tenantId={tenantId} isCliente={isCliente} /></div>;
+  }
+  if (tab === 'ajustes') {
+    return (
+      <div>
+        {pestanas}
+        <div className="card">
+          <b>Google Calendar</b>
+          <div className="muted mt6">
+            Conectado como <b>{cal.account_email ?? 'cuenta de Google'}</b> · las citas se crean en su calendario «{cal.calendar_id ?? 'primary'}»
+          </div>
+          <div className="actions actions0 mt12">
+            <button className="btn alt btnsm" type="button" onClick={onReconnect}>Reconectar</button>
+            <button
+              className="btn alt btnsm"
+              type="button"
+              disabled={disconnect.isPending}
+              onClick={async () => {
+                if (!(await confirmar({ titulo: '¿Desconectar el calendario?', cuerpo: 'Vai dejará de consultar huecos y de agendar citas para este cliente hasta que se vuelva a conectar.', accion: 'Desconectar', peligro: true }))) return;
+                disconnect.mutate({ id: tenantId }, { onSuccess: () => toast('Calendario desconectado'), onError: (e) => toast(`No se pudo desconectar: ${traducir(e)}`, false) });
+              }}
+            >
+              Desconectar
+            </button>
+          </div>
+        </div>
+        <CalendarConfig tenantId={tenantId} cal={cal} />
+        <ConfirmacionesCard tenantId={tenantId} conf={conf} isCliente={isCliente} />
+      </div>
+    );
+  }
   return (
     <div>
+      {pestanas}
+      <div className="kpis">
+        <div className="kpi"><b>{kpis.semana}</b><span>Citas esta semana</span></div>
+        <div className="kpi ok"><b>{kpis.confirmadas}</b><span>Confirmadas por el cliente</span></div>
+        <div className="kpi warn"><b>{kpis.sinConfirmar}</b><span>Sin confirmar</span></div>
+        <div className="kpi bad"><b>{kpis.canceladas}</b><span>Canceladas</span></div>
+      </div>
+      <div className="agenda">
       <div className="card">
-        <div className="muted">
-          Conectado como <b>{cal.account_email ?? 'cuenta de Google'}</b> · las citas se crean en su calendario «
-          {cal.calendar_id ?? 'primary'}»
-        </div>
-        <div className="calnav mt6">
+        <div className="calnav">
           <button
             className="btn alt btnsm"
             type="button"
             onClick={() => {
               const d = new Date();
               setMonth({ y: d.getFullYear(), m: d.getMonth() });
+              setOpenDay(null);
             }}
           >
             Hoy
           </button>
           <button className="btn alt btnsm" type="button" aria-label="Mes anterior" onClick={() => setMonth((p) => ({ y: p.m === 0 ? p.y - 1 : p.y, m: p.m === 0 ? 11 : p.m - 1 }))}>
-            ◀
+            ‹
           </button>
           <b>{monthTitle}</b>
           <button className="btn alt btnsm" type="button" aria-label="Mes siguiente" onClick={() => setMonth((p) => ({ y: p.m === 11 ? p.y + 1 : p.y, m: p.m === 11 ? 0 : p.m + 1 }))}>
-            ▶
+            ›
           </button>
           <span className="spacer" />
-          <button className="btn alt btnsm" type="button" onClick={onReconnect}>
-            Reconectar
-          </button>
-          <button
-            className="btn alt btnsm"
-            type="button"
-            disabled={disconnect.isPending}
-            onClick={async () => {
-              if (!(await confirmar({ titulo: '¿Desconectar el calendario?', cuerpo: 'Vai dejará de consultar huecos y de agendar citas para este cliente hasta que se vuelva a conectar.', accion: 'Desconectar', peligro: true }))) return;
-              disconnect.mutate(
-                { id: tenantId },
-                {
-                  onSuccess: () => toast('Calendario desconectado'),
-                  onError: (e) => toast(`No se pudo desconectar: ${traducir(e)}`, false),
-                },
-              );
-            }}
-          >
-            Desconectar
-          </button>
+          <span className="chip">{cal.account_email ?? 'cuenta de Google'}</span>
         </div>
         <div className="calgrid">
           {['Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb', 'Dom'].map((d) => (
@@ -257,13 +304,13 @@ function CalendarConnected({
             const k = dayKey(month.y, month.m, day);
             const list = byDay.get(k) ?? [];
             return (
-              <div key={k} className={`calcell${k === today ? ' today' : ''}`} onClick={() => setOpenDay(k)} role="button" tabIndex={0} aria-label={`Día ${day}`}>
+              <div key={k} className={`calcell${k === today ? ' today' : ''}${k === diaElegido ? ' is-sel' : ''}`} onClick={() => setOpenDay(k)} role="button" tabIndex={0} aria-label={`Día ${day}`} aria-pressed={k === diaElegido}>
                 <span className="dnum">{day}</span>
                 {list.slice(0, 3).map((a) => {
                   const estado = estadoConfirmacion(a);
                   return (
-                    <span key={a.id} className="calchip" title={estado ? `Cita ${estado.label}` : undefined}>
-                      {estado ? `${estado.emoji} ` : ''}
+                    <span key={a.id} className={`calchip${a.status === 'cancelled' ? ' off' : ''}`} title={estado ? `Cita ${estado.label}` : undefined}>
+                      <b className="dot" style={{ background: a.status === 'cancelled' ? 'var(--bad)' : a.customer_confirmed_at ? 'var(--ok)' : 'var(--amber)' }} />
                       {calTzHm(a.starts_at, tz)} {a.customer_name}
                     </span>
                   );
@@ -276,74 +323,69 @@ function CalendarConnected({
             <div key={`t${i}`} className="calcell out" />
           ))}
         </div>
-        <div className="mt6 muted">
-          {total
-            ? 'Toca un día para ver sus citas.'
-            : 'Sin citas este mes. Vai las creará aquí (y en el Google Calendar del negocio) cuando las agende por chat o WhatsApp.'}
-        </div>
+        {total ? null : (
+          <div className="mt6 muted">
+            Sin citas este mes. Vai las creará aquí (y en el Google Calendar del negocio) cuando las agende por chat o
+            WhatsApp.
+          </div>
+        )}
       </div>
-      <ConfirmacionesCard tenantId={tenantId} conf={conf} isCliente={isCliente} />
-      <CalendarConfig tenantId={tenantId} cal={cal} />
-      {openDay ? <DayModal day={openDay} appts={byDay.get(openDay) ?? []} tz={tz} onClose={() => setOpenDay(null)} /> : null}
+      <DiaPanel dia={diaElegido} appts={citasDelDia} tz={tz} />
+      </div>
     </div>
   );
 }
 
-// El detalle del día se abre en modal (pedido de Juan, estilo Google Calendar).
-function DayModal({ day, appts, tz, onClose }: { day: string; appts: Appointment[]; tz: string; onClose: () => void }) {
-  const ref = useRef<HTMLDialogElement>(null);
-  useEffect(() => {
-    const d = ref.current;
-    if (d && !d.open) d.showModal();
-  }, []);
+// El día elegido, SIEMPRE a la vista. Antes era un modal: había que abrirlo y cerrarlo
+// para mirar dos días seguidos, y en escritorio tapaba el mes entero.
+function DiaPanel({ dia, appts, tz }: { dia: string; appts: Appointment[]; tz: string }) {
+  const [abierta, setAbierta] = useState<string | null>(null);
+  const titulo = new Intl.DateTimeFormat('es-ES', { weekday: 'long', day: 'numeric', month: 'long' }).format(new Date(`${dia}T12:00:00Z`));
+  const detalle = appts.find((a) => a.id === abierta) ?? null;
   return (
-    <dialog ref={ref} onClose={onClose} aria-label="Citas del día">
-      <div className="modal-h">
-        <strong>{new Intl.DateTimeFormat('es-ES', { dateStyle: 'full' }).format(new Date(`${day}T12:00:00Z`))}</strong>
-        <button className="btn alt" type="button" onClick={() => ref.current?.close()}>
-          Cerrar
-        </button>
-      </div>
-      <div className="modal-b caldaylist">
-        {appts.length ? (
-          appts.map((a) => {
-            const estado = estadoConfirmacion(a);
-            const ledger = ledgerRecordatorio(a, tz);
-            return (
-              <div key={a.id}>
-                <b>
-                  {calTzHm(a.starts_at, tz)}–{calTzHm(a.ends_at, tz)}
-                </b>{' '}
-                · <b>{a.customer_name}</b>
-                {estado ? (
-                  <>
-                    {' '}
-                    <span title={`Cita ${estado.label}`}>
-                      {estado.emoji} {estado.label}
-                    </span>
-                  </>
-                ) : null}
-                <br />
-                <span className="muted">
-                  {a.customer_phone}
-                  {a.reason ? ` · ${a.reason}` : ''} · {a.channel}
+    <aside className="daypanel" aria-label={`Citas del ${titulo}`}>
+      <h3>{titulo.charAt(0).toUpperCase() + titulo.slice(1)}</h3>
+      {appts.length ? (
+        appts.map((a) => {
+          const estado = estadoConfirmacion(a);
+          return (
+            <button
+              key={a.id}
+              type="button"
+              className={`dayappt${a.status === 'cancelled' ? ' off' : ''}`}
+              aria-expanded={abierta === a.id}
+              onClick={() => setAbierta(abierta === a.id ? null : a.id)}
+            >
+              <time>{calTzHm(a.starts_at, tz)}</time>
+              <span className="who">
+                <b>{a.customer_name}</b>
+                <small className="muted">{a.reason || 'Cita'}</small>
+                <span className="mt6">
+                  <span className="pill">
+                    <b style={{ background: a.status === 'cancelled' ? 'var(--bad)' : a.customer_confirmed_at ? 'var(--ok)' : 'var(--amber)' }} />
+                    {a.status === 'cancelled' ? 'Cancelada' : a.customer_confirmed_at ? 'Confirmada' : 'Sin confirmar'}
+                  </span>
                 </span>
-                {ledger ? (
-                  <>
-                    <br />
-                    <span className="muted">{ledger}</span>
-                  </>
-                ) : null}
-              </div>
-            );
-          })
-        ) : (
-          <div className="muted">Sin citas ese día. Vai las agenda desde el chat web y WhatsApp.</div>
-        )}
-      </div>
-    </dialog>
+              </span>
+            </button>
+          );
+        })
+      ) : (
+        <p className="muted">Sin citas este día.</p>
+      )}
+      {detalle ? (
+        <div className="mt12 daydet">
+          <b className="lblup">{detalle.customer_name} · {calTzHm(detalle.starts_at, tz)}–{calTzHm(detalle.ends_at, tz)}</b>
+          <p className="muted">{detalle.customer_phone}</p>
+          <p className="muted">Canal: {detalle.channel === 'web_reserva' ? 'Página de reservas' : detalle.channel}</p>
+          {ledgerRecordatorio(detalle, tz) ? <p className="muted">{ledgerRecordatorio(detalle, tz)}</p> : null}
+          {estadoConfirmacion(detalle) ? <p className="muted">Cita {estadoConfirmacion(detalle)?.label}</p> : null}
+        </div>
+      ) : null}
+    </aside>
   );
 }
+
 
 // ── Confirmaciones (SPEC-CONFIRMACIONES): addon de recordatorio + confirmación ─
 // El interruptor es SOLO de Velai (el worker responde 403 al rol cliente); el

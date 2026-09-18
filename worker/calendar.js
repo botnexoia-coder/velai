@@ -14,7 +14,7 @@ export const CALENDAR_TOOLS = [
     description: 'Consulta los huecos libres de la agenda del negocio para un día concreto. Úsala SIEMPRE antes de proponer horas.',
     input_schema: {
       type: 'object',
-      properties: { fecha: { type: 'string', description: 'Día a consultar en formato YYYY-MM-DD' } },
+      properties: { fecha: { type: 'string', description: 'Día a consultar en formato YYYY-MM-DD' }, servicio: { type: 'string', description: 'Slug del servicio elegido' } },
       required: ['fecha'],
     },
   },
@@ -25,6 +25,7 @@ export const CALENDAR_TOOLS = [
       type: 'object',
       properties: {
         fecha_hora: { type: 'string', description: 'Inicio de la cita en formato YYYY-MM-DDTHH:MM, hora local del negocio' },
+        servicio: { type: 'string', description: 'Slug del servicio elegido' },
         nombre: { type: 'string', description: 'Nombre del cliente' },
         telefono: { type: 'string', description: 'Teléfono del cliente' },
         motivo: { type: 'string', description: 'Motivo breve de la cita (opcional)' },
@@ -59,6 +60,13 @@ export const CALENDAR_TOOLS = [
   },
 ];
 
+export const BOOKING_TOOL = {
+  name: 'enviar_enlace_reserva',
+  description: 'Envía al cliente el enlace a su calendario visual, donde elige día y hora por su cuenta. Úsala cuando el cliente haya elegido esa vía al preguntarle cómo prefiere reservar.',
+  input_schema: { type: 'object', properties: { servicio: { type: 'string', description: 'Slug del servicio elegido, si lo hay' } } },
+};
+export function calendarTools(cal, enabled) { return enabled && cal.booking_enabled ? [...CALENDAR_TOOLS, BOOKING_TOOL] : CALENDAR_TOOLS; }
+
 // Guardrails de citas: en CÓDIGO y concatenados al bloque estable del system —
 // editar la fila del tenant no puede desactivarlos (misma filosofía que GUARDRAILS).
 export const CALENDAR_GUARDRAILS = [
@@ -66,7 +74,13 @@ export const CALENDAR_GUARDRAILS = [
   '- Usa consultar_disponibilidad antes de proponer horas. NUNCA inventes huecos ni confirmes una cita sin que agendar_cita devuelva ok.',
   '- Antes de usar agendar_cita necesitas SIEMPRE: nombre y teléfono del cliente, y su confirmación de la fecha y hora exactas.',
   '- Tras agendar con éxito, confirma en una frase el día, la hora y el nombre. Si la herramienta devuelve hueco_ocupado, ofrece las alternativas que trae.',
-  '- Todas las horas son hora local del negocio. No agendes en el pasado ni a más de 60 días.',
+  '- Todas las horas son hora local del negocio. Respeta las reglas y los servicios configurados; pregunta el servicio antes de proponer horas si hay varios.',
+  // Decisión de Juan (2026-09-16): en cuanto hay cita sobre la mesa se PREGUNTA por cuál
+  // de las dos vías quiere ir, en vez de reservar el enlace para cuando la conversación
+  // se atasca. Solo aplica si el tenant tiene la página encendida — sin ella la
+  // herramienta ni se le ofrece al modelo (calendarTools).
+  '- Si tienes enviar_enlace_reserva y surge una cita (la pide el cliente, o acepta una que le has propuesto), pregúntale UNA vez cómo prefiere reservar: que le busques tú los huecos aquí mismo, o que abra el calendario y elija él. Una sola frase, con las dos opciones claras.',
+  '- Si elige el calendario, usa enviar_enlace_reserva. Si elige que le ayudes, no contesta a esa pregunta o ya te ha dicho un día y una hora concretos, sigue con consultar_disponibilidad y agendar_cita sin volver a preguntar.',
   '- Si el cliente dice que no puede ir o quiere anular, usa cancelar_cita; si confirma por texto que asistirá, usa confirmar_cita. Ambas localizan la cita por su teléfono: nunca pidas ni inventes identificadores de cita.',
   '- Si la herramienta devuelve varias_citas, pregunta cuál de la lista es y repite la llamada con fecha_hora.',
   '- Tras cancelar una cita, ofrece reagendar ahí mismo: consulta huecos con consultar_disponibilidad y agenda con agendar_cita si el cliente quiere.',
@@ -123,23 +137,30 @@ export function localWeekday(timezone, dateStr) {
 // ── Huecos libres (función PURA, cubierta por tests con DST incluido) ────────
 // busy: [{start, end}] ISO del proveedor. hours: ventanas locales [['09:00','14:00'],...].
 // Devuelve etiquetas 'HH:MM' locales, tope 12 (no inflar tokens del tool_result).
-export function freeSlots({ date, busy, hours, slotMinutes, timezone, nowMs }) {
+export function freeSlots({ date, busy, hours, slotMinutes, timezone, nowMs, bufferMin = 0, minNoticeMin = 15, limit = 12, stepMinutes = Number(slotMinutes) || 30 }) {
   const slotMs = (Number(slotMinutes) || 30) * 60000;
   const busyRanges = (busy || [])
     .map((b) => [Date.parse(b.start), Date.parse(b.end)])
     .filter(([s, e]) => Number.isFinite(s) && Number.isFinite(e) && e > s);
   // margen de 15 min: nada de ofrecer una cita "dentro de 3 minutos"
-  const minStart = (nowMs ?? 0) + 15 * 60000;
+  const minStart = (nowMs ?? 0) + minNoticeMin * 60000;
   const out = [];
   for (const window of hours || []) {
-    const openMs = localToUtcMs(timezone, date, window[0]);
+    const parts = window[0].split(':').map(Number);
+    const firstMinute = Math.ceil((parts[0] * 60 + parts[1]) / stepMinutes) * stepMinutes;
+    if (firstMinute >= 1440) continue;
+    const firstTime = `${String(Math.floor(firstMinute / 60)).padStart(2, '0')}:${String(firstMinute % 60).padStart(2, '0')}`;
+    const openMs = localToUtcMs(timezone, date, firstTime);
     const closeMs = localToUtcMs(timezone, date, window[1]);
-    for (let t = openMs; t + slotMs <= closeMs; t += slotMs) {
+    for (let t = openMs; t + slotMs + bufferMin * 60000 <= closeMs; t += stepMinutes * 60000) {
       if (t < minStart) continue;
-      const end = t + slotMs;
+      const end = t + slotMs + bufferMin * 60000;
       if (busyRanges.some(([s, e]) => s < end && e > t)) continue;
-      out.push(utcToLocalHHMM(timezone, t));
-      if (out.length >= 12) return out;
+      const label = utcToLocalHHMM(timezone, t);
+      // On the autumn DST fold expose only the instant localToUtcMs resolves.
+      if (localToUtcMs(timezone, date, label) !== t || out.includes(label)) continue;
+      out.push(label);
+      if (out.length >= limit) return out;
     }
   }
   return out;
@@ -212,25 +233,29 @@ export async function revokeGoogleToken(refreshToken) {
 // cubre en todos los casos y events.list sí, con los mismos datos para esto).
 // Solo se leen start/end/estado — los TÍTULOS de las citas del negocio jamás
 // viajan al modelo (un usuario final no puede sonsacarlos).
-export async function googleBusy(env, accessToken, calendarId, timeMinIso, timeMaxIso) {
+export async function googleBusy(env, accessToken, calendarId, timeMinIso, timeMaxIso, timezone = 'Europe/Madrid') {
   const params = new URLSearchParams({
-    singleEvents: 'true', orderBy: 'startTime', maxResults: '100',
+    singleEvents: 'true', orderBy: 'startTime', maxResults: '2500',
     timeMin: timeMinIso, timeMax: timeMaxIso,
-    fields: 'items(start,end,status,transparency)',
+    fields: 'nextPageToken,items(start,end,status,transparency)',
   });
-  const response = await fetch(
-    `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(calendarId || 'primary')}/events?${params}`,
-    { headers: { Authorization: `Bearer ${accessToken}` }, signal: AbortSignal.timeout(5000) },
-  );
-  if (!response.ok) throw new Error(`calendar_provider_${response.status}`);
-  const data = await response.json();
-  return (data.items || [])
-    .filter((item) => item.status !== 'cancelled' && item.transparency !== 'transparent')
-    .map((item) => ({
-      // eventos de día completo traen 'date' en vez de 'dateTime': cuentan como ocupado
-      start: (item.start && (item.start.dateTime || item.start.date)) || '',
-      end: (item.end && (item.end.dateTime || item.end.date)) || '',
-    }));
+  const busy = []; const seen = new Set();
+  do {
+    const response = await fetch(
+      `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(calendarId || 'primary')}/events?${params}`,
+      { headers: { Authorization: `Bearer ${accessToken}` }, signal: AbortSignal.timeout(5000) },
+    );
+    if (!response.ok) throw new Error(`calendar_provider_${response.status}`);
+    const data = await response.json();
+    const instant = (v) => v && (v.dateTime || (v.date ? new Date(localToUtcMs(timezone, v.date, '00:00')).toISOString() : ''));
+    for (const item of data.items || []) {
+      if (item.status !== 'cancelled' && item.transparency !== 'transparent') busy.push({ start: instant(item.start), end: instant(item.end) });
+    }
+    if (!data.nextPageToken) return busy;
+    // Fail closed on a broken/repeated provider cursor; never offer partial data.
+    if (seen.has(data.nextPageToken) || seen.size >= 100) throw new Error('calendar_pagination_failed');
+    seen.add(data.nextPageToken); params.set('pageToken', data.nextPageToken);
+  } while (true);
 }
 
 // Borra el evento de una cita cancelada (SPEC-CONFIRMACIONES: el hueco queda libre
@@ -244,20 +269,27 @@ export async function deleteGoogleEvent(env, accessToken, calendarId, eventId) {
   if (!response.ok && response.status !== 404 && response.status !== 410) throw new Error(`calendar_provider_${response.status}`);
 }
 
-export async function createGoogleEvent(env, accessToken, calendarId, { summary, description, startIso, endIso, timezone }) {
+export async function createGoogleEvent(env, accessToken, calendarId, { summary, description, startIso, endIso, timezone, eventId }) {
   const response = await fetch(
     `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(calendarId || 'primary')}/events`,
     {
       method: 'POST',
       headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        summary, description,
+        ...(eventId ? { id: eventId } : {}), summary, description,
         start: { dateTime: startIso, timeZone: timezone },
         end: { dateTime: endIso, timeZone: timezone },
       }),
       signal: AbortSignal.timeout(5000),
     },
   );
+  if (response.status === 409 && eventId) {
+    const existing = await fetch(`https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(calendarId || 'primary')}/events/${encodeURIComponent(eventId)}?fields=id,status,start,end`, { headers: { Authorization: `Bearer ${accessToken}` }, signal: AbortSignal.timeout(5000) });
+    if (!existing.ok) throw new Error('calendar_recovery_failed');
+    const event = await existing.json();
+    if (event.status === 'cancelled' || Date.parse(event.start?.dateTime) !== Date.parse(startIso) || Date.parse(event.end?.dateTime) !== Date.parse(endIso)) throw new Error('calendar_recovery_conflict');
+    return { id: eventId };
+  }
   if (!response.ok) throw new Error(`calendar_provider_${response.status}`);
   return response.json();
 }

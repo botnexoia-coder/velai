@@ -24,6 +24,12 @@ let nextId = 1;
 export function ToastProvider({ children }: { children: ReactNode }) {
   const [items, setItems] = useState<ToastItem[]>([]);
   const boxRef = useRef<HTMLDivElement>(null);
+  // Los temporizadores del aviso sobreviven al desmontaje si nadie los cancela: en la app
+  // el proveedor vive para siempre y no se nota, pero en los tests el entorno se destruye
+  // antes de que venzan y React actualiza estado sobre un `window` que ya no existe
+  // (CI rojo del 2026-09-16, con las 18 suites en verde).
+  const timers = useRef<ReturnType<typeof setTimeout>[]>([]);
+  useEffect(() => () => { timers.current.forEach(clearTimeout); timers.current = []; }, []);
 
   const toast = useCallback<ToastFn>((msg, ok = true) => {
     const id = nextId++;
@@ -32,10 +38,10 @@ export function ToastProvider({ children }: { children: ReactNode }) {
     requestAnimationFrame(() => {
       setItems((prev) => prev.map((t) => (t.id === id ? { ...t, on: true } : t)));
     });
-    setTimeout(() => {
+    timers.current.push(setTimeout(() => {
       setItems((prev) => prev.map((t) => (t.id === id ? { ...t, on: false } : t)));
-      setTimeout(() => setItems((prev) => prev.filter((t) => t.id !== id)), 250);
-    }, ok ? 2600 : 6000);
+      timers.current.push(setTimeout(() => setItems((prev) => prev.filter((t) => t.id !== id)), 250));
+    }, ok ? 2600 : 6000));
   }, []);
 
   useEffect(() => {

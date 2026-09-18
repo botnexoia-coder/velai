@@ -63,6 +63,28 @@ const routes: Record<string, unknown> = {
     available: false, withinHours: true, offering: false, advisors: 0,
     hours: { mon: [['09:00', '18:00']] }, tz: 'Europe/Madrid', graceMin: 5, forTenant: 'Velai',
   },
+  '/api/admin/appointments': { appointments: [] },
+  [`/api/admin/tenants/${tenantId}/calendar`]: {
+    calendar: {
+      provider: 'google', account_email: 'cliente@example.com', calendar_id: 'primary',
+      timezone: 'Europe/Madrid', slot_minutes: 30,
+      business_hours: { mon: [['09:00', '18:00']] }, status: 'connected',
+      last_error: null, connected_at: '2026-09-01T10:00:00.000Z', updated_at: '2026-09-01T10:00:00.000Z',
+    },
+    confirmaciones: { enabled: false, hours: 24, template: { sid: null, status: null } },
+  },
+  [`/api/admin/tenants/${tenantId}/booking`]: {
+    config: { booking_enabled: 1, min_notice_min: 120, max_days_ahead: 60, booking_note: 'Elige la modalidad que prefieras.' },
+    exceptions: [{ date: '2026-12-25', windows: null, note: 'Navidad' }],
+    url: 'https://citas.hirevai.com/dialogos/reservas',
+  },
+  [`/api/admin/tenants/${tenantId}/services`]: {
+    services: [
+      { id: '1', slug: 'presencial', name: 'Sesión presencial', description: '', minutes: 30, mode: 'presencial', location: '', buffer_min: 0, active: 1, position: 10 },
+      { id: '2', slug: 'video', name: 'Sesión por vídeo', description: '', minutes: 30, mode: 'video', location: '', buffer_min: 0, active: 1, position: 20 },
+      { id: '3', slug: 'telefono', name: 'Sesión por teléfono', description: '', minutes: 30, mode: 'telefono', location: '', buffer_min: 0, active: 1, position: 30 },
+    ],
+  },
 };
 
 test('el panel v2 arranca con API simulada y recorre Dashboard → Conexiones sin mutaciones', async ({ page }) => {
@@ -119,6 +141,24 @@ test('el panel v2 arranca con API simulada y recorre Dashboard → Conexiones si
   await expect(page.getByRole('heading', { name: 'Conexiones' })).toBeVisible();
   await expect(page.getByText('1077804955422697')).toBeVisible();
   await expect(page.getByText('Gestionado como Velai (Messenger)')).toBeVisible();
+
+  await page.getByRole('tab', { name: 'Calendario' }).click();
+  await expect(page.getByRole('heading', { name: /Calendario/ })).toBeVisible();
+  // Reservas online es una pestaña de la misma vista (rediseño 2026-09-16), no otra pantalla.
+  await page.getByRole('tab', { name: 'Reservas online' }).click();
+  await expect(page.getByRole('heading', { name: 'Servicios' })).toBeVisible();
+  await expect(page.getByText('30 min · Presencial')).toBeVisible();
+  await expect(page.getByText('30 min · Vídeo')).toBeVisible();
+  await expect(page.getByText('30 min · Teléfono')).toBeVisible();
+  // El estado de la página y lo que falta antes de compartir el enlace. El smoke corre
+  // como CLIENTE: ve el estado, no el interruptor — encenderla es de Velai.
+  await expect(page.getByText('Activada')).toBeVisible();
+  await expect(page.getByRole('switch', { name: 'Activar página de reservas' })).toHaveCount(0);
+  await expect(page.getByText('Google Calendar conectado')).toBeVisible();
+  await expect(page.getByText('25 dic 2026')).toBeVisible();
+  await expect(page.getByText('Cerrado todo el día · Navidad')).toBeVisible();
+  await expect(page.locator('.codebox code')).toContainText('data-vai-citas="dialogos"');
+  await page.screenshot({ path: test.info().outputPath('reservas-online-panel.png'), fullPage: true });
 
   expect(missing).toEqual([]);
   // Las fuentes de marca son externas por diseño, pero también se bloquean. El

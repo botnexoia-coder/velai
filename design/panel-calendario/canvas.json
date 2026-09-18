@@ -1,0 +1,58 @@
+{
+  "artboards": [
+    {
+      "file": "Main.dc.html",
+      "x": 0,
+      "y": 0,
+      "w": 1440,
+      "h": 1080
+    },
+    {
+      "file": "Agenda.dc.html",
+      "x": 1540,
+      "y": 0,
+      "w": 1440,
+      "h": 900
+    },
+    {
+      "file": "Ajustes.dc.html",
+      "x": 3080,
+      "y": 0,
+      "w": 1440,
+      "h": 830
+    },
+    {
+      "file": "Servicio.dc.html",
+      "x": 0,
+      "y": 1220,
+      "w": 860,
+      "h": 780
+    },
+    {
+      "file": "Movil.dc.html",
+      "x": 960,
+      "y": 1220,
+      "w": 390,
+      "h": 810
+    }
+  ],
+  "annotations": [
+    {
+      "id": "fila-vistas",
+      "x": 0,
+      "y": -170,
+      "w": 560,
+      "text": "Las tres pestañas de una sola vista: Agenda, Reservas online y Ajustes. Hoy son dos pantallas con un botón «← Calendario» que parece navegación rota."
+    },
+    {
+      "id": "fila-detalle",
+      "x": 0,
+      "y": 1090,
+      "w": 520,
+      "text": "El diálogo de servicio (hoy es un formulario suelto dentro de la lista) y la vista en móvil."
+    }
+  ],
+  "launch": {
+    "view": "canvas"
+  }
+}

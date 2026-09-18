@@ -16,6 +16,12 @@ decide quién puede cerrar cada cosa:
 
 ### CÓDIGO
 
+- [ ] Nombre público editable del agente, independiente de su alias de acceso;
+      v16 muestra el alias que utiliza el panel, sin exponer el correo completo.
+
+- [ ] Retrato en Conexiones (rol cliente); por ahora lo cura Velai en el alta.
+- [ ] Widget: seguir cambios de `<html lang>` en caliente para todos sus textos.
+
 - [ ] Contextos amplios fases 2–4 (`tenant_docs`, consulta indexada y, solo a escala,
       Vectorize); no recortar prompts como sustituto.
 - [ ] Informe semanal por WhatsApp e Instagram cuando se decida activar esos canales.
@@ -26,8 +32,50 @@ decide quién puede cerrar cada cosa:
       acabados de Google Calendar (página de integración y botón oficial).
 - [ ] Confirmaciones F3/F4 y unificación de la plantilla legacy de leads, solo cuando
       negocio priorice esas fases.
+- [ ] Finanzas: conversión EUR↔COP con total combinado, y proponer el movimiento mensual
+      del gasto de IA a partir de `ai_usage` (hoy en USD, se apunta a mano). Las dos cosas
+      se dejaron fuera a propósito; solo si negocio las pide.
 
 ### OPERACIÓN (código ya disponible; requiere entorno o una persona)
+
+- [x] Publicado el lote v15 + loader + ventana v16 el 2026-09-14 (commit `953d020`,
+      deploy worker `34853293426`). Verificado en producción: boot con los 6 campos,
+      loader `V='16'`, home en `?v=16`, ventana 400×768 con botón oculto, consola limpia.
+- [x] **Juan:** TTL de caché del navegador de la zona hirevai.com puesto en «Respetar los
+      encabezados existentes» (2026-09-14). El loader sirve ya `max-age=300` y `_headers`
+      manda en toda la caché del sitio. No volver a fijar un valor numérico ahí: anularía
+      en silencio las cabeceras del repositorio.
+- [ ] **Marca de Salo (`tufisiooficial`) y de Faby (`gogestion`) en el panel**: subir
+      retrato y escribir la tarjeta de bienvenida. Hoy las dos fichas tienen
+      `portrait_url` y `teaser_*` a NULL, así que el widget saca la inicial del bot y el
+      texto genérico; hasta el 2026-09-16 eso lo tapaba el andamiaje local que se retiró
+      de sus webs. Material ya publicado y servible:
+      `https://www.tufisiooficial.com/images/salo-avatar-widget.webp` y
+      `https://gogestion-demo.pages.dev/assets/assistants/faby-v1.jpg` (Mei ya está así).
+      Teasers que tenían antes — Salo: «¿No sabes qué atención necesitas?» / «Cuéntame qué
+      sucede y te ayudo a orientar el servicio y preparar tu cita.»; Faby: «¿Necesitas
+      ayuda con tus trámites?» / «Cuéntame qué necesitas y te ayudo a orientar tu consulta
+      con el equipo de GOgestión.»
+- [ ] **Juan: rol velai para `juanesgarciag@gmail.com`** si quiere abrir Finanzas con su
+      correo personal (Configuración → Admins, que escribe `admin_users`). Estar en
+      `SOCIOS_EMAILS` NO basta: `esSocio` exige las dos cosas. Hoy la pestaña solo la ve
+      `botnexo.ia@gmail.com`, que es admin raíz.
+- [ ] **Juan: quitar `botnexo.ia@gmail.com` de Finanzas → Socios.** Decidido el
+      2026-09-17: **la cuenta de nexo no cobra, solo entra**; los beneficiarios son
+      personas. La migración 0038 la sembró como beneficiario activo (con el correo como
+      nombre), así que hoy aparece en el selector de reparto. Como no tiene pagos, el botón
+      «Quitar» la borra del todo y desaparece del selector — un clic, sin tocar código ni
+      variables. Seguirá entrando a Finanzas: el acceso lo da `SOCIOS_EMAILS`, no esta
+      tabla.
+- [ ] **Logo de `tufisiooficial` fuera de `workers.dev`**: su `logo_url` apunta a
+      `tufisiooficial.botnexo-ia.workers.dev`, justo el dominio que cortan los bloqueadores
+      (el motivo del salto v7→v8). Resubirlo desde el panel para que quede en
+      `api.hirevai.com/media`.
+- [ ] **`MyXuCostura/myxu-costura.html`**: copia antigua de la portada (54 KB, sin
+      canonical) que sigue en el repo y no lleva widget. Decidir si se publica o se borra.
+- [ ] Comprobar la ventana v16 en una web cliente con cabecera fija y en staging con un
+      tenant real: tema, saludo único, hasta cinco sugerencias, conversación viva,
+      analítica, y subida de retrato con Historial `config`.
 
 - [ ] Completar y verificar staging: clave Anthropic propia, primer job de CD y login
       con rol cliente. Staging seguirá sin Twilio/Telegram por seguridad.
@@ -181,7 +229,62 @@ Ahora cada cliente puede completar SU vinculación, cosa que nunca fue posible:
 
 - [x] Worker con dominio propio `api.hirevai.com`; widget v=8 y las 2 herramientas (diagnóstico, test-ley) llaman ahí. workers.dev sigue vivo para widgets viejos y webhooks Twilio/Telegram.
 - [ ] **Juan:** purgar en el dashboard de Cloudflare (hirevai.com → Caching → Custom purge) las URLs `https://hirevai.com/assets/vai-widget.js?v=7` y `https://hirevai.com/assets/vai-widget.js` — así los visitantes nuevos de las webs de clientes (aún con snippet v=7) reciben ya el widget arreglado.
-- [ ] **Sebas:** subir el snippet a `?v=8` en las 4 webs de clientes (dialogosqueensenan.com confirmada con snippet correcto; el cambio es solo la query). Los navegadores que cachearon v=7 (immutable, 1 año) solo se arreglan con esto.
+- [x] Webs de clientes al loader `/assets/vai.js` (2026-09-14, desde Claude Code con la cuenta
+      botnexoia-coder): **Zoe** (`5afc847`, 7 HTML, retirada también su copia local de
+      `velai-assistant-polish.js` + `assistant-brand.js`), **hiredatavision** (`1e9f3d0`, 6 HTML,
+      misma retirada) y **Dialogos** (`a37d17e`, 12 HTML; `promo-qr.html` nunca llevó widget).
+      Verificado en vivo tras Pages: las tres cargan el loader, sin widget directo ni polish;
+      zoetravelspain.com abierto en Chromium monta «Hablar con Zoe» una sola vez y encadena
+      `vai.js` → `vai-widget.js?v=16` sin errores.
+- [ ] **Juan (panel, 10 min):** cargar en Clientes → ficha → Marca del widget el retrato, el
+      acento y los textos de la tarjeta de los tres clientes. Hasta que se carguen, el botón
+      muestra la inicial del bot y la tarjeta usa el texto genérico. Esos datos vivían solo en
+      los archivos de cada web (`assistant-brand.js` y `dialogos-widget-polish.js`, retirados
+      el 2026-09-14); se recuperaron de git y son estos:
+
+      **Alma · dialogos** — retrato `https://dialogosqueensenan.com/img/alma.jpg`,
+      acento `#ff8a42`, tarjeta ES «¿En qué puedo ayudarte?» / «Cuéntame qué necesitas.
+      Estoy aquí para escucharte y orientarte.» Su botón usaba el degradado `#194fd1 → #263c85`;
+      hoy la ficha tiene `#5AA0FF / #FF6577`, que pinta un azul claro a rosa. Decidir cuál queda.
+
+      **Zoe · zoe** — retrato `https://zoetravelspain.com/img/zoe-cat.jpg`, acento `#f57a1f`,
+      tarjeta ES «¿A dónde te gustaría viajar?» / «Cuéntame tu destino y te ayudo a dar el
+      primer paso de tu próximo viaje.», EN «Where would you like to travel?» / «Tell me your
+      destination and I can help you take the first step towards your next trip.»
+
+      **Dara · hiredatavision** — retrato `https://hiredatavision.com/assets/assistants/dara-v2.webp`,
+      acento `#57e6bd`, tarjeta ES «¿Qué dato no cuadra?» / «Cuéntame qué proceso tarda
+      demasiado o qué decisión necesitas tomar. Te ayudo a ordenar el siguiente paso.»,
+      EN «Could your data tell you more?» / «Let's talk about reports, metrics and manual
+      tasks. I can help you find a starting point.»
+
+      Mejor subir la imagen con el botón de la ficha que pegar la URL: así el retrato deja de
+      depender de la web del cliente. Cambio visible en el sitio en ≤5 min por la caché del boot.
+- [ ] **myxucostura.com: revertido, queda por decidir.** El 2026-09-15 se le puso el widget
+      (`b61514b`) y se retiraron sus dos chats locales (`dc0edef`), pero Juan pidió dejar el
+      sitio exactamente como estaba y se revirtió entero (`67fe052`, árbol idéntico a
+      `2bdf6a7` del 16 de mayo). Hoy la web sigue con su propio chat contra
+      `myxu-costura-bot.workers.dev` y sin el asistente de la plataforma, pese a que el
+      tenant `myxu-costura` ya está completo en el panel (Mei, con retrato, acento y tarjeta).
+      Antes de volver a intentarlo, aclarar con Juan qué versión del sitio es la buena: él
+      menciona un rediseño «de esta semana» que no existe en el repo `MyXuCostura`, cuyo
+      último commit propio es del 16 de mayo.
+- [ ] El retrato de Mei pesa 1,9 MB y se sirve desde la web del cliente
+      (`myxucostura.com/assets/assistants/myxu-mei-admin-v2.png`). Para un avatar de 46 px
+      sobra con una versión pequeña, y subirla por la ficha la mueve al dominio de Velai.
+- [ ] **SEO de myxucostura.com:** cualquier ruta inexistente devuelve 200 con la portada
+      (comprobado con `/esto-no-existe-12345`). Google lo trata como error blando; conviene
+      un `404.html` en el proyecto de Pages.
+- [ ] Los workers `myxu-costura-bot`, `hiredatavision-bot` y `gogestion-bot`: solo el primero
+      lo llama su web. Revisar si los otros dos siguen sirviendo a algún canal.
+- [ ] **Zoe: falta el retrato en la ficha.** Es la causa de que el rediseño de la portada
+      restaurara la capa local el 2026-09-15 y dejara la home en `?v=14` (corregido en
+      `38d24d3`). La gata sigue publicada en `https://zoetravelspain.com/img/zoe-cat.jpg`.
+- [ ] gogestion-demo.pages.dev sigue en `?v=14` con capa local. El repo es `CronoSeb/gogestion-demo`
+      y hay acceso de escritura desde la cuenta botnexoia: migrarlo al loader es un commit.
+- [ ] **Sebas:** tufisiooficial.com al loader. Lo sirve el Worker `tufisiooficial` con dominio
+      propio; su fuente no está en ningún repo de botnexoia-coder. Hoy carga
+      `vai-widget.js?v=20260913-salo` (misma línea a sustituir, tenant `tufisiooficial`).
 
 ### 2m. Marca del negocio en WhatsApp (desplegado 2026-08-22)
 
@@ -202,8 +305,8 @@ Ahora cada cliente puede completar SU vinculación, cosa que nunca fue posible:
 
 Del artifact «El panel de Velai frente al mercado» (25 productos revisados) salió un plan
 en tres horizontes: [`PLAN-PANEL.md`](./PLAN-PANEL.md) es el mapa y las decisiones;
-[`H1-PANEL.md`](./H1-PANEL.md), [`H2-PANEL.md`](./H2-PANEL.md) y
-[`H3-PANEL.md`](./H3-PANEL.md), el trabajo. Lo que depende de ti:
+[`H1-PANEL.md`](./H1-PANEL.md) y [`H2-PANEL.md`](./H2-PANEL.md), el trabajo que queda
+(H3 se cerró: §4 está en IMPLEMENTADO.md y §1, §2, §3 y §5 bajaron aquí). Lo que depende de ti:
 
 - [x] **H1 §1 desplegado el 2026-08-26** (migración 0021 + historial en D1 + vista Conversaciones + `/privacidad/`). El CI aplicó la migración y desplegó; el humo del preflight de `/chat` pasó.
 - [ ] **Pendiente de comprobar en vivo:** escribir por el widget y por WhatsApp y ver que la conversación aparece en la vista **Conversaciones** con los dos turnos (la tabla arranca vacía: las conversaciones anteriores vivían en KV y ya caducaron). Comprobar de paso que la ficha de un lead nuevo enlaza con su conversación.
@@ -212,15 +315,25 @@ en tres horizontes: [`PLAN-PANEL.md`](./PLAN-PANEL.md) es el mapa y las decision
 - [x] **H1 §2 (informe semanal) desplegado el 2026-08-26** — migración 0022, por Telegram, con interruptor de baja en Conexiones. Sin cron nuevo: viaja en el de 5 minutos dentro de una ventana de 24 h que abre el lunes a las 07:00 UTC (09:00 en verano, 08:00 en invierno).
 - [ ] **El primer informe llega el lunes 2026-08-31 por la mañana.** Comprobar que llega a los grupos de los 6 clientes activos y que el que no tenga Telegram vinculado queda como `skipped` en `tenant_reports` (no en silencio). El código de log es `weekly_report`.
 - [ ] **Ese primer informe NO llevará comparación** con la semana anterior (el historial arrancó el 2026-08-26): es correcto y deliberado. La comparación empieza a aparecer el lunes 2026-09-14.
-- [ ] **Informe por WhatsApp** (segundo paso de H1 §2): necesita su propia plantilla aprobada por Meta (`velai_weekly_report`) provisionada por subcuenta. Comparte maquinaria con el envío de plantillas de la bandeja — se hacen juntas, ver `H2-BANDEJA.md` §6.
-- [ ] **Instagram** (Juan, 2026-08-26): va por Meta igual que Messenger, así que cuando se conecte Facebook se conecta Instagram. Se decide al llegar a la bandeja — el filtro de canal NO se pinta hasta que el canal exista (`H2-BANDEJA.md` §6).
+- [ ] **Informe por WhatsApp** (segundo paso de H1 §2): necesita su propia plantilla aprobada por Meta (`velai_weekly_report`) provisionada por subcuenta. Comparte maquinaria con el envío de plantillas de la bandeja — se hacen juntas (alcance excluido de la bandeja, en IMPLEMENTADO.md).
+- [ ] **Instagram** (Juan, 2026-08-26): va por Meta igual que Messenger, así que cuando se conecte Facebook se conecta Instagram. Se decide al llegar a la bandeja — el filtro de canal NO se pinta hasta que el canal exista: un filtro que no filtra nada es la clase de mentira que el panel no se permite.
 - [ ] **Validar en vivo la regla «ESPACIO Y CIERRE»** (Juan, 2026-08-26: «no podemos dejar a un cliente a mitad de una conversación»). La red de seguridad es determinista y está en tests — nadie se queda a mitad, con modelo o sin él. Lo que SOLO se puede validar contra el modelo vivo es la *prevención*: que ante una consulta larga resuma y cierre en vez de empezar a enumerarlo todo. Herramienta: **ficha del cliente → Probar**, con la consulta de NIE de GOgestión que lo destapó. Si aún se va largo, la regla es una cadena de texto en `vai-worker.js`: se endurece y se vuelve a desplegar.
 - [ ] **Vigilar `reply_truncated` en Workers Logs.** Si sale mucho para un cliente, súbele el tope de su canal o aprieta su prompt. Si sale para un cliente que atiende en otro idioma, el cierre de emergencia (en español fijo) hay que hacerlo por tenant.
 - [ ] **Cuando la base pase de 100 MB o KV pase del 50% del cupo diario**, revisar [`VOLUMEN-Y-ALMACENAMIENTO.md`](./VOLUMEN-Y-ALMACENAMIENTO.md) (medido el 2026-08-26: la base entera pesa 332 KB y el cuello real es KV, no D1).
-- [x] **Retención de transcripciones + `/privacidad/`** — 90 días desde el último mensaje (`CONV_RETENTION_DAYS`), uniforme (una conversación con lead no se guarda más), y la política actualizada el 2026-08-26 con la base jurídica de la finalidad nueva. El razonamiento del plazo está en `H1-PANEL.md` §1.
+- [x] **Retención de transcripciones + `/privacidad/`** — 90 días desde el último mensaje (`CONV_RETENTION_DAYS`), uniforme (una conversación con lead no se guarda más), y la política actualizada el 2026-08-26 con la base jurídica de la finalidad nueva. El razonamiento del plazo está en `IMPLEMENTADO.md` §«Historial de conversaciones en D1».
 - [ ] **Coexistence y Embedded Signup: decidir antes de septiembre de 2026** (H3 §1 y §2). El 15 de octubre Meta retira Embedded Signup v2/v3 y `coex` no migra solo. Si el alta sigue siendo acompañada en la consola de Twilio, no toca nada; solo hay que decidirlo a tiempo.
 - [ ] **Verificar contra Twilio en vivo** qué campos devuelve de verdad la aprobación de plantillas (`rejection_reason`, quality rating) antes de escribir la UI de los siete estados (H1 §5). La plantilla de GOgestión sirve de caso.
 - [ ] **Supuestos del ahorro** (H1 §4): confirmar minutos por conversación y coste/hora por defecto. Referencia citable: 6–12 $ por ticket humano (informe de ROI de Intercom).
+- [ ] **Satisfacción medida aparte** (H3 §3): decidir si se hace una pregunta al cerrar, que es
+      lo único que hace Tidio del grupo DIY. Consenso unánime del sector: **nunca mezclar el CSAT
+      del bot con el de los humanos**. Si se decide NO hacerla, el argumento de Intercom para matar
+      la encuesta clásica sirve tal cual: baja respuesta, sesgo a los extremos y castigo injusto a
+      la IA. Una puntuación propia tipo CX Score sigue descartada en `PLAN-PANEL.md`.
+- [ ] **Kit Digital y Kit Consulting** (H3 §5): verificar convocatoria y plazos vigentes antes de
+      usarlo en un presupuesto. Siguen vivos en 2026 con fondos remanentes y ya financian IA; es el
+      mecanismo de compra que la pyme española reconoce y Centribal ya lo usa como canal de entrada.
+      No es panel, es canal comercial, pero condiciona cómo se presenta el precio (`PLAN-PANEL.md`:
+      por cliente y mes con los mensajes a coste, nunca créditos).
 - [ ] **Cupo de IA al agotarse** (H3 §4): ¿se corta con 429 como hoy, o se desborda con aviso como hacen Crisp y Zendesk?
 
 ### 2k. Canales múltiples por cliente (tenant_channels — fase 1 desplegada 2026-08-22)
@@ -312,9 +425,24 @@ no a una segunda ejecución manual:
       propio? (referencia de mercado: 12–31 USD/mes por volumen de citas; cada
       recordatorio es una conversación Utility de Meta — verificar tarifa ES/CO).
 
-Futuras (de la spec, no implementadas): **F3** autoagenda pública por enlace
-(`/reserva/<slug>` con availableSlots — decidir si aporta o dispersa: el chat ya
-agenda) y **F4** métricas de confirmación/cancelación/no-show en dashboard e informe
+**F3 (autoagenda) desplegada y viva**: `citas.hirevai.com/{cliente}/reservas` responde con
+la página de Diálogos y sus tres modalidades; servicios, embeds, .ics y reagendado por token
+incluidos, y el chat sigue agendando conversando. Resumen en
+[`IMPLEMENTADO.md`](./IMPLEMENTADO.md) §Autoagenda. Lo que queda de ella:
+
+- [ ] **Plantilla `confirmacion_reserva`** creada y aprobada por Meta antes de que la
+      confirmación de una reserva salga por WhatsApp. No se reutiliza un recordatorio con
+      otro significado: el mensaje dice algo distinto.
+- [ ] **Embed en la web de Diálogos** (`vai-citas.js`, inline o popup) cuando el enlace a
+      secas lleve una semana sin sustos. Hoy su web solo lleva el widget de chat.
+- [ ] **Precio de la autoagenda**: ¿entra en el plan Profesional, va con Confirmaciones como
+      un mismo addon «Citas», o se cobra aparte? Calendly cobra 10–16 $/usuario/mes por justo
+      esto, y nosotros lo damos con recordatorio por WhatsApp y bot que reagenda encima.
+- [ ] **Vigilar los primeros días**: que ninguna reserva pública se cruce con una del chat
+      (la triple barrera está en tests, pero el tráfico real es el que manda) y que el caché
+      de huecos de 90 s no enseñe una hora ya ocupada.
+
+Futura: **F4** métricas de confirmación/cancelación/no-show en dashboard e informe
 semanal (el no-show exige marcarlo a mano en el panel). Técnica pendiente: unificar
 la plantilla de LEADS (columnas `lead_template_*` de tenants) en `tenant_templates`,
 migrando datos y lectores a la vez.

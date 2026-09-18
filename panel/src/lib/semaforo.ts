@@ -8,24 +8,24 @@ export interface SemaforoChip {
   text: string;
 }
 
-export function semaforo(t: TenantRow): SemaforoChip[] {
+export function semaforo(t: TenantRow, includeChannels = true): SemaforoChip[] {
   if (!t.active && String(t.channel_address).startsWith('pending:')) return [{ cls: 'off', text: 'prospecto' }];
   const kinds = new Set(String(t.channels ?? '').split(',').filter(Boolean));
   const m = /^(whatsapp|messenger):/.exec(String(t.channel_address));
   if (m && m[1]) kinds.add(m[1]);
-  const chips: SemaforoChip[] = [{ cls: 'web', text: 'web' }];
-  if (kinds.has('whatsapp')) {
+  const chips: SemaforoChip[] = includeChannels ? [{ cls: 'web', text: 'web' }] : [];
+  if (includeChannels && kinds.has('whatsapp')) {
     chips.push(
       t.sender_status === 'ONLINE' || (t.has_from && !t.has_subaccount)
         ? { cls: 'ok', text: 'whatsapp' }
         : { cls: '', text: 'whatsapp: verificando' },
     );
-  } else if (t.sender_status === 'ONLINE' || t.has_from) {
+  } else if (includeChannels && (t.sender_status === 'ONLINE' || t.has_from)) {
     // Sender vivo en Twilio y NINGÚN canal que lo enrute: el bot calla en verde
     // (gogestion, 2026-08-24). Antes no se pintaba nada y el cliente pasaba por «solo web».
     chips.push({ cls: 'off', text: 'whatsapp: sin enrutar' });
   }
-  if (kinds.has('messenger')) chips.push({ cls: 'ok', text: 'messenger' });
+  if (includeChannels && kinds.has('messenger')) chips.push({ cls: 'ok', text: 'messenger' });
   const f: string[] = [];
   if (t.prompt_len > 8000) f.push('contexto muy largo');
   if (t.prompt_len < 200) f.push('contexto corto');

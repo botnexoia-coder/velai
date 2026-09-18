@@ -2,6 +2,8 @@
 // de Google Calendar por tenant (conectar por OAuth, configurar, desconectar). El
 // callback OAuth vive en routes/publico.js (no es /api/admin/*) y el proveedor puro
 // en worker/calendar.js. Migrado tal cual del adminRouter monolítico.
+import { bookingOrigin, bookingReadiness } from '../booking-security.js';
+import { invalidateAvailability, validDate } from '../agenda.js';
 import { Hono } from 'hono';
 import { partesAdmin, scopeClause, assertOwnTenant, adminOrigin } from '../middleware.js';
 import { googleAuthUrl, revokeGoogleToken } from '../calendar.js';
@@ -117,7 +119,7 @@ const grupoCalendar = async (c) => {
     const now = new Date().toISOString();
     const updated = await env.DB.prepare(`UPDATE tenant_calendars SET ${sets.join(',')}, updated_at=? WHERE tenant_id=?`).bind(...args, now, tenantId).run();
     if (!updated.meta.changes) throw new HttpError(404, 'not_found');
-    if (env.KV) { try { await env.KV.delete(`calcfg:${tenantId}`); } catch (_) {} }
+    await invalidateAvailability(env, tenantId);
     ctx.waitUntil(env.DB.prepare('INSERT INTO tenant_versions (tenant_id,actor_email,field,previous_value,note,created_at) VALUES (?,?,?,?,?,?)')
       .bind(tenantId, actor, 'calendar', null, 'config editada', now).run().catch(() => {}));
     return json({ ok: true }, 200, NO_STORE);
@@ -189,3 +191,84 @@ const grupoReminders = async (c) => {
   return json({ ok: true, ...(enabled === null ? {} : { enabled: Boolean(enabled) }), ...(hours === null ? {} : { hours }) }, 200, NO_STORE);
 };
 calendario.all('/api/admin/tenants/:id/reminders', grupoReminders);
+
+// Autoagenda: every resource is addressed through its verified owner, before D1.
+const bookingAdmin = async (c) => {
+  const {request,env,ctx,scope,actor} = partesAdmin(c);
+  const tenantId = c.req.param('id');
+  if (!UUID_RE.test(tenantId)) throw new HttpError(404,'not_found');
+  assertOwnTenant(scope,tenantId);
+  const tenant = await env.DB.prepare('SELECT id,slug FROM tenants WHERE id=?').bind(tenantId).first();
+  if (!tenant) throw new HttpError(404,'not_found');
+  const services = c.req.path.includes('/services');
+  const serviceId = c.req.param('serviceId');
+  if (serviceId && !UUID_RE.test(serviceId)) throw new HttpError(404,'not_found');
+  if (request.method === 'GET') {
+    if (services) return json({services:(await env.DB.prepare('SELECT id,slug,name,description,minutes,mode,location,buffer_min,active,position FROM tenant_services WHERE tenant_id=? ORDER BY position,name').bind(tenantId).all()).results},200,NO_STORE);
+    const config = await env.DB.prepare('SELECT booking_enabled,min_notice_min,max_days_ahead,booking_note FROM tenant_calendars WHERE tenant_id=?').bind(tenantId).first();
+    const exceptions = (await env.DB.prepare('SELECT date,windows,note FROM calendar_exceptions WHERE tenant_id=? ORDER BY date').bind(tenantId).all()).results || [];
+    return json({config,exceptions:exceptions.map((e)=>({...e,windows:e.windows?JSON.parse(e.windows):null})),url:bookingOrigin(env)?`${bookingOrigin(env)}/${tenant.slug}/reservas`:null,faltan:bookingReadiness(env)},200,NO_STORE);
+  }
+  if (services) {
+    if (request.method==='DELETE') {
+      if (!serviceId) throw new HttpError(400,'service_required');
+      const result=await env.DB.prepare('UPDATE tenant_services SET active=0,updated_at=? WHERE id=? AND tenant_id=?').bind(new Date().toISOString(),serviceId,tenantId).run();
+      if (!result.meta.changes) throw new HttpError(404,'not_found');
+    } else {
+      const body=await readJson(request,4000);
+      let previous=null;
+      if (serviceId) { previous=await env.DB.prepare('SELECT * FROM tenant_services WHERE id=? AND tenant_id=?').bind(serviceId,tenantId).first(); if(!previous)throw new HttpError(404,'not_found'); }
+      const merged={...(previous||{}),...body};
+      const name=clean(merged.name,100), slug=clean(merged.slug,60), description=clean(merged.description,500), location=clean(merged.location,500);
+      const minutes=Number(merged.minutes), buffer=Number(merged.buffer_min||0), position=Number(merged.position||0), active=merged.active===undefined?1:Number(merged.active), mode=clean(merged.mode,20)||'presencial';
+      if(!name||!/^[a-z0-9][a-z0-9-]{0,59}$/.test(slug)||!Number.isInteger(minutes)||minutes<10||minutes>240||!Number.isInteger(buffer)||buffer<0||buffer>120||!Number.isInteger(position)||position<0||position>1000||![0,1].includes(active)||!['presencial','video','telefono'].includes(mode))throw new HttpError(400,'invalid_service');
+      if(mode==='video'&&location&&!/^https:\/\//i.test(location))throw new HttpError(400,'invalid_location');
+      const now=new Date().toISOString();
+      try {
+        if(previous) await env.DB.prepare('UPDATE tenant_services SET slug=?,name=?,description=?,minutes=?,mode=?,location=?,buffer_min=?,active=?,position=?,updated_at=? WHERE id=? AND tenant_id=?').bind(slug,name,description||null,minutes,mode,location||null,buffer,active,position,now,serviceId,tenantId).run();
+        else await env.DB.prepare('INSERT INTO tenant_services(id,tenant_id,slug,name,description,minutes,mode,location,buffer_min,active,position,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)').bind(crypto.randomUUID(),tenantId,slug,name,description||null,minutes,mode,location||null,buffer,active,position,now,now).run();
+      } catch(e) { if(/UNIQUE/.test(String(e.message)))throw new HttpError(409,'service_slug_exists');throw e; }
+    }
+  } else {
+    const body=await readJson(request,32000);
+    const sets=[],args=[],statements=[];
+    // Abrir (o cerrar) la página al PÚBLICO es de Velai, como el addon de Confirmaciones
+    // (decisión de Juan, 2026-09-16). El cliente configura lo suyo —servicios, reglas,
+    // festivos— pero no decide que su negocio aparezca en una URL pública. El veto va
+    // AQUÍ, en el handler: la ruta sigue en la lista blanca del rol cliente porque el
+    // resto del PATCH sí es suyo.
+    if(body.booking_enabled!==undefined){
+      if(scope.role!=='velai')throw new HttpError(403,'not_authorized');
+      if(typeof body.booking_enabled!=='boolean')throw new HttpError(400,'invalid_enabled');
+      if(body.booking_enabled){const faltan=bookingReadiness(env);if(faltan.length)throw new HttpError(503,`booking_falta_${faltan[0]}`);}
+      sets.push('booking_enabled=?');args.push(body.booking_enabled?1:0);
+    }
+    for(const [field,min,max] of [['min_notice_min',0,43200],['max_days_ahead',1,365]])if(body[field]!==undefined){const n=Number(body[field]);if(!Number.isInteger(n)||n<min||n>max)throw new HttpError(400,'invalid_booking_rule');sets.push(`${field}=?`);args.push(n);}
+    if(body.booking_note!==undefined){sets.push('booking_note=?');args.push(clean(body.booking_note,1000)||null);}
+    if(body.exceptions!==undefined){
+      if(!Array.isArray(body.exceptions)||body.exceptions.length>100)throw new HttpError(400,'invalid_exceptions');
+      const seen=new Set();
+      statements.push(env.DB.prepare('DELETE FROM calendar_exceptions WHERE tenant_id=?').bind(tenantId));
+      for(const e of body.exceptions){
+        if(!e||!validDate(e.date)||seen.has(e.date))throw new HttpError(400,'invalid_exceptions');seen.add(e.date);
+        const windows=e.windows;
+        if(windows!==null){if(!Array.isArray(windows)||windows.length>4)throw new HttpError(400,'invalid_exceptions');let last='';for(const w of windows){if(!Array.isArray(w)||w.length!==2||!/^([01]\d|2[0-3]):[0-5]\d$/.test(w[0])||!/^([01]\d|2[0-3]):[0-5]\d$/.test(w[1])||w[0]>=w[1]||w[0]<last)throw new HttpError(400,'invalid_exceptions');last=w[1];}}
+        statements.push(env.DB.prepare('INSERT INTO calendar_exceptions(tenant_id,date,windows,note,created_at) VALUES (?,?,?,?,?)').bind(tenantId,e.date,windows===null?null:JSON.stringify(windows),clean(e.note,200)||null,new Date().toISOString()));
+      }
+    }
+    const cal=await env.DB.prepare("SELECT tenant_id FROM tenant_calendars WHERE tenant_id=? AND status='connected'").bind(tenantId).first();
+    if(!cal)throw new HttpError(404,'not_found');
+    if(sets.length)statements.push(env.DB.prepare(`UPDATE tenant_calendars SET ${sets.join(',')},updated_at=? WHERE tenant_id=?`).bind(...args,new Date().toISOString(),tenantId));
+    if(!statements.length)throw new HttpError(400,'nothing_to_update');
+    await env.DB.batch(statements);
+  }
+  await invalidateAvailability(env,tenantId);
+  ctx.waitUntil(env.DB.prepare('INSERT INTO tenant_versions(tenant_id,actor_email,field,previous_value,note,created_at) VALUES (?,?,?,?,?,?)').bind(tenantId,actor,'calendar',null,services?'servicios editados':'reservas online editadas',new Date().toISOString()).run().catch(()=>{}));
+  return json({ok:true},200,NO_STORE);
+};
+calendario.get('/api/admin/tenants/:id/booking',bookingAdmin);
+calendario.patch('/api/admin/tenants/:id/booking',bookingAdmin);
+calendario.get('/api/admin/tenants/:id/services',bookingAdmin);
+calendario.post('/api/admin/tenants/:id/services',bookingAdmin);
+calendario.patch('/api/admin/tenants/:id/services/:serviceId',bookingAdmin);
+calendario.delete('/api/admin/tenants/:id/services/:serviceId',bookingAdmin);

@@ -64,6 +64,12 @@ export const tenants: TenantsResponse = {
       meta_partner_status: 'pendiente',
       sender_status: null,
       channels: 'web',
+      connection_summary: [
+        { kind: 'web', address: 'barberia.com', state: 'live' },
+        { kind: 'whatsapp', address: null, state: 'off' },
+        { kind: 'messenger', address: null, state: 'off' },
+        { kind: 'telegram', address: 'Leads Barbería', state: 'live' },
+      ],
       prompt_len: 1200,
       lead_count: 12,
     },

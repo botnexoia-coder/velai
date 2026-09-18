@@ -1,7 +1,11 @@
 # Horizonte 2 — lo que cierra la paridad
 
-> Un trimestre. Mapa en [`PLAN-PANEL.md`](./PLAN-PANEL.md). **Todo esto asume H1 §1
-> hecho** (conversaciones en D1): cuatro de los cinco entregables lo necesitan.
+> Un trimestre. Mapa en [`PLAN-PANEL.md`](./PLAN-PANEL.md). H1 §1 (conversaciones en D1),
+> del que cuelgan casi todos, está hecho desde el 2026-08-26.
+>
+> **§4 (responder desde el panel) se construyó** con spec propia el 2026-08-26 y se
+> retiró de aquí el 2026-09-16: su resumen está en [`IMPLEMENTADO.md`](./IMPLEMENTADO.md)
+> («Bandeja de conversaciones»). Quedan los cuatro de abajo.
 >
 > Esbozo, no spec fina. Cada entregable se detalla al empezarlo — escribir la spec
 > ahora es escribirla dos veces.
@@ -58,24 +62,6 @@ instrucciones usó** para responder. Lo tienen Tidio, Kommo, Crisp, Fin y HubSpo
 lo tiene *parcial* (solo admin, sin traza).
 
 Depende de §1: sin fuentes separadas del prompt no hay traza que enseñar.
-
----
-
-## §4. Responder desde el panel → adelantado a [`H2-BANDEJA.md`](./H2-BANDEJA.md)
-
-Juan lo pidió el 2026-08-26 con capturas de una bandeja de dos paneles, así que sale de
-este esbozo y tiene spec propia. Lo de abajo se queda como resumen.
-
-Las 8 DIY, Cliengo y Zenvia lo tienen. Con H1 §1 el historial ya está; falta el camino
-de salida y una guarda que ninguna de ellas pone bien:
-
-**El aviso de la ventana de 24 horas de Meta a la vista.** Wati es el único del grupo
-que la expone como métrica. Fuera de la ventana, responder por WhatsApp exige plantilla
-aprobada — el panel tiene que decirlo *antes* de que el usuario escriba, no después de
-que Twilio devuelva un 63016.
-
-Nota de alcance: **etiquetas y asignación de conversaciones** las tienen las 8 DIY y
-aquí se marcan como *no aplica* — presuponen un equipo de agentes que una pyme no tiene.
 
 ---
 

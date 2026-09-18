@@ -36,6 +36,17 @@ const PAREJAS_RECORDATORIO = [
 ];
 
 export const TEMPLATE_CATALOG = {
+  confirmacion_reserva: {
+    kind: 'confirmacion_reserva', nombre: 'Confirmación de reserva online',
+    descripcion: 'Envía los datos de la reserva y el enlace privado para cancelar o cambiar la cita.',
+    fuente: 'registro', categoria: 'UTILITY',
+    approvalName: (slug) => `confirmacion_reserva_${slug}`.toLowerCase().replace(/[^a-z0-9_]/g, '_'),
+    content: (slug, businessName) => ({
+      friendly_name: `confirmacion_reserva_${slug}`.replace(/[^a-z0-9_]/g, '_'), language: 'es',
+      variables: { 1: 'María', 2: businessName || 'el negocio', 3: 'jueves, 4 de septiembre', 4: '10:00', 5: 'https://citas.hirevai.com/ejemplo/cita/0123456789abcdef0123456789abcdef' },
+      types: { 'twilio/text': { body: 'Hola {{1}}, tu cita con {{2}} está reservada para el {{3}} a las {{4}}. Puedes consultarla, cancelarla o cambiarla aquí: {{5}}' } },
+    }),
+  },
   recordatorio_cita: {
     kind: 'recordatorio_cita',
     nombre: 'Recordatorio de cita (Confirmaciones)',

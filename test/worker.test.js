@@ -1,4 +1,5 @@
 import test from 'node:test';
+import { sqliteD1 } from './helpers/sqlite-d1.js';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { createWorker, testing } from '../worker/app.js';
@@ -1209,18 +1210,23 @@ test('el widget pinta la marca del tenant desde /widget/boot, no la de Velai', a
   const widget = await readFile(new URL('../site/assets/vai-widget.js', import.meta.url), 'utf8');
   assert.match(widget, /\/widget\/boot/);
   // colores por variables CSS aplicadas por CSSOM, nunca style="" (lección de la CSP del panel)
-  assert.match(widget, /setProperty\('--vai-c1'/);
+  assert.match(widget, /setProperty\('--vai-l1'/);
   // el WhatsApp de los mensajes de error sale de la marca del tenant
   assert.match(widget, /BRAND && BRAND\.wa_number/);
   // bilingüe: el saludo EN del tenant se usa cuando la página está en inglés
   assert.match(widget, /BRAND\.greeting_en/);
+  for (const fragment of ['BRAND.portrait_url', "setProperty('--vai-acc'", '--vai-lift', 'aria-expanded', 'BRAND.teaser_title_en', '· v20']) assert.ok(widget.includes(fragment), fragment);
+  assert.equal(widget.includes('va-ui'), false);
+  assert.equal(widget.includes('vaiPulse'), false);
+
 });
 
 test('GET /widget/boot devuelve la marca del tenant, con CORS, y 404 si el slug no existe', async () => {
   const worker = createWorker({ SYSTEM: 's', DEMOS: {}, SUMMARY_PROMPT: '', GUARDRAILS: '' });
   const row = {
     id: 't1', slug: 'zoe', name: 'Zoe Travel', active: 1, bot_name: 'Zoe', brand_name: 'Zoe Travel Spain',
-    brand_color: '#1a4fd0', greeting: '¡Hola! Soy Zoe', chips_json: '["Vuelos","Hoteles"]', theme: 'dark',
+    portrait_url: 'https://example.com/portrait.png', accent_color: '#ff914f', teaser_title: 'Hola',
+    brand_color: '#1a4fd0', greeting: '¡Hola! Soy Zoe', chips_json: '["Vuelos","Hoteles","Trenes","Coches","Cruceros"]', theme: 'dark',
     twilio_auth_token_enc: 'v1:SECRETO', system_prompt: 'PROMPT-PRIVADO',
   };
   const env = {
@@ -1233,7 +1239,11 @@ test('GET /widget/boot devuelve la marca del tenant, con CORS, y 404 si el slug 
   assert.equal(res.headers.get('Access-Control-Allow-Origin'), 'https://zoetravelspain.com');
   const body = await res.json();
   assert.equal(body.bot_name, 'Zoe');
-  assert.deepEqual(body.chips, ['Vuelos', 'Hoteles']);
+  assert.equal(body.portrait_url, row.portrait_url);
+  assert.equal(body.accent_color, row.accent_color);
+  assert.equal(body.teaser_title, 'Hola');
+  for (const key of ['teaser_copy', 'teaser_title_en', 'teaser_copy_en']) assert.equal(body[key], null);
+  assert.deepEqual(body.chips, ['Vuelos', 'Hoteles', 'Trenes', 'Coches', 'Cruceros']);
   assert.equal(body.theme, 'dark');
   // NADA sensible sale del endpoint público: ni token cifrado ni system_prompt
   const raw = JSON.stringify(body);
@@ -1256,7 +1266,7 @@ test('validateTenant: la marca del widget se valida campo a campo', () => {
   assert.throws(() => testing.validateTenant({ brand_color: 'rojo' }, { partial: true }), (e) => e.code === 'invalid_brand_color');
   assert.throws(() => testing.validateTenant({ logo_url: 'http://inseguro.com/l.png' }, { partial: true }), (e) => e.code === 'invalid_logo_url', 'el logo exige https (mixed content)');
   assert.throws(() => testing.validateTenant({ theme: 'neon' }, { partial: true }), (e) => e.code === 'invalid_theme');
-  assert.throws(() => testing.validateTenant({ chips_json: ['1', '2', '3', '4'] }, { partial: true }), (e) => e.code === 'invalid_chips_json');
+  assert.throws(() => testing.validateTenant({ chips_json: ['1', '2', '3', '4', '5', '6'] }, { partial: true }), (e) => e.code === 'invalid_chips_json');
   // vacío = null: el widget cae a la marca de Velai
   assert.equal(testing.validateTenant({ chips_json: [] }, { partial: true }).chips_json, null);
   assert.equal(testing.validateTenant({ theme: '' }, { partial: true }).theme, null);
@@ -1905,51 +1915,33 @@ function nextWorkday() {
   }
 }
 
-test('agendar_cita: relee el hueco antes de crear, no duplica y respeta el cerrojo', async () => {
+test('agendar_cita: relee Google y comparte con la web el bloqueo D1', async (t) => {
   const { localToUtcMs } = await import('../worker/calendar.js');
   const day = nextWorkday();
   const iso = (hhmm) => new Date(localToUtcMs('Europe/Madrid', day, hhmm)).toISOString();
-  const inserts = [];
-  const db = { prepare: (sql) => ({ bind: (...args) => ({
-    run: async () => {
-      if (sql.includes('INSERT INTO appointments')) {
-        if (inserts.some((i) => i[2] === args[2])) throw new Error('UNIQUE constraint failed: appointments.request_id');
-        inserts.push(args);
-      }
-      return { meta: { changes: 1 } };
-    },
-    first: async () => null, all: async () => ({ results: [] }),
-  }) }) };
+  const db = await sqliteD1(); t.after(() => db.close());
+  await db.exec("INSERT INTO tenants(id,slug,name,channel_address,system_prompt,created_at,updated_at) VALUES ('t-cal','uno','Uno','web:uno','test','2026-01-01','2026-01-01'); INSERT INTO tenant_calendars(tenant_id,provider,refresh_token_enc,connected_by,connected_at,updated_at) VALUES ('t-cal','google','test','test','2026-01-01','2026-01-01');");
   const env = { DB: db, KV: mapKV(), GOOGLE_OAUTH_CLIENT_ID: 'cid', GOOGLE_OAUTH_CLIENT_SECRET: 'sec', SECRETS_KEK: TEST_KEK };
   const enc = await encryptSecret(env, 'calendar:t-cal', 'refresh-tok');
   const cal = { tenant_id: 't-cal', provider: 'google', refresh_token_enc: enc, calendar_id: 'primary', timezone: 'Europe/Madrid', slot_minutes: 30, business_hours: null, status: 'connected' };
   const created = [];
-  const realFetch = globalThis.fetch;
+  const realFetch = globalThis.fetch; t.after(() => { globalThis.fetch = realFetch; });
   globalThis.fetch = async (url, init) => {
     const u = String(url);
-    if (u.includes('oauth2.googleapis.com/token')) return new Response(JSON.stringify({ access_token: 'at', expires_in: 3600 }), { status: 200 });
-    if (u.includes('/events?')) return new Response(JSON.stringify({ items: [{ start: { dateTime: iso('10:00') }, end: { dateTime: iso('10:30') }, status: 'confirmed' }] }), { status: 200 });
-    if (u.includes('/events')) { created.push(JSON.parse(init.body)); return new Response(JSON.stringify({ id: 'evt1' }), { status: 201 }); }
-    return new Response('{}', { status: 200 });
+    if (u.includes('oauth2.googleapis.com/token')) return Response.json({ access_token: 'at', expires_in: 3600 });
+    if (u.includes('/events?')) return Response.json({ items: [{ start: { dateTime: iso('10:00') }, end: { dateTime: iso('10:30') }, status: 'confirmed' }] });
+    if (u.includes('/events')) { const event=JSON.parse(init.body); created.push(event); return Response.json({ id: event.id }, {status:201}); }
+    return Response.json({});
   };
-  try {
-    const exec = testing.calendarExecutor(env, { slug: 'uno' }, cal, { channel: 'whatsapp', conversationKey: 'whatsapp:+34600', defaultPhone: '+34600000000' });
-    // relectura del proveedor: el hueco de las 10:00 está ocupado — ni evento ni fila
-    const busy = JSON.parse(await exec('agendar_cita', { fecha_hora: `${day}T10:00`, nombre: 'Ana', telefono: '612345678' }));
-    assert.equal(busy.error, 'hueco_ocupado');
-    assert.ok(busy.alternativas.length && !busy.alternativas.includes('10:00'));
-    assert.equal(created.length, 0);
-    // hueco libre: evento en Google + fila en appointments
-    const ok = JSON.parse(await exec('agendar_cita', { fecha_hora: `${day}T11:00`, nombre: 'Ana', telefono: '612345678' }));
-    assert.deepEqual([ok.ok, ok.hora], [true, '11:00']);
-    assert.equal(created.length, 1);
-    assert.equal(inserts.length, 1);
-    assert.ok(created[0].summary.includes('Ana'));
-    // cerrojo KV: otra conversación sobre el MISMO hueco no crea un segundo evento
-    const race = JSON.parse(await exec('agendar_cita', { fecha_hora: `${day}T11:00`, nombre: 'Luis', telefono: '612345679' }));
-    assert.equal(race.error, 'hueco_ocupado');
-    assert.equal(created.length, 1, 'el cerrojo evita el segundo evento');
-  } finally { globalThis.fetch = realFetch; }
+  const exec = testing.calendarExecutor(env, { id:'t-cal',slug: 'uno' }, cal, { channel: 'whatsapp', conversationKey: 'c1', defaultPhone: '+34600000000' });
+  const busy = JSON.parse(await exec('agendar_cita', { fecha_hora: `${day}T10:00`, nombre: 'Ana' }));
+  assert.equal(busy.error, 'hueco_ocupado'); assert.equal(created.length, 0);
+  const ok = JSON.parse(await exec('agendar_cita', { fecha_hora: `${day}T11:00`, nombre: 'Ana' }));
+  assert.deepEqual([ok.ok, ok.hora], [true, '11:00']); assert.equal(created.length,1);
+  assert.equal((await db.prepare('SELECT count(*) AS n FROM appointments').first()).n,1);
+  const other = testing.calendarExecutor(env, {id:'t-cal',slug:'uno'},cal,{channel:'whatsapp',conversationKey:'c2',defaultPhone:'+34600000001'});
+  const race=JSON.parse(await other('agendar_cita',{fecha_hora:`${day}T11:00`,nombre:'Luis'}));
+  assert.equal(race.error,'hueco_ocupado'); assert.equal(created.length,1);
 });
 
 test('webhook con calendario: tool_use → TwiML vacío YA y la respuesta llega por la Messages API', async () => {
@@ -2865,6 +2857,52 @@ test('canales del cliente: ve los suyos sin diagnóstico, el ajeno es 404, y la 
   assert.equal(testing.clienteAllowed(`/api/admin/tenants/${TID}/channels`, 'GET'), true);
 });
 
+test('Clientes y Conexiones comparten el resumen real, con consultas acotadas, alias y sin credenciales', async (t) => {
+  const db = await sqliteD1(); t.after(() => db.close());
+  const linked = '00000000-0000-4000-8000-0000000000a1';
+  const unrouted = '00000000-0000-4000-8000-0000000000a2';
+  const paused = '00000000-0000-4000-8000-0000000000a3';
+  for (const [id, slug, active] of [[linked, 'linked', 1], [unrouted, 'unrouted', 1], [paused, 'paused', 0]]) {
+    await db.prepare(`INSERT INTO tenants (id,slug,name,channel_address,active,system_prompt,created_at,updated_at)
+      VALUES (?,?,?,?,?,'contexto','2026-09-16','2026-09-16')`).bind(id, slug, slug, `web:${slug}`, active).run();
+  }
+  await db.prepare(`UPDATE tenants SET telegram_chat_id='-123', telegram_chat_title='Equipo vinculado',
+    web_origins='["https://www.example.com"]', twilio_auth_token_enc='SECRET' WHERE id=?`).bind(linked).run();
+  await db.prepare("UPDATE tenants SET sender_sid='XE-own', twilio_from='whatsapp:+34910000001' WHERE id=?").bind(unrouted).run();
+  const queries = [];
+  const env = { DB: { prepare(sql) { queries.push(sql); return db.prepare(sql); } } };
+  const ctx = { waitUntil() {} };
+  const call = (path, scope = VELAI) => testing.adminRouter(adminReq(path), env, ctx, path, new URL('https://x' + path), {}, scope);
+  const response = await (await call('/api/admin/tenants')).json();
+  assert.equal(queries.length, 2, 'lista y enrutado: no se consulta una vez por cliente');
+  for (const row of response.tenants) {
+    const own = await (await call(`/api/admin/tenants/${row.id}/channels`)).json();
+    assert.deepEqual(row.connection_summary, own.channels, row.slug);
+    for (const privateKey of ['sender_sid', 'telegram_chat_id', 'twilio_auth_token_enc', 'system_prompt']) {
+      assert.equal(privateKey in row, false, privateKey);
+    }
+  }
+  const summary = (id, kind) => response.tenants.find((r) => r.id === id).connection_summary.find((c) => c.kind === kind);
+  assert.deepEqual(summary(linked, 'telegram'), { kind: 'telegram', address: 'Equipo vinculado', state: 'live' });
+  assert.equal(summary(linked, 'web').address, 'example.com');
+  assert.equal(summary(linked, 'whatsapp').state, 'off');
+  assert.equal(summary(unrouted, 'whatsapp').state, 'unrouted');
+  assert.equal(summary(paused, 'web').state, 'inactive');
+  const main = response.tenants.find((r) => r.slug === 'velai');
+  assert.equal(summary(main.id, 'messenger').managed_by, 'Velai (Messenger)');
+  const global = await (await call('/api/admin/channels')).json();
+  assert.ok(global.unrouted.some((r) => r.tenant_id === unrouted), 'el detector de GOgestión se conserva con SQL real');
+  await db.prepare(`INSERT INTO tenant_channels (address,tenant_id,kind,created_at)
+    VALUES ('whatsapp:+34910000001',?,'whatsapp','2026-09-16')`).bind(unrouted).run();
+  const resolved = await (await call('/api/admin/channels')).json();
+  assert.ok(!resolved.unrouted.some((r) => r.tenant_id === unrouted), 'la incidencia desaparece al registrar su ruta');
+  assert.equal(resolved.channels.find((r) => r.tenant_id === unrouted).state, 'live');
+  const count = queries.length;
+  await assert.rejects(call('/api/admin/tenants', { role: 'cliente', tenantId: linked }), (e) => e.code === 'not_authorized');
+  await assert.rejects(call('/api/admin/channels', { role: 'cliente', tenantId: linked }), (e) => e.code === 'not_authorized');
+  assert.equal(queries.length, count, 'el cliente no llega a consultar datos globales');
+});
+
 test('canales: la vista diagnostica el enrutado real y delata el sender vivo SIN fila (bot mudo en verde)', async () => {
   const CH = [
     // atendido: fila, cliente activo y el From coincide
@@ -3402,7 +3440,10 @@ test('conversaciones: sesión de 72 h, ventana de 20 al modelo y recuento de «n
   assert.equal(env.DB.msgs.filter((m) => m.conversation_id === tras72h.id).length, 31, 'guardado íntegro: 1 + 30');
 });
 
-test('leer lead_id no altera el guardado completo de una conversación ya enlazada', async () => {
+test('leer lead_id no altera el guardado completo de una conversación ya enlazada', async (t) => {
+  // Reloj fijado: convLoad mide la sesión de 72 h contra Date.now() y las fechas de esta
+  // prueba son absolutas — sin fijarlo, la prueba caduca sola con el calendario.
+  t.mock.timers.enable({ apis: ['Date'], now: new Date('2026-09-03T10:00:00.000Z') });
   const env = { DB: withConversations({
     prepare: () => ({ bind: () => ({ first: async () => null, all: async () => ({ results: [] }), run: async () => ({}) }) }),
     batch: async () => [],
@@ -4330,7 +4371,9 @@ test('el sondeo del widget devuelve solo lo del equipo y marca que el visitante 
   const conv = { id: 'c-web', state: 'humano', state_at: null };
   const mensajes = [
     { id: 11, role: 'assistant', text: 'respuesta del bot', created_at: 'x' },
-    { id: 12, role: 'agent', text: 'Hola, soy Ana del equipo', created_at: 'y' },
+    { id: 12, role: 'agent', text: 'Hola, soy Ana del equipo', created_at: 'y', agent_email: 'ana.lopez+turno@cliente.test' },
+    { id: 13, role: 'agent', text: 'Continúo yo', created_at: 'z', agent_email: 'juan-perez@cliente.test' },
+    { id: 14, role: 'agent', text: 'Mensaje antiguo', created_at: 'z', agent_email: null },
   ];
   const writes = [];
   const env = { DB: {
@@ -4352,7 +4395,10 @@ test('el sondeo del widget devuelve solo lo del equipo y marca que el visitante 
   assert.equal(d.state, 'humano');
   // El bot ya lo pintó quien lo pidió: repetirlo duplicaría la conversación en pantalla.
   // (El filtro de rol vive en el widget; aquí se comprueba que llegan los ids para el cursor.)
-  assert.deepEqual(d.messages.map((m) => m.id), [11, 12]);
+  assert.deepEqual(d.messages.map((m) => m.id), [11, 12, 13, 14]);
+  assert.deepEqual(d.messages.map((m) => m.agent_name), [null, 'Ana lopez', 'Juan perez', null]);
+  assert.equal(JSON.stringify(d).includes('@'), false);
+  assert.equal(JSON.stringify(d).includes('agent_email'), false);
   assert.equal(d.messages.find((m) => m.role === 'agent').text, 'Hola, soy Ana del equipo');
   // La marca de presencia: sin ella, el panel no sabe si escribe a una pestaña cerrada.
   assert.ok(writes.some((w) => /visitor_seen_at/.test(w.sql)), 'se marca al visitante como presente');
@@ -4955,7 +5001,10 @@ test('las etiquetas del globo no pueden romper el formato aunque vengan de fuera
   assert.equal(fila.slice(fila.lastIndexOf(':') + 1), '9');
 });
 
-test('leads por día trae el desglose por canal, y suma lo mismo que la barra', async () => {
+test('leads por día trae el desglose por canal, y suma lo mismo que la barra', async (t) => {
+  // Reloj fijado: fillSeries construye los 14 días desde «hoy» y estas filas llevan
+  // fechas absolutas — sin fijarlo, la prueba caduca sola con el calendario.
+  t.mock.timers.enable({ apis: ['Date'], now: new Date('2026-09-01T12:00:00.000Z') });
   const filas = [
     { d: '2026-08-30', source: 'whatsapp', n: 4 },
     { d: '2026-08-30', source: 'chat web', n: 2 },
@@ -4985,7 +5034,10 @@ test('leads por día trae el desglose por canal, y suma lo mismo que la barra', 
   assert.deepEqual(vacio.canales, []);
 });
 
-test('el gasto de IA trae las llamadas POR CLIENTE de cada día', async () => {
+test('el gasto de IA trae las llamadas POR CLIENTE de cada día', async (t) => {
+  // Reloj fijado: la serie de ai-usage cubre los últimos `days` desde «hoy» y estas
+  // filas llevan fechas absolutas — sin fijarlo, la prueba caduca sola con el calendario.
+  t.mock.timers.enable({ apis: ['Date'], now: new Date('2026-09-01T12:00:00.000Z') });
   const rows = [
     { tenant_id: 't1', day: '2026-08-31', model: 'm', calls: 5, in_tokens: 10, out_tokens: 5, cache_w_tokens: 0, cache_r_tokens: 0, tenant_name: 'GOgestión', slug: 'gogestion' },
     { tenant_id: 't2', day: '2026-08-31', model: 'm', calls: 2, in_tokens: 4, out_tokens: 2, cache_w_tokens: 0, cache_r_tokens: 0, tenant_name: 'Zoe', slug: 'zoe' },
@@ -5561,20 +5613,13 @@ test('cancelar_cita: el teléfono del remitente MANDA, la ambigüedad lista y el
   assert.equal(basura.ok, true, 'con una sola cita, fecha_hora inválida se ignora');
 });
 
-test('cancelar_cita en el chat web: sin teléfono pide el teléfono; con uno ajeno no hay citas', async () => {
-  const { localToUtcMs } = await import('../worker/calendar.js');
-  const day = nextWorkday();
-  const citas = [{ id: '00000000-0000-4000-8000-0000000000c4', tenant_id: 't-cal', status: 'confirmed', customer_name: 'Ana', customer_phone: '612345678', reason: null, starts_at: new Date(localToUtcMs('Europe/Madrid', day, '10:00')).toISOString(), timezone: 'Europe/Madrid', provider_event_id: null }];
-  const updates = [];
-  const env = { DB: citasDb(citas, updates) };
-  const cal = { tenant_id: 't-cal', calendar_id: 'primary', timezone: 'Europe/Madrid', slot_minutes: 30, business_hours: null };
-  const exec = testing.calendarExecutor(env, { id: 't-cal', slug: 'uno', name: 'Uno' }, cal, { channel: 'web', conversationKey: 'c1', defaultPhone: '' });
-  assert.equal(JSON.parse(await exec('cancelar_cita', {})).error, 'telefono_requerido');
-  assert.equal(JSON.parse(await exec('cancelar_cita', { telefono: '+34699999999' })).error, 'sin_citas_futuras');
-  assert.equal(updates.length, 0);
-  // El teléfono guardado sin prefijo casa con el mismo número con +34 (samePhone).
-  const ok = JSON.parse(await exec('cancelar_cita', { telefono: '+34612345678' }));
-  assert.equal(ok.ok, true);
+test('gestionar por chat web exige el enlace privado: conocer un teléfono no autoriza', async () => {
+  const env = { DB: { prepare() { throw new Error('must not enumerate appointments'); } } };
+  const cal = { tenant_id:'t-cal' };
+  const exec=testing.calendarExecutor(env,{id:'t-cal'},cal,{channel:'web',conversationKey:'c1',defaultPhone:''});
+  for(const name of ['cancelar_cita','confirmar_cita']) for(const input of [{},{telefono:'+34612345678'}]) {
+    assert.equal(JSON.parse(await exec(name,input)).error,'manage_link_required');
+  }
 });
 
 // ── Confirmaciones en el panel: bloque del GET del calendario + interruptor solo-Velai ──
@@ -5650,7 +5695,7 @@ test('GET /plantillas por rol: velai la matriz global con opciones; el cliente S
   const call = (scope) => testing.adminRouter(adminReq(path), env, ctx, path, new URL('https://x' + path), {}, scope);
   const out = await (await call(VELAI)).json();
   // El catálogo es LA lista completa: el registro Y la legacy de columnas.
-  assert.deepEqual(out.kinds.map((k) => `${k.kind}:${k.fuente}`).sort(), ['aviso_lead:columnas', 'recordatorio_cita:registro']);
+  assert.deepEqual(out.kinds.map((k) => `${k.kind}:${k.fuente}`).sort(), ['aviso_lead:columnas', 'confirmacion_reserva:registro', 'recordatorio_cita:registro']);
   assert.ok(out.kinds.every((k) => k.label));
   // El orden del SQL (activos primero) se respeta tal cual.
   assert.deepEqual(out.tenants.map((t) => t.slug), ['beta', 'alfa']);
@@ -6114,4 +6159,104 @@ test('aprobar con la MISMA pareja no recrea nada; rechazar exige nota y el clien
     const path = '/api/admin/solicitudes/9/aprobar';
     await assert.rejects(testing.adminRouter(adminReq(path, { method: 'POST' }), env, { waitUntil() {} }, path, new URL('https://x' + path), {}, CLIENTE), (e) => e.status === 403);
   } finally { globalThis.fetch = realFetch; }
+});
+
+
+test('el lanzador v15 retira los dos scripts externos de marca', async () => {
+  for (const file of ['assistant-brand.js', 'velai-assistant-polish.js']) {
+    await assert.rejects(readFile(new URL('../site/assets/' + file, import.meta.url)), { code: 'ENOENT' });
+  }
+});
+
+test('validateTenant valida retrato, acento y límites de la bienvenida', () => {
+  const fields = { portrait_url: 'https://example.com/p.png', accent_color: '#FF914F',
+    teaser_title: 'x'.repeat(90), teaser_title_en: 'y'.repeat(90),
+    teaser_copy: 'x'.repeat(210), teaser_copy_en: 'y'.repeat(210) };
+  const out = testing.validateTenant(fields, { partial: true });
+  assert.equal(out.accent_color, '#FF914F');
+  assert.equal(out.portrait_url, fields.portrait_url);
+  for (const key of ['teaser_title', 'teaser_title_en']) assert.equal(out[key].length, 80);
+  for (const key of ['teaser_copy', 'teaser_copy_en']) assert.equal(out[key].length, 200);
+  for (const key of Object.keys(fields)) assert.equal(testing.validateTenant({ [key]: '' }, { partial: true })[key], null);
+  assert.throws(() => testing.validateTenant({ accent_color: 'naranja' }, { partial: true }), (e) => e.code === 'invalid_accent_color');
+  assert.throws(() => testing.validateTenant({ portrait_url: 'http://example.com/p.png' }, { partial: true }), (e) => e.code === 'invalid_portrait_url');
+});
+
+test('subir retrato guarda y audita portrait_url sin canales ni sincronización de WhatsApp', async () => {
+  const TID = '00000000-0000-4000-8000-0000000000d1';
+  const writes = [], puts = [], deleted = [], pending = [];
+  const env = {
+    KV: { async get() { return null; }, async put(...args) { puts.push(args); }, async delete(key) { deleted.push(key); } },
+    DB: { prepare: (sql) => ({ bind: (...args) => ({
+      first: async () => ({ id: TID, slug: 'mio', portrait_url: 'https://example.com/old.png',
+        sender_sid: 'XE' + 'a'.repeat(32), twilio_subaccount_sid: 'AC' + 'b'.repeat(32) }),
+      run: async () => { writes.push({ sql, args }); return { meta: { changes: 1 } }; },
+      all: async () => ({ results: [] }),
+    }) }) },
+  };
+  const path = `/api/admin/tenants/${TID}/logo`;
+  const url = new URL('https://x' + path + '?kind=portrait&channels=invalid');
+  const png = new Uint8Array(200); png.set([0x89, 0x50, 0x4e, 0x47]);
+  const post = (bytes) => testing.adminRouter(adminReq(path, { method: 'POST', body: bytes }), env,
+    { waitUntil(p) { pending.push(p); } }, path, url, {}, { role: 'cliente', tenantId: TID });
+  const res = await (await post(png)).json();
+  assert.equal(res.kind, 'portrait');
+  assert.match(res.portrait_url, /\/media\/portraits\/.*\.png\?v=\d+/);
+  const update = writes.find((w) => w.sql.startsWith('UPDATE tenants SET portrait_url='));
+  assert.equal(update.args[0], res.portrait_url);
+  assert.ok(writes.every((w) => !w.sql.includes('SET logo')));
+  const version = writes.find((w) => w.sql.includes('INSERT INTO tenant_versions'));
+  assert.deepEqual(JSON.parse(version.args[3]), { portrait_url: 'https://example.com/old.png' });
+  assert.match(version.args[4], /retrato subido a/);
+  assert.equal(pending.length, 0, 'no pushSenderProfile aunque haya sender');
+  assert.ok(deleted.length > 0, 'invalida caché');
+  assert.equal(puts[0][2].metadata.contentType, 'image/png');
+  await assert.rejects(post(new Uint8Array(200)), (e) => e.code === 'invalid_image');
+  await assert.rejects(post(new Uint8Array(2 * 1024 * 1024 + 1)), (e) => e.code === 'image_too_large');
+});
+
+
+test('widget: loader y cabecera en la misma versión, ventana nueva y cinco sugerencias', async () => {
+  const loader = await readFile(new URL('../site/assets/vai.js', import.meta.url), 'utf8');
+  assert.match(loader, /currentScript/);
+  assert.match(loader, /vai-widget\.js\?v=/);
+  const widget = await readFile(new URL('../site/assets/vai-widget.js', import.meta.url), 'utf8');
+  // La versión no se clava aquí: el loader debe coincidir con la cabecera del widget,
+  // que es lo que rompe la caché. check-site.mjs añade a esto los 27 HTML.
+  assert.equal(loader.match(/V = '(\d+)'/)[1], widget.match(/· v(\d+)/)[1]);
+  assert.equal(widget.includes('#075e54'), false);
+  // Un tenant sin textos propios cae a copy genérico, jamás al reclamo de Velai.
+  assert.match(widget, /TENANT \? T\.teaserTitleGen : T\.teaserTitle/);
+  assert.match(widget, /TENANT \? T\.teaserCopyGen : T\.teaserCopy/);
+  assert.match(widget, /TENANT \? \[\] : T\.chips/);
+  // El telón y el bloqueo del fondo son de v19: en móvil la ventana deja 108 px para el
+  // lanzador y por ese hueco se veía —y se movía— la web del cliente.
+  for (const token of ['.vai-hero', 'is-empty', 'is-open', 'prefers-color-scheme', '· v20', '#vaiScrim', 'bloquearFondo']) assert.ok(widget.includes(token));
+  const chips = ['Uno', 'Dos', 'Tres', 'Cuatro', 'Cinco'];
+  assert.deepEqual(JSON.parse(testing.validateTenant({ chips_json: chips }, { partial: true }).chips_json), chips);
+});
+
+test('autoagenda: host dedicado no expone assets, admin, OAuth ni chat', async () => {
+  const worker = createWorker({ SYSTEM: '', DEMOS: {}, GUARDRAILS: '' });
+  const env = { BOOKING_ORIGIN: 'https://citas.hirevai.com', ADMIN_ORIGIN: 'https://admin.hirevai.com', PANEL_V2: '1', ASSETS: { fetch() { throw new Error('ASSETS must be unreachable'); } } };
+  for (const path of ['/index.html', '/assets/index-secret.js', '/api/admin/leads', '/oauth/calendar/callback', '/widget/boot', '/chat']) {
+    const res = await worker.fetch(new Request(`https://citas.hirevai.com${path}`), env, { waitUntil() {} });
+    assert.equal(res.status, 404, path);
+    assert.equal((await res.json()).error, 'not_found');
+  }
+});
+
+test('autoagenda: fail-closed y reserva ausente en otros hosts; admin conserva Access', async () => {
+  const worker = createWorker({ SYSTEM: '', DEMOS: {}, GUARDRAILS: '' });
+  const base = { ADMIN_ORIGIN: 'https://admin.hirevai.com', PANEL_V2: '1', ASSETS: { fetch() { throw new Error('no assets without identity'); } } };
+  for (const origin of ['', 'http://citas.hirevai.com', 'https://admin.hirevai.com', 'https://api.hirevai.com', 'https://citas.hirevai.com/unsafe']) {
+    const res = await worker.fetch(new Request('https://citas.hirevai.com/dialogos/reservas'), { ...base, BOOKING_ORIGIN: origin }, { waitUntil() {} });
+    assert.equal(res.status, 404);
+  }
+  for (const host of ['api.hirevai.com', 'vai-worker.botnexo-ia.workers.dev']) {
+    const res = await worker.fetch(new Request(`https://${host}/dialogos/reservas`), { ...base, BOOKING_ORIGIN: 'https://citas.hirevai.com' }, { waitUntil() {} });
+    assert.equal(res.status, 404);
+  }
+  const admin = await worker.fetch(new Request('https://admin.hirevai.com/dialogos/reservas'), { ...base, BOOKING_ORIGIN: 'https://citas.hirevai.com' }, { waitUntil() {} });
+  assert.equal(admin.status, 401, 'admin sigue exigiendo identidad, nunca muestra reservas');
 });

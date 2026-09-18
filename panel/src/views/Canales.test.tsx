@@ -3,10 +3,11 @@
 import { QueryClientProvider } from '@tanstack/react-query';
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { MemoryRouter } from 'react-router';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createQueryClient } from '../api/queryClient';
 import { ToastProvider } from '../components/Toasts';
-import { chNorm, channelsBad, filterChannels } from '../lib/canales';
+import { chNorm, channelIncidents, channelsBad, filterChannels } from '../lib/canales';
 import { Canales } from './Canales';
 import type { ChannelsResponse } from '../api/types';
 
@@ -58,16 +59,33 @@ describe('lógica pura de canales', () => {
     expect(r.rows[0]?.slug).toBe('gogestion');
     // El número se encuentra tecleado sin prefijo.
     expect(filterChannels(data, { q: '+34910000002', tenant: '', state: '' }).rows).toHaveLength(1);
+    // Los enlaces del Dashboard conservan la dirección completa, incluido el prefijo.
+    expect(filterChannels(data, { q: 'whatsapp:+34910000001', tenant: '', state: '' }).rows).toHaveLength(1);
   });
 
   it('el filtro «requieren atención» excluye lo atendido pero NUNCA los sin enrutar', () => {
     const r = filterChannels(data, { q: '', tenant: '', state: 'alert' });
-    expect(r.rows.map((c) => c.state)).toEqual(['inactive']);
+    expect(r.rows).toHaveLength(0); // una pausa deliberada no es una incidencia
     expect(r.unrouted).toHaveLength(1);
   });
 
-  it('la píldora global cuenta lo que requiere atención (inactivo + sin enrutar)', () => {
-    expect(channelsBad(data)).toBe(2);
+  it('cuenta incidencias, sin tratar clientes inactivos como averías', () => {
+    expect(channelsBad(data)).toBe(1);
+    expect(channelsBad({ channels: data.channels, unrouted: [{ ...data.unrouted[0]!, active: 0 }] })).toBe(0);
+  });
+
+  it('Enrutados conserva la alerta sin enrutar y respeta la búsqueda y el cliente', () => {
+    expect(filterChannels(data, { q: '', tenant: '', state: 'live' }).unrouted).toHaveLength(1);
+    expect(filterChannels(data, { q: '', tenant: 't1', state: 'live' }).unrouted).toHaveLength(0);
+  });
+
+  it('el diagnóstico de huérfanos no enlaza a una ficha inexistente; los desajustes abren el WhatsApp correcto', () => {
+    const incidents = channelIncidents({ channels: [
+      { ...data.channels[0]!, state: 'orphan', name: null, slug: null },
+      { ...data.channels[1]!, state: 'from_mismatch', active: 1 },
+    ], unrouted: [] });
+    expect(incidents[0]?.href).toBe('/canales?q=whatsapp%3A%2B34910000001');
+    expect(incidents[1]?.href).toBe('/conexiones?t=t2#whatsapp');
   });
 });
 
@@ -82,23 +100,41 @@ describe('vista Canales', () => {
     render(
       <QueryClientProvider client={createQueryClient()}>
         <ToastProvider>
-          <Canales />
+          <MemoryRouter><Canales /></MemoryRouter>
         </ToastProvider>
       </QueryClientProvider>,
     );
     await waitFor(() => expect(screen.getAllByText('GOgestión').length).toBeGreaterThan(0));
-    expect(screen.getAllByText('atendido').length).toBeGreaterThan(1); // flag + leyenda
+    expect(screen.getByText('Enrutado')).toBeInTheDocument();
     expect(screen.getByText('cliente inactivo')).toBeInTheDocument();
     // La alarma del caso gogestion: sender vivo sin fila que lo enrute.
-    expect(screen.getByText(/el worker NO atiende/)).toBeInTheDocument();
+    expect(screen.getByText(/Números de WhatsApp sin enrutar/)).toBeInTheDocument();
     expect(screen.getByText('+34910000003')).toBeInTheDocument();
-    expect(screen.getByText(/2 canales requieren atención/)).toBeInTheDocument();
+    expect(screen.getByText('1 incidencia')).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Revisar WhatsApp de Barbería López' })).toHaveAttribute('href', '/conexiones?t=t3#whatsapp');
 
     // Filtrar: el contador pasa a «X de Y canales» con el TOTAL del sistema.
     const user = userEvent.setup();
+    await user.selectOptions(screen.getByRole('combobox', { name: 'Estado' }), 'live');
+    expect(screen.getByText('+34910000003')).toBeInTheDocument();
+    await user.selectOptions(screen.getByRole('combobox', { name: 'Estado' }), '');
     await user.type(screen.getByPlaceholderText(/Buscar número/), 'dialogos');
-    await waitFor(() => expect(screen.getByText('1 de 2 canales')).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText('1 de 2 rutas')).toBeInTheDocument());
     // En la tabla solo queda Diálogos (GOgestión sigue en el <select>, nada más).
     expect(screen.getAllByText('GOgestión')).toHaveLength(1);
+  });
+
+  it('Actualizar consulta aunque la caché esté fresca y retira una incidencia resuelta', async () => {
+    let current = data;
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify(current)));
+    vi.stubGlobal('fetch', fetchMock);
+    render(<QueryClientProvider client={createQueryClient()}><MemoryRouter><Canales /></MemoryRouter></QueryClientProvider>);
+    await screen.findByText('1 incidencia');
+    current = { channels: data.channels, unrouted: [] };
+    await userEvent.click(screen.getByRole('button', { name: 'Actualizar' }));
+    expect(await screen.findByText('Sin incidencias de configuración')).toBeInTheDocument();
+    expect(screen.queryByText('+34910000003')).not.toBeInTheDocument();
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(screen.getByText(/Última consulta:/)).toBeInTheDocument();
   });
 });
