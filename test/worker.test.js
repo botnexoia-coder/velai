@@ -6313,6 +6313,52 @@ test('autoagenda: fail-closed y reserva ausente en otros hosts; admin conserva A
   assert.equal(admin.status, 401, 'admin sigue exigiendo identidad, nunca muestra reservas');
 });
 
+test('formulario externo firmado crea una sola vez lead, reserva, consentimiento y avisos', async (t) => {
+  const DB = await sqliteD1(); t.after(() => DB.close());
+  const tenantId = '653aaff5-8b17-4d71-a181-aa4b3c9f688d';
+  await DB.prepare(`INSERT INTO tenants
+    (id,slug,name,channel_address,system_prompt,active,created_at,updated_at)
+    VALUES (?,?,?,?,?,1,?,?)`).bind(tenantId, 'colegiale-sevilla', 'NAYA Eventos', 'web:naya-test', 'PENDIENTE',
+      '2026-09-19T00:00:00.000Z', '2026-09-19T00:00:00.000Z').run();
+  await DB.prepare(`INSERT INTO tenant_events
+    (id,tenant_id,slug,name,status,created_at,updated_at)
+    VALUES (?,?,?,?, 'active',?,?)`).bind('7a000000-0000-4000-8000-000000000099', tenantId, 'fiesta-test', 'Noche de Solteros',
+      '2026-09-19T00:00:00.000Z', '2026-09-19T00:00:00.000Z').run();
+
+  const worker = createWorker({ SYSTEM: '', DEMOS: {}, GUARDRAILS: '' });
+  const env = { DB, EVENT_INTAKE_SECRET: 'secreto-de-integracion-suficientemente-largo' };
+  const integrationToken = await testing.eventIntakeToken(env.EVENT_INTAKE_SECRET, 'colegiale-sevilla');
+  const waits = [];
+  const ctx = { waitUntil(promise) { waits.push(promise); } };
+  const requestId = '9c6f17ab-e58d-4a68-b635-2d5015639a5d';
+  const payload = {
+    requestId, tenant: 'colegiale-sevilla', name: 'Prueba NAYA', whatsapp: '+34600000001',
+    event: 'Noche de Solteros y Solteras', attendees: 2, email: 'prueba@example.com', notes: 'Mesa tranquila',
+    contactConsent: true, marketingConsent: true, pageUrl: 'https://nayaeventos.com/',
+  };
+  const send = (token = integrationToken) => worker.fetch(new Request('https://api.hirevai.com/integrations/event-reservations', {
+    method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` }, body: JSON.stringify(payload),
+  }), env, ctx);
+
+  const denied = await send('incorrecto');
+  assert.equal(denied.status, 401);
+  const first = await send();
+  assert.equal(first.status, 201);
+  const firstBody = await first.json();
+  assert.equal(firstBody.reservation, 'event_reservation');
+  assert.equal(firstBody.duplicate, false);
+  const retry = await send();
+  assert.equal(retry.status, 201);
+  assert.equal((await retry.json()).duplicate, true);
+  await Promise.allSettled(waits);
+
+  assert.equal((await DB.prepare('SELECT COUNT(*) AS n FROM leads WHERE request_id=?').bind(requestId).first()).n, 1);
+  assert.equal((await DB.prepare('SELECT COUNT(*) AS n FROM event_reservations WHERE request_id=?').bind(requestId).first()).n, 1);
+  const consent = await DB.prepare('SELECT status,channel FROM contact_consents WHERE request_id=?').bind(requestId).first();
+  assert.deepEqual(consent, { status: 'accepted', channel: 'web' });
+  assert.equal((await DB.prepare('SELECT COUNT(*) AS n FROM lead_notifications WHERE lead_id=?').bind(firstBody.leadId).first()).n, 2);
+});
+
 test('eventos: una intención se guarda provisional y distingue una celebración propia', async () => {
   const writes = [];
   const env = { DB: { prepare(sql) { return { bind(...args) { return {

@@ -11,7 +11,7 @@ import { adminHost, adminIdentity } from '../middleware.js';
 import {
   HttpError, json, NO_STORE, publicCors, rateLimited, timingSafeEqual,
   adminPageResponse, handleTwilio, handleTelegramWebhook, handleWidgetBoot,
-  handleChatPoll, handleLead, handleChat, handleCalendarCallback,
+  handleChatPoll, handleLead, handleEventIntake, handleChat, handleCalendarCallback,
   mediaGet, MEDIA_KEY_RE,
 } from '../app.js';
 
@@ -140,6 +140,10 @@ const leadOChat = async (c) => {
 };
 publico.all('/lead', leadOChat);
 publico.all('/chat', leadOChat);
+
+// Formularios alojados fuera de Velai: exclusivamente servidor-a-servidor y con
+// secreto compartido. Nunca lleva CORS porque el navegador no debe poder llamarlo.
+publico.post('/integrations/event-reservations', async (c) => handleEventIntake(c.req.raw, c.env, c.executionCtx));
 
 // Mismo perímetro que el panel: solo en el hostname de Access (en el
 // público es un 404 idéntico al de cualquier ruta inexistente).

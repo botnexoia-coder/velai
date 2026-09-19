@@ -1640,6 +1640,90 @@ export async function handleLead(request, env, cors, ctx) {
   return json(result, 201, cors);
 }
 
+// Entrada servidor-a-servidor para formularios de clientes. No usa Turnstile porque
+// el navegador nunca conoce este endpoint ni su secreto: la web del cliente valida y
+// persiste primero, y su backend firma la entrega. El requestId hace idempotente todo
+// el recorrido (lead, reserva y consentimiento) ante reintentos de red.
+async function eventIntakeToken(secret, tenantSlug) {
+  const bytes = new TextEncoder();
+  const key = await crypto.subtle.importKey('raw', bytes.encode(secret), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
+  const signed = new Uint8Array(await crypto.subtle.sign('HMAC', key, bytes.encode(`event-intake:${tenantSlug}`)));
+  return btoa(String.fromCharCode(...signed)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+}
+
+export async function handleEventIntake(request, env, ctx) {
+  const secret = String(env.EVENT_INTAKE_SECRET || '');
+  if (!secret) throw new HttpError(404, 'not_found');
+  const body = await readJson(request);
+  const tenantSlug = clean(body.tenant, 40);
+  const authorization = request.headers.get('Authorization') || '';
+  const token = authorization.startsWith('Bearer ') ? authorization.slice(7) : '';
+  const expectedToken = await eventIntakeToken(secret, tenantSlug);
+  if (!timingSafeEqual(token, expectedToken)) throw new HttpError(401, 'invalid_integration_token');
+
+  if (!UUID_RE.test(body.requestId || '')) throw new HttpError(400, 'invalid_request_id');
+  const tenant = tenantSlug ? await tenantBySlug(env, tenantSlug) : null;
+  if (!tenant) throw new HttpError(400, 'invalid_tenant');
+
+  const name = clean(body.name, 100);
+  const phone = normalizePhone(body.whatsapp);
+  const eventLabel = clean(body.event, 160);
+  const email = clean(body.email, 200);
+  const notes = clean(body.notes, 1000);
+  const attendees = Number(body.attendees == null ? 1 : body.attendees);
+  if (!name) throw new HttpError(400, 'invalid_name');
+  if (!phone || !phone.startsWith('+')) throw new HttpError(400, 'invalid_phone');
+  if (!eventLabel) throw new HttpError(400, 'invalid_event');
+  if (!Number.isInteger(attendees) || attendees < 1 || attendees > 20) throw new HttpError(400, 'invalid_attendees');
+  if (body.contactConsent !== true) throw new HttpError(400, 'contact_consent_required');
+
+  const ownEvent = /(?:organizar|crear|montar|hacer)\s+(?:mi|nuestro|un)\s+(?:propio\s+)?evento|propio evento/i.test(eventLabel);
+  const activeEvent = ownEvent ? null : await activeTenantEvent(env, tenant.id);
+  const need = ownEvent
+    ? `Quiere organizar su propio evento (${attendees} ${attendees === 1 ? 'persona' : 'personas'})`
+    : `${eventLabel} · ${attendees} ${attendees === 1 ? 'persona' : 'personas'}`;
+  const detailParts = [need, email ? `Email: ${email}` : '', notes].filter(Boolean);
+  const result = await storeLead(env, ctx, {
+    requestId: body.requestId,
+    tenantId: tenant.id,
+    tenantIsDefault: tenant.slug === defaultTenantSlug(env),
+    source: 'formulario web de eventos',
+    name,
+    whatsapp: phone,
+    phone,
+    sector: 'Eventos',
+    channel: 'web',
+    score: null,
+    need,
+    note: notes || null,
+    context: email ? `Email: ${email}` : null,
+    pageUrl: clean(body.pageUrl, 500),
+    utm: safeUtm(body.utm),
+  });
+
+  const now = new Date().toISOString();
+  const consentStatus = body.marketingConsent === true ? 'accepted' : 'declined';
+  await env.DB.batch([
+    env.DB.prepare(`INSERT INTO event_reservations
+      (id,tenant_id,event_id,conversation_id,lead_id,kind,name,contact,details,status,created_at,updated_at,request_id)
+      VALUES (?,?,?,?,?,?,?,?,?,'pending',?,?,?)
+      ON CONFLICT(tenant_id,request_id) WHERE request_id IS NOT NULL DO UPDATE SET
+        lead_id=excluded.lead_id,event_id=excluded.event_id,name=excluded.name,contact=excluded.contact,
+        details=excluded.details,updated_at=excluded.updated_at`)
+      .bind(crypto.randomUUID(), tenant.id, activeEvent && activeEvent.id || null, null, result.leadId,
+        ownEvent ? 'own_event' : 'event_reservation', name, phone, clean(detailParts.join(' · '), 1000), now, now, body.requestId),
+    env.DB.prepare(`INSERT INTO contact_consents
+      (tenant_id,contact,purpose,status,channel,conversation_id,evidence,text_version,created_at,request_id)
+      VALUES (?,?,'future_events',?,'web',NULL,?,'future-events-web-v1',?,?)
+      ON CONFLICT(tenant_id,request_id) WHERE request_id IS NOT NULL DO NOTHING`)
+      .bind(tenant.id, phone, consentStatus,
+        body.marketingConsent === true ? 'Casilla opcional de futuros eventos marcada en el formulario web' : 'Casilla opcional de futuros eventos no marcada en el formulario web',
+        now, body.requestId),
+  ]);
+
+  return json({ ok: true, leadId: result.leadId, reservation: ownEvent ? 'own_event' : 'event_reservation', duplicate: result.duplicate }, 201, NO_STORE);
+}
+
 async function validTwilioSignature(authToken, url, params, signature) {
   if (!authToken || !signature) return false;
   const data = url + Object.keys(params).sort().map((key) => key + params[key]).join('');
@@ -4305,4 +4389,4 @@ export function createWorker(config) {
   };
 }
 
-export const testing = { scheduled, MINUTE_CRON, processReminders, reminderHoursFor, reminderTemplateVariables, samePhone, tenantTemplate, pollTemplateApprovals, REMINDER_KIND, waitedMin, QUEUE_MAX_MIN, QUEUE_WAIT_TEXT, canAttend, velaiTenantId, handleChatPoll, VISITOR_AWAY_MS, expireTakeovers, NO_ADVISOR_TEXT, graceExpired, systemWithHandoff, HANDOFF_ON, HANDOFF_OFF, supportWindows, withinSupportHours, advisorAvailable, CONV_STATES, TAKEOVER_GRACE_MIN, settleReply, TRUNCATED_CLOSING, trimToSentence, waBody, replyWindow, reportPeriod, reportMetric, weeklyReportText, weeklyStats, sendWeeklyReports, convLoad, convAppend, convLinkLead, convFilters, convRetentionDays, UNANSWERED_RE, CONV_WINDOW, cloudflareUsage, CF_FREE_LIMITS, recordConversation, aiCost, recordAiUsage, rateLimited, memLimited, applySenderProfile, pushSenderProfile, clean, persistLead, leadAlertStatus, captureWhatsAppLead, leadFromSummary, leadCaptureDone, activeTenantEvent, captureEventInterest, eventConsentReply, notificationText, errorResponseParts, tenantByAddress, syncPrimaryChannel, assertChannelFree, normalizePhone, extractPhone, extractPhoneFromMessages, safeUtm, publicCors, validTwilioSignature, callAnthropic, callAnthropicRaw, runToolLoop, calendarExecutor, calendarSystem, tenantCalendar, validCalendarDate, availableSlots, handleCalendarCallback, calendarCallbackFor, sendTwilioText, timingSafeEqual, telegramBotUsername, telegramSetWebhook, telegramWebhookInfo, handleTelegramWebhook, sendTelegramText, tenantTelegramToken, telegramThreadFor, registerTelegramTopic, csvCell, expiryDate, leadFilters, isDemoKey, templateVar, leadTemplateVariables, readJson, deliver, drainQueuedLeads, verifyTurnstile, systemFor, validateTenant, invalidateTenantCache, tenantWriteError, assertNotActivePending, tenantChannelSummary, channelsForScope, routingChannelState, handleProvision, pollProvisioning, fillSeries, resolveScope, scopeClause, assertOwnTenant, clienteAllowed, adminRouter, recordAuthFailure, handleAdmin, handleWidgetBoot, allowedOrigins, envOrigins, syncPanelGate, envAdmins, syncAdminGate, getSetting, setSetting, withCfToken };
+export const testing = { scheduled, MINUTE_CRON, processReminders, reminderHoursFor, reminderTemplateVariables, samePhone, tenantTemplate, pollTemplateApprovals, REMINDER_KIND, waitedMin, QUEUE_MAX_MIN, QUEUE_WAIT_TEXT, canAttend, velaiTenantId, handleChatPoll, handleEventIntake, eventIntakeToken, VISITOR_AWAY_MS, expireTakeovers, NO_ADVISOR_TEXT, graceExpired, systemWithHandoff, HANDOFF_ON, HANDOFF_OFF, supportWindows, withinSupportHours, advisorAvailable, CONV_STATES, TAKEOVER_GRACE_MIN, settleReply, TRUNCATED_CLOSING, trimToSentence, waBody, replyWindow, reportPeriod, reportMetric, weeklyReportText, weeklyStats, sendWeeklyReports, convLoad, convAppend, convLinkLead, convFilters, convRetentionDays, UNANSWERED_RE, CONV_WINDOW, cloudflareUsage, CF_FREE_LIMITS, recordConversation, aiCost, recordAiUsage, rateLimited, memLimited, applySenderProfile, pushSenderProfile, clean, persistLead, leadAlertStatus, captureWhatsAppLead, leadFromSummary, leadCaptureDone, activeTenantEvent, captureEventInterest, eventConsentReply, notificationText, errorResponseParts, tenantByAddress, syncPrimaryChannel, assertChannelFree, normalizePhone, extractPhone, extractPhoneFromMessages, safeUtm, publicCors, validTwilioSignature, callAnthropic, callAnthropicRaw, runToolLoop, calendarExecutor, calendarSystem, tenantCalendar, validCalendarDate, availableSlots, handleCalendarCallback, calendarCallbackFor, sendTwilioText, timingSafeEqual, telegramBotUsername, telegramSetWebhook, telegramWebhookInfo, handleTelegramWebhook, sendTelegramText, tenantTelegramToken, telegramThreadFor, registerTelegramTopic, csvCell, expiryDate, leadFilters, isDemoKey, templateVar, leadTemplateVariables, readJson, deliver, drainQueuedLeads, verifyTurnstile, systemFor, validateTenant, invalidateTenantCache, tenantWriteError, assertNotActivePending, tenantChannelSummary, channelsForScope, routingChannelState, handleProvision, pollProvisioning, fillSeries, resolveScope, scopeClause, assertOwnTenant, clienteAllowed, adminRouter, recordAuthFailure, handleAdmin, handleWidgetBoot, allowedOrigins, envOrigins, syncPanelGate, envAdmins, syncAdminGate, getSetting, setSetting, withCfToken };
