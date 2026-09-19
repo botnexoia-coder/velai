@@ -121,7 +121,7 @@ function MovimientoModal({ initial, tenants, onClose }: { initial: FinMovimiento
     e.preventDefault(); setError(null);
     if (!entero) { setError(new Error('importe_invalido')); return; }
     try {
-      await mutation.mutateAsync({ method: initial ? 'PATCH' : 'POST', id: initial?.id, body: initial ? { fecha, concepto_id: conceptoId, importe: entero, nota } : { tipo, moneda, fecha, concepto_id: conceptoId, importe: entero, nota, tenant_id: tipo === 'egreso' ? null : tenant || null } });
+      await mutation.mutateAsync({ method: initial ? 'PATCH' : 'POST', id: initial?.id, body: { tipo, ...(initial ? {} : { moneda }), fecha, concepto_id: conceptoId, importe: entero, nota, tenant_id: tipo === 'egreso' ? null : tenant || null } });
       toast('Movimiento guardado'); onClose();
     } catch (e) { setError(e); }
   }
@@ -131,8 +131,8 @@ function MovimientoModal({ initial, tenants, onClose }: { initial: FinMovimiento
   }
   return <Modal title={initial ? 'Detalle del movimiento' : 'Registrar movimiento'} close={onClose} busy={mutation.isPending}>
     {initial?.reparto_id ? <><p>Esta línea pertenece a un reparto para {initial.beneficiario}.</p><p><Dinero value={initial.importe} moneda={initial.moneda} /> · {initial.fecha}</p><p>Para corregirla, borra el reparto completo y vuelve a registrarlo.</p><Link className="btn" to="/finanzas?tab=repartos">Ver repartos</Link></> : <form onSubmit={(e) => void guardar(e)}>
-      <fieldset disabled={mutation.isPending} className="fin-fieldset"><legend>Tipo de movimiento</legend><div className="fin-segment">{TIPOS.map((t) => <button type="button" key={t} className={`btn ${t === tipo ? '' : 'alt'}`} disabled={Boolean(initial)} aria-pressed={t === tipo} onClick={() => { setTipo(t); setConcepto(''); }}>{LABEL[t]}</button>)}</div></fieldset>
-      <div className="fin-form"><label>Concepto<select required value={conceptoId || ''} onChange={(e) => setConcepto(e.target.value)} disabled={mutation.isPending || !catalogo.data}>{!opciones.length ? <option value="">No hay conceptos activos</option> : null}{initial && !opciones.some((c) => c.id === initial.concepto_id) ? <option value={initial.concepto_id}>{initial.concepto_nombre} (inactivo)</option> : null}{opciones.map((c) => <option key={c.id} value={c.id}>{c.nombre}</option>)}</select></label>
+      <fieldset disabled={mutation.isPending} className="fin-fieldset"><legend>Tipo de movimiento</legend><div className="fin-segment">{TIPOS.map((t) => <button type="button" key={t} className={`btn ${t === tipo ? '' : 'alt'}`} aria-pressed={t === tipo} onClick={() => { setTipo(t); setConcepto(''); }}>{LABEL[t]}</button>)}</div></fieldset>
+      <div className="fin-form"><label>Concepto<select required value={conceptoId || ''} onChange={(e) => setConcepto(e.target.value)} disabled={mutation.isPending || !catalogo.data}>{!opciones.length ? <option value="">No hay conceptos activos</option> : null}{initial && tipo === initial.tipo && !opciones.some((c) => c.id === initial.concepto_id) ? <option value={initial.concepto_id}>{initial.concepto_nombre} (inactivo)</option> : null}{opciones.map((c) => <option key={c.id} value={c.id}>{c.nombre}</option>)}</select></label>
         <label>Fecha<input type="date" required min="2025-01-01" value={fecha} onChange={(e) => setFecha(e.target.value)} /></label>
         <label>Moneda<select disabled={Boolean(initial)} value={moneda} onChange={(e) => { setMoneda(e.target.value as FinMoneda); setImporte(''); }}>{MONEDAS.map((m) => <option key={m}>{m}</option>)}</select></label>
         <label>Importe ({moneda})<input required inputMode="decimal" placeholder={moneda === 'EUR' ? '0,00' : '0'} value={importe} onChange={(e) => setImporte(e.target.value)} /><small>{moneda === 'EUR' ? 'Euros, hasta dos decimales' : 'Pesos enteros, sin decimales'}</small></label>

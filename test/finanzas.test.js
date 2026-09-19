@@ -119,6 +119,21 @@ test('catálogo: duplicados, renombrar, ordenar, desactivar y proteger el histó
   assert.equal((await api('finanzas/resumen')).monedas.EUR.caja, 0);
 });
 
+test('un movimiento existente puede corregirse de ingreso a gasto y recalcula las cuentas', async (t) => {
+  const { api, mov, conceptos, DB } = await fixture(t);
+  const creado = await mov('ingreso', 'EUR', 10000, '2025-02-10');
+  await api(`finanzas/movimientos/${creado.id}`, 'PATCH', {
+    tipo: 'gasto', concepto_id: conceptos.gasto[0].id, importe: 10000,
+    fecha: '2025-02-10', nota: 'Tipo corregido', tenant_id: null,
+  });
+  const guardado = await DB.prepare('SELECT tipo,concepto_id,nota FROM fin_movimientos WHERE id=?').bind(creado.id).first();
+  assert.deepEqual(guardado, { tipo: 'gasto', concepto_id: conceptos.gasto[0].id, nota: 'Tipo corregido' });
+  const resumen = await api('finanzas/resumen');
+  assert.equal(resumen.monedas.EUR.ingresos, 0);
+  assert.equal(resumen.monedas.EUR.gastos, 10000);
+  assert.equal(resumen.monedas.EUR.caja, -10000);
+});
+
 test('repartos: validación completa antes de escribir y rollback real si falla una línea del batch', async (t) => {
   const { DB, reparto } = await fixture(t);
   await assert.rejects(reparto([{ beneficiario: SOCIO.email, importe: 500 }, { beneficiario: SOCIO.email, importe: 0 }]), error(400, 'importe_invalido'));

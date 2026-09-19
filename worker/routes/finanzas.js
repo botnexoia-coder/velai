@@ -231,9 +231,10 @@ finanzas.patch('/api/admin/finanzas/movimientos/:id', async (c) => {
   const old = await exists(env, 'fin_movimientos', c.req.param('id'));
   if (old.reparto_id) throw new HttpError(409, 'linea_de_reparto');
   const b = await bodyOf(request);
-  if (Object.keys(b).some((k) => !['importe', 'fecha', 'concepto_id', 'nota'].includes(k))) fail('campo_no_editable');
+  if (Object.keys(b).some((k) => !['tipo', 'importe', 'fecha', 'concepto_id', 'nota', 'tenant_id'].includes(k))) fail('campo_no_editable');
   const m = await validateMovimiento(env, { ...old, ...b }, old);
-  const result = await env.DB.prepare('UPDATE fin_movimientos SET importe=?, fecha=?, concepto_id=?, nota=? WHERE id=?').bind(m.importe, m.fecha, m.concepto_id, m.nota, old.id).run();
+  const result = await env.DB.prepare('UPDATE fin_movimientos SET tipo=?, importe=?, fecha=?, concepto_id=?, nota=?, tenant_id=? WHERE id=?')
+    .bind(m.tipo, m.importe, m.fecha, m.concepto_id, m.nota, m.tenant_id, old.id).run();
   if (!result.meta.changes) throw new HttpError(404, 'not_found');
   return json({ ok: true }, 200, NO_STORE);
 });

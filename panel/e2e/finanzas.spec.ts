@@ -115,6 +115,24 @@ test('móvil, tema oscuro y acceso cerrado a un administrador no socio', async (
   expect(calls).toEqual([]);
 });
 
+test('tablet: permite corregir el tipo desde Detalle del movimiento', async ({ page, fin }) => {
+  await page.setViewportSize({ width: 820, height: 1180 });
+  await page.goto('/finanzas');
+  await page.getByRole('button', { name: 'Registrar movimiento' }).click();
+  let dialog = page.getByRole('dialog', { name: 'Registrar movimiento' });
+  await dialog.getByLabel('Importe (EUR)').fill('25');
+  await dialog.getByRole('button', { name: 'Guardar movimiento' }).click();
+  await page.getByRole('button', { name: 'Cuota mensual de cliente', exact: true }).click();
+  dialog = page.getByRole('dialog', { name: 'Detalle del movimiento' });
+  await expect(dialog.getByRole('button', { name: 'Gasto', exact: true })).toBeEnabled();
+  await dialog.getByRole('button', { name: 'Gasto', exact: true }).click();
+  await expect(dialog.getByLabel('Concepto')).toContainText('Anthropic (IA)');
+  await dialog.getByRole('button', { name: 'Guardar movimiento' }).click();
+  await expect(dialog).toHaveCount(0);
+  expect((await fin.DB.prepare('SELECT tipo FROM fin_movimientos').first())?.tipo).toBe('gasto');
+  await expect(page.getByRole('region', { name: 'Resumen EUR' })).toContainText('−€ 25,00');
+});
+
 test('Socios: alta, edición, reparto, baja conservando histórico y reactivación', async ({ page, fin }) => {
   const errors: string[] = []; page.on('pageerror', (e) => errors.push(e.message));
   await page.goto('/finanzas?tab=socios');
