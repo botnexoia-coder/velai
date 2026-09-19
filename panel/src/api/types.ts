@@ -16,6 +16,53 @@ export interface Me {
   tenantLogo: string | null;
   /** El cliente lo necesita para llamar a SUS rutas /tenants/:id/…; para velai es null. */
   tenantId: string | null;
+  /** Activa la vista operativa si el tenant tiene al menos un evento configurado. */
+  eventsEnabled?: boolean;
+}
+
+export type EventReservationStatus = 'pending' | 'confirmed' | 'cancelled';
+export interface TenantEvent {
+  id: string;
+  tenant_id?: string;
+  tenant_name?: string | null;
+  slug: string;
+  name: string;
+  starts_at: string | null;
+  venue: string | null;
+  address: string | null;
+  status: 'draft' | 'active' | 'closed' | 'archived';
+  updated_at: string;
+}
+export interface EventReservation {
+  id: string;
+  tenant_id?: string;
+  tenant_name?: string | null;
+  event_id: string | null;
+  event_name: string | null;
+  conversation_id: string | null;
+  lead_id: string | null;
+  kind: 'event_reservation' | 'own_event';
+  name: string | null;
+  contact: string | null;
+  details: string | null;
+  status: EventReservationStatus;
+  created_at: string;
+  updated_at: string;
+}
+export interface ContactConsent {
+  id: number;
+  tenant_id?: string;
+  contact: string;
+  purpose: 'future_events';
+  status: 'accepted' | 'declined' | 'withdrawn';
+  channel: string;
+  evidence: string;
+  created_at: string;
+}
+export interface EventsResponse {
+  events: TenantEvent[];
+  reservations: EventReservation[];
+  consents: ContactConsent[];
 }
 
 export type LeadStatus = 'new' | 'contacted' | 'qualified' | 'won' | 'lost' | 'spam';

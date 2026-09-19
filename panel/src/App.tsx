@@ -11,6 +11,7 @@ import { Canales } from './views/Canales';
 import { Plantillas } from './views/Plantillas';
 import { Calendario } from './views/Calendario';
 import { Conexiones } from './views/Conexiones';
+import { Eventos } from './views/Eventos';
 import { Clientes } from './views/Clientes';
 import { TipHost } from './components/Tip';
 import { ConfirmarHost } from './components/Confirmar';
@@ -26,6 +27,7 @@ export function App() {
           <Route path="/leads" element={<Leads />} />
           <Route path="/conversaciones" element={<Conversaciones />} />
           <Route path="/calendario" element={<Calendario />} />
+          <Route path="/eventos" element={<Eventos />} />
           <Route path="/conexiones" element={<Conexiones />} />
           <Route path="/clientes" element={<Clientes />} />
           <Route path="/finanzas" element={<Suspense fallback={<p role="status">Cargando…</p>}><Finanzas /></Suspense>} />

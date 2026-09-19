@@ -26,6 +26,8 @@ import type {
   ChannelsResponse,
   ConfigInfo,
   EscalationsResponse,
+  EventsResponse,
+  EventReservationStatus,
   InboxResponse,
   LeadDetail,
   LeadsResponse,
@@ -88,6 +90,25 @@ export function useStats() {
   return useQuery({
     queryKey: ['stats'],
     queryFn: () => api<Stats>('/api/admin/stats', undefined, { quiet: quietRefetch(client, ['stats']) }),
+  });
+}
+
+// ── Eventos ─────────────────────────────────────────────────────────────────
+export function useEvents(enabled = true) {
+  const client = useQueryClient();
+  return useQuery({
+    queryKey: ['events'],
+    queryFn: () => api<EventsResponse>('/api/admin/events', undefined, { quiet: quietRefetch(client, ['events']) }),
+    enabled,
+  });
+}
+
+export function useEventReservationStatus() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, status }: { id: string; status: EventReservationStatus }) =>
+      apiPatch<OkResponse>(`/api/admin/events/reservations/${id}`, { status }),
+    onSuccess: () => void client.invalidateQueries({ queryKey: ['events'] }),
   });
 }
 

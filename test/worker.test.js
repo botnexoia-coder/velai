@@ -6312,3 +6312,36 @@ test('autoagenda: fail-closed y reserva ausente en otros hosts; admin conserva A
   const admin = await worker.fetch(new Request('https://admin.hirevai.com/dialogos/reservas'), { ...base, BOOKING_ORIGIN: 'https://citas.hirevai.com' }, { waitUntil() {} });
   assert.equal(admin.status, 401, 'admin sigue exigiendo identidad, nunca muestra reservas');
 });
+
+test('eventos: una intención se guarda provisional y distingue una celebración propia', async () => {
+  const writes = [];
+  const env = { DB: { prepare(sql) { return { bind(...args) { return {
+    first: async () => sql.includes('FROM tenant_events') ? { id: '70000000-0000-4000-8000-000000000001', name: 'Fiesta' } : null,
+    run: async () => { writes.push({ sql, args }); return { meta: { changes: 1 } }; },
+  }; } }; } } };
+  const tenant = { id: '60000000-0000-4000-8000-000000000001', slug: 'naya' };
+  await testing.captureEventInterest(env, tenant, '50000000-0000-4000-8000-000000000001', '40000000-0000-4000-8000-000000000001', 'whatsapp:+34600',
+    { name: 'Ana', need: 'Quiero reservar dos entradas', context: '' }, [{ role: 'user', content: 'quiero reservar' }]);
+  await testing.captureEventInterest(env, tenant, '50000000-0000-4000-8000-000000000002', '40000000-0000-4000-8000-000000000002', 'whatsapp:+34601',
+    { name: 'Luis', need: 'Quiero organizar mi cumpleaños', context: '' }, [{ role: 'user', content: 'quiero hacer mi evento' }]);
+  assert.equal(writes.length, 2);
+  assert.equal(writes[0].args[5], 'event_reservation');
+  assert.equal(writes[0].args[2], '70000000-0000-4000-8000-000000000001');
+  assert.equal(writes[1].args[5], 'own_event');
+  assert.equal(writes[1].args[2], null);
+});
+
+test('consentimiento: un sí aislado no vale, la pregunta explícita sí y BAJA siempre revoca', async () => {
+  const states = [];
+  const env = { DB: { prepare(sql) { return { bind(...args) { return {
+    first: async () => sql.includes('FROM tenant_events') ? { id: '70000000-0000-4000-8000-000000000001' } : null,
+    run: async () => { if (sql.includes('INSERT INTO contact_consents')) states.push(args[2]); return { meta: { changes: 1 } }; },
+  }; } }; } } };
+  const tenant = { id: '60000000-0000-4000-8000-000000000001', slug: 'naya' };
+  const base = { id: '50000000-0000-4000-8000-000000000001', messages: [{ role: 'assistant', content: '¿Confirmas la reserva?' }] };
+  assert.equal(await testing.eventConsentReply(env, tenant, base, 'whatsapp', 'whatsapp:+34600', 'sí'), null);
+  const asked = { ...base, messages: [{ role: 'assistant', content: '¿Quieres que guarde tu número para avisarte por WhatsApp de futuros eventos?' }] };
+  assert.match(await testing.eventConsentReply(env, tenant, asked, 'whatsapp', 'whatsapp:+34600', 'sí'), /Perfecto/);
+  assert.match(await testing.eventConsentReply(env, tenant, base, 'whatsapp', 'whatsapp:+34600', 'BAJA'), /registrado/);
+  assert.deepEqual(states, ['accepted', 'withdrawn']);
+});

@@ -224,6 +224,11 @@ body.dark .plchip.bad{color:var(--bad)}
 .muted{color:var(--muted)}.error{color:var(--bad)}
 .pager{text-align:center;margin:18px}
 .empty{text-align:center;padding:36px;color:var(--muted)}
+/* Eventos: deliberadamente operativo, no otro CRM. */
+.eventhero{display:flex;justify-content:space-between;gap:20px;padding:20px 22px;margin-bottom:16px;border:1px solid rgba(255,107,26,.22);border-radius:var(--r);background:linear-gradient(120deg,rgba(255,107,26,.10),rgba(57,135,229,.06))}
+.eventhero h2{font-family:var(--font-d);font-size:22px;margin:8px 0 4px}.eventhero p{margin:0 0 4px}.eventhero small{color:var(--muted)}
+.eventstats{margin-bottom:24px}.eventstats strong{display:block;font-family:var(--font-d);font-size:30px;margin:3px 0}.eventstats small{color:var(--muted)}
+.eventsection{margin:28px 2px 12px}.eventsection h2{font-family:var(--font-d);font-size:18px;margin:0 0 4px}.eventsection p{color:var(--muted);margin:0;font-size:13px}
 /* ── Modales ── */
 dialog{width:min(820px,calc(100% - 24px));max-height:92vh;overflow:auto;background:var(--bg2);color:var(--white);border:1px solid var(--border2);border-radius:var(--r);padding:0}
 dialog::backdrop{background:rgba(5,3,6,.78);backdrop-filter:blur(3px)}
