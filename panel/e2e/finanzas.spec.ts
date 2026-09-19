@@ -133,6 +133,32 @@ test('tablet: permite corregir el tipo desde Detalle del movimiento', async ({ p
   await expect(page.getByRole('region', { name: 'Resumen EUR' })).toContainText('−€ 25,00');
 });
 
+test('tablet: avisa y limpia los datos sin guardar al cambiar de tipo o cerrar', async ({ page, fin }) => {
+  void fin;
+  await page.setViewportSize({ width: 820, height: 1180 });
+  await page.goto('/finanzas');
+  await page.getByRole('button', { name: 'Registrar movimiento' }).click();
+  let dialog = page.getByRole('dialog', { name: 'Registrar movimiento' });
+  await dialog.getByLabel('Importe (EUR)').fill('87,50');
+  await dialog.getByRole('textbox', { name: 'Nota', exact: true }).fill('Dato todavía sin guardar');
+  await dialog.getByRole('button', { name: 'Gasto', exact: true }).click();
+  let confirm = page.getByRole('dialog', { name: '¿Cambiar el tipo de movimiento?' });
+  await expect(confirm).toContainText('si continúas, se borrarán');
+  await confirm.getByRole('button', { name: 'Seguir editando' }).click();
+  await expect(dialog.getByLabel('Importe (EUR)')).toHaveValue('87,50');
+  await dialog.getByRole('button', { name: 'Gasto', exact: true }).click();
+  confirm = page.getByRole('dialog', { name: '¿Cambiar el tipo de movimiento?' });
+  await confirm.getByRole('button', { name: 'Descartar y cambiar' }).click();
+  await expect(dialog.getByRole('button', { name: 'Gasto', exact: true })).toHaveAttribute('aria-pressed', 'true');
+  await expect(dialog.getByLabel('Importe (EUR)')).toHaveValue('');
+  await expect(dialog.getByRole('textbox', { name: 'Nota', exact: true })).toHaveValue('');
+  await dialog.getByLabel('Importe (EUR)').fill('12');
+  await dialog.getByRole('button', { name: 'Cerrar', exact: true }).click();
+  confirm = page.getByRole('dialog', { name: '¿Cerrar sin guardar?' });
+  await confirm.getByRole('button', { name: 'Descartar y cerrar' }).click();
+  await expect(dialog).toHaveCount(0);
+});
+
 test('Socios: alta, edición, reparto, baja conservando histórico y reactivación', async ({ page, fin }) => {
   const errors: string[] = []; page.on('pageerror', (e) => errors.push(e.message));
   await page.goto('/finanzas?tab=socios');

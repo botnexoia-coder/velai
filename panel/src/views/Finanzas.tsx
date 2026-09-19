@@ -101,10 +101,10 @@ function Movimientos({ dates }: { dates: FinFilters }) {
     {editing ? <MovimientoModal initial={editing === 'new' ? null : editing} tenants={tenants.data?.tenants || []} onClose={() => setEditing(null)} /> : null}
   </>;
 }
-function Modal({ title, children, close, busy = false }: { title: string; children: ReactNode; close: () => void; busy?: boolean }) {
+function Modal({ title, children, close, busy = false }: { title: string; children: ReactNode; close: () => void | Promise<void>; busy?: boolean }) {
   const ref = useRef<HTMLDialogElement>(null);
   useEffect(() => { ref.current?.showModal(); }, []);
-  return <dialog ref={ref} className="fin-modal" aria-label={title} onCancel={(e) => { if (busy) e.preventDefault(); }} onClose={close}><div className="modal-h"><strong>{title}</strong><button className="btn alt" type="button" disabled={busy} onClick={close}>Cerrar</button></div><div className="modal-b">{children}</div></dialog>;
+  return <dialog ref={ref} className="fin-modal" aria-label={title} onCancel={(e) => { e.preventDefault(); if (!busy) void close(); }}><div className="modal-h"><strong>{title}</strong><button className="btn alt" type="button" disabled={busy} onClick={() => void close()}>Cerrar</button></div><div className="modal-b">{children}</div></dialog>;
 }
 function MovimientoModal({ initial, tenants, onClose }: { initial: FinMovimiento | null; tenants: TenantRow[]; onClose: () => void }) {
   const catalogo = useFinConceptos(), mutation = useFinMutacion<Partial<FinMovimientoInput>>('movimientos'), toast = useToast();
@@ -117,6 +117,36 @@ function MovimientoModal({ initial, tenants, onClose }: { initial: FinMovimiento
   const opciones = catalogo.data?.conceptos[tipo] || [];
   const conceptoId = Number(concepto || opciones[0]?.id || 0);
   const entero = finImporte(importe, moneda);
+  const original = {
+    tipo: initial?.tipo || 'ingreso' as FinTipo,
+    concepto: String(initial?.concepto_id || ''), fecha: initial?.fecha || hoy(),
+    moneda: initial?.moneda || 'EUR' as FinMoneda,
+    importe: initial ? String(initial.importe / (initial.moneda === 'EUR' ? 100 : 1)) : '',
+    nota: initial?.nota || '', tenant: initial?.tenant_id || '',
+  };
+  const camposCambiados = Boolean((concepto && concepto !== original.concepto) || fecha !== original.fecha
+    || moneda !== original.moneda || importe !== original.importe || nota !== original.nota || tenant !== original.tenant);
+  // En un alta vacía se puede explorar Ingreso/Gasto/Egreso sin avisos. En edición,
+  // cambiar el tipo sí es una modificación pendiente y debe protegerse al salir.
+  const sucio = camposCambiados || Boolean(initial && tipo !== original.tipo);
+  async function descartar(motivo: 'tipo' | 'cerrar') {
+    if (!sucio) return true;
+    return confirmar({
+      titulo: motivo === 'tipo' ? '¿Cambiar el tipo de movimiento?' : '¿Cerrar sin guardar?',
+      cuerpo: 'Hay cambios sin guardar. Puedes volver para guardarlos; si continúas, se borrarán.',
+      accion: motivo === 'tipo' ? 'Descartar y cambiar' : 'Descartar y cerrar',
+      cancelar: 'Seguir editando', peligro: true,
+    });
+  }
+  async function cambiarTipo(next: FinTipo) {
+    if (next === tipo || !await descartar('tipo')) return;
+    setTipo(next); setConcepto(''); setError(null);
+    if (sucio) {
+      setFecha(original.fecha); setMoneda(original.moneda); setImporte(original.importe);
+      setNota(original.nota); setTenant(next === 'egreso' ? '' : original.tenant);
+    } else if (next === 'egreso') setTenant('');
+  }
+  async function cerrar() { if (await descartar('cerrar')) onClose(); }
   async function guardar(e: React.FormEvent) {
     e.preventDefault(); setError(null);
     if (!entero) { setError(new Error('importe_invalido')); return; }
@@ -129,9 +159,9 @@ function MovimientoModal({ initial, tenants, onClose }: { initial: FinMovimiento
     if (!initial || !await confirmar({ titulo: '¿Borrar este movimiento?', cuerpo: 'Se recalcularán la caja y el beneficio.', accion: 'Borrar movimiento', peligro: true })) return;
     try { await mutation.mutateAsync({ method: 'DELETE', id: initial.id }); toast('Movimiento borrado'); onClose(); } catch (e) { setError(e); }
   }
-  return <Modal title={initial ? 'Detalle del movimiento' : 'Registrar movimiento'} close={onClose} busy={mutation.isPending}>
+  return <Modal title={initial ? 'Detalle del movimiento' : 'Registrar movimiento'} close={cerrar} busy={mutation.isPending}>
     {initial?.reparto_id ? <><p>Esta línea pertenece a un reparto para {initial.beneficiario}.</p><p><Dinero value={initial.importe} moneda={initial.moneda} /> · {initial.fecha}</p><p>Para corregirla, borra el reparto completo y vuelve a registrarlo.</p><Link className="btn" to="/finanzas?tab=repartos">Ver repartos</Link></> : <form onSubmit={(e) => void guardar(e)}>
-      <fieldset disabled={mutation.isPending} className="fin-fieldset"><legend>Tipo de movimiento</legend><div className="fin-segment">{TIPOS.map((t) => <button type="button" key={t} className={`btn ${t === tipo ? '' : 'alt'}`} aria-pressed={t === tipo} onClick={() => { setTipo(t); setConcepto(''); }}>{LABEL[t]}</button>)}</div></fieldset>
+      <fieldset disabled={mutation.isPending} className="fin-fieldset"><legend>Tipo de movimiento</legend><div className="fin-segment">{TIPOS.map((t) => <button type="button" key={t} className={`btn ${t === tipo ? '' : 'alt'}`} aria-pressed={t === tipo} onClick={() => void cambiarTipo(t)}>{LABEL[t]}</button>)}</div></fieldset>
       <div className="fin-form"><label>Concepto<select required value={conceptoId || ''} onChange={(e) => setConcepto(e.target.value)} disabled={mutation.isPending || !catalogo.data}>{!opciones.length ? <option value="">No hay conceptos activos</option> : null}{initial && tipo === initial.tipo && !opciones.some((c) => c.id === initial.concepto_id) ? <option value={initial.concepto_id}>{initial.concepto_nombre} (inactivo)</option> : null}{opciones.map((c) => <option key={c.id} value={c.id}>{c.nombre}</option>)}</select></label>
         <label>Fecha<input type="date" required min="2025-01-01" value={fecha} onChange={(e) => setFecha(e.target.value)} /></label>
         <label>Moneda<select disabled={Boolean(initial)} value={moneda} onChange={(e) => { setMoneda(e.target.value as FinMoneda); setImporte(''); }}>{MONEDAS.map((m) => <option key={m}>{m}</option>)}</select></label>
