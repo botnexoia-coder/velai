@@ -49,6 +49,7 @@ describe('shell y navegación por rol', () => {
   it('velai ve la gestión completa: Clientes, Canales y Configuración', async () => {
     renderApp(meVelai);
     await waitFor(() => expect(screen.getByRole('tab', { name: /clientes/i })).toBeInTheDocument());
+    expect(screen.getByRole('tab', { name: 'Eventos' })).toBeInTheDocument();
     expect(screen.getByRole('tab', { name: /canales/i })).toBeInTheDocument();
     expect(within(screen.getByRole('navigation', { name: 'Sistema' })).getByRole('tab', { name: 'Diagnóstico de canales' })).toBeInTheDocument();
     expect(screen.getByRole('tab', { name: /configuración/i })).toBeInTheDocument();

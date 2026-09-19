@@ -17,12 +17,24 @@ export function Eventos() {
   const [selected, setSelected] = useState('');
   const events = query.data?.events ?? [];
   const eventId = selected || events.find((e) => e.status === 'active')?.id || events[0]?.id || '';
-  const reservations = useMemo(
-    () => (query.data?.reservations ?? []).filter((r) => r.kind === 'own_event' || !eventId || r.event_id === eventId),
-    [eventId, query.data?.reservations],
-  );
-  const consents = query.data?.consents ?? [];
   const current = events.find((e) => e.id === eventId);
+  // El administrador recibe varios tenants. La selección de un evento también fija el
+  // tenant de la vista para que reservas propias y consentimientos no se mezclen entre
+  // clientes. En el panel de cliente tenant_id se elimina de la respuesta y el filtro
+  // conserva, correctamente, todas sus filas.
+  const currentTenantId = current?.tenant_id;
+  const reservations = useMemo(
+    () => (query.data?.reservations ?? []).filter((r) => {
+      if (!eventId) return true;
+      if (r.kind === 'own_event') return !currentTenantId || r.tenant_id === currentTenantId;
+      return r.event_id === eventId;
+    }),
+    [currentTenantId, eventId, query.data?.reservations],
+  );
+  const consents = useMemo(
+    () => (query.data?.consents ?? []).filter((c) => !currentTenantId || c.tenant_id === currentTenantId),
+    [currentTenantId, query.data?.consents],
+  );
   const pending = reservations.filter((r) => r.status === 'pending').length;
   const confirmed = reservations.filter((r) => r.status === 'confirmed').length;
   const accepted = consents.filter((c) => c.status === 'accepted').length;
@@ -40,7 +52,7 @@ export function Eventos() {
         <div><h1>Eventos</h1><p>Reservas y consentimiento, sin perder el hilo de WhatsApp</p></div>
         {events.length > 1 ? (
           <span className="sel"><select aria-label="Evento" value={eventId} onChange={(e) => setSelected(e.target.value)}>
-            {events.map((event) => <option key={event.id} value={event.id}>{event.name}</option>)}
+            {events.map((event) => <option key={event.id} value={event.id}>{event.tenant_name ? `${event.tenant_name} · ` : ''}{event.name}</option>)}
           </select></span>
         ) : null}
       </div>
@@ -48,6 +60,7 @@ export function Eventos() {
       {current ? (
         <section className="eventhero">
           <div><span className="flag ok">{current.status === 'active' ? 'Activo' : current.status}</span><h2>{current.name}</h2>
+            {current.tenant_name ? <p><b>{current.tenant_name}</b></p> : null}
             <p>{eventDate(current.starts_at)} · {current.venue || 'Lugar por confirmar'}</p>
             {current.address ? <small>{current.address}</small> : null}
           </div>
