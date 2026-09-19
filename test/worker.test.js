@@ -3,6 +3,7 @@ import { sqliteD1 } from './helpers/sqlite-d1.js';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { createWorker, testing } from '../worker/app.js';
+import { esSocio } from '../worker/middleware.js';
 import { encryptSecret, decryptSecret } from '../worker/crypto.js';
 import { deploymentDecision, deploymentScope, deploymentScopeForPush } from '../scripts/deploy-scope.mjs';
 
@@ -1460,6 +1461,57 @@ test('admins: resolveScope reconoce a un admin de D1 y un admin de D1 no puede s
     testing.adminRouter(usersReq({ method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email: 'estivenrojas09@gmail.com' }) }),
       { DB: db, ADMIN_EMAILS: '' }, { waitUntil() {} }, usersPath(), new URL('https://x' + usersPath()), {}, VELAI),
     (e) => e.status === 400 && e.code === 'email_is_admin');
+});
+
+// ── Permisos finos (migración 0040): solo la cuenta raíz los concede ──
+test('permisos: solo la raíz los toca, solo se dan a admins y abren Finanzas de verdad', async (t) => {
+  const DB = await sqliteD1(); t.after(() => DB.close());
+  const env = { ADMIN_EMAILS: 'raiz@velai.ai', SOCIOS_EMAILS: 'raiz@velai.ai,toml@velai.ai', DB };
+  // La 0040 siembra a Estiven, que ya era admin y el 2026-09-19 entra a Finanzas.
+  assert.deepEqual((await DB.prepare('SELECT email,permiso FROM admin_permisos').all()).results,
+    [{ email: 'estivenrojas09@gmail.com', permiso: 'finanzas' }]);
+  await DB.exec("DELETE FROM admin_permisos; INSERT INTO admin_users (email,created_by,created_at) VALUES ('ana@velai.ai','raiz@velai.ai','2026-09-19');");
+  const RAIZ = { role: 'velai', tenantId: null, email: 'raiz@velai.ai' };
+  const call = (init, suffix = '', scope = RAIZ) => {
+    const url = new URL('https://admin.hirevai.com/api/admin/permisos' + suffix);
+    return testing.adminRouter(new Request(url, init), env, { waitUntil() {} }, url.pathname, url, {}, scope);
+  };
+  const post = (body, scope) => call({ method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }, '', scope);
+
+  // Un admin del panel NO puede concederse el permiso a sí mismo: esa es la garantía
+  // que hacía que SOCIOS_EMAILS tuviera que vivir fuera de D1.
+  const ANA = { role: 'velai', tenantId: null, email: 'ana@velai.ai' };
+  for (const init of [{}, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }]) {
+    await assert.rejects(call(init, '', ANA), (e) => e.status === 403 && e.code === 'root_only');
+  }
+  await assert.rejects(call({ method: 'DELETE' }, '/finanzas/ana%40velai.ai', ANA), (e) => e.status === 403 && e.code === 'root_only');
+
+  // El catálogo sale del worker y los del entorno se ven marcados, no borrables.
+  const antes = await (await call({})).json();
+  assert.deepEqual(antes.catalogo.map((a) => a.id), ['finanzas']);
+  assert.deepEqual(antes.concedidos, []);
+  assert.deepEqual(antes.fijos.sort((a, b) => a.email.localeCompare(b.email)), [
+    { email: 'raiz@velai.ai', permiso: 'finanzas', motivo: 'raiz' },
+    { email: 'toml@velai.ai', permiso: 'finanzas', motivo: 'entorno' },
+  ]);
+
+  // Validaciones: permiso inexistente, correo que no es admin, y los que ya lo tienen.
+  await assert.rejects(post({ email: 'ana@velai.ai', permiso: 'inventado' }), (e) => e.status === 400 && e.code === 'permiso_invalido');
+  await assert.rejects(post({ email: 'nadie@velai.ai', permiso: 'finanzas' }), (e) => e.status === 409 && e.code === 'email_no_es_admin');
+  await assert.rejects(post({ email: 'raiz@velai.ai', permiso: 'finanzas' }), (e) => e.status === 409 && e.code === 'permiso_de_raiz');
+  await assert.rejects(post({ email: 'toml@velai.ai', permiso: 'finanzas' }), (e) => e.status === 409 && e.code === 'permiso_del_entorno');
+
+  assert.equal((await post({ email: 'ANA@velai.ai', permiso: 'finanzas' })).status, 201);
+  await assert.rejects(post({ email: 'ana@velai.ai', permiso: 'finanzas' }), (e) => e.status === 409 && e.code === 'permiso_duplicado');
+  const despues = await (await call({})).json();
+  assert.deepEqual(despues.concedidos, [{ email: 'ana@velai.ai', permiso: 'finanzas', otorgado_por: 'raiz@velai.ai', otorgado_en: despues.concedidos[0].otorgado_en }]);
+  assert.equal(esSocio(env, await testing.resolveScope(env, 'ana@velai.ai')), true);
+
+  // Quitarlo: lo del entorno se explica en vez de devolver un 404 desconcertante.
+  await assert.rejects(call({ method: 'DELETE' }, '/finanzas/toml%40velai.ai'), (e) => e.status === 400 && e.code === 'permiso_del_entorno');
+  await assert.rejects(call({ method: 'DELETE' }, '/finanzas/nadie%40velai.ai'), (e) => e.status === 404 && e.code === 'not_found');
+  assert.equal((await call({ method: 'DELETE' }, '/finanzas/ANA%40velai.ai')).status, 200);
+  assert.equal(esSocio(env, await testing.resolveScope(env, 'ana@velai.ai')), false);
 });
 
 // ── Configuración (solo raíz): rotación del token de API de Cloudflare ──

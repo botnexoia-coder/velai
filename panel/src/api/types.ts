@@ -670,6 +670,32 @@ export interface AdminMutationResponse {
   gate?: GateState;
 }
 
+// ── Permisos finos (GET/POST/DELETE /api/admin/permisos, solo admins raíz) ───
+/** Un área cerrada del panel. Hoy solo «finanzas»; el catálogo lo manda el worker. */
+export interface PermisoCatalogo {
+  id: string;
+  nombre: string;
+  detalle: string;
+}
+/** Concedido desde el panel: se puede quitar con un clic. */
+export interface PermisoConcedido {
+  email: string;
+  permiso: string;
+  otorgado_por: string;
+  otorgado_en: string;
+}
+/** Viene de la configuración del worker: se ve, no se toca desde aquí. */
+export interface PermisoFijo {
+  email: string;
+  permiso: string;
+  motivo: 'raiz' | 'entorno';
+}
+export interface PermisosResponse {
+  catalogo: PermisoCatalogo[];
+  concedidos: PermisoConcedido[];
+  fijos: PermisoFijo[];
+}
+
 // ── Calendario ───────────────────────────────────────────────────────────────
 /** GET /api/admin/tenants/:id/calendar (sin el refresh token, claro). */
 export interface CalendarRow {

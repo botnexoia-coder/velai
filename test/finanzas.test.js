@@ -44,6 +44,36 @@ test('cada endpoint cierra a no-socios antes de consultar; fin_socios no concede
   assert.equal((await api('me', 'GET', undefined, { ...SOCIO, email: 'intruso@velai.test' })).socio, false);
 });
 
+test('el permiso «finanzas» de admin_permisos abre el libro; quitarlo lo cierra (0040)', async (t) => {
+  const { env, DB, api } = await fixture(t);
+  // Admin del panel SIN entrada en SOCIOS_EMAILS: hoy no entra.
+  const email = 'estiven@velai.test';
+  await DB.prepare('INSERT INTO admin_users (email,created_by,created_at) VALUES (?,?,?)').bind(email, 'raiz@velai.test', '2026-09-19').run();
+  env.ADMIN_EMAILS = 'raiz@velai.test';
+  const sinPermiso = await testing.resolveScope(env, email);
+  assert.equal(sinPermiso.role, 'velai');
+  assert.deepEqual(sinPermiso.permisos, []);
+  assert.equal(esSocio(env, sinPermiso), false);
+  assert.equal((await api('me', 'GET', undefined, sinPermiso)).socio, false);
+
+  await DB.prepare('INSERT INTO admin_permisos (email,permiso,otorgado_por,otorgado_en) VALUES (?,?,?,?)')
+    .bind(email, 'finanzas', 'raiz@velai.test', '2026-09-19').run();
+  const conPermiso = await testing.resolveScope(env, email.toUpperCase());
+  assert.deepEqual(conPermiso.permisos, ['finanzas']);
+  assert.equal(esSocio(env, conPermiso), true);
+  assert.equal((await api('me', 'GET', undefined, conPermiso)).socio, true);
+  assert.ok((await api('finanzas/resumen', 'GET', undefined, conPermiso)).monedas);
+
+  // La raíz del entorno lleva todos los permisos sin fila que lo diga.
+  const raiz = await testing.resolveScope(env, 'raiz@velai.test');
+  assert.equal(raiz.raiz, true);
+  assert.equal(esSocio({ ...env, SOCIOS_EMAILS: '' }, raiz), true);
+
+  // Y revocarlo cierra: el scope se resuelve por petición, no se cachea.
+  await DB.prepare('DELETE FROM admin_permisos WHERE email=?').bind(email).run();
+  assert.equal(esSocio(env, await testing.resolveScope(env, email)), false);
+});
+
 test('aritmética de ambas monedas: caja de origen, beneficio del periodo y reparto por persona', async (t) => {
   const { mov, reparto, api } = await fixture(t);
   await mov('ingreso', 'EUR', 10000, '2025-01-01');

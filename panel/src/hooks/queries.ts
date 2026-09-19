@@ -14,6 +14,7 @@ import { quietRefetch } from '../api/queryClient';
 import type {
   AdminMutationResponse,
   AdminsResponse,
+  PermisosResponse,
   AiBalance,
   AiUsage,
   AppointmentsResponse,
@@ -684,6 +685,36 @@ export function useAdminDelete() {
   return useMutation({
     mutationFn: (email: string) => apiDelete<AdminMutationResponse>(`/api/admin/admins/${encodeURIComponent(email)}`),
     onSettled: () => void client.invalidateQueries({ queryKey: ['admins'] }),
+  });
+}
+// ── Permisos finos: solo la cuenta raíz los lee y los escribe (403 root_only) ──
+// Invalidan también ['me'], que es de donde el Shell saca `socio`: sin eso, quien
+// acaba de recibir Finanzas no ve la pestaña hasta recargar.
+export function usePermisos() {
+  return useQuery({
+    queryKey: ['permisos'],
+    queryFn: () => api<PermisosResponse>('/api/admin/permisos'),
+  });
+}
+export function usePermisoAdd() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (v: { email: string; permiso: string }) => apiPost<{ ok: true }>('/api/admin/permisos', v),
+    onSettled: () => {
+      void client.invalidateQueries({ queryKey: ['permisos'] });
+      void client.invalidateQueries({ queryKey: ['me'] });
+    },
+  });
+}
+export function usePermisoDelete() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (v: { email: string; permiso: string }) =>
+      apiDelete<{ ok: true }>(`/api/admin/permisos/${encodeURIComponent(v.permiso)}/${encodeURIComponent(v.email)}`),
+    onSettled: () => {
+      void client.invalidateQueries({ queryKey: ['permisos'] });
+      void client.invalidateQueries({ queryKey: ['me'] });
+    },
   });
 }
 /** El servidor decide con 403 root_only; el panel solo pinta (retry ya está apagado en 4xx). */

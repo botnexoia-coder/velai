@@ -94,18 +94,40 @@ export function envSocios(env) {
   return [...new Set(String(env.SOCIOS_EMAILS || '').split(',').map((x) => x.trim().toLowerCase()).filter(Boolean))];
 }
 
+// Permisos finos sobre áreas cerradas del panel (migración 0040). Se resuelven UNA vez,
+// al resolver el alcance, y viajan en el scope: así las guardas de cada handler siguen
+// siendo síncronas y no tocan D1 — test/finanzas.test.js exige que un no-socio reciba
+// 403 SIN una sola consulta, y ese barrido es lo que impide que la puerta número
+// dieciocho se escriba distinta.
+export const PERMISOS = ['finanzas'];
+
+export async function permisosDe(env, email) {
+  // En try/catch como admin_users (0009): si la tabla aún no está migrada el panel no
+  // se cae — simplemente no hay permisos concedidos y manda el entorno.
+  try {
+    const rows = (await env.DB.prepare('SELECT permiso FROM admin_permisos WHERE lower(email) = ?')
+      .bind(String(email).toLowerCase()).all()).results || [];
+    return [...new Set(rows.map((r) => r.permiso).filter((p) => PERMISOS.includes(p)))];
+  } catch (_) { return []; }
+}
+
+// Dos orígenes, a propósito: SOCIOS_EMAILS es la raíz (sobrevive a cualquier borrado de
+// D1) y admin_permisos es lo que la cuenta raíz concede y revoca desde el panel.
 export function esSocio(env, scope) {
-  return scope.role === 'velai' && envSocios(env).includes(String(scope.email || '').toLowerCase());
+  return scope.role === 'velai' && (
+    envSocios(env).includes(String(scope.email || '').toLowerCase())
+    || (scope.permisos || []).includes('finanzas'));
 }
 
 export async function resolveScope(env, email) {
   const who = String(email).toLowerCase();
-  if (envAdmins(env).includes(who)) return { role: 'velai', tenantId: null, email };
+  // Raíz = todos los permisos, sin fila que lo diga: es la cuenta que los concede.
+  if (envAdmins(env).includes(who)) return { role: 'velai', tenantId: null, email, raiz: true, permisos: PERMISOS };
   // Admins gestionados desde el panel (admin_users, migración 0009). En try/catch:
   // si la tabla aún no existe, el panel no se cae — simplemente no hay admins de D1.
   try {
     const admin = await env.DB.prepare('SELECT email FROM admin_users WHERE lower(email) = ?').bind(who).first();
-    if (admin) return { role: 'velai', tenantId: null, email };
+    if (admin) return { role: 'velai', tenantId: null, email, raiz: false, permisos: await permisosDe(env, who) };
   } catch (_) {}
   const row = await env.DB.prepare('SELECT tenant_id, role FROM tenant_users WHERE lower(email) = ?')
     .bind(who).first();

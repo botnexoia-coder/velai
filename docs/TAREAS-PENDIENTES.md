@@ -58,8 +58,9 @@ decide quién puede cerrar cada cosa:
       con el equipo de GOgestión.»
 - [ ] **Juan: rol velai para `juanesgarciag@gmail.com`** si quiere abrir Finanzas con su
       correo personal (Configuración → Admins, que escribe `admin_users`). Estar en
-      `SOCIOS_EMAILS` NO basta: `esSocio` exige las dos cosas. Hoy la pestaña solo la ve
-      `botnexo.ia@gmail.com`, que es admin raíz.
+      `SOCIOS_EMAILS` NO basta: `esSocio` exige las dos cosas. Hoy la pestaña la ven
+      `botnexo.ia@gmail.com` (admin raíz) y `estivenrojas09@gmail.com` (admin del panel con
+      el permiso `finanzas` de la migración 0040).
 - [ ] **Juan: quitar `botnexo.ia@gmail.com` de Finanzas → Socios.** Decidido el
       2026-09-17: **la cuenta de nexo no cobra, solo entra**; los beneficiarios son
       personas. La migración 0038 la sembró como beneficiario activo (con el correo como

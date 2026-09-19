@@ -3,7 +3,7 @@
 // infraestructura, la Configuración de admins raíz (token de Cloudflare, webhook de
 // Telegram) y los admins gestionados. Migrado tal cual del adminRouter monolítico.
 import { Hono } from 'hono';
-import { partesAdmin, envAdmins, esSocio } from '../middleware.js';
+import { partesAdmin, envAdmins, envSocios, esSocio, PERMISOS } from '../middleware.js';
 import { verifyCfToken } from '../cloudflare.js';
 import {
   HttpError, json, NO_STORE, clean, readJson, getSetting, setSetting,
@@ -129,6 +129,10 @@ const soloRaiz = async (c, next) => {
 configuracion.use('/api/admin/config', soloRaiz);
 configuracion.use('/api/admin/config/cf-token', soloRaiz);
 configuracion.use('/api/admin/config/telegram-webhook', soloRaiz);
+// Conceder permisos es EXACTAMENTE lo que no puede poder un admin del panel: por eso
+// estas rutas comparten la puerta del token de Cloudflare y no la de los admins.
+configuracion.use('/api/admin/permisos', soloRaiz);
+configuracion.use('/api/admin/permisos/:permiso/:email', soloRaiz);
 
 configuracion.get('/api/admin/config', async (c) => {
   const { env } = partesAdmin(c);
@@ -226,6 +230,72 @@ configuracion.delete('/api/admin/admins/:email', async (c) => {
   ctx.waitUntil(sendTelegramText(env, `👑 <b>${escapeHtml(actor)}</b> quitó al ADMIN <code>${escapeHtml(email)}</code>.`).catch(() => {}));
   const gate = await syncAdminGate(env, ctx);
   return json({ ok: true, gate }, 200, NO_STORE);
+});
+
+// ── Permisos finos (migración 0040, SOLO admins raíz) ───────────────────────
+// Rol velai abre el panel; esto abre las áreas cerradas de dentro. Hoy solo Finanzas.
+// Quién los concede es la mitad importante: `soloRaiz` = ADMIN_EMAILS del entorno, así
+// que un admin dado de alta en el panel no puede ascenderse solo — que era justo el
+// motivo por el que SOCIOS_EMAILS se quedó fuera de D1 en 0037.
+const CATALOGO = [{
+  id: 'finanzas',
+  nombre: 'Finanzas',
+  detalle: 'El libro interno: movimientos, repartos, conceptos y socios. Ve y edita todo el dinero de Velai.',
+}];
+
+configuracion.get('/api/admin/permisos', async (c) => {
+  const { env } = partesAdmin(c);
+  let concedidos = [];
+  try {
+    concedidos = (await env.DB.prepare('SELECT email, permiso, otorgado_por, otorgado_en FROM admin_permisos ORDER BY permiso, email COLLATE NOCASE').all()).results || [];
+  } catch (_) {}
+  // Los del entorno se listan igual que los admins raíz: se ven, no se quitan desde
+  // aquí. Ver a quién le entra el permiso «por el toml» es la mitad de la pregunta.
+  const fijos = [
+    ...envAdmins(env).flatMap((email) => PERMISOS.map((permiso) => ({ email, permiso, motivo: 'raiz' }))),
+    ...envSocios(env).filter((email) => !envAdmins(env).includes(email)).map((email) => ({ email, permiso: 'finanzas', motivo: 'entorno' })),
+  ];
+  return json({ catalogo: CATALOGO, concedidos, fijos }, 200, NO_STORE);
+});
+
+configuracion.post('/api/admin/permisos', async (c) => {
+  const { request, env, ctx, actor } = partesAdmin(c);
+  const body = await readJson(request, 2000);
+  const email = String(body.email || '').trim().toLowerCase();
+  const permiso = String(body.permiso || '').trim();
+  if (!PANEL_EMAIL_RE.test(email) || email.length > 200) throw new HttpError(400, 'invalid_email');
+  if (!PERMISOS.includes(permiso)) throw new HttpError(400, 'permiso_invalido');
+  // Un permiso a quien no es admin no abre nada y además miente en la lista: el
+  // catálogo de personas es admin_users, no este. Raíz y entorno ya lo tienen.
+  if (envAdmins(env).includes(email)) throw new HttpError(409, 'permiso_de_raiz');
+  if (permiso === 'finanzas' && envSocios(env).includes(email)) throw new HttpError(409, 'permiso_del_entorno');
+  const admin = await env.DB.prepare('SELECT email FROM admin_users WHERE lower(email) = ?').bind(email).first();
+  if (!admin) throw new HttpError(409, 'email_no_es_admin');
+  try {
+    await env.DB.prepare('INSERT INTO admin_permisos (email, permiso, otorgado_por, otorgado_en) VALUES (?,?,?,?)')
+      .bind(email, permiso, actor, new Date().toISOString()).run();
+  } catch (e) {
+    if (/UNIQUE|PRIMARY KEY/i.test(String(e.message || ''))) throw new HttpError(409, 'permiso_duplicado');
+    throw e;
+  }
+  console.log(JSON.stringify({ level: 'info', code: 'permiso_concedido', email, permiso, actor }));
+  ctx.waitUntil(sendTelegramText(env, `🔐 <b>${escapeHtml(actor)}</b> dio a <code>${escapeHtml(email)}</code> el permiso <b>${escapeHtml(permiso)}</b>.`).catch(() => {}));
+  return json({ ok: true, email, permiso }, 201, NO_STORE);
+});
+
+configuracion.delete('/api/admin/permisos/:permiso/:email', async (c) => {
+  const { env, ctx, actor } = partesAdmin(c);
+  const permiso = c.req.param('permiso').trim();
+  const email = c.req.param('email').trim().toLowerCase();
+  // Quitarle a la raíz o al entorno un permiso que no sale de esta tabla borraría cero
+  // filas y devolvería un 404 desconcertante: se dice por qué.
+  if (envAdmins(env).includes(email)) throw new HttpError(400, 'permiso_de_raiz');
+  if (permiso === 'finanzas' && envSocios(env).includes(email)) throw new HttpError(400, 'permiso_del_entorno');
+  const result = await env.DB.prepare('DELETE FROM admin_permisos WHERE lower(email) = ? AND permiso = ?').bind(email, permiso).run();
+  if (!result.meta || !result.meta.changes) throw new HttpError(404, 'not_found');
+  console.log(JSON.stringify({ level: 'info', code: 'permiso_retirado', email, permiso, actor }));
+  ctx.waitUntil(sendTelegramText(env, `🔐 <b>${escapeHtml(actor)}</b> quitó a <code>${escapeHtml(email)}</code> el permiso <b>${escapeHtml(permiso)}</b>.`).catch(() => {}));
+  return json({ ok: true }, 200, NO_STORE);
 });
 
 // ── Consumo de infraestructura (solo Velai) ───────────────────────────────

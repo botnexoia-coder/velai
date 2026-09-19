@@ -64,7 +64,22 @@ rol velai.
   `BEFORE INSERT` dentro del propio batch: si el socio deja de estar activo a mitad, cae
   también la cabecera del reparto. Alta, cambio y baja dejan rastro (`created_by`/`created_at`
   en la ficha y `fin_socio_alta` / `fin_socio_cambio` / `fin_socio_baja` en el log).
-- **Pruebas**: `test/finanzas.test.js` (18 casos sobre SQLite real, con todas las migraciones y
+- **Permisos finos** (`0040_permisos.sql`): ser admin de Velai abría el panel pero no
+  Finanzas, y lo único que abría Finanzas era `SOCIOS_EMAILS` — una variable del `wrangler.toml`,
+  o sea un deploy por cada persona. Ahora hay `admin_permisos` (email × permiso, hoy solo
+  `finanzas`), que la cuenta raíz concede y revoca desde **Configuración → Permisos**. La
+  garantía que mantenía la lista fuera de D1 no la daba el almacén sino quién escribe: las tres
+  rutas comparten la puerta `soloRaiz` del token de Cloudflare — raíz = `ADMIN_EMAILS` del
+  entorno—, así que **un admin dado de alta en el panel no puede ascenderse a sí mismo**.
+  `SOCIOS_EMAILS` se queda como la RAÍZ del acceso: si la tabla se vaciara entera, los correos
+  del toml siguen entrando, igual que `ADMIN_EMAILS` sobrevive a un `DELETE FROM admin_users`.
+  Los permisos se resuelven UNA vez en `resolveScope` y viajan en el scope, para que `esSocio`
+  siga siendo síncrono y el barrido adversario de los 17 handlers siga devolviendo 403 sin
+  tocar D1. Solo se conceden a quien ya es admin (un permiso suelto no abre nada y mentiría en
+  la lista) y quedan auditados en Telegram (🔐) y en el log (`permiso_concedido` /
+  `permiso_retirado`). Estiven (`estivenrojas09@gmail.com`) entra a Finanzas por esta tabla y
+  no por el toml, precisamente para poder quitárselo con un clic.
+- **Pruebas**: `test/finanzas.test.js` (19 casos sobre SQLite real, con todas las migraciones y
   las claves ajenas activas) cubre la aritmética de las dos monedas, el 403 a un velai NO socio
   sin permitirle una sola consulta, el rollback real de un reparto con una línea mala, la baja
   concurrente y un replay de la 0038 sobre el estado ya desplegado que demuestra que no mueve

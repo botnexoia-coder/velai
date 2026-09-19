@@ -15,9 +15,12 @@ import {
   useCfTokenClear,
   useCfTokenSave,
   useConfig,
+  usePermisoAdd,
+  usePermisoDelete,
+  usePermisos,
   useWebhookCheck,
 } from '../hooks/queries';
-import type { ConfigInfo, WebhookInfo } from '../api/types';
+import type { ConfigInfo, PermisoCatalogo, PermisosResponse, WebhookInfo } from '../api/types';
 
 export function Configuracion() {
   const { data: config, error: configError } = useConfig();
@@ -41,6 +44,7 @@ export function Configuracion() {
         ) : null}
       </div>
       <Admins />
+      <Permisos />
       {rootOnly ? (
         <p className="muted mt12">
           El estado de las integraciones y el token de Cloudflare son solo para admins raíz (los de la configuración del
@@ -155,6 +159,119 @@ function Admins() {
           }}
         >
           Añadir admin
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ── Permisos finos (solo admins raíz) ────────────────────────────────────────
+// Rol admin abre el panel; esto abre las áreas cerradas de dentro. La vista se calla
+// entera con 403 root_only: un admin normal no tiene por qué saber que existe.
+function Permisos() {
+  const { data, error } = usePermisos();
+  const { data: admins } = useAdmins();
+  const rootOnly = error instanceof ApiError && error.message === 'root_only';
+  if (rootOnly) return null;
+
+  return (
+    <div className="panelcard mt12">
+      <b>
+        Permisos
+        <span className="pt-count">{data ? `${data.catalogo.length === 1 ? '1 área' : `${data.catalogo.length} áreas`}` : ''}</span>
+      </b>
+      <p className="muted mt6">
+        Ser admin no abre estas áreas: hay que darlas una a una. Solo la cuenta raíz puede concederlas y quitarlas — un
+        admin no puede ascenderse a sí mismo. Los marcados «raíz» o «worker» vienen de la configuración del worker y no
+        se quitan desde aquí.
+      </p>
+      {error && !rootOnly ? <p className="error mt6">{traducir(error)}</p> : null}
+      {data
+        ? data.catalogo.map((area) => <Area key={area.id} area={area} data={data} admins={admins?.admins ?? []} />)
+        : null}
+    </div>
+  );
+}
+
+function Area({ area, data, admins }: { area: PermisoCatalogo; data: PermisosResponse; admins: { email: string; root: boolean }[] }) {
+  const add = usePermisoAdd();
+  const del = usePermisoDelete();
+  const toast = useToast();
+  const [email, setEmail] = useState('');
+
+  const fijos = data.fijos.filter((f) => f.permiso === area.id);
+  const concedidos = data.concedidos.filter((c) => c.permiso === area.id);
+  const yaTienen = new Set([...fijos, ...concedidos].map((p) => p.email.toLowerCase()));
+  // Solo se ofrece a quien ya es admin: dar el permiso a otro correo no abre nada.
+  const candidatos = admins.filter((a) => !a.root && !yaTienen.has(a.email.toLowerCase()));
+
+  return (
+    <div className="mt12">
+      <b>{area.nombre}</b>
+      <p className="muted mt6">{area.detalle}</p>
+      <div className="mt6">
+        {fijos.map((f) => (
+          <span key={`f-${f.email}`} className="flag ok">
+            {f.email} · {f.motivo === 'raiz' ? 'raíz' : 'worker'}
+          </span>
+        ))}
+        {concedidos.map((c) => (
+          <span key={`c-${c.email}`} className="flag off">
+            {c.email}
+            <a
+              href="#"
+              data-tip={`Concedido por ${c.otorgado_por}. Quitar el permiso: deja de ver ${area.nombre} al instante.`}
+              aria-label={`Quitar ${area.nombre} a ${c.email}`}
+              onClick={async (e) => {
+                e.preventDefault();
+                if (!(await confirmar({ titulo: `¿Quitar ${area.nombre} a ${c.email}?`, cuerpo: 'Sigue siendo admin, pero deja de ver esa área.', accion: 'Quitar permiso', peligro: true }))) return;
+                del.mutate(
+                  { email: c.email, permiso: area.id },
+                  { onSuccess: () => toast('Permiso quitado ✓'), onError: (e2) => toast(`NO quitado: ${traducir(e2)}`, false) },
+                );
+              }}
+            >
+              ✕
+            </a>
+          </span>
+        ))}
+        {fijos.length + concedidos.length === 0 ? <span className="muted">Nadie, salvo la cuenta raíz.</span> : null}
+      </div>
+      <div className="actions actions0">
+        <select
+          className="grow inpill"
+          value={email}
+          onChange={(e) => setEmail(e.target.value)}
+          aria-label={`Admin al que dar ${area.nombre}`}
+          disabled={candidatos.length === 0}
+        >
+          <option value="">{candidatos.length === 0 ? 'Todos los admins ya lo tienen' : `Dar ${area.nombre} a un admin…`}</option>
+          {candidatos.map((a) => (
+            <option key={a.email} value={a.email}>
+              {a.email}
+            </option>
+          ))}
+        </select>
+        <button
+          className="btn alt"
+          type="button"
+          disabled={!email}
+          onClick={async () => {
+            if (!email) return;
+            if (!(await confirmar({ titulo: `¿Dar ${area.nombre} a ${email}?`, cuerpo: area.detalle, accion: 'Dar permiso' }))) return;
+            add.mutate(
+              { email, permiso: area.id },
+              {
+                onSuccess: () => {
+                  setEmail('');
+                  toast(`Permiso concedido ✓ — lo verá al recargar el panel`);
+                },
+                onError: (e2) => toast(`Permiso NO concedido: ${traducir(e2)}`, false),
+              },
+            );
+          }}
+        >
+          Dar permiso
         </button>
       </div>
     </div>
