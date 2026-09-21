@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { traducir } from '../api/errors';
-import type { EventReservationStatus } from '../api/types';
+import type { EventPaymentStatus, EventReservationStatus } from '../api/types';
 import { useEventReservationStatus, useEvents } from '../hooks/queries';
 import { fmt } from '../lib/format';
 import { useToast } from '../components/Toasts';
@@ -8,6 +8,10 @@ import { useToast } from '../components/Toasts';
 function eventDate(value: string | null) {
   if (!value) return 'Fecha por confirmar';
   return new Intl.DateTimeFormat('es-ES', { dateStyle: 'long', timeStyle: 'short' }).format(new Date(value));
+}
+
+function euros(cents: number | null) {
+  return cents == null ? '—' : new Intl.NumberFormat('es-ES', { style: 'currency', currency: 'EUR' }).format(cents / 100);
 }
 
 export function Eventos() {
@@ -46,6 +50,13 @@ export function Eventos() {
     });
   }
 
+  function changePayment(id: string, payment_status: EventPaymentStatus) {
+    update.mutate({ id, payment_status }, {
+      onSuccess: () => toast('Pago actualizado ✓'),
+      onError: (error) => toast(`No se pudo actualizar: ${traducir(error)}`, false),
+    });
+  }
+
   return (
     <div>
       <div className="vhead">
@@ -63,6 +74,8 @@ export function Eventos() {
             {current.tenant_name ? <p><b>{current.tenant_name}</b></p> : null}
             <p>{eventDate(current.starts_at)} · {current.venue || 'Lugar por confirmar'}</p>
             {current.address ? <small>{current.address}</small> : null}
+            {current.advance_discount_percent ? <p><b>{current.promotion_label}</b>: {euros(current.advance_individual_price_cents)} por persona · {euros(current.advance_couple_price_cents)} por pareja ({current.advance_discount_percent}% con pago anticipado)</p> : null}
+            {current.promotion_terms ? <small>{current.promotion_terms}</small> : null}
           </div>
         </section>
       ) : null}
@@ -74,16 +87,20 @@ export function Eventos() {
       <div className="eventsection"><h2>Reservas e interesados</h2><p>La IA crea una ficha provisional; una persona confirma la reserva.</p></div>
       <div className="table">
         <table>
-          <thead><tr><th>Fecha</th><th>Tipo</th><th>Nombre</th><th>WhatsApp</th><th>Detalle</th><th>Estado</th></tr></thead>
+          <thead><tr><th>Fecha</th><th>Tipo</th><th>Nombre</th><th>WhatsApp</th><th>Detalle</th><th>Total</th><th>Pago</th><th>Estado</th></tr></thead>
           <tbody>
             {reservations.map((r) => <tr key={r.id}>
               <td>{fmt(r.updated_at)}</td><td>{r.kind === 'own_event' ? 'Evento propio' : 'Evento actual'}</td>
-              <td>{r.name || 'Por completar'}</td><td className="tel">{r.contact || '—'}</td><td>{r.details || '—'}</td>
+              <td>{r.name || 'Por completar'}</td><td className="tel">{r.contact || '—'}</td><td>{r.details || '—'}{r.conversation_id ? <><br /><a href={`/conversaciones?conversation=${encodeURIComponent(r.conversation_id)}`}>Abrir conversación</a></> : null}</td>
+              <td>{euros(r.quoted_total_cents)}{r.promotion_applied ? <small> · promo NAYA</small> : null}</td>
+              <td><span className="sel"><select aria-label={`Pago de ${r.name || r.contact || 'reserva'}`} value={r.payment_status || 'pending'} disabled={update.isPending} onChange={(e) => changePayment(r.id, e.target.value as EventPaymentStatus)}>
+                <option value="pending">Pendiente</option><option value="proof_received">Comprobante recibido</option><option value="verified">Verificado</option><option value="rejected">Rechazado</option><option value="refunded">Reembolsado</option>
+              </select></span></td>
               <td><span className="sel"><select aria-label={`Estado de ${r.name || r.contact || 'reserva'}`} value={r.status} disabled={update.isPending} onChange={(e) => change(r.id, e.target.value as EventReservationStatus)}>
                 <option value="pending">Pendiente</option><option value="confirmed">Confirmada</option><option value="cancelled">Cancelada</option>
               </select></span></td>
             </tr>)}
-            {query.data && !reservations.length ? <tr><td colSpan={6} className="empty">Todavía no hay reservas para este evento.</td></tr> : null}
+            {query.data && !reservations.length ? <tr><td colSpan={8} className="empty">Todavía no hay reservas para este evento.</td></tr> : null}
           </tbody>
         </table>
       </div>

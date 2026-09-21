@@ -6466,6 +6466,31 @@ test('eventos: solo guarda tras confirmar resumen con nombre completo y asistent
   assert.equal(writes[1].args[2], null);
 });
 
+test('eventos: conserva desglose, total y promoción ofrecidos en el cierre', () => {
+  assert.deepEqual(testing.eventReservationPricing(
+    'Resumen: 2 entradas de pareja a 45 € y 1 entrada individual a 27 €. Total: 117 €. Incluye 10 % de descuento por pago anticipado.',
+  ), { individualTickets: 1, coupleTickets: 2, totalCents: 11700, promotionApplied: 1 });
+  assert.deepEqual(testing.eventReservationPricing('Resumen sin precio todavía.'), {
+    individualTickets: null, coupleTickets: null, totalCents: null, promotionApplied: 0,
+  });
+});
+
+test('eventos: un comprobante recibido queda pendiente de validación y da respaldo para la entrada', async () => {
+  const updates = [];
+  const env = { DB: { prepare(sql) { return { bind(...args) { return {
+    first: async () => sql.includes('FROM event_reservations') ? { id: '80000000-0000-4000-8000-000000000001' } : null,
+    run: async () => { updates.push({ sql, args }); return { meta: { changes: 1 } }; },
+  }; } }; } } };
+  const reply = await testing.eventPaymentProofReply(env, { id: 'tenant-naya' }, {
+    id: '50000000-0000-4000-8000-000000000001',
+    messages: [{ role: 'assistant', content: 'Haz el Bizum y envía el comprobante por este WhatsApp.' }],
+  }, true);
+  assert.match(reply, /pendiente de validación/i);
+  assert.match(reply, /muestra en la entrada/i);
+  assert.equal(updates.length, 1);
+  assert.match(updates[0].sql, /payment_status='proof_received'/);
+});
+
 test('eventos: un saludo o un sí sin resumen confirmado nunca crea una reserva', async () => {
   const writes = [];
   const env = { DB: { prepare(sql) { return { bind(...args) { return {

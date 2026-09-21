@@ -1829,15 +1829,24 @@ async function captureEventInterest(env, tenant, convId, leadId, contact, fields
   const own = /(?:mi|nuestro|hacer|organizar|montar|preparar)\s+(?:propio\s+)?evento|cumplea[nñ]os|despedida|boda|comuni[oó]n|celebraci[oó]n|fiesta privada/i.test(combined);
   const kind = own ? 'own_event' : 'event_reservation';
   const details = clean([closing.summary, fields.need, fields.context].filter(Boolean).join(' · ') || transcript, 1000);
+  const pricing = eventReservationPricing(closing.summary);
   const now = new Date().toISOString();
   try {
     await env.DB.prepare(`INSERT INTO event_reservations
-      (id,tenant_id,event_id,conversation_id,lead_id,kind,name,contact,details,status,created_at,updated_at)
-      VALUES (?,?,?,?,?,?,?,?,?,'pending',?,?)
+      (id,tenant_id,event_id,conversation_id,lead_id,kind,name,contact,details,status,created_at,updated_at,
+       individual_tickets,couple_tickets,quoted_total_cents,currency,promotion_applied,payment_status)
+      VALUES (?,?,?,?,?,?,?,?,?,'pending',?,?,?,?,?,?,'pending')
       ON CONFLICT(tenant_id,conversation_id,kind) WHERE conversation_id IS NOT NULL DO UPDATE SET
-        lead_id=excluded.lead_id,name=COALESCE(excluded.name,event_reservations.name),contact=COALESCE(excluded.contact,event_reservations.contact),details=COALESCE(NULLIF(excluded.details,''),event_reservations.details),updated_at=excluded.updated_at`)
+        lead_id=excluded.lead_id,name=COALESCE(excluded.name,event_reservations.name),contact=COALESCE(excluded.contact,event_reservations.contact),
+        details=COALESCE(NULLIF(excluded.details,''),event_reservations.details),updated_at=excluded.updated_at,
+        individual_tickets=COALESCE(excluded.individual_tickets,event_reservations.individual_tickets),
+        couple_tickets=COALESCE(excluded.couple_tickets,event_reservations.couple_tickets),
+        quoted_total_cents=COALESCE(excluded.quoted_total_cents,event_reservations.quoted_total_cents),
+        currency=COALESCE(excluded.currency,event_reservations.currency),promotion_applied=excluded.promotion_applied`)
       .bind(crypto.randomUUID(), tenant.id, own ? null : event.id, convId, leadId, kind,
-        fields.name || null, clean(contact, 80) || null, details || null, now, now).run();
+        fields.name || null, clean(contact, 80) || null, details || null, now, now,
+        pricing.individualTickets, pricing.coupleTickets, pricing.totalCents,
+        pricing.totalCents == null ? null : 'EUR', pricing.promotionApplied).run();
     return { active: true, saved: true, kind };
   } catch (error) {
     console.log(JSON.stringify({ level: 'warn', code: 'event_interest_not_saved', tenant: tenant.slug, error: clean(String(error.message || error), 60) }));
@@ -1866,6 +1875,45 @@ function eventClosingState(messages, fields = {}) {
   const userText = trail.filter((m) => m?.role === 'user').map((m) => String(m.content || '')).join(' ');
   const attendees = /(?:\b\d{1,3}\b|\b(?:una?|dos|tres|cuatro|cinco|seis|siete|ocho|nueve|diez)\b)\s*(?:personas?|entradas?|asistentes?|invitados?)/i.test(userText);
   return { confirmed: affirmative && askedToClose, fullName, attendees, summary };
+}
+
+function eventReservationPricing(summary) {
+  const text = String(summary || '');
+  const integer = (pattern) => {
+    const match = text.match(pattern);
+    return match ? Number(match[1]) : null;
+  };
+  const money = (pattern) => {
+    const match = text.match(pattern);
+    if (!match) return null;
+    const value = Number(match[1].replace(',', '.'));
+    return Number.isFinite(value) ? Math.round(value * 100) : null;
+  };
+  return {
+    individualTickets: integer(/(\d+)\s*(?:entradas?\s*)?(?:individual(?:es)?|personas?)/i),
+    coupleTickets: integer(/(\d+)\s*(?:entradas?\s*)?(?:de\s+)?pareja/i),
+    totalCents: money(/total(?:\s+anunciado)?\s*:?\s*(\d+(?:[.,]\d{1,2})?)\s*€/i),
+    promotionApplied: /(?:10\s*%|descuento|reserva\s+anticipada|pago\s+anticipado)/i.test(text) ? 1 : 0,
+  };
+}
+
+async function eventPaymentProofReply(env, tenant, conv, hasMedia) {
+  if (!hasMedia || !env.DB || !conv?.id) return null;
+  const recentlyAskedForProof = (conv.messages || []).slice(-10).some((turn) =>
+    turn?.role === 'assistant' && /(?:bizum|comprobante|justificante)[\s\S]{0,220}(?:whatsapp|env[ií]a|pago)|(?:env[ií]a|manda)[\s\S]{0,120}(?:comprobante|justificante)/i.test(String(turn.content || '')),
+  );
+  if (!recentlyAskedForProof) return null;
+  try {
+    const reservation = await env.DB.prepare(`SELECT id FROM event_reservations
+      WHERE tenant_id=? AND conversation_id=? AND kind='event_reservation' AND status='pending'
+      ORDER BY updated_at DESC LIMIT 1`).bind(tenant.id, conv.id).first();
+    if (!reservation) return null;
+    await env.DB.prepare("UPDATE event_reservations SET payment_status='proof_received',updated_at=? WHERE id=? AND tenant_id=?")
+      .bind(new Date().toISOString(), reservation.id, tenant.id).run();
+    return '¡Recibido! He dejado tu comprobante pendiente de validación por el equipo. Tu plaza se confirma cuando verifiquen el pago. Si no te llega la confirmación antes del evento, muestra en la entrada este comprobante y esta conversación de WhatsApp para que puedan revisarlo.';
+  } catch (_) {
+    return null;
+  }
 }
 
 async function recordEventConsent(env, tenant, conv, channel, contact, status, evidence) {
@@ -3123,6 +3171,7 @@ export async function handleTwilio(request, env, ctx, config) {
   }
   const from = clean(params.get('From'), 80);
   let message = clean(params.get('Body'), 2000);
+  const hasInboundMedia = Number(params.get('NumMedia') || 0) > 0;
   const unsupportedMedia = !message;
   if (!from) throw new HttpError(400, 'invalid_twilio_payload');
   // Botón del recordatorio de cita (SPEC-CONFIRMACIONES F1): camino determinista
@@ -3172,6 +3221,11 @@ export async function handleTwilio(request, env, ctx, config) {
     await convAppend(env, conv, [{ role: 'user', content: message }]);
     console.log(JSON.stringify({ level: 'info', code: 'bot_paused', tenant: tenant.slug, state: conv.state }));
     return new Response(EMPTY_TWIML, { headers: { 'Content-Type': 'text/xml; charset=utf-8' } });
+  }
+  const paymentProofReply = await eventPaymentProofReply(env, tenant, conv, hasInboundMedia);
+  if (paymentProofReply) {
+    await convAppend(env, conv, [{ role: 'user', content: message }, { role: 'assistant', content: paymentProofReply }]);
+    return twiml(paymentProofReply);
   }
   if (unsupportedMedia) {
     const reply = 'Todavía no puedo leer fotos, documentos ni notas de voz. Escríbeme tu consulta en texto y te ayudo.';
@@ -4488,4 +4542,4 @@ export function createWorker(config) {
   };
 }
 
-export const testing = { senderPhone, PLANES, MODULOS, modulosDe, canalesOcupados, assertPlanChannelLimit, scheduled, MINUTE_CRON, processReminders, reminderHoursFor, reminderTemplateVariables, samePhone, tenantTemplate, pollTemplateApprovals, REMINDER_KIND, waitedMin, QUEUE_MAX_MIN, QUEUE_WAIT_TEXT, canAttend, velaiTenantId, handleChatPoll, handleEventIntake, eventIntakeToken, VISITOR_AWAY_MS, expireTakeovers, NO_ADVISOR_TEXT, graceExpired, systemWithHandoff, HANDOFF_ON, HANDOFF_OFF, supportWindows, withinSupportHours, advisorAvailable, CONV_STATES, TAKEOVER_GRACE_MIN, settleReply, TRUNCATED_CLOSING, trimToSentence, waBody, replyWindow, reportPeriod, reportMetric, weeklyReportText, weeklyStats, sendWeeklyReports, convLoad, convAppend, convLinkLead, convFilters, convRetentionDays, UNANSWERED_RE, CONV_WINDOW, cloudflareUsage, CF_FREE_LIMITS, recordConversation, aiCost, recordAiUsage, rateLimited, memLimited, applySenderProfile, pushSenderProfile, clean, persistLead, leadAlertStatus, captureWhatsAppLead, leadFromSummary, leadCaptureDone, activeTenantEvent, captureEventInterest, eventClosingState, eventConsentReply, notificationText, errorResponseParts, tenantByAddress, syncPrimaryChannel, assertChannelFree, normalizePhone, extractPhone, extractPhoneFromMessages, safeUtm, publicCors, validTwilioSignature, callAnthropic, callAnthropicRaw, runToolLoop, calendarExecutor, calendarSystem, tenantCalendar, validCalendarDate, availableSlots, handleCalendarCallback, calendarCallbackFor, sendTwilioText, timingSafeEqual, telegramBotUsername, telegramSetWebhook, telegramWebhookInfo, handleTelegramWebhook, sendTelegramText, tenantTelegramToken, telegramThreadFor, registerTelegramTopic, csvCell, expiryDate, leadFilters, isDemoKey, templateVar, leadTemplateVariables, readJson, deliver, drainQueuedLeads, verifyTurnstile, systemFor, validateTenant, invalidateTenantCache, tenantWriteError, assertNotActivePending, tenantChannelSummary, channelsForScope, routingChannelState, handleProvision, pollProvisioning, fillSeries, resolveScope, scopeClause, assertOwnTenant, clienteAllowed, adminRouter, recordAuthFailure, handleAdmin, handleWidgetBoot, allowedOrigins, envOrigins, syncPanelGate, envAdmins, syncAdminGate, getSetting, setSetting, withCfToken };
+export const testing = { senderPhone, PLANES, MODULOS, modulosDe, canalesOcupados, assertPlanChannelLimit, scheduled, MINUTE_CRON, processReminders, reminderHoursFor, reminderTemplateVariables, samePhone, tenantTemplate, pollTemplateApprovals, REMINDER_KIND, waitedMin, QUEUE_MAX_MIN, QUEUE_WAIT_TEXT, canAttend, velaiTenantId, handleChatPoll, handleEventIntake, eventIntakeToken, VISITOR_AWAY_MS, expireTakeovers, NO_ADVISOR_TEXT, graceExpired, systemWithHandoff, HANDOFF_ON, HANDOFF_OFF, supportWindows, withinSupportHours, advisorAvailable, CONV_STATES, TAKEOVER_GRACE_MIN, settleReply, TRUNCATED_CLOSING, trimToSentence, waBody, replyWindow, reportPeriod, reportMetric, weeklyReportText, weeklyStats, sendWeeklyReports, convLoad, convAppend, convLinkLead, convFilters, convRetentionDays, UNANSWERED_RE, CONV_WINDOW, cloudflareUsage, CF_FREE_LIMITS, recordConversation, aiCost, recordAiUsage, rateLimited, memLimited, applySenderProfile, pushSenderProfile, clean, persistLead, leadAlertStatus, captureWhatsAppLead, leadFromSummary, leadCaptureDone, activeTenantEvent, captureEventInterest, eventClosingState, eventReservationPricing, eventPaymentProofReply, eventConsentReply, notificationText, errorResponseParts, tenantByAddress, syncPrimaryChannel, assertChannelFree, normalizePhone, extractPhone, extractPhoneFromMessages, safeUtm, publicCors, validTwilioSignature, callAnthropic, callAnthropicRaw, runToolLoop, calendarExecutor, calendarSystem, tenantCalendar, validCalendarDate, availableSlots, handleCalendarCallback, calendarCallbackFor, sendTwilioText, timingSafeEqual, telegramBotUsername, telegramSetWebhook, telegramWebhookInfo, handleTelegramWebhook, sendTelegramText, tenantTelegramToken, telegramThreadFor, registerTelegramTopic, csvCell, expiryDate, leadFilters, isDemoKey, templateVar, leadTemplateVariables, readJson, deliver, drainQueuedLeads, verifyTurnstile, systemFor, validateTenant, invalidateTenantCache, tenantWriteError, assertNotActivePending, tenantChannelSummary, channelsForScope, routingChannelState, handleProvision, pollProvisioning, fillSeries, resolveScope, scopeClause, assertOwnTenant, clienteAllowed, adminRouter, recordAuthFailure, handleAdmin, handleWidgetBoot, allowedOrigins, envOrigins, syncPanelGate, envAdmins, syncAdminGate, getSetting, setSetting, withCfToken };

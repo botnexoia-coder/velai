@@ -108,8 +108,8 @@ export function useEvents(enabled = true) {
 export function useEventReservationStatus() {
   const client = useQueryClient();
   return useMutation({
-    mutationFn: ({ id, status }: { id: string; status: EventReservationStatus }) =>
-      apiPatch<OkResponse>(`/api/admin/events/reservations/${id}`, { status }),
+    mutationFn: ({ id, status, payment_status }: { id: string; status?: EventReservationStatus; payment_status?: import('../api/types').EventPaymentStatus }) =>
+      apiPatch<OkResponse>(`/api/admin/events/reservations/${id}`, { status, payment_status }),
     onSuccess: () => void client.invalidateQueries({ queryKey: ['events'] }),
   });
 }

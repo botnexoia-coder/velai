@@ -29,11 +29,11 @@ it('Velai ve Eventos y la selección activa no mezcla datos de otros clientes', 
     '/api/admin/ai-balance': { month: '2026-09', included: 1, used: 0, remaining: 1, pct: 0, over: false, usedToday: 0, calls: 0, serie: [] },
     '/api/admin/events': {
       events: [
-        { id: '70000000-0000-4000-8000-000000000001', tenant_id: naya, tenant_name: 'Naya Eventos', slug: 'solteros', name: 'Noche de Solteros', starts_at: '2026-10-30T22:00:00.000Z', venue: "Co'legiale", address: 'Calle Geología 53', status: 'active', updated_at: '2026-09-19T10:00:00.000Z' },
+        { id: '70000000-0000-4000-8000-000000000001', tenant_id: naya, tenant_name: 'Naya Eventos', slug: 'solteros', name: 'Noche de Solteros', starts_at: '2026-10-30T22:00:00.000Z', venue: "Co'legiale", address: 'Calle Geología 53', status: 'active', updated_at: '2026-09-19T10:00:00.000Z', individual_price_cents: 3000, couple_price_cents: 5000, advance_discount_percent: 10, advance_individual_price_cents: 2700, advance_couple_price_cents: 4500, promotion_label: 'Reserva anticipada con NAYA', promotion_terms: 'Pago anticipado verificado', payment_method: 'bizum', payment_destination: '641805822', payment_recipient: 'Jonathan GP' },
         { id: '70000000-0000-4000-8000-000000000002', tenant_id: otro, tenant_name: 'Otro cliente', slug: 'otro', name: 'Otro evento', starts_at: null, venue: null, address: null, status: 'closed', updated_at: '2026-09-19T10:00:00.000Z' },
       ],
       reservations: [
-        { id: '80000000-0000-4000-8000-000000000001', tenant_id: naya, event_id: '70000000-0000-4000-8000-000000000001', event_name: 'Noche de Solteros', conversation_id: null, lead_id: null, kind: 'event_reservation', name: 'Reserva NAYA', contact: '+34600000001', details: '2 personas', status: 'pending', created_at: '2026-09-19T10:00:00.000Z', updated_at: '2026-09-19T10:00:00.000Z' },
+        { id: '80000000-0000-4000-8000-000000000001', tenant_id: naya, event_id: '70000000-0000-4000-8000-000000000001', event_name: 'Noche de Solteros', conversation_id: '50000000-0000-4000-8000-000000000001', lead_id: null, kind: 'event_reservation', name: 'Reserva NAYA', contact: '+34600000001', details: '2 personas', status: 'pending', created_at: '2026-09-19T10:00:00.000Z', updated_at: '2026-09-19T10:00:00.000Z', individual_tickets: 2, couple_tickets: 0, quoted_total_cents: 5400, currency: 'EUR', promotion_applied: 1, payment_status: 'proof_received' },
         { id: '80000000-0000-4000-8000-000000000002', tenant_id: otro, event_id: null, event_name: null, conversation_id: null, lead_id: null, kind: 'own_event', name: 'Evento ajeno', contact: '+34600000002', details: 'No debe verse', status: 'pending', created_at: '2026-09-19T10:00:00.000Z', updated_at: '2026-09-19T10:00:00.000Z' },
       ],
       consents: [
@@ -53,6 +53,9 @@ it('Velai ve Eventos y la selección activa no mezcla datos de otros clientes', 
   await waitFor(() => expect(screen.getByText('Reserva NAYA')).toBeInTheDocument());
   expect(screen.getByText('Naya Eventos · Noche de Solteros')).toBeInTheDocument();
   expect(screen.getAllByText('+34600000001')).toHaveLength(2);
+  expect(screen.getByText((_, element) => element?.tagName === 'P' && Boolean(element.textContent?.includes('27,00') && element.textContent?.includes('por persona')))).toBeInTheDocument();
+  expect(screen.getByText('promo NAYA', { exact: false })).toBeInTheDocument();
+  expect(screen.getByRole('link', { name: 'Abrir conversación' })).toHaveAttribute('href', '/conversaciones?conversation=50000000-0000-4000-8000-000000000001');
   expect(screen.queryByText('Evento ajeno')).toBeNull();
   expect(screen.queryByText('+34600000002')).toBeNull();
 });

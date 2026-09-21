@@ -31,6 +31,7 @@ export interface Me {
 }
 
 export type EventReservationStatus = 'pending' | 'confirmed' | 'cancelled';
+export type EventPaymentStatus = 'pending' | 'proof_received' | 'verified' | 'rejected' | 'refunded';
 export interface TenantEvent {
   id: string;
   tenant_id?: string;
@@ -42,6 +43,16 @@ export interface TenantEvent {
   address: string | null;
   status: 'draft' | 'active' | 'closed' | 'archived';
   updated_at: string;
+  individual_price_cents: number | null;
+  couple_price_cents: number | null;
+  advance_discount_percent: number | null;
+  advance_individual_price_cents: number | null;
+  advance_couple_price_cents: number | null;
+  promotion_label: string | null;
+  promotion_terms: string | null;
+  payment_method: string | null;
+  payment_destination: string | null;
+  payment_recipient: string | null;
 }
 export interface EventReservation {
   id: string;
@@ -58,6 +69,12 @@ export interface EventReservation {
   status: EventReservationStatus;
   created_at: string;
   updated_at: string;
+  individual_tickets: number | null;
+  couple_tickets: number | null;
+  quoted_total_cents: number | null;
+  currency: string | null;
+  promotion_applied: number;
+  payment_status: EventPaymentStatus;
 }
 export interface ContactConsent {
   id: number;
