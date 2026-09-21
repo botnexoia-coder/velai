@@ -672,6 +672,15 @@ test('provision/sender: el número se acepta como lo teclea una persona, y no du
     h = provisionHarness({ tenant: { ...sub, twilio_auth_token_enc: enc } });
     await assert.rejects(testing.handleProvision(provReq({ phone: '+34631514370' }), h.env, h.ctx, sub.id, 'sender', 'juan@x'), (e) => e.code === 'sender_sin_sincronizar');
     assert.equal(posts.length, antes, 'no se crea un segundo sender');
+    // Y con el campo VACÍO tiene que decir lo mismo: si ya existe, el problema no es el
+    // número. Validar el teléfono primero mandaba a corregir el formato a quien solo
+    // tenía que sincronizar — el rodeo que se comió el alta de zoe.
+    h = provisionHarness({ tenant: { ...sub, twilio_auth_token_enc: enc } });
+    await assert.rejects(testing.handleProvision(provReq({}), h.env, h.ctx, sub.id, 'sender', 'juan@x'), (e) => e.code === 'sender_sin_sincronizar');
+    // Sin sender previo, el campo vacío sí es un problema de número, y se dice aparte.
+    existentes = [];
+    h = provisionHarness({ tenant: { ...sub, twilio_auth_token_enc: enc } });
+    await assert.rejects(testing.handleProvision(provReq({}), h.env, h.ctx, sub.id, 'sender', 'juan@x'), (e) => e.code === 'phone_requerido');
   } finally { globalThis.fetch = realFetch; }
 });
 

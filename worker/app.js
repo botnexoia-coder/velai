@@ -3791,14 +3791,20 @@ async function runProvisionStep(request, env, ctx, tenant, tenantId, step, actor
     if (tenant.sender_sid) throw new HttpError(409, 'already_provisioned');
     if (!tenant.waba_id) throw new HttpError(400, 'waba_required');
     const body = await readJson(request, 2000);
-    const phone = senderPhone(body.phone);
-    if (!phone) throw new HttpError(400, 'invalid_phone');
-    await assertPlanChannelLimit(env, tenantId, tenant.plan ?? 'profesional', { addChannel: { kind: 'whatsapp', address: `whatsapp:${phone}` } }, tenant);
-    // El sender puede existir YA en Twilio y no en la ficha: es lo que deja el Self
-    // Sign-up hecho por el cliente en la consola, y `tenant.sender_sid` no lo sabe.
-    // Crear otro encima duplica o falla en Twilio cuando lo que hace falta es
-    // reconciliar con «Sincronizar desde Twilio» (le pasó a zoe, 2026-09-21).
+    // El orden de estas tres guardas es la corrección, no un detalle:
+    //  1) el cupo del plan es local y no gasta una llamada a Twilio para nada;
+    //  2) «¿ya existe el sender?» va ANTES de mirar el teléfono, porque puede estar YA
+    //     en Twilio y no en la ficha —lo que deja el Self Sign-up hecho por el cliente
+    //     en la consola, y `tenant.sender_sid` no lo sabe—. Validando primero el
+    //     número, a quien está en ese caso se le manda a corregir el formato, que es
+    //     justo el camino equivocado: lo que necesita es «Sincronizar desde Twilio».
+    //     Le pasó a zoe el 2026-09-21 y costó dos vueltas averiguarlo.
+    //  3) solo entonces el teléfono, distinguiendo vacío de ambiguo.
+    // Para el cupo basta el kind: canalesOcupados cuenta tipos, no direcciones.
+    await assertPlanChannelLimit(env, tenantId, tenant.plan ?? 'profesional', { addChannel: { kind: 'whatsapp' } }, tenant);
     if ((await listWhatsAppSenders(credentials)).length) throw new HttpError(409, 'sender_sin_sincronizar');
+    const phone = senderPhone(body.phone);
+    if (!phone) throw new HttpError(400, clean(body.phone, 60) ? 'invalid_phone' : 'phone_requerido');
     const created = await createWhatsAppSender(credentials, { phone, wabaId: tenant.waba_id, callbackUrl: WORKER_PUBLIC_URL });
     try {
       const res = await env.DB.prepare('UPDATE tenants SET sender_sid=?, sender_status=?, updated_at=? WHERE id=? AND sender_sid IS NULL')

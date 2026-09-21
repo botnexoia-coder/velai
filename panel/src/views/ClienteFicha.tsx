@@ -896,6 +896,13 @@ function ProvPane({ tenantId, form }: { tenantId: string; form: Form }) {
   const { data: prov, error } = useProvision(tenantId);
   const step = useProvisionStep();
   const [phone, setPhone] = useState('');
+  // El número casi siempre está ya en la ficha (twilio_from, que se muestra como
+  // `whatsapp:+34…`). Prerrellenarlo quita el paso de teclearlo a mano, que es de donde
+  // salía el invalid_phone: se copiaba el valor con el prefijo delante.
+  useEffect(() => {
+    const deLaFicha = String(form.twilio_from || '').replace(/^whatsapp:/i, '').trim();
+    if (deLaFicha) setPhone((actual) => actual || deLaFicha);
+  }, [form.twilio_from]);
   const [code, setCode] = useState('');
   const [raw, setRaw] = useState('');
 

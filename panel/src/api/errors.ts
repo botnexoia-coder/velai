@@ -33,6 +33,7 @@ export const TERRS: Record<string, string> = {
   subaccount_taken: 'Esa subcuenta de Twilio ya está asignada a otro cliente.',
   pending_tenant_cannot_be_active: 'Un prospecto (canal pending:) no puede activarse: ponle primero su canal real.',
   invalid_twilio_auth_token: 'El auth token debe ser 32 caracteres hexadecimales (Twilio → Keys & Credentials).',
+  phone_requerido: 'Falta el número del sender: escríbelo en el campo de al lado, con su prefijo de país (+34600000000).',
   invalid_phone: 'Escribe el número con su prefijo de país: +34600000000 (vale pegarlo como «whatsapp:+34…» o con espacios). Sin prefijo no se puede saber de qué país es.',
   sender_sin_sincronizar: 'Ese cliente YA tiene un sender en Twilio. No lo crees otra vez: pulsa «Sincronizar desde Twilio», que lo trae a la ficha y repara su webhook.',
   plan_channel_limit: 'Este plan no admite otro canal. Libera uno o cambia a Profesional.',
