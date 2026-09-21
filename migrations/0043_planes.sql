@@ -23,6 +23,12 @@ UPDATE tenants AS t SET plan = CASE WHEN
   + (channel_address LIKE 'instagram:%' OR EXISTS (SELECT 1 FROM tenant_channels c WHERE c.tenant_id=t.id AND c.kind='instagram'))
   > 1 THEN 'profesional' ELSE 'esencial' END;
 
+-- Los tenants de la propia casa (sembrados en 0002) no se someten al tarifario
+-- comercial: el bot público de Velai atiende por WhatsApp, Messenger y la web, y un
+-- cupo de Esencial le bloquearía añadir un canal con un 409 en el momento menos
+-- oportuno. Empresa = sin tope y con el catálogo entero.
+UPDATE tenants SET plan = 'empresa' WHERE slug IN ('velai','velai-messenger');
+
 -- Conservar también el acceso al histórico de citas y las confirmaciones sin conexión.
 INSERT INTO tenant_modulos
 SELECT id,'calendario','on','migracion:0043',strftime('%Y-%m-%dT%H:%M:%fZ','now') FROM tenants t

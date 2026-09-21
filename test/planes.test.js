@@ -73,6 +73,12 @@ test('migración: SQL y JS deducen igual y conservan derechos e histórico', asy
   }
   assert.deepEqual((await tenantPlan(env, 'migration-0')).modulos, MODULOS);
   assert.deepEqual((await tenantPlan(env, 'migration-1')).modulos, ['calendario', 'citas']);
+  // Los tenants de la casa quedan fuera del tarifario: un cupo de Esencial bloquearía
+  // añadirle un canal al bot público de Velai.
+  for (const slug of ['velai', 'velai-messenger']) {
+    const row = await env.DB.prepare('SELECT plan FROM tenants WHERE slug=?').bind(slug).first();
+    assert.equal(row.plan, 'empresa', `${slug} no puede quedar sujeto al cupo comercial`);
+  }
 });
 
 test('alta y edición: límite real, cambio de primario y downgrade sin perder canales', async (t) => {
