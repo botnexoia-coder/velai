@@ -4333,6 +4333,7 @@ function handoffDb(conv, tenantRow, presencia = { n: 0 }, mine = null) {
             const scoped = sql.includes('c.tenant_id = ?') ? (conv.tenant_id === args[1] ? conv : null) : conv;
             return scoped && scoped.id === args[0] ? { ...scoped } : null;
           }
+          if (/MAX\(created_at\) AS last_in/.test(sql)) return { last_in: conv.last_in || null };
           if (/COUNT\(\*\) AS n FROM agent_presence/.test(sql)) return presencia;
           if (/SELECT available FROM agent_presence/.test(sql)) return mine;
           return null;
@@ -4347,7 +4348,7 @@ function handoffDb(conv, tenantRow, presencia = { n: 0 }, mine = null) {
 
 test('tomar el control: cerrojo por conversación, y si ya la tiene otra persona se dice quién', async () => {
   const CID = '00000000-0000-4000-8000-000000000b01';
-  const conv = { id: CID, tenant_id: 't-mio', channel: 'whatsapp', external_id: 'whatsapp:+34600000000', state: 'esperando', agent_email: null };
+  const conv = { id: CID, tenant_id: 't-mio', channel: 'whatsapp', external_id: 'whatsapp:+34600000000', inbox_address: 'whatsapp:+15550000001', state: 'esperando', agent_email: null, last_in: new Date().toISOString() };
   const db = handoffDb(conv, { id: 't-mio' });
   const kv = mapKV();
   const env = { DB: db, KV: kv };
@@ -4374,9 +4375,12 @@ test('tomar el control: cerrojo por conversación, y si ya la tiene otra persona
   assert.equal((await (await call('release', OWN)).json()).state, 'bot');
   assert.ok(!kv.map.has('pause:t-mio:whatsapp:+34600000000'), 'la pausa se levanta al devolver el control');
 
-  // Una conversación que la IA atiende no tiene control que tomar.
+  // Una conversación que atiende la IA se puede tomar de forma proactiva cuando la
+  // ventana del canal sigue abierta.
   conv.state = 'bot'; conv.agent_email = null;
-  await assert.rejects(call('takeover', OWN), (e) => e.status === 409 && e.code === 'nada_que_tomar');
+  assert.equal((await (await call('takeover', OWN)).json()).state, 'humano');
+  conv.last_in = new Date(Date.now() - 25 * 3600000).toISOString();
+  await assert.rejects(call('takeover', OWN), (e) => e.status === 409 && e.code === 'window_closed');
   // Y la de otro cliente es 404, nunca 403.
   await assert.rejects(call('takeover', { role: 'cliente', tenantId: 't-otro', email: 'x@y.com' }), (e) => e.status === 404);
 });

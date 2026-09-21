@@ -134,6 +134,15 @@ conversaciones.get('/api/admin/inbox', async (c) => {
     if (head) {
       const messages = (await env.DB.prepare('SELECT role, agent_email, text, created_at, attachments_json FROM conv_messages WHERE conversation_id=? ORDER BY id ASC LIMIT 500').bind(head.id).all()).results;
       const win = await replyWindow(env, head);
+      // El dueño del tenant puede entrar de forma proactiva en una conversación que aún
+      // lleva la IA, pero solo si el canal admite una respuesta AHORA (en WhatsApp, dentro
+      // de las 24 h). Exponemos la capacidad por separado: el cajón sigue cerrado hasta
+      // tomar el control y nunca quedan dos voces escribiendo a la vez.
+      if (head.state === 'bot' && await canAttend(env, scope, head.tenant_id)) {
+        const prospective = await replyWindow(env, { ...head, state: 'humano' });
+        win.canTakeover = prospective.open;
+        win.takeoverReason = prospective.open ? null : prospective.reason;
+      }
       // La misma puerta que el endpoint de respuesta, pero ANTES: el cajón se cierra con
       // el motivo escrito en vez de dejar que alguien escriba y se coma un 403.
       if (!(await canAttend(env, scope, head.tenant_id))) { win.open = false; win.reason = 'velai_no_atiende_clientes'; }
@@ -217,7 +226,7 @@ conversaciones.post('/api/admin/conversations/:id/:accion{takeover|release}', as
   const id = c.req.param('id'); const accion = c.req.param('accion');
   if (!UUID_RE.test(id)) throw new HttpError(404, 'not_found');
   const scc = scopeClause(scope, 'c');
-  const conv = await env.DB.prepare(`SELECT c.id, c.state, c.agent_email, c.channel, c.tenant_id, c.external_id, c.inbox_address, c.demo, c.msgs FROM conversations c WHERE c.id=?${scc.sql}`)
+  const conv = await env.DB.prepare(`SELECT c.* FROM conversations c WHERE c.id=?${scc.sql}`)
     .bind(id, ...scc.args).first();
   if (!conv) throw new HttpError(404, 'not_found');
   // 403 y no 404 a propósito: Velai SÍ ve esta conversación, así que fingir que no existe
@@ -231,7 +240,15 @@ conversaciones.post('/api/admin/conversations/:id/:accion{takeover|release}', as
     if (conv.state === 'humano' && conv.agent_email && conv.agent_email !== who) {
       throw new HttpError(409, 'ya_tomada');
     }
-    if (!['esperando', 'humano'].includes(conv.state)) throw new HttpError(409, 'nada_que_tomar');
+    if (conv.state === 'bot') {
+      // Seguimiento proactivo del propio cliente: antes de cederle el turno comprobamos
+      // la ventana real como si ya tuviera el control. Así no puede tomar una conversación
+      // caducada para descubrir el 63016 después de escribir.
+      const prospective = await replyWindow(env, { ...conv, state: 'humano' });
+      if (!prospective.open) throw new HttpError(409, prospective.reason || 'nada_que_tomar');
+    } else if (!['esperando', 'humano'].includes(conv.state)) {
+      throw new HttpError(409, 'nada_que_tomar');
+    }
     await env.DB.prepare("UPDATE conversations SET state='humano', agent_email=?, state_at=? WHERE id=?").bind(who, now, conv.id).run();
     console.log(JSON.stringify({ level: 'info', code: 'takeover', channel: conv.channel, actor_role: scope.role }));
     return json({ ok: true, state: 'humano', agent_email: who }, 200, NO_STORE);

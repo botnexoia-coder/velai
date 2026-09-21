@@ -614,8 +614,18 @@ function Composer({ thread, queueMin, onToast }: { thread: InboxThread; queueMin
               <button
                 className="btn alt btnsm"
                 type="button"
-                disabled
-                data-tip="Se habilita solo cuando la persona pide hablar con el equipo"
+                disabled={!thread.window.canTakeover || takeover.isPending}
+                data-tip={
+                  thread.window.canTakeover
+                    ? 'Pausa a NAYA y abre el cajón para responder desde el panel'
+                    : traducir(new Error(thread.window.takeoverReason || 'nada_que_tomar'))
+                }
+                onClick={() =>
+                  takeover.mutate(c.id, {
+                    onSuccess: () => onToast('Control tomado ✓ — NAYA queda pausada hasta que se lo devuelvas'),
+                    onError: (e) => onToast(`No se pudo: ${traducir(e)}`, false),
+                  })
+                }
               >
                 Responder como humano
               </button>

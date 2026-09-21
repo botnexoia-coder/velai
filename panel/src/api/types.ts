@@ -277,6 +277,10 @@ export interface ConvMessage {
 export interface ReplyWindow {
   open: boolean;
   reason?: string;
+  /** El equipo puede tomar el turno de la IA si el canal admite responder ahora. */
+  canTakeover?: boolean;
+  /** Motivo por el que no puede tomarlo (p. ej., ventana de Meta cerrada). */
+  takeoverReason?: string | null;
   web?: boolean;
   away?: boolean;
   seenAt?: string | null;
