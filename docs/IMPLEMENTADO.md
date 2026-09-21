@@ -91,6 +91,17 @@ Revisión posterior (mismo día, tres correcciones sobre la primera pasada):
 También se retiró `useTenantPlanSave` (nunca se usó: la ficha guarda el plan por el
 `PATCH /tenants/:id` general, dentro del «un solo Guardar»).
 
+**Corrección del router de aprovisionamiento (2026-09-21, caso Zoe).** Pulsar
+«Sincronizar desde Twilio» enviaba correctamente `/sender/sync`, pero las alternativas
+sin agrupar en la ruta de `/sender` también coincidían con esa URL. El router ejecutaba
+el alta y devolvía `sender_sin_sincronizar` aunque se hubiera pulsado sincronizar.
+Las alternativas de las rutas de aprovisionamiento van ahora agrupadas; se comprueban
+también OTP, perfil, comprobación y reenvío de plantillas, y se rechazan sufijos ajenos.
+La prueba de concurrencia pasa por el router y un E2E pulsa el botón real con SQLite y
+Twilio simulado: reproduce el error antes de la corrección y después registra el sender,
+su canal y el webhook sin crear otro. Los tests directos de `handleProvision` por sí
+solos no detectaban este fallo de despacho. Pendiente desplegar esta corrección por CD.
+
 Verificación: `npm run check`, unitarios del panel, typecheck/build y Playwright;
 pruebas con SQLite real de migración, altas, cambios de canal, concurrencia,
 rollback, auditoría, continuidad de WhatsApp y cierre de reservas públicas tras

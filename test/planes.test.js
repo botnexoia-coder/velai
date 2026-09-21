@@ -194,7 +194,7 @@ test('sender/sync: informa del guardado concurrente, repara el webhook y permite
     if (String(url).includes('/v2/Channels/Senders/')) { repairs++; return Response.json({ status: 'ONLINE' }); }
     throw new Error('Unexpected mocked request: ' + url);
   });
-  const sync = () => testing.handleProvision(new Request('https://admin.test/x', { method: 'POST', body: '{}' }), env, ctx, ID, 'sender/sync', admin.email);
+  const sync = () => call(env, tenantPath + '/provision/sender/sync', {}, admin, 'POST');
   const partial = await (await sync()).json();
   assert.equal(partial.channelRegistered, false);
   assert.equal(partial.channelError, 'stale_tenant');
@@ -207,6 +207,39 @@ test('sender/sync: informa del guardado concurrente, repara el webhook y permite
   assert.equal(retry.channelError, null);
   assert.equal((await env.DB.prepare('SELECT tenant_id FROM tenant_channels WHERE address=?').bind('whatsapp:+34600000002').first()).tenant_id, ID);
   assert.equal((await env.DB.prepare('SELECT greeting FROM tenants WHERE id=?').bind(ID).first()).greeting, 'Otro guardado');
+});
+
+test('router de aprovisionamiento: OTP, perfil y revisión de plantillas no ejecutan el alta', async (t) => {
+  const env = await fixture(t); await insert(env, { plan: 'profesional' });
+  env.SECRETS_KEK = btoa(String.fromCharCode(...new Uint8Array(32).fill(7)));
+  const token = await encryptSecret(env, ID, 'test-token');
+  const sender = 'XE' + 'a'.repeat(32), template = 'HX' + 'b'.repeat(32);
+  await env.DB.prepare(`UPDATE tenants SET twilio_subaccount_sid=?,twilio_auth_token_enc=?,
+    sender_sid=?,sender_status='PENDING_VERIFICATION',lead_template_sid=?,lead_template_status='pending',brand_name='Prueba' WHERE id=?`)
+    .bind('AC' + 'c'.repeat(32), token, sender, template, ID).run();
+  const calls = [];
+  t.mock.method(globalThis, 'fetch', async (url, init) => {
+    const path = new URL(url).pathname, body = init.body ? JSON.parse(init.body) : null;
+    calls.push({ path, method: init.method, body });
+    if (path === `/v2/Channels/Senders/${sender}`) return Response.json({ status: 'ONLINE', profile: { name: 'Prueba' } });
+    if (path === `/v1/Content/${template}/ApprovalRequests`) return Response.json({ whatsapp: { status: 'approved' } });
+    if (path === `/v1/Content/${template}/ApprovalRequests/whatsapp`) return Response.json({ status: 'received' });
+    throw new Error('Unexpected Twilio request: ' + path);
+  });
+  const post = (step, body = {}) => call(env, tenantPath + '/provision/' + step, body, admin, 'POST');
+  assert.equal((await (await post('sender/verify', { code: '123456' })).json()).status, 'ONLINE');
+  assert.equal(calls.at(-1).body.configuration.verification_code, '123456');
+  assert.equal((await (await post('sender/profile')).json()).applied.description, true);
+  assert.equal(calls.at(-1).body.profile.name, 'Prueba');
+  assert.equal((await (await post('template/check')).json()).status, 'approved');
+  assert.equal(calls.at(-1).method, 'GET');
+  assert.equal((await (await post('template/resubmit')).json()).ok, true);
+  assert.equal(calls.at(-1).path, `/v1/Content/${template}/ApprovalRequests/whatsapp`);
+  const before = calls.length;
+  for (const path of ['sender/unknown', 'sender/sync/extra', 'sender/profile/extra', 'sender/verify/extra', 'template/check/extra', 'template/resubmit/extra', 'notsender']) {
+    await assert.rejects(post(path), (e) => e.code === 'not_found');
+  }
+  assert.equal(calls.length, before, 'las rutas inválidas no llegan a Twilio');
 });
 
 test('transacción: fallo intermedio revierte plan, derechos, flags y auditoría', async (t) => {

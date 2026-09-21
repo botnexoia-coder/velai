@@ -21,6 +21,29 @@ const test = base.extend<{ planes: Awaited<ReturnType<typeof planesFixture>> }>(
   },
 });
 
+test('Sincronizar desde Twilio recorre el router y adopta el sender existente', async ({ page, planes }) => {
+  const twilio = await planes.setupWhatsApp();
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = twilio.fetchProvider;
+  try {
+    await page.goto(`/conexiones?t=${PLAN_TENANT}`);
+    const responsePromise = page.waitForResponse((response) => response.url().endsWith('/provision/sender/sync'));
+    await page.getByRole('button', { name: 'Sincronizar desde Twilio', exact: true }).click();
+    const response = await responsePromise;
+    expect(await response.json()).toMatchObject({ ok: true, channelRegistered: true, channelError: null, webhookFixed: true });
+    expect(response.status()).toBe(200);
+    await expect(page.getByText(/Sincronizado ✓/)).toBeVisible();
+    await expect(page.getByText(/Ese cliente YA tiene un sender/)).toHaveCount(0);
+    expect(await planes.DB.prepare('SELECT sender_sid,sender_status,channel_address FROM tenants WHERE id=?').bind(PLAN_TENANT).first())
+      .toMatchObject({ sender_sid: twilio.senderSid, sender_status: 'ONLINE', channel_address: 'web:prueba' });
+    expect(await planes.DB.prepare('SELECT tenant_id FROM tenant_channels WHERE address=?').bind(twilio.address).first())
+      .toMatchObject({ tenant_id: PLAN_TENANT });
+    expect(twilio.requests.filter((r) => r.method === 'POST')).toEqual([
+      expect.objectContaining({ path: `/v2/Channels/Senders/${twilio.senderSid}`, body: { webhook: { callback_url: 'https://vai-worker.botnexo-ia.workers.dev', callback_method: 'POST' } } }),
+    ]);
+  } finally { globalThis.fetch = originalFetch; }
+});
+
 test('alta, límite traducido y plan con excepciones: panel y worker reales', async ({ page, planes }) => {
   const errors: string[] = []; page.on('pageerror', (e) => errors.push(e.message));
   await page.goto(`/clientes?t=${PLAN_TENANT}`);
