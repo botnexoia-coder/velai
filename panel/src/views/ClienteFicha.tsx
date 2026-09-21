@@ -995,7 +995,7 @@ function ProvPane({ tenantId, form }: { tenantId: string; form: Form }) {
           >
             Reenviar a aprobación
           </button>
-          <input placeholder="+34910000000" className="w150" value={phone} onChange={(e) => setPhone(e.target.value)} aria-label="Teléfono del sender" />
+          <input placeholder="+34910000000" title="Con prefijo de país. Vale pegarlo como «whatsapp:+34…» o con espacios." className="w150" value={phone} onChange={(e) => setPhone(e.target.value)} aria-label="Teléfono del sender" />
           <button className="btn alt" type="button" disabled={step.isPending} onClick={() => provPost('sender', { phone: phone.trim() })}>
             3· Crear sender
           </button>

@@ -65,6 +65,21 @@ export function normalizePhone(value) {
   return digits.length >= 6 && digits.length <= 15 ? (raw.startsWith('+') ? '+' : '') + digits : '';
 }
 
+// El número del sender se teclea a mano en el panel, y la gente pega lo que tiene
+// delante: la ficha muestra `whatsapp:+34…` en twilio_from, así que eso es justo lo que
+// se copia. También llegan espacios, guiones y el `0034` internacional. Todas esas
+// formas son el MISMO número, y rechazarlas con invalid_phone obligaba a adivinar el
+// formato exacto — bloqueó el alta de zoe (2026-09-21) y antes la de otro cliente.
+// Lo que NO se acepta son los dígitos pelados sin `+` ni `00`: sin prefijo de país no
+// se sabe qué número es, y equivocarse crea un sender de OTRO país, que cuesta dinero
+// y un ticket de soporte para deshacer. Ahí el 400 es la respuesta correcta.
+export function senderPhone(value) {
+  const raw = clean(value, 60).replace(/^\s*whatsapp:\s*/i, '').trim();
+  if (!/^(\+|00)/.test(raw)) return '';
+  const digits = raw.replace(/\D/g, '').replace(/^00/, '');
+  return /^[1-9]\d{6,14}$/.test(digits) ? `+${digits}` : '';
+}
+
 // Sin '.' en la clase (importes «40.000»), sin fechas y con longitud de teléfono real:
 // una conversación sobre facturación o CIFs no debe disparar la captura de lead.
 const DATE_RE = /\b\d{1,2}[-/.]\d{1,2}[-/.]\d{2,4}\b/;
@@ -3776,9 +3791,14 @@ async function runProvisionStep(request, env, ctx, tenant, tenantId, step, actor
     if (tenant.sender_sid) throw new HttpError(409, 'already_provisioned');
     if (!tenant.waba_id) throw new HttpError(400, 'waba_required');
     const body = await readJson(request, 2000);
-    const phone = clean(body.phone, 20);
-    if (!/^\+[1-9]\d{6,14}$/.test(phone)) throw new HttpError(400, 'invalid_phone');
+    const phone = senderPhone(body.phone);
+    if (!phone) throw new HttpError(400, 'invalid_phone');
     await assertPlanChannelLimit(env, tenantId, tenant.plan ?? 'profesional', { addChannel: { kind: 'whatsapp', address: `whatsapp:${phone}` } }, tenant);
+    // El sender puede existir YA en Twilio y no en la ficha: es lo que deja el Self
+    // Sign-up hecho por el cliente en la consola, y `tenant.sender_sid` no lo sabe.
+    // Crear otro encima duplica o falla en Twilio cuando lo que hace falta es
+    // reconciliar con «Sincronizar desde Twilio» (le pasó a zoe, 2026-09-21).
+    if ((await listWhatsAppSenders(credentials)).length) throw new HttpError(409, 'sender_sin_sincronizar');
     const created = await createWhatsAppSender(credentials, { phone, wabaId: tenant.waba_id, callbackUrl: WORKER_PUBLIC_URL });
     try {
       const res = await env.DB.prepare('UPDATE tenants SET sender_sid=?, sender_status=?, updated_at=? WHERE id=? AND sender_sid IS NULL')
@@ -4425,4 +4445,4 @@ export function createWorker(config) {
   };
 }
 
-export const testing = { PLANES, MODULOS, modulosDe, canalesOcupados, assertPlanChannelLimit, scheduled, MINUTE_CRON, processReminders, reminderHoursFor, reminderTemplateVariables, samePhone, tenantTemplate, pollTemplateApprovals, REMINDER_KIND, waitedMin, QUEUE_MAX_MIN, QUEUE_WAIT_TEXT, canAttend, velaiTenantId, handleChatPoll, handleEventIntake, eventIntakeToken, VISITOR_AWAY_MS, expireTakeovers, NO_ADVISOR_TEXT, graceExpired, systemWithHandoff, HANDOFF_ON, HANDOFF_OFF, supportWindows, withinSupportHours, advisorAvailable, CONV_STATES, TAKEOVER_GRACE_MIN, settleReply, TRUNCATED_CLOSING, trimToSentence, waBody, replyWindow, reportPeriod, reportMetric, weeklyReportText, weeklyStats, sendWeeklyReports, convLoad, convAppend, convLinkLead, convFilters, convRetentionDays, UNANSWERED_RE, CONV_WINDOW, cloudflareUsage, CF_FREE_LIMITS, recordConversation, aiCost, recordAiUsage, rateLimited, memLimited, applySenderProfile, pushSenderProfile, clean, persistLead, leadAlertStatus, captureWhatsAppLead, leadFromSummary, leadCaptureDone, activeTenantEvent, captureEventInterest, eventConsentReply, notificationText, errorResponseParts, tenantByAddress, syncPrimaryChannel, assertChannelFree, normalizePhone, extractPhone, extractPhoneFromMessages, safeUtm, publicCors, validTwilioSignature, callAnthropic, callAnthropicRaw, runToolLoop, calendarExecutor, calendarSystem, tenantCalendar, validCalendarDate, availableSlots, handleCalendarCallback, calendarCallbackFor, sendTwilioText, timingSafeEqual, telegramBotUsername, telegramSetWebhook, telegramWebhookInfo, handleTelegramWebhook, sendTelegramText, tenantTelegramToken, telegramThreadFor, registerTelegramTopic, csvCell, expiryDate, leadFilters, isDemoKey, templateVar, leadTemplateVariables, readJson, deliver, drainQueuedLeads, verifyTurnstile, systemFor, validateTenant, invalidateTenantCache, tenantWriteError, assertNotActivePending, tenantChannelSummary, channelsForScope, routingChannelState, handleProvision, pollProvisioning, fillSeries, resolveScope, scopeClause, assertOwnTenant, clienteAllowed, adminRouter, recordAuthFailure, handleAdmin, handleWidgetBoot, allowedOrigins, envOrigins, syncPanelGate, envAdmins, syncAdminGate, getSetting, setSetting, withCfToken };
+export const testing = { senderPhone, PLANES, MODULOS, modulosDe, canalesOcupados, assertPlanChannelLimit, scheduled, MINUTE_CRON, processReminders, reminderHoursFor, reminderTemplateVariables, samePhone, tenantTemplate, pollTemplateApprovals, REMINDER_KIND, waitedMin, QUEUE_MAX_MIN, QUEUE_WAIT_TEXT, canAttend, velaiTenantId, handleChatPoll, handleEventIntake, eventIntakeToken, VISITOR_AWAY_MS, expireTakeovers, NO_ADVISOR_TEXT, graceExpired, systemWithHandoff, HANDOFF_ON, HANDOFF_OFF, supportWindows, withinSupportHours, advisorAvailable, CONV_STATES, TAKEOVER_GRACE_MIN, settleReply, TRUNCATED_CLOSING, trimToSentence, waBody, replyWindow, reportPeriod, reportMetric, weeklyReportText, weeklyStats, sendWeeklyReports, convLoad, convAppend, convLinkLead, convFilters, convRetentionDays, UNANSWERED_RE, CONV_WINDOW, cloudflareUsage, CF_FREE_LIMITS, recordConversation, aiCost, recordAiUsage, rateLimited, memLimited, applySenderProfile, pushSenderProfile, clean, persistLead, leadAlertStatus, captureWhatsAppLead, leadFromSummary, leadCaptureDone, activeTenantEvent, captureEventInterest, eventConsentReply, notificationText, errorResponseParts, tenantByAddress, syncPrimaryChannel, assertChannelFree, normalizePhone, extractPhone, extractPhoneFromMessages, safeUtm, publicCors, validTwilioSignature, callAnthropic, callAnthropicRaw, runToolLoop, calendarExecutor, calendarSystem, tenantCalendar, validCalendarDate, availableSlots, handleCalendarCallback, calendarCallbackFor, sendTwilioText, timingSafeEqual, telegramBotUsername, telegramSetWebhook, telegramWebhookInfo, handleTelegramWebhook, sendTelegramText, tenantTelegramToken, telegramThreadFor, registerTelegramTopic, csvCell, expiryDate, leadFilters, isDemoKey, templateVar, leadTemplateVariables, readJson, deliver, drainQueuedLeads, verifyTurnstile, systemFor, validateTenant, invalidateTenantCache, tenantWriteError, assertNotActivePending, tenantChannelSummary, channelsForScope, routingChannelState, handleProvision, pollProvisioning, fillSeries, resolveScope, scopeClause, assertOwnTenant, clienteAllowed, adminRouter, recordAuthFailure, handleAdmin, handleWidgetBoot, allowedOrigins, envOrigins, syncPanelGate, envAdmins, syncAdminGate, getSetting, setSetting, withCfToken };

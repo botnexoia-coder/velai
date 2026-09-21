@@ -630,6 +630,51 @@ test('provision: Twilio 400 → 502 sin tocar la fila; D1 caída tras crear → 
   } finally { globalThis.fetch = realFetch; }
 });
 
+test('provision/sender: el número se acepta como lo teclea una persona, y no duplica un sender que ya existe', async () => {
+  // senderPhone puro. Los casos «buenos» son formas reales de escribir el MISMO número:
+  // la ficha muestra twilio_from como `whatsapp:+34…`, así que eso es lo que se copia.
+  for (const bueno of ['+34631514370', 'whatsapp:+34631514370', 'WhatsApp:+34631514370',
+    ' +34 631 514 370 ', '+34-631-514-370', '0034631514370', '+34 (631) 514370']) {
+    assert.equal(testing.senderPhone(bueno), '+34631514370', `debería aceptar ${JSON.stringify(bueno)}`);
+  }
+  // Sin prefijo de país NO se adivina: crear un sender del país equivocado cuesta dinero
+  // y un ticket de soporte. Ahí el 400 es la respuesta correcta, no un apaño.
+  for (const malo of ['631514370', '34631514370', '', null, 'whatsapp:', '+', '+0123', 'hola']) {
+    assert.equal(testing.senderPhone(malo), '', `no debería adivinar ${JSON.stringify(malo)}`);
+  }
+
+  const realFetch = globalThis.fetch;
+  const sub = { id: '00000000-0000-4000-8000-00000000000a', slug: 'acme', name: 'Acme',
+    twilio_subaccount_sid: 'AC' + 'c'.repeat(32), waba_id: '123456789012345', sender_sid: null };
+  const enc = await encryptSecret({ SECRETS_KEK: TEST_KEK }, sub.id, 'a1b2c3d4e5f60718293a4b5c6d7e8f90');
+  let existentes = [];
+  const posts = [];
+  try {
+    globalThis.fetch = async (url, init) => {
+      const u = String(url);
+      if (u.includes('/v2/Channels/Senders?Channel=whatsapp')) return new Response(JSON.stringify({ senders: existentes }), { status: 200 });
+      if (u.endsWith('/v2/Channels/Senders')) { posts.push(JSON.parse(init.body)); return new Response(JSON.stringify({ sid: 'XE' + 'f'.repeat(32), status: 'CREATING' }), { status: 201 }); }
+      return new Response('{}', { status: 200 });
+    };
+    // Pegado tal cual desde la ficha: se normaliza y llega a Twilio en E.164.
+    let h = provisionHarness({ tenant: { ...sub, twilio_auth_token_enc: enc } });
+    const res = await (await testing.handleProvision(provReq({ phone: 'whatsapp:+34 631 514 370' }), h.env, h.ctx, sub.id, 'sender', 'juan@x')).json();
+    assert.equal(res.ok, true);
+    assert.equal(posts.at(-1).sender_id, 'whatsapp:+34631514370', 'Twilio recibe el E.164 limpio');
+    // Sin prefijo de país sigue siendo 400, y sin tocar Twilio.
+    h = provisionHarness({ tenant: { ...sub, twilio_auth_token_enc: enc } });
+    const antes = posts.length;
+    await assert.rejects(testing.handleProvision(provReq({ phone: '631514370' }), h.env, h.ctx, sub.id, 'sender', 'juan@x'), (e) => e.code === 'invalid_phone');
+    assert.equal(posts.length, antes, 'un número ambiguo no crea nada');
+    // El Self Sign-up ya dejó un sender en Twilio y la ficha no lo sabe (zoe, 2026-09-21):
+    // crear otro encima duplicaría. Se manda a «Sincronizar desde Twilio».
+    existentes = [{ sid: 'XE' + 'a'.repeat(32), sender_id: 'whatsapp:+34631514370', status: 'ONLINE' }];
+    h = provisionHarness({ tenant: { ...sub, twilio_auth_token_enc: enc } });
+    await assert.rejects(testing.handleProvision(provReq({ phone: '+34631514370' }), h.env, h.ctx, sub.id, 'sender', 'juan@x'), (e) => e.code === 'sender_sin_sincronizar');
+    assert.equal(posts.length, antes, 'no se crea un segundo sender');
+  } finally { globalThis.fetch = realFetch; }
+});
+
 test('provision/sender sin waba → 400 sin llamada; el cron aprueba plantillas pendientes', async () => {
   const realFetch = globalThis.fetch;
   const calls = [];
