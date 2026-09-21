@@ -155,3 +155,10 @@ Repasada de nuevo el 2026-09-16, esta vez **dentro** de los docs: se borró
 §2), y de `H1-PANEL.md` y `H2-PANEL.md` se retiraron las secciones ya construidas —
 H1 §1 y §2, H2 §4 — que pasaron a `IMPLEMENTADO.md`. La regla vale también dentro de un
 MD: una sección hecha no se queda ahí marcada como hecha, se va.
+
+Y otra vez el 2026-09-21, al cerrar la Biblioteca multimedia: `SPEC-BIBLIOTECA.md` y
+`BIBLIOTECA-VERIFICACION.md` se borraron con su resumen en `IMPLEMENTADO.md` y sus dos
+restos en `TAREAS-PENDIENTES.md` §2p. Llevaban desde el 17 describiendo algo ya
+desplegado y verificado, y ninguno estaba en la tabla de arriba — la señal de que un MD
+se quedó fuera del ciclo es justamente esa: que la tabla no lo nombre. De paso cayó la
+tarea fantasma que aún pedía activar R2 y descomentar su binding, hechos desde el 17.

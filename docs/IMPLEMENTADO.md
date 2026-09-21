@@ -106,6 +106,53 @@ la integración web firmada crea lead, reserva y consentimiento con idempotencia
 El cliente consulta y gestiona solo sus reservas; Velai conserva la vista global.
 La concesión del módulo es independiente de que existan eventos cargados.
 
+## Biblioteca multimedia por cliente (`SPEC-BIBLIOTECA.md`, 2026-09-17, migración 0039)
+
+Pedido de Juan: «un apartado multimedia, que el bot pueda tomar de ahí imágenes, documentos
+o audios para enviar en los chats». El negocio sube su material **una vez** desde su panel y
+Vai lo entrega solo cuando hace falta, en vez de describirlo con palabras o soltar una URL.
+
+**Las decisiones que fijaron el diseño** (Juan, 2026-09-17): el bot elige con una **tool
+sobre el catálogo**, no con reglas a mano — cada archivo lleva una descripción y decide el
+modelo; **lo gestionan cliente y Velai** (autoservicio, rutas en `clienteAllowed` con guarda
+own-only); cuatro familias —imagen, PDF, audio y vídeo corto—; **R2 obligatorio**, sin
+binding la subida da 503 y nunca se cae a KV en silencio; **500 MB por cliente**; y por
+fichero, los límites del canal y ni un byte más (5 MB imágenes, 16 MB el resto, los de
+WhatsApp: aceptar más sería prometer algo que el canal no entrega).
+
+- **La pieza que sostiene el resto: el executor no envía nada.** `enviar_archivo` solo deja
+  el archivo elegido en `meta.attachment`, igual que `meta.bookingCard`. Así hay **un solo
+  camino de envío por canal** (TwiML `<Media>`, `MediaUrl`, campo JSON del widget) y la
+  herramienta se prueba entera sin tocar Twilio.
+- **Esquema y perímetro**: `tenant_media` + `tenant_media_uploads` y las cuotas
+  (`media_quota_bytes`, `media_bytes_used`, `media_files_used`) con reserva atómica por
+  trigger en D1; claves inadivinables `lib/<tenant>/<uuid+8hex>.<ext>` que nunca se
+  sobrescriben; **tipo por magic bytes, jamás por cabecera** (SVG rechazado: es script); y
+  `/media/*` con `nosniff`, `default-src 'none'; sandbox` y `noindex`, porque un fichero
+  interpretable como HTML en el origen de la API del panel es XSS en `api.hirevai.com`.
+  La `description` la escribe el cliente y entra en el prompt: ≤300 caracteres sin saltos
+  de línea ni caracteres de control, para que no pueda falsificar secciones del system.
+- **Panel**: vista `Biblioteca` dentro de Conexiones (subida, metadatos, canales permitidos
+  `web/whatsapp/messenger`, cuota y borrado), historial con `attachments_json`, marcador de
+  texto en la transcripción y chips en la bandeja.
+
+**Verificado en producción el 2026-09-17** (PR #2 y #3, CD del commit `8f1507b`): subida
+autenticada de un PDF de 3 MB desde el panel y descarga pública con el mismo SHA-256 y las
+cabeceras esperadas; un archivo de 20 MB rechazado con 413 `media_too_large`; logo aplicado
+con `store:r2`; el modelo eligió el PDF y Twilio lo entregó con estado `read`, 1 adjunto y
+sin error; al pedirlo otra vez respondió solo texto, con `sent_count` en 1; y tras
+desactivarlo, una conversación web nueva no lo ofreció ni lo nombró. Las pruebas por
+navegador no superaron Turnstile y se completaron con interacción real de Juan, **sin
+deshabilitarlo ni sustituirlo**. El PDF de prueba queda inactivo en producción con su
+historial intacto; su enlace público sigue accesible, como está documentado del producto.
+
+**Lo que NO entra, decidido**: recibir archivos del cliente final; PDF como base de
+conocimiento (`CONTEXTOS-AMPLIOS.md` ya lo descartó — esto es para **enviar**, no para
+consultar); miniaturas o transcodificación; Telegram; URLs firmadas; y analítica de
+descargas (`/media/*` va por caché de borde y no se puede contar sin desactivarla).
+
+---
+
 ## Finanzas: el libro interno de Velai (`SPEC-FINANZAS.md`, 2026-09-17, migraciones 0037/0038)
 
 Pedido de Juan: «gastos, ingresos y egresos… qué queda en caja, y si repartimos algunos de los

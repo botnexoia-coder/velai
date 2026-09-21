@@ -133,7 +133,7 @@ decide quién puede cerrar cada cosa:
 - [ ] Google: enviar la verificación OAuth, esperar aprobación y reactivar protecciones
       de borde después; validación legal de privacidad/LSSI.
 - [ ] Cambios en webs de clientes, bots de BotFather y logos que deben aportar sus
-      propietarios; R2 es opcional y operativo.
+      propietarios. (R2 dejó de ser opcional: la Biblioteca lo exige y ya está operativo.)
 
 ### DECISIONES DE NEGOCIO
 
@@ -318,11 +318,22 @@ Ahora cada cliente puede completar SU vinculación, cosa que nunca fue posible:
       propio; su fuente no está en ningún repo de botnexoia-coder. Hoy carga
       `vai-widget.js?v=20260913-salo` (misma línea a sustituir, tenant `tufisiooficial`).
 
+### 2p. Biblioteca multimedia (desplegada y verificada en producción 2026-09-17)
+
+Spec y verificación consolidadas en [`IMPLEMENTADO.md`](./IMPLEMENTADO.md). Lo que queda:
+
+- [ ] **Adjuntar desde la bandeja**: que un agente humano mande un archivo de la biblioteca
+      en una conversación con takeover. La spec lo dejó fuera a propósito, pero la
+      infraestructura ya está puesta — es la fase natural siguiente, no un rediseño.
+- [ ] **El PDF de prueba de producción** (`Prueba técnica de Biblioteca`) quedó inactivo con
+      su historial intacto. Borrarlo cuando ya no haga falta como evidencia; su enlace
+      público sigue accesible mientras exista, que es el comportamiento documentado.
+
 ### 2m. Marca del negocio en WhatsApp (desplegado 2026-08-22)
 
 - [x] Subida del logo desde la ficha (Marca del widget → «Subir imagen»): valida el tipo por magic bytes, máx. 2 MB, se guarda en nuestro almacenamiento y se sirve por `api.hirevai.com/media/logos/<id>.<ext>?v=…` (URL versionada, caché de un año).
 - [x] Botón **«Aplicar marca al perfil»** en Conexiones → WhatsApp (solo Velai): manda logo, descripción y web de la ficha al perfil de negocio del sender. El display name se relee y se reenvía intacto — cambiarlo dispara revisión de Meta.
-- [ ] **Juan (opcional, 1 clic):** activar **R2** en el dashboard (dash.cloudflare.com → R2 → habilitar; 10 GB gratis). Hoy los logos viven en KV y funciona igual; con R2 activo, `npx wrangler@4 r2 bucket create vai-media` + descomentar el binding en `wrangler.toml` y las subidas nuevas van allí.
+- [x] **R2 activo (2026-09-17):** buckets `vai-media` y `vai-media-staging` creados y enlazados en `wrangler.toml`; los logos nuevos se guardan allí (`store:r2`), no en KV. Llegó con la Biblioteca multimedia — ver `IMPLEMENTADO.md`.
 - [x] **Autoservicio (2026-08-24):** el propio cliente sube su logo desde Conexiones → «Tu logo» (ruta en `clienteAllowed` con guarda own-only: ajeno = 404) y el worker se lo aplica SOLO a su foto de WhatsApp en segundo plano (`sender_profile_synced` / `sender_profile_sync_failed` en los logs). El botón manual de Velai sigue como red de seguridad.
 - [ ] Subir un logo grande de Diálogos (su favicon actual es pequeño y se verá pixelado como foto de WhatsApp): ahora basta con subirlo, el perfil se actualiza solo.
 
