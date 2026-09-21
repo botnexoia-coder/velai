@@ -1813,14 +1813,22 @@ async function activeTenantEvent(env, tenantId, requireModule = true) {
 }
 
 async function captureEventInterest(env, tenant, convId, leadId, contact, fields, messages) {
-  if (!convId || !leadId) return;
+  if (!convId || !leadId) return { active: false, saved: false };
   const event = await activeTenantEvent(env, tenant.id);
-  if (!event) return;
+  if (!event) return { active: false, saved: false };
+  // Una conversación comercial no es todavía una reserva. Antes se insertaba aquí
+  // desde el segundo turno y el panel acababa lleno de «Por completar», incluso con
+  // simples saludos. Solo materializamos la reserva cuando el cliente confirma el
+  // resumen final y ya constan nombre completo y cantidad de asistentes.
+  const closing = eventClosingState(messages, fields);
+  if (!closing.confirmed || !closing.fullName || !closing.attendees) {
+    return { active: true, saved: false };
+  }
   const transcript = (messages || []).filter((m) => m.role === 'user').map((m) => m.content).join(' ');
   const combined = `${fields.need || ''} ${fields.context || ''} ${transcript}`;
   const own = /(?:mi|nuestro|hacer|organizar|montar|preparar)\s+(?:propio\s+)?evento|cumplea[nñ]os|despedida|boda|comuni[oó]n|celebraci[oó]n|fiesta privada/i.test(combined);
   const kind = own ? 'own_event' : 'event_reservation';
-  const details = clean([fields.need, fields.context].filter(Boolean).join(' · ') || transcript, 1000);
+  const details = clean([closing.summary, fields.need, fields.context].filter(Boolean).join(' · ') || transcript, 1000);
   const now = new Date().toISOString();
   try {
     await env.DB.prepare(`INSERT INTO event_reservations
@@ -1830,13 +1838,34 @@ async function captureEventInterest(env, tenant, convId, leadId, contact, fields
         lead_id=excluded.lead_id,name=COALESCE(excluded.name,event_reservations.name),contact=COALESCE(excluded.contact,event_reservations.contact),details=COALESCE(NULLIF(excluded.details,''),event_reservations.details),updated_at=excluded.updated_at`)
       .bind(crypto.randomUUID(), tenant.id, own ? null : event.id, convId, leadId, kind,
         fields.name || null, clean(contact, 80) || null, details || null, now, now).run();
+    return { active: true, saved: true, kind };
   } catch (error) {
     console.log(JSON.stringify({ level: 'warn', code: 'event_interest_not_saved', tenant: tenant.slug, error: clean(String(error.message || error), 60) }));
+    return { active: true, saved: false };
   }
 }
 
 function normalizedIntent(value) {
   return String(value || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim().toLowerCase().replace(/[.!¡¿?]/g, '').replace(/\s+/g, ' ');
+}
+
+function eventClosingState(messages, fields = {}) {
+  const trail = Array.isArray(messages) ? messages : [];
+  let userIndex = -1;
+  for (let i = trail.length - 1; i >= 0; i--) {
+    if (trail[i]?.role === 'user') { userIndex = i; break; }
+  }
+  let summary = '';
+  for (let i = userIndex - 1; i >= 0; i--) {
+    if (trail[i]?.role === 'assistant') { summary = String(trail[i].content || ''); break; }
+  }
+  const answer = normalizedIntent(userIndex >= 0 ? trail[userIndex].content : '');
+  const affirmative = /^(?:si|confirmo|correcto|todo correcto|de acuerdo|vale|ok|okay|dale|perfecto|asi es)(?:[\s,;:]|$)/.test(answer);
+  const askedToClose = /(?:est[aá]\s+todo\s+correcto|confirmas?(?:\s+la)?\s+(?:solicitud|reserva|resumen)|lo\s+dejo\s+solicitad|dejo\s+(?:la\s+)?(?:solicitud|reserva)\s+(?:preparada|registrada)|para\s+que\s+el\s+equipo\s+(?:la\s+)?(?:prepare|confirme))/i.test(summary);
+  const fullName = clean(fields.name, 100).split(/\s+/).filter(Boolean).length >= 2;
+  const userText = trail.filter((m) => m?.role === 'user').map((m) => String(m.content || '')).join(' ');
+  const attendees = /(?:\b\d{1,3}\b|\b(?:una?|dos|tres|cuatro|cinco|seis|siete|ocho|nueve|diez)\b)\s*(?:personas?|entradas?|asistentes?|invitados?)/i.test(userText);
+  return { confirmed: affirmative && askedToClose, fullName, attendees, summary };
 }
 
 async function recordEventConsent(env, tenant, conv, channel, contact, status, evidence) {
@@ -1875,7 +1904,7 @@ async function eventConsentReply(env, tenant, conv, channel, contact, message) {
   if (!saved) return 'Ahora mismo no he podido guardar esa preferencia. Te la volveré a preguntar más adelante para no asumir nada.';
   return accepted
     ? '¡Perfecto! 🎉 Guardaré tu número para avisarte de próximos eventos. Puedes darte de baja cuando quieras escribiendo BAJA.'
-    : 'Perfecto, no guardaré tu número para avisos de futuros eventos. Seguimos con tu reserva 😊';
+    : 'Perfecto, no guardaré tu número para avisos de futuros eventos. Tu solicitud sigue su curso con el equipo 😊';
 }
 
 // Las marcas nuevas guardan el leadId, pero durante 30 días pueden sobrevivir marcas
@@ -1918,8 +1947,13 @@ async function captureChatLead(config, env, ctx, tenant, body, phone, messages, 
     pageUrl: clean(body.pageUrl, 500), utm: safeUtm(body.utm), score: null,
   });
   if (result.ok) await convLinkLead(env, convId, result.leadId);
-  if (result.ok) await captureEventInterest(env, tenant, convId, result.leadId, phone, fields, messages);
-  if (result.ok && env.KV && leadCaptureDone(env, tenant, fields, userTurns)) await env.KV.put(mark, '1', { expirationTtl: 30 * 86400 });
+  const eventCapture = result.ok
+    ? await captureEventInterest(env, tenant, convId, result.leadId, phone, fields, messages)
+    : { active: false, saved: false };
+  if (result.ok && env.KV && leadCaptureDone(env, tenant, fields, userTurns)
+    && (!eventCapture.active || eventCapture.saved || userTurns >= LEAD_PATIENCE)) {
+    await env.KV.put(mark, '1', { expirationTtl: 30 * 86400 });
+  }
 }
 
 // Los canales de Twilio también capturan leads: WhatsApp conserva el teléfono y
@@ -1954,8 +1988,11 @@ async function captureWhatsAppLead(config, env, ctx, tenant, from, contactId, me
     ...fields, score: null,
   });
   if (result.ok) await convLinkLead(env, convId, result.leadId);
-  if (result.ok) await captureEventInterest(env, tenant, convId, result.leadId, source === 'whatsapp' ? contactId : from, fields, messages);
-  if (result.ok && env.KV && leadCaptureDone(env, tenant, fields, userTurns)) {
+  const eventCapture = result.ok
+    ? await captureEventInterest(env, tenant, convId, result.leadId, source === 'whatsapp' ? contactId : from, fields, messages)
+    : { active: false, saved: false };
+  if (result.ok && env.KV && leadCaptureDone(env, tenant, fields, userTurns)
+    && (!eventCapture.active || eventCapture.saved || userTurns >= LEAD_PATIENCE)) {
     await env.KV.put(mark, result.leadId || '1', { expirationTtl: 30 * 86400 });
   }
 }
@@ -4451,4 +4488,4 @@ export function createWorker(config) {
   };
 }
 
-export const testing = { senderPhone, PLANES, MODULOS, modulosDe, canalesOcupados, assertPlanChannelLimit, scheduled, MINUTE_CRON, processReminders, reminderHoursFor, reminderTemplateVariables, samePhone, tenantTemplate, pollTemplateApprovals, REMINDER_KIND, waitedMin, QUEUE_MAX_MIN, QUEUE_WAIT_TEXT, canAttend, velaiTenantId, handleChatPoll, handleEventIntake, eventIntakeToken, VISITOR_AWAY_MS, expireTakeovers, NO_ADVISOR_TEXT, graceExpired, systemWithHandoff, HANDOFF_ON, HANDOFF_OFF, supportWindows, withinSupportHours, advisorAvailable, CONV_STATES, TAKEOVER_GRACE_MIN, settleReply, TRUNCATED_CLOSING, trimToSentence, waBody, replyWindow, reportPeriod, reportMetric, weeklyReportText, weeklyStats, sendWeeklyReports, convLoad, convAppend, convLinkLead, convFilters, convRetentionDays, UNANSWERED_RE, CONV_WINDOW, cloudflareUsage, CF_FREE_LIMITS, recordConversation, aiCost, recordAiUsage, rateLimited, memLimited, applySenderProfile, pushSenderProfile, clean, persistLead, leadAlertStatus, captureWhatsAppLead, leadFromSummary, leadCaptureDone, activeTenantEvent, captureEventInterest, eventConsentReply, notificationText, errorResponseParts, tenantByAddress, syncPrimaryChannel, assertChannelFree, normalizePhone, extractPhone, extractPhoneFromMessages, safeUtm, publicCors, validTwilioSignature, callAnthropic, callAnthropicRaw, runToolLoop, calendarExecutor, calendarSystem, tenantCalendar, validCalendarDate, availableSlots, handleCalendarCallback, calendarCallbackFor, sendTwilioText, timingSafeEqual, telegramBotUsername, telegramSetWebhook, telegramWebhookInfo, handleTelegramWebhook, sendTelegramText, tenantTelegramToken, telegramThreadFor, registerTelegramTopic, csvCell, expiryDate, leadFilters, isDemoKey, templateVar, leadTemplateVariables, readJson, deliver, drainQueuedLeads, verifyTurnstile, systemFor, validateTenant, invalidateTenantCache, tenantWriteError, assertNotActivePending, tenantChannelSummary, channelsForScope, routingChannelState, handleProvision, pollProvisioning, fillSeries, resolveScope, scopeClause, assertOwnTenant, clienteAllowed, adminRouter, recordAuthFailure, handleAdmin, handleWidgetBoot, allowedOrigins, envOrigins, syncPanelGate, envAdmins, syncAdminGate, getSetting, setSetting, withCfToken };
+export const testing = { senderPhone, PLANES, MODULOS, modulosDe, canalesOcupados, assertPlanChannelLimit, scheduled, MINUTE_CRON, processReminders, reminderHoursFor, reminderTemplateVariables, samePhone, tenantTemplate, pollTemplateApprovals, REMINDER_KIND, waitedMin, QUEUE_MAX_MIN, QUEUE_WAIT_TEXT, canAttend, velaiTenantId, handleChatPoll, handleEventIntake, eventIntakeToken, VISITOR_AWAY_MS, expireTakeovers, NO_ADVISOR_TEXT, graceExpired, systemWithHandoff, HANDOFF_ON, HANDOFF_OFF, supportWindows, withinSupportHours, advisorAvailable, CONV_STATES, TAKEOVER_GRACE_MIN, settleReply, TRUNCATED_CLOSING, trimToSentence, waBody, replyWindow, reportPeriod, reportMetric, weeklyReportText, weeklyStats, sendWeeklyReports, convLoad, convAppend, convLinkLead, convFilters, convRetentionDays, UNANSWERED_RE, CONV_WINDOW, cloudflareUsage, CF_FREE_LIMITS, recordConversation, aiCost, recordAiUsage, rateLimited, memLimited, applySenderProfile, pushSenderProfile, clean, persistLead, leadAlertStatus, captureWhatsAppLead, leadFromSummary, leadCaptureDone, activeTenantEvent, captureEventInterest, eventClosingState, eventConsentReply, notificationText, errorResponseParts, tenantByAddress, syncPrimaryChannel, assertChannelFree, normalizePhone, extractPhone, extractPhoneFromMessages, safeUtm, publicCors, validTwilioSignature, callAnthropic, callAnthropicRaw, runToolLoop, calendarExecutor, calendarSystem, tenantCalendar, validCalendarDate, availableSlots, handleCalendarCallback, calendarCallbackFor, sendTwilioText, timingSafeEqual, telegramBotUsername, telegramSetWebhook, telegramWebhookInfo, handleTelegramWebhook, sendTelegramText, tenantTelegramToken, telegramThreadFor, registerTelegramTopic, csvCell, expiryDate, leadFilters, isDemoKey, templateVar, leadTemplateVariables, readJson, deliver, drainQueuedLeads, verifyTurnstile, systemFor, validateTenant, invalidateTenantCache, tenantWriteError, assertNotActivePending, tenantChannelSummary, channelsForScope, routingChannelState, handleProvision, pollProvisioning, fillSeries, resolveScope, scopeClause, assertOwnTenant, clienteAllowed, adminRouter, recordAuthFailure, handleAdmin, handleWidgetBoot, allowedOrigins, envOrigins, syncPanelGate, envAdmins, syncAdminGate, getSetting, setSetting, withCfToken };

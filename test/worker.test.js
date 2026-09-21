@@ -6432,22 +6432,52 @@ test('formulario externo firmado crea una sola vez lead, reserva, consentimiento
   assert.equal((await DB.prepare('SELECT COUNT(*) AS n FROM lead_notifications WHERE lead_id=?').bind(firstBody.leadId).first()).n, 2);
 });
 
-test('eventos: una intención se guarda provisional y distingue una celebración propia', async () => {
+test('eventos: solo guarda tras confirmar resumen con nombre completo y asistentes', async () => {
   const writes = [];
   const env = { DB: { prepare(sql) { return { bind(...args) { return {
     first: async () => sql.includes('tenant_modulos') ? { plan: 'esencial', plan_revision: '', estado: 'on' } : sql.includes('FROM tenant_events') ? { id: '70000000-0000-4000-8000-000000000001', name: 'Fiesta' } : null,
     run: async () => { writes.push({ sql, args }); return { meta: { changes: 1 } }; },
   }; } }; } } };
   const tenant = { id: '60000000-0000-4000-8000-000000000001', slug: 'naya' };
-  await testing.captureEventInterest(env, tenant, '50000000-0000-4000-8000-000000000001', '40000000-0000-4000-8000-000000000001', 'whatsapp:+34600',
-    { name: 'Ana', need: 'Quiero reservar dos entradas', context: '' }, [{ role: 'user', content: 'quiero reservar' }]);
+  const incomplete = await testing.captureEventInterest(env, tenant, '50000000-0000-4000-8000-000000000001', '40000000-0000-4000-8000-000000000001', 'whatsapp:+34600',
+    { name: 'Ana', need: 'Quiero reservar dos entradas', context: '' }, [{ role: 'user', content: 'quiero reservar dos entradas' }]);
+  assert.deepEqual(incomplete, { active: true, saved: false });
+  const booking = await testing.captureEventInterest(env, tenant, '50000000-0000-4000-8000-000000000001', '40000000-0000-4000-8000-000000000001', 'whatsapp:+34600',
+    { name: 'Ana Ruiz', need: 'Quiero reservar dos entradas', context: '' }, [
+      { role: 'user', content: 'quiero reservar dos entradas' },
+      { role: 'assistant', content: 'Resumen: Ana Ruiz, 2 entradas. ¿Está todo correcto y lo dejo solicitado?' },
+      { role: 'user', content: 'Sí, por favor' },
+    ]);
   await testing.captureEventInterest(env, tenant, '50000000-0000-4000-8000-000000000002', '40000000-0000-4000-8000-000000000002', 'whatsapp:+34601',
-    { name: 'Luis', need: 'Quiero organizar mi cumpleaños', context: '' }, [{ role: 'user', content: 'quiero hacer mi evento' }]);
+    { name: 'Luis Pérez', need: 'Quiero organizar mi cumpleaños para 40 invitados', context: '' }, [
+      { role: 'user', content: 'quiero hacer mi evento para 40 invitados' },
+      { role: 'assistant', content: 'Resumen del evento. ¿Confirmas la solicitud?' },
+      { role: 'user', content: 'Confirmo' },
+    ]);
+  assert.equal(booking.saved, true);
   assert.equal(writes.length, 2);
   assert.equal(writes[0].args[5], 'event_reservation');
   assert.equal(writes[0].args[2], '70000000-0000-4000-8000-000000000001');
   assert.equal(writes[1].args[5], 'own_event');
   assert.equal(writes[1].args[2], null);
+});
+
+test('eventos: un saludo o un sí sin resumen confirmado nunca crea una reserva', async () => {
+  const writes = [];
+  const env = { DB: { prepare(sql) { return { bind(...args) { return {
+    first: async () => sql.includes('tenant_modulos') ? { plan: 'esencial', plan_revision: '', estado: 'on' } : sql.includes('FROM tenant_events') ? { id: '70000000-0000-4000-8000-000000000001', name: 'Fiesta' } : null,
+    run: async () => { writes.push({ sql, args }); return { meta: { changes: 1 } }; },
+  }; } }; } } };
+  const tenant = { id: '60000000-0000-4000-8000-000000000001', slug: 'naya' };
+  await testing.captureEventInterest(env, tenant, '50000000-0000-4000-8000-000000000003', '40000000-0000-4000-8000-000000000003', 'whatsapp:+34602',
+    { name: 'Por completar', need: 'Interesado en eventos', context: '' }, [{ role: 'user', content: 'Hola' }]);
+  await testing.captureEventInterest(env, tenant, '50000000-0000-4000-8000-000000000004', '40000000-0000-4000-8000-000000000004', 'whatsapp:+34603',
+    { name: 'Ana Ruiz', need: 'Reserva', context: '' }, [
+      { role: 'user', content: 'quiero dos entradas' },
+      { role: 'assistant', content: '¿Quieres whisky o ron?' },
+      { role: 'user', content: 'Sí' },
+    ]);
+  assert.equal(writes.length, 0);
 });
 
 test('consentimiento: un sí aislado no vale, la pregunta explícita sí y BAJA siempre revoca', async () => {
@@ -6461,8 +6491,9 @@ test('consentimiento: un sí aislado no vale, la pregunta explícita sí y BAJA 
   assert.equal(await testing.eventConsentReply(env, tenant, base, 'whatsapp', 'whatsapp:+34600', 'sí'), null);
   const asked = { ...base, messages: [{ role: 'assistant', content: '¿Quieres que guarde tu número para avisarte por WhatsApp de futuros eventos?' }] };
   assert.match(await testing.eventConsentReply(env, tenant, asked, 'whatsapp', 'whatsapp:+34600', 'sí'), /Perfecto/);
+  assert.match(await testing.eventConsentReply(env, tenant, asked, 'whatsapp', 'whatsapp:+34600', 'no'), /sigue su curso con el equipo/);
   assert.match(await testing.eventConsentReply(env, tenant, base, 'whatsapp', 'whatsapp:+34600', 'BAJA'), /registrado/);
-  assert.deepEqual(states, ['accepted', 'withdrawn']);
+  assert.deepEqual(states, ['accepted', 'declined', 'withdrawn']);
 });
 
 test('planes: Esencial supera el cupo pero sigue respondiendo WhatsApp', async () => {
