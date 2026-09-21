@@ -100,7 +100,8 @@ también OTP, perfil, comprobación y reenvío de plantillas, y se rechazan sufi
 La prueba de concurrencia pasa por el router y un E2E pulsa el botón real con SQLite y
 Twilio simulado: reproduce el error antes de la corrección y después registra el sender,
 su canal y el webhook sin crear otro. Los tests directos de `handleProvision` por sí
-solos no detectaban este fallo de despacho. Pendiente desplegar esta corrección por CD.
+solos no detectaban este fallo de despacho. Desplegada por CD el 2026-09-21 (worker
+`3b276ec3-4a21-4fbb-8578-a97e13045bbd`).
 
 Verificación: `npm run check`, unitarios del panel, typecheck/build y Playwright;
 pruebas con SQLite real de migración, altas, cambios de canal, concurrencia,
