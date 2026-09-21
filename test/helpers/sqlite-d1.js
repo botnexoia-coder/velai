@@ -21,7 +21,7 @@ for line in sys.stdin:
  except Exception as e:
   print(json.dumps({'error':str(e)}),flush=True)
 `;
-export async function sqliteD1() {
+export async function sqliteD1({ through = null } = {}) {
   const child = spawn('python3', ['-u', '-c', python], { stdio: ['pipe', 'pipe', 'inherit'] });
   const pending = [];
   createInterface({ input: child.stdout }).on('line', (line) => { const cb = pending.shift(); const data = JSON.parse(line); data.error ? cb.reject(new Error(data.error)) : cb.resolve(data.ok); });
@@ -33,6 +33,6 @@ export async function sqliteD1() {
   });
   const db = { prepare: statement, batch: (statements) => call({ statements }), exec: (script) => call({ script }), close: () => child.stdin.end() };
   const root = new URL('../../migrations/', import.meta.url);
-  for (const name of (await readdir(root)).filter((s) => s.endsWith('.sql')).sort()) await db.exec(await readFile(new URL(name, root), 'utf8'));
+  for (const name of (await readdir(root)).filter((s) => s.endsWith('.sql') && (!through || s.slice(0, 4) <= through)).sort()) await db.exec(await readFile(new URL(name, root), 'utf8'));
   return db;
 }

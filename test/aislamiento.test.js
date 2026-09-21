@@ -15,7 +15,7 @@ import { testing } from '../worker/app.js';
 
 const A = '00000000-0000-4000-8000-00000000000a'; // el cliente que pregunta
 const B = '00000000-0000-4000-8000-00000000000b'; // el cliente ajeno
-const CLIENTE = { role: 'cliente', tenantId: A, email: 'cliente@mio.com' };
+const CLIENTE = { role: 'cliente', modulos: ['calendario', 'citas', 'eventos'], tenantId: A, email: 'cliente@mio.com' };
 
 // Todo lo que sea del tenant B lleva marcador: si algo de esto sale por la respuesta
 // de un cliente de A, es una fuga. Cadenas raras a propósito, para que un match sea real.
@@ -318,5 +318,24 @@ test('Finanzas: clienteGate rechaza cada ruta antes de tocar D1', async () => {
     assert.equal(r.status, 403, `${route.method} ${path}`);
     assert.equal(r.error, 'not_authorized');
     assert.equal(r.db.queries.length, 0, 'la puerta tiene que ir antes de D1');
+  }
+});
+
+// Derechos ausentes: ninguna ruta contratada llega a D1 (incluidos subrecursos).
+test('módulos: todas las rutas contratadas cierran antes de consultar D1', async () => {
+  const paths = [
+    ['/api/admin/appointments', 'GET'], ['/api/admin/events', 'GET'],
+    [`/api/admin/events/reservations/${leadIdA}`, 'PATCH'],
+    [`/api/admin/tenants/${A}/calendar`, 'GET'], [`/api/admin/tenants/${A}/calendar`, 'PATCH'],
+    [`/api/admin/tenants/${A}/calendar`, 'DELETE'], [`/api/admin/tenants/${A}/calendar/connect`, 'POST'],
+    [`/api/admin/tenants/${A}/booking`, 'GET'], [`/api/admin/tenants/${A}/booking`, 'PATCH'],
+    [`/api/admin/tenants/${A}/services`, 'GET'], [`/api/admin/tenants/${A}/services`, 'POST'],
+    [`/api/admin/tenants/${A}/services/${leadIdA}`, 'PATCH'], [`/api/admin/tenants/${A}/services/${leadIdA}`, 'DELETE'],
+  ];
+  for (const [path, method] of paths) {
+    const env = { DB: { prepare() { assert.fail(`${path}: no debe consultar D1`); } } };
+    const url = new URL('https://test' + path);
+    await assert.rejects(testing.adminRouter(new Request(url, { method }), env, { waitUntil() {} }, path, url, {}, { ...CLIENTE, modulos: [] }),
+      (e) => e.status === 403 && e.code === 'modulo_no_contratado', path);
   }
 });

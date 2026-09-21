@@ -80,6 +80,7 @@ export function Clientes() {
                     <span className="muted">{t.prompt_len} car.</span>
                   </td>
                   <td>
+                    {t.plan ? <span className="flag">{{ esencial: 'Esencial', profesional: 'Profesional', empresa: 'Empresa' }[t.plan]}</span> : null}
                     {semaforo(t, false).map((c, i) => (
                       <span key={i} className={`flag${c.cls ? ` ${c.cls}` : ''}`}>
                         {c.text}

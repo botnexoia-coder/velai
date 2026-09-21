@@ -9,6 +9,37 @@
 > Las specs ya implementadas están consolidadas en
 > [`IMPLEMENTADO.md`](./IMPLEMENTADO.md) (texto íntegro en el historial de git).
 
+## Planes y módulos — puesta en marcha de 0043
+
+Implementación y pruebas locales completadas el 2026-09-21; todavía sin desplegar.
+
+- [ ] Antes del CD, revisar los planes deducidos contra los contratos de los clientes:
+      un cliente con un solo canal quedará en Esencial aunque pague Profesional.
+      La migración conserva sus módulos actuales como excepciones.
+      Consulta remota de solo lectura para preparar esa revisión:
+
+      ```bash
+      npx wrangler d1 execute vai-leads --remote --command "SELECT slug, channel_address, web_origins, (SELECT group_concat(kind) FROM tenant_channels c WHERE c.tenant_id=t.id) AS enrutados FROM tenants t WHERE active=1 ORDER BY slug"
+      ```
+
+- [ ] Pasar CI y CD: `d1 migrations apply` por el flujo habitual, primero staging y
+      después producción. No usar `d1 execute --file` para aplicar 0043.
+- [ ] En staging, comprobar una cuenta Esencial con WhatsApp: segundo canal rechazado,
+      mensajes atendidos; conceder/revocar Eventos en una cuenta sin eventos; revocar
+      Citas y comprobar que cierra su página pública de reservas.
+- [ ] Verificar el reparto definitivo en producción y corregir los planes comerciales
+      desde Clientes → Plan y módulos. Conceder Citas permite configurar sus
+      interruptores en Calendario, pero no publica reservas ni envía recordatorios
+      automáticamente.
+- [ ] **Avisar a Johan**: el intake firmado de eventos
+      (`POST /integrations/event-reservations`, el formulario de nayaeventos.com) ahora
+      exige el módulo `eventos`. Si algún día se le revoca a NAYA, ese formulario pasa
+      de `201` a `403 modulo_no_contratado` — el consumidor vive fuera de este repo.
+- [ ] **Orden del CD, no negociable**: `resolveScope` es fail-closed, así que si 0043
+      no está aplicada cuando arranca el worker nuevo, TODOS los clientes se quedan sin
+      Calendario, Citas y Eventos hasta que la migración entre. El CD ya aplica
+      migraciones antes del deploy; si 0043 falla, parar y no desplegar encima.
+
 ## Resumen activo por tipo (fuente de verdad)
 
 Las secciones históricas de abajo conservan contexto y pasos concretos. Esta lista
@@ -106,7 +137,7 @@ decide quién puede cerrar cada cosa:
 
 ### DECISIONES DE NEGOCIO
 
-- [ ] Presupuesto/canal de campañas, precio del addon Confirmaciones, supuestos de
+- [ ] Presupuesto/canal de campañas, precio del addon Citas (Confirmaciones + Autoagenda), supuestos de
       ahorro, política al agotar IA, Colombia y futuras demos/nurturing.
 
 ### LISTO EN ESTE WORKTREE, AÚN NO DESPLEGADO
@@ -422,9 +453,9 @@ no a una segunda ejecución manual:
       Confirmaciones») cuando la plantilla esté aprobada.
 - [ ] **Prueba real**: agendar una cita con Vai a >24 h vista, esperar el
       recordatorio y pulsar los dos botones (Confirmo y Cancelar → reagendado).
-- [ ] **Decisión de precio**: ¿incluido en el plan Profesional o addon con precio
-      propio? (referencia de mercado: 12–31 USD/mes por volumen de citas; cada
-      recordatorio es una conversación Utility de Meta — verificar tarifa ES/CO).
+- [ ] **Decisión de precio de Citas**: el módulo agrupa Confirmaciones + Autoagenda.
+      Decidir si entra en Profesional o se cobra aparte, y su tarifa. Por ahora es
+      addon en el catálogo; incluirlo en un plan se cambia en `worker/planes.js`.
 
 **F3 (autoagenda) desplegada y viva**: `citas.hirevai.com/{cliente}/reservas` responde con
 la página de Diálogos y sus tres modalidades; servicios, embeds, .ics y reagendado por token
@@ -436,9 +467,6 @@ incluidos, y el chat sigue agendando conversando. Resumen en
       otro significado: el mensaje dice algo distinto.
 - [ ] **Embed en la web de Diálogos** (`vai-citas.js`, inline o popup) cuando el enlace a
       secas lleve una semana sin sustos. Hoy su web solo lleva el widget de chat.
-- [ ] **Precio de la autoagenda**: ¿entra en el plan Profesional, va con Confirmaciones como
-      un mismo addon «Citas», o se cobra aparte? Calendly cobra 10–16 $/usuario/mes por justo
-      esto, y nosotros lo damos con recordatorio por WhatsApp y bot que reagenda encima.
 - [ ] **Vigilar los primeros días**: que ninguna reserva pública se cruce con una del chat
       (la triple barrera está en tests, pero el tráfico real es el que manda) y que el caché
       de huecos de 90 s no enseñe una hora ya ocupada.

@@ -1,9 +1,11 @@
+import { PLANES, MODULOS, modulosDe, canalesOcupados } from './planes.js';
+import { assertPlanChannelLimit, assertTenantModulo, tieneModulo } from './tenant-planes.js';
 import { Hono } from 'hono';
 import { ADMIN_HEADERS, ADMIN_HTML } from './admin-page.js';
 import {
   adminOrigin, adminHost, adminCorsGuard, adminIdentity, envAdmins, resolveScope,
   recordAuthFailure, scopeClause, assertOwnTenant, clienteAllowed,
-  mwAdminHost, mwAdminCors, mwAdminIdentity, mwResolveScope, clienteGate,
+  mwAdminHost, mwAdminCors, mwAdminIdentity, mwResolveScope, clienteGate, moduloGate,
 } from './middleware.js';
 import { publico } from './routes/publico.js';
 import { reserva } from './routes/reserva.js';
@@ -503,6 +505,22 @@ export async function assertChannelFree(env, address, tenantId) {
   if (!/^(whatsapp|messenger):/.test(String(address || ''))) return;
   const row = await env.DB.prepare('SELECT tenant_id FROM tenant_channels WHERE address=?').bind(address).first();
   if (row && row.tenant_id !== tenantId) throw new HttpError(409, 'address_taken');
+}
+
+// Para altas/ediciones: canal y ficha cambian en el mismo batch, bajo la revisión
+// adquirida por el UPDATE. Un guardado concurrente no deja filas de enrutado huérfanas.
+export function primaryChannelStatements(env, tenantId, previousAddress, newAddress, revision) {
+  const kindOf = (a) => /^(whatsapp|messenger):/.exec(String(a || ''))?.[1];
+  const guard = 'EXISTS (SELECT 1 FROM tenants WHERE id=? AND plan_revision=?)';
+  const statements = [];
+  if (kindOf(previousAddress)) statements.push(env.DB.prepare(`DELETE FROM tenant_channels WHERE address=? AND tenant_id=? AND ${guard}`).bind(previousAddress, tenantId, tenantId, revision));
+  const kind = kindOf(newAddress);
+  if (kind) {
+    statements.push(env.DB.prepare(`DELETE FROM tenant_channels WHERE tenant_id=? AND kind=? AND ${guard}`).bind(tenantId, kind, tenantId, revision));
+    statements.push(env.DB.prepare(`INSERT INTO tenant_channels(address,tenant_id,kind,created_at) SELECT ?,?,?,? WHERE ${guard}`)
+      .bind(newAddress, tenantId, kind, new Date().toISOString(), tenantId, revision));
+  }
+  return statements;
 }
 
 // Mantiene tenant_channels como espejo del canal primario (tenants.channel_address).
@@ -1665,6 +1683,7 @@ export async function handleEventIntake(request, env, ctx) {
   const tenant = tenantSlug ? await tenantBySlug(env, tenantSlug) : null;
   if (!tenant) throw new HttpError(400, 'invalid_tenant');
 
+  await assertTenantModulo(env, tenant.id, 'eventos');
   const name = clean(body.name, 100);
   const phone = normalizePhone(body.whatsapp);
   const eventLabel = clean(body.event, 160);
@@ -1768,11 +1787,11 @@ function leadCaptureDone(env, tenant, fields, userTurns) {
 }
 
 // ── Eventos y consentimiento (0041) ─────────────────────────────────────────
-// La presencia de un evento activo activa el módulo para ese tenant. De este modo el
-// código es reutilizable y no hay un `if (slug === NAYA)` escondido en el runtime.
-async function activeTenantEvent(env, tenantId) {
+// Los datos del evento se conservan al revocar el módulo; la captura deja de ofrecerse.
+async function activeTenantEvent(env, tenantId, requireModule = true) {
   if (!env.DB) return null;
   try {
+    if (requireModule && !await tieneModulo(env, tenantId, 'eventos')) return null;
     return await env.DB.prepare("SELECT id,name FROM tenant_events WHERE tenant_id=? AND status='active' ORDER BY starts_at ASC LIMIT 1")
       .bind(tenantId).first();
   } catch (_) { return null; } // deploy compatible antes de aplicar la migración
@@ -1822,7 +1841,8 @@ async function recordEventConsent(env, tenant, conv, channel, contact, status, e
 // turno anterior preguntó expresamente por futuros eventos: un «sí» a una reserva jamás
 // puede convertirse por accidente en permiso comercial.
 async function eventConsentReply(env, tenant, conv, channel, contact, message) {
-  if (!await activeTenantEvent(env, tenant.id)) return null;
+  // Los consentimientos pendientes y las bajas se siguen atendiendo tras la revocación.
+  if (!await activeTenantEvent(env, tenant.id, false)) return null;
   const intent = normalizedIntent(message);
   const withdraw = ['baja', 'cancelar promociones', 'no mas mensajes', 'no quiero mas mensajes'].includes(intent);
   if (withdraw) {
@@ -1930,6 +1950,10 @@ async function captureWhatsAppLead(config, env, ctx, tenant, from, contactId, me
 // cifrado (AAD `calendar:<tenant_id>`); la config se cachea en KV como los tenants.
 async function tenantCalendar(env, tenant) {
   if (!env.DB || !tenant || !env.GOOGLE_OAUTH_CLIENT_ID) return null;
+  // El derecho se lee de D1 incluso con caché: un llenado en vuelo o un borrado
+  // fallido puede dejar en KV una conexión cuyo módulo ya se revocó. Si la lectura
+  // falla, el chat sigue respondiendo sin ofrecer las tools de calendario.
+  try { if (!await tieneModulo(env, tenant.id, 'calendario')) return null; } catch (_) { return null; }
   const key = `calcfg:${tenant.id}`;
   if (env.KV) {
     try { const cached = await env.KV.get(key, 'json'); if (cached) return cached.tenant_id ? cached : null; } catch (_) {}
@@ -3697,6 +3721,7 @@ async function runProvisionStep(request, env, ctx, tenant, tenantId, step, actor
     if (senders.length > 1) throw new HttpError(409, 'multiple_senders'); // decidir a mano, no adivinar
     const s = senders[0];
     const phone = s.senderId;
+    await assertPlanChannelLimit(env, tenantId, tenant.plan ?? 'profesional', { addChannel: { kind: 'whatsapp', address: phone } }, tenant);
     const proposed = { waba_id: s.wabaId, sender_sid: s.senderSid, sender_status: s.status, twilio_from: phone, channel_address: phone };
     const sets = []; const args = [];
     for (const [col, val] of Object.entries(proposed)) {
@@ -3704,25 +3729,31 @@ async function runProvisionStep(request, env, ctx, tenant, tenantId, step, actor
       if ((col === 'channel_address' || col === 'twilio_from') && tenant[col]) continue; // ya puesto: se informa, no se pisa
       sets.push(`${col}=?`); args.push(val);
     }
-    if (sets.length) {
-      await env.DB.prepare(`UPDATE tenants SET ${sets.join(',')}, updated_at=? WHERE id=?`).bind(...args, now, tenantId).run();
-      await invalidateTenantCache(env, [tenant]);
-    }
-    // El ENRUTADO vive en tenant_channels, no en las columnas de arriba. Un tenant que
-    // ya tenía canal web (channel_address='web:<slug>') no recibe el número por el
-    // bucle anterior — se lo salta a propósito para no pisarlo — y sin fila aquí el
-    // webhook entrante no resuelve tenant: 404 unknown_tenant y bot MUDO con el sender
-    // en ONLINE (le pasó a gogestion, 2026-08-24). Registrar el canal es el paso que
-    // de verdad enciende WhatsApp, así que va siempre, no solo cuando sets.length.
+    // Tolerante A PROPÓSITO (incidente gogestion, 2026-08-24): si el número enruta a
+    // OTRO cliente, o alguien guardó la ficha a la vez, este paso NO aborta. Lo que
+    // viene justo después —reparar el webhook— también es necesario para recibir
+    // mensajes. El fallo del registro se devuelve al panel para que explique qué
+    // falta resolver antes de dar la sincronización por completada.
+    // El cupo del plan sí corta antes (arriba): configurar de más es otra cosa.
+    const revision = crypto.randomUUID();
     let channelRegistered = false;
+    let channelError = null;
     try {
       await assertChannelFree(env, phone, tenantId);
-      await syncPrimaryChannel(env, tenantId, null, phone);
+      // El CAS y el enrutado comparten transacción: un downgrade concurrente nunca
+      // puede dejar un segundo canal configurado después de comprobar el límite.
+      let updated;
+      try { [updated] = await env.DB.batch([
+        env.DB.prepare(`UPDATE tenants SET ${[...sets, 'plan_revision=?', 'updated_at=?'].join(',')} WHERE id=? AND updated_at=? AND plan_revision=?`)
+          .bind(...args, revision, now, tenantId, tenant.updated_at, tenant.plan_revision ?? ''),
+        ...primaryChannelStatements(env, tenantId, null, phone, revision),
+      ]); } catch (error) { throw tenantWriteError(error); }
+      if (!updated.meta.changes) throw new HttpError(409, 'stale_tenant');
       channelRegistered = true;
-      await invalidateTenantCache(env, [tenant]); // ahora sí barre `tenant:addr:<numero>`
+      await invalidateTenantCache(env, [tenant]);
     } catch (error) {
-      // 409 address_taken: el número enruta a OTRO cliente. No se toca — se informa.
       if (!(error instanceof HttpError)) throw error;
+      channelError = error.code;
       console.log(JSON.stringify({ level: 'error', code: 'sender_channel_not_registered', tenant: tenant.slug, error: error.code }));
     }
     // El Self Sign-up deja el webhook en el default de Twilio: sender verde y bot
@@ -3733,11 +3764,11 @@ async function runProvisionStep(request, env, ctx, tenant, tenantId, step, actor
       try { await updateSenderWebhook(credentials, s.senderSid, WORKER_PUBLIC_URL); webhookOk = true; webhookFixed = true; }
       catch (error) { console.log(JSON.stringify({ level: 'error', code: 'sender_webhook_fix_failed', tenant: tenant.slug, error: clean(error.message, 60) })); }
     }
-    await provisionAudit(env, ctx, tenant, actor, `sender sincronizado desde Twilio (${s.senderSid}, ${s.status})${webhookFixed ? ' + webhook reparado' : ''}${channelRegistered ? ` + canal ${phone} enrutado` : ''}`);
+    await provisionAudit(env, ctx, tenant, actor, `sender ${channelRegistered && webhookOk ? 'sincronizado' : 'con sincronización incompleta'} desde Twilio (${s.senderSid}, ${s.status})${webhookFixed ? ' + webhook reparado' : ''}${channelRegistered ? ` + canal ${phone} enrutado` : ` + canal sin registrar (${channelError})`}${webhookOk ? '' : ' + webhook pendiente de reparar'}`);
     return json({
-      ok: true, applied: sets.length, sender: { senderSid: s.senderSid, senderId: s.senderId, status: s.status, wabaId: s.wabaId },
+      ok: true, applied: channelRegistered ? sets.length : 0, sender: { senderSid: s.senderSid, senderId: s.senderId, status: s.status, wabaId: s.wabaId },
       conflicts: ['channel_address', 'twilio_from'].filter((c) => tenant[c] && tenant[c] !== phone).map((c) => ({ field: c, current: tenant[c], fromTwilio: phone })),
-      webhookOk, webhookFixed, channelRegistered,
+      webhookOk, webhookFixed, channelRegistered, channelError,
     }, 200, NO_STORE);
   }
 
@@ -3747,6 +3778,7 @@ async function runProvisionStep(request, env, ctx, tenant, tenantId, step, actor
     const body = await readJson(request, 2000);
     const phone = clean(body.phone, 20);
     if (!/^\+[1-9]\d{6,14}$/.test(phone)) throw new HttpError(400, 'invalid_phone');
+    await assertPlanChannelLimit(env, tenantId, tenant.plan ?? 'profesional', { addChannel: { kind: 'whatsapp', address: `whatsapp:${phone}` } }, tenant);
     const created = await createWhatsAppSender(credentials, { phone, wabaId: tenant.waba_id, callbackUrl: WORKER_PUBLIC_URL });
     try {
       const res = await env.DB.prepare('UPDATE tenants SET sender_sid=?, sender_status=?, updated_at=? WHERE id=? AND sender_sid IS NULL')
@@ -3823,6 +3855,9 @@ async function calendarCallbackFor(env, ctx, url, actor, scope = { role: 'velai'
   // consiga un state ajeno (el state ya está consumido llegados aquí).
   if (scope.role !== 'velai' && stored.tenantId !== scope.tenantId) throw new HttpError(403, 'not_authorized');
   const back = (result) => new Response(null, { status: 302, headers: { Location: `${adminOrigin(env)}/#calendar=${result}` } });
+  // Como el resto de fallos de este flujo: esto vuelve del navegador del usuario, así
+  // que se redirige al panel. Un 403 en JSON aquí sería una pantalla en crudo.
+  try { await assertTenantModulo(env, stored.tenantId, 'calendario'); } catch (_) { return back('sin_modulo'); }
   const code = clean(url.searchParams.get('code'), 512);
   if (!code) return back('denegado'); // el usuario canceló en la pantalla de Google
   let tokens;
@@ -4301,6 +4336,7 @@ function buildAdminApp() {
   });
   // La lista blanca del rol cliente, ANTES de cualquier handler (403 sin tocar datos).
   admin.use('/api/admin/*', clienteGate);
+  admin.use('/api/admin/*', moduloGate);
   admin.route('/', rutasConfig);
   admin.route('/', rutasFinanzas);
   admin.route('/', rutasLeads);
@@ -4389,4 +4425,4 @@ export function createWorker(config) {
   };
 }
 
-export const testing = { scheduled, MINUTE_CRON, processReminders, reminderHoursFor, reminderTemplateVariables, samePhone, tenantTemplate, pollTemplateApprovals, REMINDER_KIND, waitedMin, QUEUE_MAX_MIN, QUEUE_WAIT_TEXT, canAttend, velaiTenantId, handleChatPoll, handleEventIntake, eventIntakeToken, VISITOR_AWAY_MS, expireTakeovers, NO_ADVISOR_TEXT, graceExpired, systemWithHandoff, HANDOFF_ON, HANDOFF_OFF, supportWindows, withinSupportHours, advisorAvailable, CONV_STATES, TAKEOVER_GRACE_MIN, settleReply, TRUNCATED_CLOSING, trimToSentence, waBody, replyWindow, reportPeriod, reportMetric, weeklyReportText, weeklyStats, sendWeeklyReports, convLoad, convAppend, convLinkLead, convFilters, convRetentionDays, UNANSWERED_RE, CONV_WINDOW, cloudflareUsage, CF_FREE_LIMITS, recordConversation, aiCost, recordAiUsage, rateLimited, memLimited, applySenderProfile, pushSenderProfile, clean, persistLead, leadAlertStatus, captureWhatsAppLead, leadFromSummary, leadCaptureDone, activeTenantEvent, captureEventInterest, eventConsentReply, notificationText, errorResponseParts, tenantByAddress, syncPrimaryChannel, assertChannelFree, normalizePhone, extractPhone, extractPhoneFromMessages, safeUtm, publicCors, validTwilioSignature, callAnthropic, callAnthropicRaw, runToolLoop, calendarExecutor, calendarSystem, tenantCalendar, validCalendarDate, availableSlots, handleCalendarCallback, calendarCallbackFor, sendTwilioText, timingSafeEqual, telegramBotUsername, telegramSetWebhook, telegramWebhookInfo, handleTelegramWebhook, sendTelegramText, tenantTelegramToken, telegramThreadFor, registerTelegramTopic, csvCell, expiryDate, leadFilters, isDemoKey, templateVar, leadTemplateVariables, readJson, deliver, drainQueuedLeads, verifyTurnstile, systemFor, validateTenant, invalidateTenantCache, tenantWriteError, assertNotActivePending, tenantChannelSummary, channelsForScope, routingChannelState, handleProvision, pollProvisioning, fillSeries, resolveScope, scopeClause, assertOwnTenant, clienteAllowed, adminRouter, recordAuthFailure, handleAdmin, handleWidgetBoot, allowedOrigins, envOrigins, syncPanelGate, envAdmins, syncAdminGate, getSetting, setSetting, withCfToken };
+export const testing = { PLANES, MODULOS, modulosDe, canalesOcupados, assertPlanChannelLimit, scheduled, MINUTE_CRON, processReminders, reminderHoursFor, reminderTemplateVariables, samePhone, tenantTemplate, pollTemplateApprovals, REMINDER_KIND, waitedMin, QUEUE_MAX_MIN, QUEUE_WAIT_TEXT, canAttend, velaiTenantId, handleChatPoll, handleEventIntake, eventIntakeToken, VISITOR_AWAY_MS, expireTakeovers, NO_ADVISOR_TEXT, graceExpired, systemWithHandoff, HANDOFF_ON, HANDOFF_OFF, supportWindows, withinSupportHours, advisorAvailable, CONV_STATES, TAKEOVER_GRACE_MIN, settleReply, TRUNCATED_CLOSING, trimToSentence, waBody, replyWindow, reportPeriod, reportMetric, weeklyReportText, weeklyStats, sendWeeklyReports, convLoad, convAppend, convLinkLead, convFilters, convRetentionDays, UNANSWERED_RE, CONV_WINDOW, cloudflareUsage, CF_FREE_LIMITS, recordConversation, aiCost, recordAiUsage, rateLimited, memLimited, applySenderProfile, pushSenderProfile, clean, persistLead, leadAlertStatus, captureWhatsAppLead, leadFromSummary, leadCaptureDone, activeTenantEvent, captureEventInterest, eventConsentReply, notificationText, errorResponseParts, tenantByAddress, syncPrimaryChannel, assertChannelFree, normalizePhone, extractPhone, extractPhoneFromMessages, safeUtm, publicCors, validTwilioSignature, callAnthropic, callAnthropicRaw, runToolLoop, calendarExecutor, calendarSystem, tenantCalendar, validCalendarDate, availableSlots, handleCalendarCallback, calendarCallbackFor, sendTwilioText, timingSafeEqual, telegramBotUsername, telegramSetWebhook, telegramWebhookInfo, handleTelegramWebhook, sendTelegramText, tenantTelegramToken, telegramThreadFor, registerTelegramTopic, csvCell, expiryDate, leadFilters, isDemoKey, templateVar, leadTemplateVariables, readJson, deliver, drainQueuedLeads, verifyTurnstile, systemFor, validateTenant, invalidateTenantCache, tenantWriteError, assertNotActivePending, tenantChannelSummary, channelsForScope, routingChannelState, handleProvision, pollProvisioning, fillSeries, resolveScope, scopeClause, assertOwnTenant, clienteAllowed, adminRouter, recordAuthFailure, handleAdmin, handleWidgetBoot, allowedOrigins, envOrigins, syncPanelGate, envAdmins, syncAdminGate, getSetting, setSetting, withCfToken };

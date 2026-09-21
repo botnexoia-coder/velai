@@ -1,7 +1,9 @@
 // Rutas planas del panel (la app v1 era single-page con vistas conmutadas; aquí cada
 // vista es una ruta). El shell envuelve todas.
 import { Navigate, Route, Routes } from 'react-router';
-import { lazy, Suspense } from 'react';
+import { useMe } from './hooks/queries';
+import type { Modulo } from './api/types';
+import { lazy, Suspense, type ReactNode } from 'react';
 import { Shell } from './shell/Shell';
 import { Dashboard } from './views/Dashboard';
 import { Leads } from './views/Leads';
@@ -26,8 +28,8 @@ export function App() {
           <Route index element={<Dashboard />} />
           <Route path="/leads" element={<Leads />} />
           <Route path="/conversaciones" element={<Conversaciones />} />
-          <Route path="/calendario" element={<Calendario />} />
-          <Route path="/eventos" element={<Eventos />} />
+          <Route path="/calendario" element={<ModuloRoute modulo="calendario"><Calendario /></ModuloRoute>} />
+          <Route path="/eventos" element={<ModuloRoute modulo="eventos"><Eventos /></ModuloRoute>} />
           <Route path="/conexiones" element={<Conexiones />} />
           <Route path="/clientes" element={<Clientes />} />
           <Route path="/finanzas" element={<Suspense fallback={<p role="status">Cargando…</p>}><Finanzas /></Suspense>} />
@@ -41,4 +43,10 @@ export function App() {
       <ConfirmarHost />
     </>
   );
+}
+
+function ModuloRoute({ modulo, children }: { modulo: Modulo; children: ReactNode }) {
+  const { data: me } = useMe();
+  if (!me) return <p role="status">Cargando…</p>;
+  return me.role === 'velai' || me.modulos?.includes(modulo) ? children : <Navigate to="/" replace />;
 }

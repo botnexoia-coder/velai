@@ -2,6 +2,7 @@
 // de Google Calendar por tenant (conectar por OAuth, configurar, desconectar). El
 // callback OAuth vive en routes/publico.js (no es /api/admin/*) y el proveedor puro
 // en worker/calendar.js. Migrado tal cual del adminRouter monolítico.
+import { assertTenantModulo } from '../tenant-planes.js';
 import { bookingOrigin, bookingReadiness } from '../booking-security.js';
 import { invalidateAvailability, validDate } from '../agenda.js';
 import { Hono } from 'hono';
@@ -51,6 +52,7 @@ const grupoCalendar = async (c) => {
   if (!tenantRow) throw new HttpError(404, 'not_found');
   if (sub === 'connect' && request.method === 'POST') {
     const body = await readJson(request, 2000);
+    await assertTenantModulo(env, tenantId, 'calendario');
     if (clean(body.provider, 20) !== 'google') throw new HttpError(400, 'invalid_provider'); // microsoft: fase futura
     if (!env.GOOGLE_OAUTH_CLIENT_ID || !env.GOOGLE_OAUTH_CLIENT_SECRET) throw new HttpError(503, 'calendar_not_configured');
     if (!env.KV) throw new HttpError(503, 'calendar_not_configured');
@@ -160,9 +162,10 @@ const grupoReminders = async (c) => {
   const previous = await env.DB.prepare('SELECT id, slug, name, channel_address, reminders_enabled, reminder_hours FROM tenants WHERE id=?').bind(tenantId).first();
   if (!previous) throw new HttpError(404, 'not_found');
   const sets = []; const args = []; const cambios = [];
-  let enabled = null;
+  let enabled = null; let requiredRevision = null;
   if (body.enabled !== undefined) {
     if (typeof body.enabled !== 'boolean') throw new HttpError(400, 'invalid_enabled');
+    if (body.enabled) requiredRevision = await assertTenantModulo(env, tenantId, 'citas');
     enabled = body.enabled ? 1 : 0;
     sets.push('reminders_enabled=?'); args.push(enabled);
     cambios.push(enabled ? 'addon activado' : 'addon desactivado');
@@ -180,7 +183,9 @@ const grupoReminders = async (c) => {
   }
   if (!sets.length) throw new HttpError(400, 'nothing_to_update');
   const now = new Date().toISOString();
-  await env.DB.prepare(`UPDATE tenants SET ${sets.join(',')}, updated_at=? WHERE id=?`).bind(...args, now, tenantId).run();
+  const updated = await env.DB.prepare(`UPDATE tenants SET ${sets.join(',')}, updated_at=? WHERE id=?${requiredRevision !== null ? ' AND plan_revision=?' : ''}`)
+    .bind(...args, now, tenantId, ...(requiredRevision !== null ? [requiredRevision] : [])).run();
+  if (!updated.meta.changes) throw new HttpError(409, 'stale_tenant');
   // La fila del tenant vive cacheada en KV (30 min): sin invalidar, los canales
   // seguirían viendo el valor viejo hasta que caducara.
   await invalidateTenantCache(env, [previous]);
@@ -232,6 +237,7 @@ const bookingAdmin = async (c) => {
   } else {
     const body=await readJson(request,32000);
     const sets=[],args=[],statements=[];
+    let requiredRevision=null;
     // Abrir (o cerrar) la página al PÚBLICO es de Velai, como el addon de Confirmaciones
     // (decisión de Juan, 2026-09-16). El cliente configura lo suyo —servicios, reglas,
     // festivos— pero no decide que su negocio aparezca en una URL pública. El veto va
@@ -240,7 +246,7 @@ const bookingAdmin = async (c) => {
     if(body.booking_enabled!==undefined){
       if(scope.role!=='velai')throw new HttpError(403,'not_authorized');
       if(typeof body.booking_enabled!=='boolean')throw new HttpError(400,'invalid_enabled');
-      if(body.booking_enabled){const faltan=bookingReadiness(env);if(faltan.length)throw new HttpError(503,`booking_falta_${faltan[0]}`);}
+      if(body.booking_enabled){requiredRevision=await assertTenantModulo(env,tenantId,'citas');const faltan=bookingReadiness(env);if(faltan.length)throw new HttpError(503,`booking_falta_${faltan[0]}`);}
       sets.push('booking_enabled=?');args.push(body.booking_enabled?1:0);
     }
     for(const [field,min,max] of [['min_notice_min',0,43200],['max_days_ahead',1,365]])if(body[field]!==undefined){const n=Number(body[field]);if(!Number.isInteger(n)||n<min||n>max)throw new HttpError(400,'invalid_booking_rule');sets.push(`${field}=?`);args.push(n);}
@@ -258,9 +264,11 @@ const bookingAdmin = async (c) => {
     }
     const cal=await env.DB.prepare("SELECT tenant_id FROM tenant_calendars WHERE tenant_id=? AND status='connected'").bind(tenantId).first();
     if(!cal)throw new HttpError(404,'not_found');
-    if(sets.length)statements.push(env.DB.prepare(`UPDATE tenant_calendars SET ${sets.join(',')},updated_at=? WHERE tenant_id=?`).bind(...args,new Date().toISOString(),tenantId));
+    if(sets.length)statements.push(env.DB.prepare(`UPDATE tenant_calendars SET ${sets.join(',')},updated_at=? WHERE tenant_id=?${requiredRevision!==null?' AND EXISTS (SELECT 1 FROM tenants WHERE id=? AND plan_revision=?)':''}`)
+      .bind(...args,new Date().toISOString(),tenantId,...(requiredRevision!==null?[tenantId,requiredRevision]:[])));
     if(!statements.length)throw new HttpError(400,'nothing_to_update');
-    await env.DB.batch(statements);
+    const result=await env.DB.batch(statements);
+    if(requiredRevision!==null&&!result.at(-1).meta.changes)throw new HttpError(409,'stale_tenant');
   }
   await invalidateAvailability(env,tenantId);
   ctx.waitUntil(env.DB.prepare('INSERT INTO tenant_versions(tenant_id,actor_email,field,previous_value,note,created_at) VALUES (?,?,?,?,?,?)').bind(tenantId,actor,'calendar',null,services?'servicios editados':'reservas online editadas',new Date().toISOString()).run().catch(()=>{}));

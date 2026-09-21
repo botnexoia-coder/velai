@@ -5,6 +5,15 @@
 // filas antes de responder (su nombre va en la cabecera del panel) — por eso son
 // opcionales en todos los tipos de fila.
 
+export type Plan = 'esencial' | 'profesional' | 'empresa';
+export type Modulo = 'calendario' | 'citas' | 'eventos';
+export interface ModuloExcepcion { modulo: Modulo; estado: 'on' | 'off'; otorgado_por?: string; otorgado_en?: string }
+export interface PlanInfo { id: Plan; nombre: string; canales: number | null; modulos: Modulo[] }
+export interface TenantPlanResponse {
+  plan: Plan; revision: string; updated_at: string; modulos: Modulo[];
+  excepciones: ModuloExcepcion[]; canales: string[]; limite: number | null; catalogo: PlanInfo[];
+}
+
 export type Role = 'velai' | 'cliente';
 
 /** GET /api/admin/me */
@@ -16,8 +25,9 @@ export interface Me {
   tenantLogo: string | null;
   /** El cliente lo necesita para llamar a SUS rutas /tenants/:id/…; para velai es null. */
   tenantId: string | null;
-  /** Activa la vista operativa si el tenant tiene al menos un evento configurado. */
-  eventsEnabled?: boolean;
+  /** Ausentes en workers anteriores: las áreas contratables quedan cerradas. */
+  plan?: Plan | null;
+  modulos?: Modulo[];
 }
 
 export type EventReservationStatus = 'pending' | 'confirmed' | 'cancelled';
@@ -169,6 +179,7 @@ export interface Stats {
 
 /** Fila de GET /api/admin/tenants (solo velai). */
 export interface TenantRow {
+  plan?: Plan;
   id: string;
   slug: string;
   name: string;
@@ -384,6 +395,7 @@ export interface ReplyResponse {
 
 // ── Ficha del tenant (GET /api/admin/tenants/:id — columnas explícitas) ──────
 export interface TenantDetail {
+  plan?: Plan;
   id: string;
   slug: string;
   name: string;
@@ -523,6 +535,7 @@ export interface SenderSyncResponse {
   webhookOk: boolean;
   webhookFixed: boolean;
   channelRegistered: boolean;
+  channelError: string | null;
 }
 /** POST /:id/provision/sender/profile y /:id/logo/apply */
 export interface ProfileApplyResponse {

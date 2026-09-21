@@ -8,7 +8,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createQueryClient } from '../api/queryClient';
 import { ToastProvider } from '../components/Toasts';
 import { semaforo } from '../lib/semaforo';
-import { tenants } from '../test/fixtures';
+import { tenants, tenantPlan } from '../test/fixtures';
 import { Clientes } from './Clientes';
 import type { TenantDetail, TenantDetailResponse, TenantRow } from '../api/types';
 
@@ -106,6 +106,8 @@ function renderClientes(onFetch?: (url: string, init?: RequestInit) => Response 
       const path = url.split('?')[0] ?? '';
       const routes: Record<string, unknown> = {
         '/api/admin/tenants': tenants,
+        '/api/admin/planes': { ...tenantPlan, plan: 'esencial', modulos: [], canales: [], limite: 1 },
+        [`/api/admin/tenants/${detailTenant.id}/plan`]: tenantPlan,
         [`/api/admin/tenants/${detailTenant.id}`]: detail,
         [`/api/admin/tenants/${detailTenant.id}/versions`]: { versions: [] },
         [`/api/admin/tenants/${detailTenant.id}/users`]: { users: [{ email: 'gestora@cliente.com', created_at: '' }] },
@@ -233,7 +235,7 @@ describe('vista Clientes', () => {
     const user = userEvent.setup();
     await user.click(await screen.findByRole('button', { name: 'Nuevo cliente' }));
     const dialog = await screen.findByRole('dialog', { hidden: true });
-    // Stepper con los 5 pasos y sin el Guardar de la cabecera.
+    // Stepper con los 6 pasos y sin el Guardar de la cabecera.
     expect(within(dialog).getByText('Aprovisionamiento')).toBeInTheDocument();
     expect(within(dialog).queryByRole('button', { name: 'Guardar' })).toBeNull();
     await user.type(within(dialog).getByLabelText('Nombre'), 'Nuevo Negocio');
@@ -242,6 +244,10 @@ describe('vista Clientes', () => {
     // El backend exige system_prompt: Identidad avanza sin guardar para permitir
     // escribirlo en Contexto.
     expect(calls.some((c) => c.init?.method === 'POST' && c.url.endsWith('/api/admin/tenants'))).toBe(false);
+    expect(within(dialog).getByText('Plan y módulos')).toBeInTheDocument();
+    await user.selectOptions(await within(dialog).findByLabelText('Plan de la cuenta'), 'profesional');
+    await user.click(within(dialog).getByLabelText('Habilitar Eventos'));
+    await user.click(within(dialog).getByRole('button', { name: 'Guardar y continuar' }));
     const prompt = await within(dialog).findByLabelText('Contexto del negocio');
     await user.type(prompt, 'Contexto válido del nuevo negocio con más de sesenta caracteres para crear la ficha completa.');
     await user.click(within(dialog).getByRole('button', { name: 'Guardar y continuar' }));
@@ -249,6 +255,8 @@ describe('vista Clientes', () => {
       const post = calls.find((c) => c.init?.method === 'POST' && c.url.endsWith('/api/admin/tenants'));
       expect(post).toBeTruthy();
       const body = JSON.parse(String(post?.init?.body)) as Record<string, unknown>;
+      expect(body['plan']).toBe('profesional');
+      expect(body['excepciones']).toEqual([{ modulo: 'eventos', estado: 'on' }]);
       expect(body['slug']).toBe('nuevo-negocio');
       expect(body['system_prompt']).toContain('Contexto válido');
       expect(body['meta_partner_status']).toBe('pendiente');

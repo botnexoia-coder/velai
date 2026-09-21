@@ -910,3 +910,15 @@ a:focus-visible{outline:2px solid var(--orange);outline-offset:3px}
 .biblioteca-form label { display: grid; gap: 6px; }
 .biblioteca-form .fin-actions label { display: flex; align-items: center; }
 .biblioteca-form input[type=file] { max-width: 100%; }
+
+/* Plan y módulos: casilla junto al estado, también en la ficha estrecha. */
+.plan-toggle{display:flex;align-items:center;gap:10px;cursor:pointer}
+.plan-toggle input[type="checkbox"]{width:18px;height:18px;flex:none;margin:0;accent-color:var(--orange)}
+@media(max-width:600px){
+  .tenant-modal .modal-h{flex-wrap:wrap;padding:14px 22px}
+  .tenant-modal .modal-h strong{width:100%}
+  .tenant-modal .mh-r{flex-wrap:wrap;justify-content:flex-start}
+  .tenant-modal .tnote{width:100%;flex-basis:100%}
+  .tenant-modal .ttabs{flex-wrap:nowrap;overflow-x:auto}
+  .tenant-modal .ttab{flex:none}
+}

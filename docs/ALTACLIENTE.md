@@ -61,3 +61,18 @@ canal real + circuito de la Ruta B, marcar Activo y guardar. Sin deploy.
 
 Borrar el sender, retirar el socio en Meta si lo hubiera, **Activo desmarcado** en el panel
 (la fila nunca se borra: los leads apuntan a `tenant_id`), y purgar sus leads según la retención.
+
+
+### Plan y módulos (0043, disponible tras el CD)
+
+El alta incorpora «Plan y módulos» después de Identidad. El plan inicial es Esencial:
+una plaza de conversación (web **o** WhatsApp). Profesional y Empresa permiten
+varios canales e incluyen Calendario; Empresa tiene por ahora las mismas funciones
+implementadas. Telegram no consume plaza. Citas y Eventos se conceden aparte.
+
+Citas requiere Calendario. Concederlo no enciende reservas ni confirmaciones: esos
+interruptores se configuran en Calendario. Revocarlo apaga ambos en la misma
+transacción. «Usar lo que incluye el plan» elimina la excepción; una concesión
+explícita se conserva al cambiar de plan. Bajar a Esencial exige dejar como máximo
+un canal configurado. Un prospecto con WhatsApp ya enrutado se activa usando ese
+canal, sin añadir web por defecto.

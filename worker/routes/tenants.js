@@ -2,13 +2,15 @@
 // rutas): alta y ficha del cliente, versionado/restauración del prompt, preview contra
 // el modelo, aprovisionamiento de Twilio y usuarios del cliente. Migrado tal cual del
 // adminRouter monolítico — misma conducta, mismos códigos.
+import { catalogoPlanes, validarPlan, tenantPlan, assertPlanChannelLimit, planStatements } from '../tenant-planes.js';
+import { invalidateAvailability } from '../agenda.js';
 import { Hono } from 'hono';
 import { partesAdmin, envAdmins } from '../middleware.js';
 import { templateKind, catalogKinds } from '../plantillas.js';
 import {
   HttpError, json, NO_STORE, clean, readJson, rateLimited, callAnthropic,
   validateTenant, tenantTokenColumn, assertNotActivePending, assertTeamNotFrom,
-  tenantWriteError, syncPrimaryChannel, assertChannelFree, invalidateTenantCache,
+  tenantWriteError, primaryChannelStatements, assertChannelFree, invalidateTenantCache,
   tenantChannelSummary, tenantChannelSummaries, handleProvision, panelUserAudit, syncPanelGate,
   sendTelegramText, escapeHtml, UUID_RE, PANEL_EMAIL_RE, PENDING_RE,
   PROMPT_MIN, PROMPT_MAX, WA_MAX_TOKENS, WA_BODY_LIMIT, reminderHoursFor,
@@ -21,7 +23,7 @@ tenants.get('/api/admin/tenants', async (c) => {
   // Semáforo de configuración de un vistazo: sin plantilla, sin equipo o con
   // prompt sospechosamente corto se ve desde el listado, sin abrir nada.
   const rows = (await env.DB.prepare(`
-    SELECT t.id, t.slug, t.name, t.channel_address, t.active, t.updated_at,
+    SELECT t.id,t.plan, t.slug, t.name, t.channel_address, t.active, t.updated_at,
            t.twilio_from, t.sender_sid, t.telegram_chat_id, t.telegram_chat_title, t.web_origins,
            t.lead_template_sid IS NOT NULL AS has_template,
            t.team_whatsapp IS NOT NULL AS has_team,
@@ -146,16 +148,19 @@ tenants.post('/api/admin/tenants', async (c) => {
     body.channel_address = willBeActive === 1 ? `web:${base}` : `pending:${base}`;
   }
   const fields = validateTenant(body, { partial: false });
+  const planConfig = validarPlan(body);
+  await assertPlanChannelLimit(env, null, planConfig.plan, fields);
+  const revision = crypto.randomUUID();
   assertNotActivePending(fields.channel_address, fields.active ?? 1);
   const now = new Date().toISOString();
   const tenantId = crypto.randomUUID();
   const tokenColumn = await tenantTokenColumn(env, tenantId, body);
   try {
-    await env.DB.prepare(`INSERT INTO tenants
+    await env.DB.batch([env.DB.prepare(`INSERT INTO tenants
       (id,slug,name,channel_address,team_whatsapp,telegram_chat_id,lead_template_sid,twilio_from,twilio_subaccount_sid,waba_id,twilio_auth_token_enc,meta_partner_status,system_prompt,
        bot_name,brand_name,logo_url,portrait_url,accent_color,teaser_title,teaser_copy,teaser_title_en,teaser_copy_en,brand_color,brand_color_2,agent_color,greeting,greeting_en,chips_json,placeholder,wa_number,theme,web_origins,
-       active,created_at,updated_at)
-      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
+       active,created_at,updated_at,plan,plan_revision)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
       .bind(tenantId, fields.slug, fields.name, fields.channel_address, fields.team_whatsapp ?? null,
         fields.telegram_chat_id ?? null, fields.lead_template_sid ?? null, fields.twilio_from ?? null,
         fields.twilio_subaccount_sid ?? null, fields.waba_id ?? null, tokenColumn,
@@ -165,9 +170,11 @@ tenants.post('/api/admin/tenants', async (c) => {
         fields.brand_color ?? null, fields.brand_color_2 ?? null, fields.agent_color ?? null, fields.greeting ?? null,
         fields.greeting_en ?? null, fields.chips_json ?? null, fields.placeholder ?? null,
         fields.wa_number ?? null, fields.theme ?? null, fields.web_origins ?? null,
-        fields.active ?? 1, now, now).run();
+        fields.active ?? 1, now, now, planConfig.plan, revision),
+      ...planStatements(env, tenantId, planConfig, actor, now, revision),
+      ...primaryChannelStatements(env, tenantId, null, fields.channel_address, revision),
+    ]);
   } catch (error) { throw tenantWriteError(error); }
-  await syncPrimaryChannel(env, tenantId, null, fields.channel_address);
   // Invalidar ANTES del versionado: si el INSERT de la versión fallara, la caché
   // no puede quedarse 5 minutos sirviendo el estado anterior.
   await invalidateTenantCache(env, [fields]);
@@ -263,7 +270,7 @@ const grupoTenant = async (c) => {
   const tenantAction = c.req.param('accion') || (versionId ? 'versions' : null);
   if (!tenantAction && request.method === 'GET') {
     // Columnas explícitas, NUNCA SELECT *: twilio_auth_token_enc no sale del worker.
-    const tenant = await env.DB.prepare(`SELECT id, slug, name, channel_address, team_whatsapp, telegram_chat_id,
+    const tenant = await env.DB.prepare(`SELECT id, slug, name, plan, channel_address, team_whatsapp, telegram_chat_id,
       lead_template_sid, twilio_from, twilio_subaccount_sid, waba_id, meta_partner_status, system_prompt,
       bot_name, brand_name, logo_url, portrait_url, accent_color, teaser_title, teaser_copy, teaser_title_en, teaser_copy_en, brand_color, brand_color_2, agent_color, greeting, greeting_en, chips_json,
       placeholder, wa_number, theme, web_origins, sender_sid, sender_status, telegram_chat_title,
@@ -278,31 +285,48 @@ const grupoTenant = async (c) => {
     const previous = await env.DB.prepare('SELECT * FROM tenants WHERE id=?').bind(tenantId).first();
     if (!previous) throw new HttpError(404, 'not_found');
     const fields = validateTenant(body, { partial: true });
+    const planBefore = body.plan !== undefined || body.excepciones !== undefined ? await tenantPlan(env, tenantId) : null;
+    if (planBefore && body.expected_revision !== planBefore.revision) throw new HttpError(409, 'stale_tenant');
+    const planConfig = planBefore ? validarPlan(body, planBefore) : null;
+    const revision = crypto.randomUUID();
     const tokenColumn = await tenantTokenColumn(env, tenantId, body);
-    if (!Object.keys(fields).length && !tokenColumn) throw new HttpError(400, 'nothing_to_update');
+    if (!Object.keys(fields).length && !tokenColumn && !planConfig) throw new HttpError(400, 'nothing_to_update');
     // Activar un prospecto obligaba a reescribir `pending:<slug>` → `web:<slug>` a mano
     // en una caja de texto. Ese paso es el que dejó a gogestion con `web:gogestion`
     // ocupando el canal primario y su WhatsApp sin enrutar. Ahora se promueve solo.
+    // Si ya tiene mensajería enrutada se activa con ese canal (Esencial WhatsApp).
     // Si el llamante manda EXPLÍCITAMENTE un `pending:` y active=1, sigue siendo 400:
     // eso es una contradicción que pidió a mano, no un hueco que rellenar.
     if (fields.channel_address === undefined && Number(fields.active ?? previous.active) === 1
       && PENDING_RE.test(String(previous.channel_address))) {
-      fields.channel_address = `web:${previous.slug}`;
+      const routed = await env.DB.prepare("SELECT address FROM tenant_channels WHERE tenant_id=? AND kind IN ('whatsapp','messenger') ORDER BY CASE kind WHEN 'whatsapp' THEN 0 ELSE 1 END LIMIT 1").bind(tenantId).first();
+      fields.channel_address = routed?.address || `web:${previous.slug}`;
     }
     assertNotActivePending(fields.channel_address ?? previous.channel_address, fields.active ?? previous.active);
     assertTeamNotFrom(fields, previous);
     const channelChanged = fields.channel_address !== undefined && fields.channel_address !== previous.channel_address;
     if (channelChanged) await assertChannelFree(env, fields.channel_address, tenantId);
+    if (fields.channel_address !== undefined || fields.web_origins !== undefined || planConfig) {
+      await assertPlanChannelLimit(env, tenantId, planConfig?.plan ?? previous.plan ?? 'profesional', fields, previous);
+    }
     const now = new Date().toISOString();
     // `columns` alimenta también el versionado: el token va aparte y jamás entra ahí.
+    if (planConfig) fields.plan = planConfig.plan;
+    if (planConfig || channelChanged || fields.web_origins !== undefined) fields.plan_revision = revision;
     const columns = Object.keys(fields);
     const setSql = [...columns.map((c2) => `${c2}=?`), ...(tokenColumn ? ['twilio_auth_token_enc=?'] : [])].join(',');
     const setValues = [...columns.map((c2) => fields[c2]), ...(tokenColumn ? [tokenColumn] : [])];
     // Bloqueo optimista: sin el updated_at cargado, el último en guardar pisaría al otro.
     let result;
     try {
-      result = await env.DB.prepare(`UPDATE tenants SET ${setSql}, updated_at=? WHERE id=? AND updated_at=?`)
-        .bind(...setValues, now, tenantId, clean(body.expected_updated_at, 40)).run();
+      const update = env.DB.prepare(`UPDATE tenants SET ${setSql}, updated_at=? WHERE id=? AND updated_at=? AND plan_revision=?`)
+        .bind(...setValues, now, tenantId, clean(body.expected_updated_at, 40), previous.plan_revision ?? '');
+      if (planConfig || channelChanged) {
+        [result] = await env.DB.batch([update,
+          ...(planConfig ? planStatements(env, tenantId, planConfig, actor, now, revision, planBefore) : []),
+          ...(channelChanged ? primaryChannelStatements(env, tenantId, previous.channel_address, fields.channel_address, revision) : []),
+        ]);
+      } else result = await update.run();
     } catch (error) { throw tenantWriteError(error); }
     if (!result.meta.changes) throw new HttpError(409, 'stale_tenant');
     // El prompt se versiona aparte porque es lo que de verdad se querrá revertir.
@@ -310,10 +334,10 @@ const grupoTenant = async (c) => {
     await env.DB.prepare('INSERT INTO tenant_versions (tenant_id,actor_email,field,previous_value,note,created_at) VALUES (?,?,?,?,?,?)')
       .bind(tenantId, actor, changedPrompt ? 'system_prompt' : 'config',
         changedPrompt ? previous.system_prompt : JSON.stringify(
-          Object.fromEntries(columns.filter((c2) => c2 !== 'system_prompt').map((c2) => [c2, previous[c2]]))),
+          Object.fromEntries(columns.filter((c2) => !['system_prompt', 'plan', 'plan_revision'].includes(c2)).map((c2) => [c2, previous[c2]]))),
         clean(body.note, 200) || null, now).run();
-    if (channelChanged) await syncPrimaryChannel(env, tenantId, previous.channel_address, fields.channel_address);
     await invalidateTenantCache(env, [previous, fields]);
+    if (planConfig) await invalidateAvailability(env, tenantId);
     if (changedPrompt) {
       ctx.waitUntil(sendTelegramText(env, `✏️ <b>${escapeHtml(actor)}</b> cambió el contexto de <b>${escapeHtml(previous.name)}</b>`).catch(() => {}));
     }
@@ -362,3 +386,38 @@ const grupoTenant = async (c) => {
 tenants.all('/api/admin/tenants/:id', grupoTenant);
 tenants.all('/api/admin/tenants/:id/:accion{preview|versions}', grupoTenant);
 tenants.all('/api/admin/tenants/:id/versions/:vid{\\d+}/restore', grupoTenant);
+
+// Solo Velai: el plan no forma parte de la lista blanca del rol cliente.
+tenants.get('/api/admin/tenants/:id/plan', async (c) => {
+  const { env, scope } = partesAdmin(c);
+  if (scope.role !== 'velai') throw new HttpError(403, 'not_authorized');
+  if (!UUID_RE.test(c.req.param('id'))) throw new HttpError(404, 'not_found');
+  return json(await tenantPlan(env, c.req.param('id')), 200, NO_STORE);
+});
+tenants.patch('/api/admin/tenants/:id/plan', async (c) => {
+  const { env, request, scope, actor } = partesAdmin(c);
+  if (scope.role !== 'velai') throw new HttpError(403, 'not_authorized');
+  const id = c.req.param('id');
+  if (!UUID_RE.test(id)) throw new HttpError(404, 'not_found');
+  const body = await readJson(request, 4000);
+  const before = await tenantPlan(env, id);
+  if (body.expected_revision !== before.revision) throw new HttpError(409, 'stale_tenant');
+  const config = validarPlan(body, before);
+  await assertPlanChannelLimit(env, id, config.plan);
+  const previous = await env.DB.prepare('SELECT id,slug,channel_address FROM tenants WHERE id=?').bind(id).first();
+  const revision = crypto.randomUUID(); const now = new Date().toISOString();
+  const result = await env.DB.batch([
+    env.DB.prepare('UPDATE tenants SET plan=?,plan_revision=?,updated_at=? WHERE id=? AND plan_revision=? AND updated_at=?')
+      .bind(config.plan, revision, now, id, before.revision, before.updated_at),
+    ...planStatements(env, id, config, actor, now, revision, before),
+  ]);
+  if (!result[0].meta.changes) throw new HttpError(409, 'stale_tenant');
+  await invalidateTenantCache(env, [previous]);
+  await invalidateAvailability(env, id);
+  return json({ ok: true, ...await tenantPlan(env, id) }, 200, NO_STORE);
+});
+
+tenants.get('/api/admin/planes', (c) => {
+  if (c.get('scope').role !== 'velai') throw new HttpError(403, 'not_authorized');
+  return json({ plan: 'esencial', revision: '', updated_at: '', modulos: [], excepciones: [], canales: [], limite: 1, catalogo: catalogoPlanes() }, 200, NO_STORE);
+});

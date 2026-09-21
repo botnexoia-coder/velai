@@ -107,8 +107,8 @@ export function Shell() {
           <Tab to="/" label="Dashboard" icon={<IcoDashboard />} />
           <Tab to="/leads" label="Leads" icon={<IcoLeads />} />
           <Tab to="/conversaciones" label="Conversaciones" icon={<IcoChat />} />
-          <Tab to="/calendario" label="Calendario" icon={<IcoCalendar />} />
-          {isVelai || (isCliente && me?.eventsEnabled) ? <Tab to="/eventos" label="Eventos" icon={<IcoCalendar />} /> : null}
+          {isVelai || me?.modulos?.includes('calendario') ? <Tab to="/calendario" label="Calendario" icon={<IcoCalendar />} /> : null}
+          {isVelai || (isCliente && me?.modulos?.includes('eventos')) ? <Tab to="/eventos" label="Eventos" icon={<IcoCalendar />} /> : null}
           <Tab to="/conexiones" label="Conexiones" icon={<IcoLink />} />
           {/* El cliente ve SUS plantillas (solo lectura) aquí, tras Conexiones — no
               tiene sección Sistema. Velai la sigue teniendo en Sistema, abajo. */}

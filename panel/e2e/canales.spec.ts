@@ -50,7 +50,7 @@ async function panel(page: Page, me: Me = meVelai) {
       state.mutations.push(u.pathname);
       if (u.pathname === `/api/admin/tenants/${ownId}/provision/sender/sync`) {
         state.channels = { channels: [routed], unrouted: [] };
-        return route.fulfill({ json: { ok: true, applied: 1, conflicts: [], webhookOk: true, webhookFixed: false } });
+        return route.fulfill({ json: { ok: true, applied: 1, conflicts: [], webhookOk: true, webhookFixed: false, channelRegistered: true, channelError: null } });
       }
       return route.abort();
     }

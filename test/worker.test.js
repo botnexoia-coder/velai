@@ -532,7 +532,7 @@ function provisionHarness({ tenant, failUpdate = false } = {}) {
       first: async () => sql.startsWith('SELECT * FROM tenants') ? row : null,
       run: async () => { if (failUpdate && sql.startsWith('UPDATE tenants')) throw new Error('d1 down'); updates.push({ sql, args }); return { meta: { changes: 1 } }; },
       all: async () => ({ results: [] }),
-    }) }), batch: async () => [] },
+    }) }), batch: async (stmts) => Promise.all(stmts.map((st) => st.run())) },
   };
   return { env, row, updates, ctx: { waitUntil() {} } };
 }
@@ -987,7 +987,7 @@ function scopedDb({ leads = [], tenantUser = null } = {}) {
     batch: async (stmts) => stmts.map(() => ({ results: [{ n: 0, oldest: null }] })),
   };
 }
-const CLIENTE = { role: 'cliente', tenantId: 't-mio', email: 'cliente@x.com' };
+const CLIENTE = { role: 'cliente', modulos: ['calendario', 'citas', 'eventos'], tenantId: 't-mio', email: 'cliente@x.com' };
 const VELAI = { role: 'velai', tenantId: null, email: 'admin@velai' };
 const LEADS = [
   { id: '00000000-0000-4000-8000-0000000000a1', tenant_id: 't-mio', name: 'Mío', whatsapp: '+34600000001', tenant_name: 'Mi Negocio', status: 'new', created_at: '2026-08-18T00:00:00Z' },
@@ -2007,7 +2007,7 @@ test('webhook con calendario: tool_use → TwiML vacío YA y la respuesta llega 
   const enc = await encryptSecret(env, `calendar:${tenant.id}`, 'refresh-tok');
   const calRow = { tenant_id: tenant.id, provider: 'google', refresh_token_enc: enc, calendar_id: 'primary', timezone: 'Europe/Madrid', slot_minutes: 30, business_hours: null, status: 'connected' };
   env.DB = { prepare: (sql) => ({ bind: () => ({
-    first: async () => sql.includes('channel_address') ? tenant : (sql.includes('tenant_calendars') ? calRow : null),
+    first: async () => sql.includes('tenant_modulos') ? { plan: 'profesional', plan_revision: '', estado: null } : sql.includes('channel_address') ? tenant : (sql.includes('tenant_calendars') ? calRow : null),
     all: async () => ({ results: [] }), run: async () => ({ meta: { changes: 1 } }),
   }) }), batch: async () => [] };
   let anthropicCalls = 0; const twilioSends = [];
@@ -2030,7 +2030,7 @@ test('webhook con calendario: tool_use → TwiML vacío YA y la respuesta llega 
     env.DB.prepare('x'); // no-op para linters de stub
     const tenants = { 'whatsapp:+15550000001': tenant };
     env.DB = withConversations({ prepare: (sql) => ({ bind: (...args) => ({
-      first: async () => sql.includes('channel_address') ? (tenants[args[0]] || null) : (sql.includes('tenant_calendars') ? calRow : null),
+      first: async () => sql.includes('tenant_modulos') ? { plan: 'profesional', plan_revision: '', estado: null } : sql.includes('channel_address') ? (tenants[args[0]] || null) : (sql.includes('tenant_calendars') ? calRow : null),
       all: async () => ({ results: [] }), run: async () => ({ meta: { changes: 1 } }),
     }) }), batch: async () => [] });
     const res = await worker.fetch(await twilioRequest('https://worker.test/', params, 'tok'), env, ctx);
@@ -2053,7 +2053,7 @@ test('callback OAuth: state de un solo uso, token cifrado con AAD calendar: y 40
   const inserts = [];
   const db = { prepare: (sql) => ({ bind: (...args) => ({
     run: async () => { inserts.push({ sql, args }); return { meta: { changes: 1 } }; },
-    first: async () => null, all: async () => ({ results: [] }),
+    first: async () => sql.includes('tenant_modulos') ? { plan: 'profesional', plan_revision: '', estado: null } : null, all: async () => ({ results: [] }),
   }) }), batch: async () => [] };
   const env = { DB: db, KV: kv, SECRETS_KEK: TEST_KEK, GOOGLE_OAUTH_CLIENT_ID: 'cid', GOOGLE_OAUTH_CLIENT_SECRET: 'sec', ADMIN_ORIGIN: 'https://admin.hirevai.com' };
   const ctx = { waitUntil() {} };
@@ -2103,7 +2103,7 @@ test('citas en el panel: el cliente solo ve las suyas y solo puede tocar SU cale
   assert.equal(all.appointments.length, 2);
   // autoservicio: el cliente accede a SU calendario; el de otro tenant es 404 (nunca 403)
   const TID = '00000000-0000-4000-8000-0000000000c1';
-  const OWN = { role: 'cliente', tenantId: TID, email: 'cliente@x.com' };
+  const OWN = { role: 'cliente', modulos: ['calendario', 'citas'], tenantId: TID, email: 'cliente@x.com' };
   const dbCal = { prepare: (sql) => ({ bind: () => ({
     first: async () => sql.includes('SELECT id, slug, name') ? { id: TID, slug: 'mio', name: 'Mi Negocio' } : null,
     all: async () => ({ results: [] }), run: async () => ({ meta: { changes: 1 } }),
@@ -2508,9 +2508,27 @@ test('sender/sync: reconcilia desde Twilio sin pisar el canal, repara el webhook
     // El paso que de verdad ENCIENDE WhatsApp: sin esta fila el sender queda ONLINE y el
     // bot mudo (gogestion, 2026-08-24). Va aunque channel_address no se pise.
     assert.equal(res.channelRegistered, true);
+    assert.equal(res.channelError, null);
     const ins = h.updates.find((u) => u.sql.includes('INSERT INTO tenant_channels'));
     assert.ok(ins, 'registra el número en la tabla de enrutado');
     assert.ok(ins.args.includes('whatsapp:+34624121930') && ins.args.includes('whatsapp'), 'la fila enruta el número del sender');
+    // El número YA enruta a otro cliente: el paso NO aborta. Si abortara, el webhook se
+    // quedaría sin reparar y el sender ONLINE con el bot mudo — el incidente de
+    // gogestion (2026-08-24) otra vez. Se informa del conflicto y se sigue.
+    const h2 = provisionHarness({});
+    h2.row = await mkTenant(h2.env);
+    h2.env.DB.prepare = (sql) => ({ bind: (...args) => ({
+      first: async () => (sql.startsWith('SELECT * FROM tenants') ? h2.row
+        : sql.includes('FROM tenant_channels WHERE address') ? { tenant_id: 'otro-cliente' } : null),
+      run: async () => { h2.updates.push({ sql, args }); return { meta: { changes: 1 } }; },
+      all: async () => ({ results: [] }),
+    }) });
+    const res2 = await (await testing.handleProvision(provReq(), h2.env, h2.ctx, h2.row.id, 'sender/sync', 'admin@velai')).json();
+    assert.equal(res2.channelRegistered, false, 'informa de que no pudo enrutar, en vez de fingir que sí');
+    assert.equal(res2.channelError, 'address_taken');
+    assert.equal(res2.applied, 0, 'nada aplicado si el enrutado no entró');
+    assert.equal(res2.webhookFixed, true, 'y AUN ASÍ repara el webhook: eso es lo que enciende WhatsApp');
+    assert.ok(!h2.updates.some((u) => u.sql.includes('INSERT INTO tenant_channels')), 'no le roba el número a otro cliente');
   } finally { globalThis.fetch = realFetch; }
 });
 const WORKER_URL_TEST = 'vai-worker.botnexo-ia.workers.dev';
@@ -2541,7 +2559,7 @@ test('la dirección del canal se DERIVA: alta prospecto, promoción a web al act
   const TID = '00000000-0000-4000-8000-0000000000c1';
   // (a) el alta ya no recibe channel_address: el worker lo deriva del slug
   const ins = [];
-  const envA = { DB: { prepare: (sql) => ({ bind: (...args) => ({
+  const envA = { DB: { batch: async (stmts) => Promise.all(stmts.map((st) => st.run())), prepare: (sql) => ({ bind: (...args) => ({
     first: async () => null, all: async () => ({ results: [] }),
     run: async () => { ins.push({ sql, args }); return { meta: { changes: 1 } }; } }) }) },
     KV: { async get() { return null; }, async put() {}, async delete() {} } };
@@ -2565,7 +2583,7 @@ test('la dirección del canal se DERIVA: alta prospecto, promoción a web al act
   // (b) marcar Activo promueve pending:<slug> → web:<slug> sin teclear nada
   const prev = { id: TID, slug: 'gog', name: 'G', channel_address: 'pending:gog', active: 0, updated_at: 't0', system_prompt: 'x'.repeat(60) };
   const ups = [];
-  const envB = { DB: { prepare: (sql) => ({ bind: (...args) => ({
+  const envB = { DB: { batch: async (stmts) => Promise.all(stmts.map((st) => st.run())), prepare: (sql) => ({ bind: (...args) => ({
     first: async () => (sql.includes('FROM tenants WHERE id=') ? prev : null), all: async () => ({ results: [] }),
     run: async () => { ups.push({ sql, args }); return { meta: { changes: 1 } }; } }) }) },
     KV: { async get() { return null; }, async put() {}, async delete() {} } };
@@ -3004,7 +3022,7 @@ test('tenant_channels: el webhook enruta por la tabla ADEMÁS del canal primario
   const row = { id: TID, slug: 'mio', channel_address: 'web:mio', twilio_from: null, team_whatsapp: null, updated_at: 'T0' };
   const writes = [];
   let takenBy = null;
-  const db = { prepare: (sql) => ({ bind: (...args) => ({
+  const db = { batch: async (stmts) => Promise.all(stmts.map((st) => st.run())), prepare: (sql) => ({ bind: (...args) => ({
     first: async () => {
       if (sql.includes('FROM tenants WHERE id=')) return { ...row };
       if (sql.includes('FROM tenant_channels WHERE address=')) return takenBy ? { tenant_id: takenBy } : null;
@@ -5678,7 +5696,7 @@ test('gestionar por chat web exige el enlace privado: conocer un teléfono no au
 
 test('GET calendar lleva el bloque de confirmaciones y el PATCH del addon es solo-Velai', async () => {
   const TID = '00000000-0000-4000-8000-0000000000c1';
-  const OWN = { role: 'cliente', tenantId: TID, email: 'cliente@x.com' };
+  const OWN = { role: 'cliente', modulos: ['calendario', 'citas'], tenantId: TID, email: 'cliente@x.com' };
   const updates = [];
   const db = { prepare: (sql) => ({ bind: (...args) => ({
     first: async () => {
@@ -6000,7 +6018,7 @@ test('PATCH /reminders acepta hours de la lista curada y rechaza el resto', asyn
   const TID = '00000000-0000-4000-8000-0000000000c1';
   const updates = [];
   const db = { prepare: (sql) => ({ bind: (...args) => ({
-    first: async () => (/FROM tenants WHERE id=\?/.test(sql)
+    first: async () => sql.includes('tenant_modulos') ? { plan: 'profesional', plan_revision: '', estado: 'on' } : (/FROM tenants WHERE id=\?/.test(sql)
       ? { id: TID, slug: 'mio', name: 'Mi Negocio', channel_address: 'web:mio', reminders_enabled: 1, reminder_hours: '24' } : null),
     all: async () => ({ results: [] }),
     run: async () => { if (/UPDATE tenants SET/.test(sql)) updates.push({ sql, args }); return { meta: { changes: 1 } }; },
@@ -6325,6 +6343,7 @@ test('formulario externo firmado crea una sola vez lead, reserva, consentimiento
     VALUES (?,?,?,?, 'active',?,?)`).bind('7a000000-0000-4000-8000-000000000099', tenantId, 'fiesta-test', 'Noche de Solteros',
       '2026-09-19T00:00:00.000Z', '2026-09-19T00:00:00.000Z').run();
 
+  await DB.prepare("INSERT INTO tenant_modulos VALUES (?,'eventos','on','test','now')").bind(tenantId).run();
   const worker = createWorker({ SYSTEM: '', DEMOS: {}, GUARDRAILS: '' });
   const env = { DB, EVENT_INTAKE_SECRET: 'secreto-de-integracion-suficientemente-largo' };
   const integrationToken = await testing.eventIntakeToken(env.EVENT_INTAKE_SECRET, 'colegiale-sevilla');
@@ -6362,7 +6381,7 @@ test('formulario externo firmado crea una sola vez lead, reserva, consentimiento
 test('eventos: una intención se guarda provisional y distingue una celebración propia', async () => {
   const writes = [];
   const env = { DB: { prepare(sql) { return { bind(...args) { return {
-    first: async () => sql.includes('FROM tenant_events') ? { id: '70000000-0000-4000-8000-000000000001', name: 'Fiesta' } : null,
+    first: async () => sql.includes('tenant_modulos') ? { plan: 'esencial', plan_revision: '', estado: 'on' } : sql.includes('FROM tenant_events') ? { id: '70000000-0000-4000-8000-000000000001', name: 'Fiesta' } : null,
     run: async () => { writes.push({ sql, args }); return { meta: { changes: 1 } }; },
   }; } }; } } };
   const tenant = { id: '60000000-0000-4000-8000-000000000001', slug: 'naya' };
@@ -6390,4 +6409,41 @@ test('consentimiento: un sí aislado no vale, la pregunta explícita sí y BAJA 
   assert.match(await testing.eventConsentReply(env, tenant, asked, 'whatsapp', 'whatsapp:+34600', 'sí'), /Perfecto/);
   assert.match(await testing.eventConsentReply(env, tenant, base, 'whatsapp', 'whatsapp:+34600', 'BAJA'), /registrado/);
   assert.deepEqual(states, ['accepted', 'withdrawn']);
+});
+
+test('planes: Esencial supera el cupo pero sigue respondiendo WhatsApp', async () => {
+  const tenant = { id: 't-plan', slug: 'plan', system_prompt: 'Responde amablemente.', plan: 'esencial', channel_address: 'whatsapp:+15550000001', web_origins: '["https://prueba.invalid"]' };
+  assert.equal(testing.canalesOcupados(tenant).length, 2);
+  const env = webhookEnv({ [tenant.channel_address]: tenant });
+  const worker = createWorker({ SYSTEM: 's', DEMOS: {}, SUMMARY_PROMPT: '', GUARDRAILS: '' });
+  const originalFetch = globalThis.fetch;
+  const pending = [];
+  globalThis.fetch = async (url) => String(url).includes('api.anthropic.com')
+    ? Response.json({ content: [{ type: 'text', text: 'Hola, seguimos atendiendo.' }] }) : Response.json({});
+  try {
+    const response = await worker.fetch(await twilioRequest('https://worker.test/', {
+      AccountSid: env.TWILIO_ACCOUNT_SID, From: 'whatsapp:+34600000000', To: tenant.channel_address,
+      Body: 'hola', MessageSid: 'SM' + '9'.repeat(32),
+    }, 'tok'), env, { waitUntil(p) { pending.push(p); } });
+    assert.equal(response.status, 200);
+    assert.match(await response.text(), /Hola, seguimos atendiendo/);
+    await Promise.allSettled(pending);
+  } finally { globalThis.fetch = originalFetch; }
+});
+
+test('planes: sender y sender/sync no añaden WhatsApp a un Esencial web', async () => {
+  const sub = { id: '00000000-0000-4000-8000-00000000000a', slug: 'acme', name: 'Acme', plan: 'esencial', channel_address: 'web:acme', twilio_subaccount_sid: 'AC' + 'c'.repeat(32), waba_id: '1234567890', sender_sid: null };
+  const h = provisionHarness({ tenant: { ...sub, twilio_auth_token_enc: await encryptSecret({ SECRETS_KEK: TEST_KEK }, sub.id, 'a1b2c3d4e5f60718293a4b5c6d7e8f90') } });
+  const originalFetch = globalThis.fetch; const calls = [];
+  globalThis.fetch = async (url, init = {}) => {
+    calls.push({ url: String(url), method: init.method || 'GET' });
+    return Response.json({ senders: [{ sid: 'XE' + '1'.repeat(32), sender_id: 'whatsapp:+34910000000', status: 'ONLINE', configuration: { waba_id: '1234567890' }, webhook: { callback_url: 'https://api.hirevai.com' } }] });
+  };
+  try {
+    await assert.rejects(testing.handleProvision(provReq({ phone: '+34910000000' }), h.env, h.ctx, sub.id, 'sender', 'test@velai'), (e) => e.code === 'plan_channel_limit');
+    assert.equal(calls.length, 0);
+    await assert.rejects(testing.handleProvision(provReq(), h.env, h.ctx, sub.id, 'sender/sync', 'test@velai'), (e) => e.code === 'plan_channel_limit');
+    assert.equal(calls.length, 1); assert.equal(calls[0].method, 'GET');
+    assert.equal(h.updates.length, 0);
+  } finally { globalThis.fetch = originalFetch; }
 });

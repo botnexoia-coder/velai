@@ -16,6 +16,7 @@
 // Lo que NO vive aquí: scopeClause/assertOwnTenant se aplican DENTRO de cada
 // consulta — el middleware sabe QUIÉN pregunta, pero solo el handler sabe qué
 // SQL construye. Esa mitad la vigila scripts/check-aislamiento.mjs.
+import { MODULOS, modulosDe } from './planes.js';
 import { HttpError, clean, rateLimited, sendTelegramText, escapeHtml, decodeBase64Url } from './app.js';
 
 // Sin fallback silencioso: si ADMIN_ORIGIN falta o es inválida, las rutas de admin
@@ -122,17 +123,27 @@ export function esSocio(env, scope) {
 export async function resolveScope(env, email) {
   const who = String(email).toLowerCase();
   // Raíz = todos los permisos, sin fila que lo diga: es la cuenta que los concede.
-  if (envAdmins(env).includes(who)) return { role: 'velai', tenantId: null, email, raiz: true, permisos: PERMISOS };
+  if (envAdmins(env).includes(who)) return { role: 'velai', tenantId: null, email, raiz: true, permisos: PERMISOS, modulos: MODULOS };
   // Admins gestionados desde el panel (admin_users, migración 0009). En try/catch:
   // si la tabla aún no existe, el panel no se cae — simplemente no hay admins de D1.
   try {
     const admin = await env.DB.prepare('SELECT email FROM admin_users WHERE lower(email) = ?').bind(who).first();
-    if (admin) return { role: 'velai', tenantId: null, email, raiz: false, permisos: await permisosDe(env, who) };
+    if (admin) return { role: 'velai', tenantId: null, email, raiz: false, permisos: await permisosDe(env, who), modulos: MODULOS };
   } catch (_) {}
   const row = await env.DB.prepare('SELECT tenant_id, role FROM tenant_users WHERE lower(email) = ?')
     .bind(who).first();
   if (!row) throw new HttpError(403, 'not_authorized');
-  return { role: 'cliente', tenantId: row.tenant_id, email };
+  let plan = null; let modulos = [];
+  // Ante un despliegue sin migrar, solo se cierran las áreas contratables.
+  try {
+    const [tenant, overrides] = await env.DB.batch([
+      env.DB.prepare('SELECT plan FROM tenants WHERE id=?').bind(row.tenant_id),
+      env.DB.prepare('SELECT modulo,estado FROM tenant_modulos WHERE tenant_id=?').bind(row.tenant_id),
+    ]);
+    plan = tenant.results?.[0]?.plan ?? null;
+    modulos = modulosDe(plan, overrides.results || []);
+  } catch (_) {}
+  return { role: 'cliente', tenantId: row.tenant_id, email, plan, modulos };
 }
 
 // Único punto de paso del aislamiento (NO NEGOCIABLE): con tenantId la condición
@@ -304,4 +315,24 @@ export function partesAdmin(c) {
     scope,
     actor: scope.email,
   };
+}
+
+// Mismo perímetro en producción y en el barrido adversario. Ajeno sigue siendo 404.
+export const RUTA_MODULO = [
+  [/^\/api\/admin\/appointments(?:\/|$)/, 'calendario'],
+  [/^\/api\/admin\/tenants\/[^/]+\/calendar(?:\/|$)/, 'calendario'],
+  [/^\/api\/admin\/tenants\/[^/]+\/(?:booking|services|reminders)(?:\/|$)/, 'citas'],
+  [/^\/api\/admin\/events(?:\/|$)/, 'eventos'],
+];
+export async function moduloGate(c, next) {
+  const scope = c.get('scope');
+  if (scope.role !== 'velai') {
+    const modulo = RUTA_MODULO.find(([ruta]) => ruta.test(c.req.path))?.[1];
+    if (modulo) {
+      const tenantId = /^\/api\/admin\/tenants\/([^/]+)/.exec(c.req.path)?.[1];
+      if (tenantId) assertOwnTenant(scope, tenantId);
+      if (!scope.modulos?.includes(modulo)) throw new HttpError(403, 'modulo_no_contratado');
+    }
+  }
+  await next();
 }

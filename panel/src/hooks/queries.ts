@@ -9,6 +9,7 @@ import {
   useQueryClient,
   type QueryClient,
 } from '@tanstack/react-query';
+import type { TenantPlanResponse } from '../api/types';
 import { api, apiDelete, apiPatch, apiPost, qs } from '../api/client';
 import { quietRefetch } from '../api/queryClient';
 import type {
@@ -66,7 +67,8 @@ export function useMe() {
   return useQuery({
     queryKey: ['me'],
     queryFn: () => api<Me>('/api/admin/me'),
-    staleTime: Infinity,
+    staleTime: 30_000,
+    refetchInterval: 30_000,
   });
 }
 
@@ -323,6 +325,10 @@ export function useTenantDetail(id: string | null) {
 function invalidateTenant(client: QueryClient, id: string | null | undefined) {
   if (id) {
     invalidateConexiones(client, id);
+    void client.invalidateQueries({ queryKey: ['tenant-plan', id] });
+    void client.invalidateQueries({ queryKey: ['tenant-calendar', id] });
+    void client.invalidateQueries({ queryKey: ['booking', id] });
+    void client.invalidateQueries({ queryKey: ['me'] });
     void client.invalidateQueries({ queryKey: ['tenant-detail', id] });
     void client.invalidateQueries({ queryKey: ['tenant-versions', id] });
     void client.invalidateQueries({ queryKey: ['tenant-provision', id] });
@@ -825,4 +831,8 @@ export function useMediaMutation(tenantId: string) {
     },
     onSuccess: () => client.invalidateQueries({ queryKey: ['biblioteca', tenantId] }),
   });
+}
+
+export function useTenantPlan(id: string | null) {
+  return useQuery({ queryKey: ['tenant-plan', id], queryFn: () => api<TenantPlanResponse>(id ? `/api/admin/tenants/${id}/plan` : '/api/admin/planes') });
 }

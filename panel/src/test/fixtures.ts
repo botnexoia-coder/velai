@@ -13,7 +13,7 @@ import type {
 export const meVelai: Me = { role: 'velai', tenantName: null, tenantLogo: null, tenantId: null };
 
 export const meCliente: Me = {
-  role: 'cliente',
+  role: 'cliente', plan: 'profesional', modulos: ['calendario', 'citas'],
   tenantName: 'Barbería López',
   tenantLogo: null,
   tenantId: '11111111-1111-4111-8111-111111111111',
@@ -207,3 +207,12 @@ export function mockFetch(routes: Record<string, unknown>): typeof fetch {
     return new Response(JSON.stringify({ error: 'not_found' }), { status: 404, headers: { 'Content-Type': 'application/json' } });
   }) as typeof fetch;
 }
+
+export const tenantPlan = {
+  plan: 'profesional', revision: '', updated_at: '', modulos: ['calendario'], excepciones: [], canales: ['web'], limite: null,
+  catalogo: [
+    { id: 'esencial', nombre: 'Esencial', canales: 1, modulos: [] },
+    { id: 'profesional', nombre: 'Profesional', canales: null, modulos: ['calendario'] },
+    { id: 'empresa', nombre: 'Empresa', canales: null, modulos: ['calendario'] },
+  ],
+};

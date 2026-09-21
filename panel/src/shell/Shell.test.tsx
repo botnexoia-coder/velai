@@ -61,7 +61,7 @@ describe('shell y navegación por rol', () => {
     // Las comunes están…
     await waitFor(() => expect(screen.getByRole('tab', { name: /conversaciones/i })).toBeInTheDocument());
     expect(screen.getByRole('tab', { name: /leads/i })).toBeInTheDocument();
-    expect(screen.getByRole('tab', { name: /calendario/i })).toBeInTheDocument();
+    expect(await screen.findByRole('tab', { name: /calendario/i })).toBeInTheDocument();
     // …y las de Velai, no (la defensa real es del worker; esto es la interfaz).
     await waitFor(() => expect(document.body.classList.contains('cliente')).toBe(true));
     // Sus plantillas (solo lectura) también son suyas, tras Conexiones.
@@ -71,6 +71,19 @@ describe('shell y navegación por rol', () => {
     expect(screen.queryByRole('tab', { name: /configuración/i })).toBeNull();
     expect(screen.getByText('Barbería López')).toBeInTheDocument();
     expect(vi.mocked(fetch).mock.calls.some(([url]) => String(url).includes('/api/admin/channels'))).toBe(false);
+  });
+
+  it('sin módulos oculta Calendario y Eventos y cierra las rutas directas', async () => {
+    renderApp({ ...meCliente, plan: 'esencial', modulos: [] }, '/calendario');
+    await screen.findByRole('heading', { name: 'Dashboard' });
+    expect(screen.queryByRole('tab', { name: 'Calendario' })).toBeNull();
+    expect(screen.queryByRole('tab', { name: 'Eventos' })).toBeNull();
+    expect(vi.mocked(fetch).mock.calls.some(([url]) => /appointments|\/calendar/.test(String(url)))).toBe(false);
+  });
+  it('Eventos depende del derecho aunque la cuenta no tenga datos', async () => {
+    renderApp({ ...meCliente, modulos: ['eventos'] });
+    await screen.findByRole('tab', { name: 'Eventos' });
+    expect(screen.queryByRole('tab', { name: 'Calendario' })).toBeNull();
   });
 
   it('el tema de las vistas se conmuta y se recuerda POR PESTAÑA (sessionStorage)', async () => {

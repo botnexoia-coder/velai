@@ -1073,7 +1073,15 @@ function WhatsappBox({
                   { id: tenantId },
                   {
                     onSuccess: (d) => {
-                      let texto = `Sincronizado ✓ · ${d.applied} campos${d.webhookFixed ? ' · webhook reparado' : ''}`;
+                      let texto = `${d.channelRegistered && d.webhookOk ? 'Sincronizado ✓' : '⚠ Sincronización incompleta'} · ${d.applied} campos${d.webhookFixed ? ' · webhook reparado' : ''}`;
+                      if (!d.channelRegistered) {
+                        const motivo = d.channelError === 'stale_tenant'
+                          ? 'La ficha cambió durante la sincronización. Vuelve a pulsar «Sincronizar desde Twilio».'
+                          : d.channelError === 'address_taken'
+                            ? 'El número ya está asignado a otro cliente. Revisa la asignación antes de reintentar.'
+                            : `${d.channelError ? traducir(d.channelError) + ' ' : ''}Vuelve a pulsar «Sincronizar desde Twilio».`;
+                        texto += ` · No se pudo registrar el canal de WhatsApp. ${motivo}`;
+                      }
                       if (!d.webhookOk) texto += ' · ⚠ WEBHOOK MAL: los mensajes NO llegan al worker';
                       if (d.conflicts.length) texto += ` · conflictos: ${d.conflicts.map((c) => `${c.field} (fila ${c.current} / Twilio ${c.fromTwilio})`).join('; ')}`;
                       setOut(texto);

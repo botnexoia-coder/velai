@@ -91,7 +91,7 @@ test('CSP admite solo orígenes HTTPS exactos del tenant y panel; JSON y .ics re
 });
 
 test('CRUD admin: cliente crea/configura solo lo suyo, valida excepciones y desactiva servicios',async(t)=>{
- const f=await fixture(t);const scope={role:'cliente',tenantId:TID,email:'test@example.com'};
+ const f=await fixture(t);await f.DB.prepare("INSERT INTO tenant_modulos VALUES (?,'citas','on','test','now')").bind(TID).run();const scope={role:'cliente',modulos:['calendario','citas'],tenantId:TID,email:'test@example.com'};
  const call=async(path,method='GET',body)=>{const req=new Request('https://admin.hirevai.com'+path,{method,body:body?JSON.stringify(body):undefined,headers:{'Content-Type':'application/json'}});return testing.adminRouter(req,f.env,f.ctx,path,new URL(req.url),{},scope);};
  const base='/api/admin/tenants/'+TID;
  assert.equal((await call(base+'/services','POST',{slug:'extra',name:'Extra',minutes:90,buffer_min:30})).status,200);

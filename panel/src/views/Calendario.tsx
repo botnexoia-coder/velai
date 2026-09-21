@@ -180,6 +180,8 @@ function CalendarConnected({
   isCliente: boolean;
   onReconnect: () => void;
 }) {
+  const { data: me } = useMe();
+  const canCitas = !isCliente || Boolean(me?.modulos?.includes('citas'));
   const toast = useToast();
   const disconnect = useCalendarDisconnect();
   const tz = cal.timezone || 'Europe/Madrid';
@@ -217,7 +219,7 @@ function CalendarConnected({
 
   const pestanas = (
     <div className="chtabs mb12" role="tablist" aria-label="Secciones del calendario">
-      {([['agenda', 'Agenda'], ['booking', 'Reservas online'], ['ajustes', 'Ajustes']] as const).map(([k, label]) => (
+      {([['agenda', 'Agenda'], ['booking', 'Reservas online'], ['ajustes', 'Ajustes']] as const).filter(([k]) => k !== 'booking' || canCitas).map(([k, label]) => (
         <button key={k} type="button" role="tab" aria-selected={tab === k} className={`chtab${tab === k ? ' is-on' : ''}`} onClick={() => setTab(k)}>
           {label}
         </button>
@@ -225,7 +227,7 @@ function CalendarConnected({
     </div>
   );
 
-  if (tab === 'booking') {
+  if (tab === 'booking' && canCitas) {
     return <div>{pestanas}<ReservasOnline key={tenantId} tenantId={tenantId} isCliente={isCliente} /></div>;
   }
   if (tab === 'ajustes') {
@@ -393,6 +395,7 @@ function DiaPanel({ dia, appts, tz }: { dia: string; appts: Appointment[]; tz: s
 // aprovisionamiento (plantillas/recordatorio_cita) y la aprueba Meta — el cron del
 // worker vigila la aprobación y este bloque solo pinta el estado.
 function ConfirmacionesCard({ tenantId, conf, isCliente, sinCalendario = false }: { tenantId: string; conf: Confirmaciones | null; isCliente: boolean; sinCalendario?: boolean }) {
+  const { data: me } = useMe();
   const toast = useToast();
   const patch = useRemindersPatch();
   // El catálogo (kinds + config del diálogo de alta) solo hace falta para Velai: el
@@ -403,7 +406,7 @@ function ConfirmacionesCard({ tenantId, conf, isCliente, sinCalendario = false }
   const nombreTenant = catalogo?.tenants.find((t) => t.id === tenantId)?.name ?? 'este cliente';
   const [crearAbierto, setCrearAbierto] = useState(false);
   // Worker sin la migración 0030: el bloque no viaja y la card no se inventa nada.
-  if (!conf) return null;
+  if (!conf || (isCliente && !me?.modulos?.includes('citas'))) return null;
   const tpl = conf.template;
   const tplEstado = !tpl.status
     ? 'Aún no hay plantilla de recordatorios: sin ella no puede salir ningún recordatorio.'

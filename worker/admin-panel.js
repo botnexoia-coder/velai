@@ -1357,7 +1357,8 @@ let ME={role:'velai'};
 // Self Sign-up y repara el webhook si quedó en el default de Twilio.
 $('#waSync').onclick=async()=>{$('#waSyncOut').textContent='sincronizando…';
  try{const d=await api('/api/admin/tenants/'+cxTenant+'/provision/sender/sync',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'});
-  let out='Sincronizado ✓ · '+d.applied+' campos'+(d.webhookFixed?' · webhook reparado':'');
+  let out=(d.channelRegistered&&d.webhookOk?'Sincronizado ✓':'⚠ Sincronización incompleta')+' · '+d.applied+' campos'+(d.webhookFixed?' · webhook reparado':'');
+  if(!d.channelRegistered){const motivo=d.channelError==='stale_tenant'?'La ficha cambió durante la sincronización. Vuelve a pulsar «Sincronizar desde Twilio».':d.channelError==='address_taken'?'El número ya está asignado a otro cliente. Revisa la asignación antes de reintentar.':(d.channelError?(TERRS[d.channelError]||d.channelError)+' ':'')+'Vuelve a pulsar «Sincronizar desde Twilio».';out+=' · No se pudo registrar el canal de WhatsApp. '+motivo}
   if(!d.webhookOk)out+=' · ⚠ WEBHOOK MAL: los mensajes NO llegan al worker';
   if(d.conflicts&&d.conflicts.length)out+=' · conflictos: '+d.conflicts.map(c=>c.field+' (fila '+c.current+' / Twilio '+c.fromTwilio+')').join('; ');
   $('#waSyncOut').textContent=out;loadConexiones()}

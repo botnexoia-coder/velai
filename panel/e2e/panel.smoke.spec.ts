@@ -11,7 +11,7 @@ const allowedBlockedExternal = new Set([
 
 const routes: Record<string, unknown> = {
   '/api/admin/me': {
-    role: 'cliente', tenantName: 'Velai', tenantLogo: null, tenantId,
+    role: 'cliente', plan: 'profesional', modulos: ['calendario', 'citas'], tenantName: 'Velai', tenantLogo: null, tenantId,
   },
   '/api/admin/stats': {
     total30: 9,

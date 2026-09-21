@@ -2,6 +2,7 @@
 // de canales, el estado del WhatsApp en lenguaje de negocio y la vista montada.
 import { QueryClientProvider } from '@tanstack/react-query';
 import { render, screen, waitFor } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createQueryClient } from '../api/queryClient';
@@ -9,9 +10,9 @@ import { ToastProvider } from '../components/Toasts';
 import { cxTiles } from '../lib/canales';
 import { wizState, WIZ_FIN } from '../lib/telegram';
 import { logoEstado, waEstado } from '../lib/whatsapp';
-import { availability, meCliente, mockFetch } from '../test/fixtures';
+import { availability, meCliente, meVelai, mockFetch, tenants } from '../test/fixtures';
 import { Conexiones } from './Conexiones';
-import type { TelegramInfo, TenantChannel, WhatsappInfoResponse, WhatsappRow } from '../api/types';
+import type { SenderSyncResponse, TelegramInfo, TenantChannel, WhatsappInfoResponse, WhatsappRow } from '../api/types';
 
 function tgInfo(over: Partial<TelegramInfo> = {}): TelegramInfo {
   return {
@@ -126,6 +127,51 @@ describe('el texto del logo (logoEstado)', () => {
     const ok = logoEstado('https://x/logo.png', true, { ok: true, at: '2026-08-30' }, tr, f);
     expect(ok.applyVisible).toBe(false);
     expect(ok.texto).toContain('en tu WhatsApp');
+  });
+});
+
+describe('sincronización de WhatsApp (Velai)', () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it.each([
+    { channelRegistered: false, channelError: 'stale_tenant', webhookOk: true, message: /La ficha cambió.*Vuelve a pulsar «Sincronizar desde Twilio»/ },
+    { channelRegistered: false, channelError: 'address_taken', webhookOk: true, message: /El número ya está asignado a otro cliente.*Revisa la asignación/ },
+    { channelRegistered: false, channelError: null, webhookOk: true, message: /No se pudo registrar el canal de WhatsApp/ },
+    { channelRegistered: true, channelError: null, webhookOk: false, message: /WEBHOOK MAL/ },
+  ])('explica una sincronización incompleta: $channelError, webhook=$webhookOk', async ({ channelRegistered, channelError, webhookOk, message }) => {
+    const tid = meCliente.tenantId as string;
+    const result: SenderSyncResponse = {
+      ok: true, applied: channelRegistered ? 4 : 0,
+      sender: { senderSid: 'XEtest', senderId: 'whatsapp:+34600000002', status: 'ONLINE', wabaId: '12345' },
+      conflicts: [], channelRegistered, channelError, webhookOk, webhookFixed: webhookOk,
+    };
+    const path = `/api/admin/tenants/${tid}/provision/sender/sync`;
+    const routes = {
+      '/api/admin/me': meVelai,
+      '/api/admin/tenants': tenants,
+      '/api/admin/availability': availability,
+      [`/api/admin/tenants/${tid}/channels`]: { channels: [] },
+      [`/api/admin/tenants/${tid}/telegram`]: { telegram: tgInfo() },
+      [path]: result,
+    };
+    vi.stubGlobal('fetch', mockFetch(routes));
+    render(
+      <QueryClientProvider client={createQueryClient()}>
+        <ToastProvider><MemoryRouter><Conexiones /></MemoryRouter></ToastProvider>
+      </QueryClientProvider>,
+    );
+    const user = userEvent.setup();
+    const button = await screen.findByRole('button', { name: 'Sincronizar desde Twilio' });
+    await user.click(button);
+    const notice = await screen.findByText(/Sincronización incompleta/);
+    expect(notice).toHaveTextContent(message);
+    if (webhookOk) expect(notice).toHaveTextContent('webhook reparado');
+    expect(screen.queryByText(/Sincronizado ✓/)).toBeNull();
+    // El mismo botón permite reintentar y el resultado correcto sustituye al aviso.
+    routes[path] = { ...result, channelRegistered: true, channelError: null, webhookOk: true, applied: 4 };
+    await user.click(button);
+    expect(await screen.findByText(/Sincronizado ✓ · 4 campos/)).toBeInTheDocument();
+    expect(screen.queryByText(/Sincronización incompleta/)).toBeNull();
   });
 });
 

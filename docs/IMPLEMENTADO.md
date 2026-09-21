@@ -20,6 +20,92 @@
 
 ---
 
+## Planes y módulos por cuenta (2026-09-21, migración 0043; implementación local, pendiente de CD)
+
+Plan + excepciones por cuenta, conservando las decisiones de la spec revisada:
+Esencial permite un canal de conversación; Profesional y Empresa no ponen tope e
+incluyen Calendario. Citas (reservas online + confirmaciones) y Eventos son addons.
+Empresa tiene hoy las mismas prestaciones implementadas que Profesional. Finanzas
+sigue siendo interna de Velai y no forma parte de este catálogo.
+
+- `worker/planes.js` concentra catálogo, derechos efectivos y canales ocupados. Web
+  ocupa plaza con primario `web:` o al menos un origen configurado; WhatsApp,
+  Messenger e Instagram cuentan una vez por tipo (primario o fila de enrutado).
+  Instagram solo se reconoce para contar; su integración sigue pendiente. Telegram
+  es un destino de avisos y nunca consume plaza.
+- `0043_planes.sql` añade `tenants.plan`, una revisión para evitar sobrescrituras y
+  `tenant_modulos` con excepciones `on`/`off`, actor y fecha. Deduce el plan por los
+  canales actuales y conserva Calendario, Citas y Eventos que ya se usaban, incluido
+  el acceso a históricos. Una excepción concedida sobrevive al cambio de plan;
+  quitarla devuelve el comportamiento del catálogo. La migración no deduce contratos
+  comerciales: revisar el reparto real antes de aplicarla.
+- El límite se comprueba al dar de alta, editar orígenes/canal, crear o sincronizar
+  el sender y bajar de plan. Responde `409 plan_channel_limit` antes de configurar
+  un segundo canal en Esencial. Canal primario y espejo se escriben juntos, con
+  control de concurrencia. Activar un prospecto con WhatsApp ya conectado utiliza
+  ese canal y no lo convierte innecesariamente en web.
+- El **cupo de canales nunca corta mensajes entrantes**, aunque haya configuración
+  heredada que lo supere. Revocar Calendario retira sus herramientas de agenda;
+  revocar Eventos detiene la captura del módulo y su integración firmada. No borra
+  datos, y se siguen atendiendo consentimientos pendientes y bajas de avisos.
+- `resolveScope` carga plan/derechos una vez; `moduloGate` protege calendario,
+  reservas/servicios y eventos antes de las consultas de los handlers. Recurso de
+  otro tenant sigue siendo 404. Sin migración, se cierran solo las áreas contratables.
+  `/me` publica `plan`/`modulos`: Eventos ya no depende de sembrar una fila.
+- Solo Velai puede consultar/editar `/tenants/:id/plan`; `/planes` ofrece el catálogo
+  para el alta. PATCH exige revisión y audita `field='plan'`. El guardado general
+  acepta también plan/excepciones para que la ficha conserve **un solo Guardar**.
+  La transacción incluye derechos y apagado de `reminders_enabled` y
+  `booking_enabled` cuando Citas deja de estar concedido. Citas requiere Calendario.
+  Los interruptores operativos no se reactivan al volver a conceder el módulo;
+  tampoco puede activarlos Velai sin derecho ni reencenderlos una petición antigua.
+- Panel: segundo paso «Plan y módulos», selector desde el catálogo del servidor,
+  estado heredado/excepcional, restauración del valor del plan y contador de canales;
+  chip de plan en Clientes. Menús y rutas directas respetan los derechos; Citas
+  oculta sus controles en Calendario. `/me` se refresca cada 30 segundos para que
+  una sesión abierta recoja las revocaciones. Ficha revisada en escritorio y móvil.
+
+Revisión posterior (mismo día, tres correcciones sobre la primera pasada):
+
+- **El aprovisionamiento vuelve a ser tolerante.** `sender/sync` había perdido su
+  `try/catch` deliberado: un `address_taken` (el número enruta a otro cliente) o un
+  guardado concurrente abortaban el paso con 409 **antes de reparar el webhook**, otro
+  requisito para recibir mensajes — o sea, reintroducía el incidente de gogestion
+  (2026-08-24: sender ONLINE y bot mudo). Ahora informa (`channelRegistered:false`,
+  `applied:0`, `channelError`, log `sender_channel_not_registered`) y sigue hasta reparar el webhook. El
+  cupo del plan sí sigue cortando antes: configurar de más es otra cosa. El assert de
+  `channelRegistered` se había vuelto tautológico (el valor era una constante `true`) y
+  ahora hay un caso con el número ya enrutado a otro cliente que lo vigila. Ambos paneles
+  muestran «Sincronización incompleta» si falla el registro o el webhook: un guardado
+  concurrente pide reintentar; un número ocupado pide revisar su asignación. La auditoría
+  también distingue el resultado parcial. Una prueba con SQLite cubre la carrera y el reintento.
+- **El derecho de calendario se comprueba antes de usar la caché.** Cada consulta de
+  `tenantCalendar` verifica el módulo en D1. Borrar `calcfg:` al revocarlo no basta:
+  un llenado en vuelo puede restaurarlo y el borrado puede fallar. Las pruebas cubren
+  ambos casos; la configuración antigua no habilita consultas posteriores. Si falla
+  la lectura del derecho, el chat sigue respondiendo sin las tools de calendario.
+- **El callback OAuth de Google redirige en vez de devolver JSON.** `assertTenantModulo`
+  lanzaba un 403 en un flujo que vuelve al navegador del usuario; ahora sale por
+  `back('sin_modulo')` como el resto de errores de ese callback.
+
+También se retiró `useTenantPlanSave` (nunca se usó: la ficha guarda el plan por el
+`PATCH /tenants/:id` general, dentro del «un solo Guardar»).
+
+Verificación: `npm run check`, unitarios del panel, typecheck/build y Playwright;
+pruebas con SQLite real de migración, altas, cambios de canal, concurrencia,
+rollback, auditoría, continuidad de WhatsApp y cierre de reservas públicas tras
+revocar Citas. El E2E nuevo usa el worker real contra SQLite, sin cuentas externas.
+No se ha aplicado la migración ni desplegado desde esta sesión. El siguiente paso
+es el CD habitual (staging antes de producción), registrado en TAREAS-PENDIENTES.
+
+### Eventos (migraciones 0041/0042, ahora bajo el módulo `eventos`)
+
+Vista operativa de eventos, reservas provisionales y consentimientos. La captura
+conversacional distingue reservas de un evento de solicitudes de celebración propia;
+la integración web firmada crea lead, reserva y consentimiento con idempotencia.
+El cliente consulta y gestiona solo sus reservas; Velai conserva la vista global.
+La concesión del módulo es independiente de que existan eventos cargados.
+
 ## Finanzas: el libro interno de Velai (`SPEC-FINANZAS.md`, 2026-09-17, migraciones 0037/0038)
 
 Pedido de Juan: «gastos, ingresos y egresos… qué queda en caja, y si repartimos algunos de los

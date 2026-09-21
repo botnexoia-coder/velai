@@ -19,6 +19,7 @@ import {
   useProvision,
   useProvisionStep,
   useTenantDetail,
+  useTenantPlan,
   useTenantSave,
   useTenantUsers,
   useTenantVersions,
@@ -29,7 +30,7 @@ import {
   useLogoUpload,
   type TenantSaveBody,
 } from '../hooks/queries';
-import type { TenantChannel, TenantDetail, TenantDetailResponse } from '../api/types';
+import type { Plan, Modulo, ModuloExcepcion, TenantChannel, TenantDetail, TenantDetailResponse } from '../api/types';
 
 // Los campos de texto de la ficha (mismo mapa TF que el v1). channel_address NO está
 // aquí a propósito: dejó de ser un campo que se teclea — el alta lo deriva del slug en
@@ -99,11 +100,12 @@ function linesFrom(text: string, max: number): string[] {
     .slice(0, max);
 }
 
-const PANES = ['identidad', 'contexto', 'marca', 'prov', 'usuarios', 'historial'] as const;
+const PANES = ['identidad', 'plan', 'contexto', 'marca', 'prov', 'usuarios', 'historial'] as const;
 type Pane = (typeof PANES)[number];
-const WIZ: Pane[] = ['identidad', 'contexto', 'marca', 'prov', 'usuarios'];
+const WIZ: Pane[] = ['identidad', 'plan', 'contexto', 'marca', 'prov', 'usuarios'];
 const PANE_NAMES: Record<Pane, string> = {
   identidad: 'Identidad y canal',
+  plan: 'Plan y módulos',
   contexto: 'Contexto',
   marca: 'Marca del widget',
   prov: 'Aprovisionamiento',
@@ -127,6 +129,16 @@ export function ClienteFicha({ id, onClose }: { id: string | null; onClose: () =
   const { data: detail } = useTenantDetail(tenantId);
   const { data: tenants } = useTenants(true);
   const save = useTenantSave();
+  const { data: planInfo, error: planError } = useTenantPlan(tenantId);
+  const [plan, setPlan] = useState<Plan>('esencial');
+  const [excepciones, setExcepciones] = useState<ModuloExcepcion[]>([]);
+  const planRevision = useRef<string | null>(null);
+  useEffect(() => {
+    if (planInfo && planRevision.current !== `${tenantId}:${planInfo.revision}`) {
+      setPlan(planInfo.plan); setExcepciones(planInfo.excepciones);
+      planRevision.current = `${tenantId}:${planInfo.revision}`;
+    }
+  }, [planInfo, tenantId]);
 
   const [form, setForm] = useState<Form>(emptyForm);
   const [chipsText, setChipsText] = useState('');
@@ -176,6 +188,10 @@ export function ClienteFicha({ id, onClose }: { id: string | null; onClose: () =
     body['web_origins'] = linesFrom(originsText, 6);
     body['active'] = active;
     body['note'] = note;
+    if (!editing || dirty.has('plan')) {
+      if (!planInfo) { toast('No se ha podido cargar el plan. Inténtalo de nuevo.', false); return false; }
+      body.plan = plan; body.excepciones = excepciones; body.expected_revision = planInfo.revision;
+    }
     if (token) body.twilio_auth_token = token; // write-only: solo si se escribe
     if (editing) body.expected_updated_at = editing.updated_at;
     try {
@@ -265,6 +281,51 @@ export function ClienteFicha({ id, onClose }: { id: string | null; onClose: () =
         )}
       </div>
       <div className="modal-b">
+        {(wizard ? WIZ[wizStep] : pane) === 'plan' ? (
+          <section>
+            {planError ? <p role="alert">{traducir(planError)}</p> : null}
+            {!planInfo ? <p role="status">Cargando planes…</p> : <>
+              <Card label="Plan de la cuenta">
+                <select aria-label="Plan de la cuenta" value={plan} onChange={(e) => {
+                  const next = e.target.value as Plan;
+                  setPlan(next); markDirty('plan');
+                  // Un addon de Citas requiere conservar Calendario al bajar de plan.
+                  if (excepciones.some((r) => r.modulo === 'citas' && r.estado === 'on') && next === 'esencial') {
+                    setExcepciones((rows) => [...rows.filter((r) => r.modulo !== 'calendario'), { modulo: 'calendario', estado: 'on' }]);
+                  }
+                }}>
+                  {planInfo.catalogo.map((p) => <option key={p.id} value={p.id}>{p.nombre}</option>)}
+                </select>
+                <p className="muted">Canales: {planInfo.canales.length} de {planInfo.catalogo.find((p) => p.id === plan)?.canales ?? 'sin límite'}{planInfo.canales.length ? ` · ${planInfo.canales.join(', ')}` : ''}. Telegram no consume plaza.</p>
+                {plan === 'empresa' ? <p className="muted">Empresa ofrece actualmente los mismos módulos y canales que Profesional.</p> : null}
+              </Card>
+              <div className="grid mt12">
+                {(['calendario', 'citas', 'eventos'] as Modulo[]).map((modulo) => {
+                  const incluido = planInfo.catalogo.find((p) => p.id === plan)?.modulos.includes(modulo);
+                  const excepcion = excepciones.find((r) => r.modulo === modulo);
+                  const enabled = excepcion ? excepcion.estado === 'on' : Boolean(incluido);
+                  const nombre = { calendario: 'Calendario', citas: 'Citas', eventos: 'Eventos' }[modulo];
+                  return <Card key={modulo} label={nombre}>
+                    <label className="plan-toggle"><input type="checkbox" aria-label={`Habilitar ${nombre}`} checked={enabled} onChange={(e) => {
+                      const on = e.target.checked;
+                      setExcepciones((rows) => {
+                        let next: ModuloExcepcion[] = [...rows.filter((r) => r.modulo !== modulo), { modulo, estado: on ? 'on' : 'off' }];
+                        if (modulo === 'citas' && on) next = [...next.filter((r) => r.modulo !== 'calendario'), { modulo: 'calendario', estado: 'on' }];
+                        if (modulo === 'calendario' && !on) next = [...next.filter((r) => r.modulo !== 'citas'), { modulo: 'citas', estado: 'off' }];
+                        return next;
+                      }); markDirty('plan');
+                    }} /> {enabled ? 'Habilitado' : 'Deshabilitado'}</label>
+                    <p className="muted">{excepcion ? `Excepción: ${enabled ? 'concedido' : 'revocado'}` : incluido ? 'Incluido en el plan' : 'Módulo adicional'}</p>
+                    {excepcion ? <button className="btn alt btnsm" type="button" onClick={() => {
+                      setExcepciones((rows) => rows.filter((r) => r.modulo !== modulo && !(modulo === 'calendario' && !incluido && r.modulo === 'citas'))); markDirty('plan');
+                    }}>Usar lo que incluye el plan</button> : null}
+                    {modulo === 'citas' ? <small className="muted">Reservas online y confirmaciones. Requiere Calendario. Al revocarlo se apagan ambas funciones; al concederlo se configuran desde Calendario.</small> : null}
+                  </Card>;
+                })}
+              </div>
+            </>}
+          </section>
+        ) : null}
         {(wizard ? WIZ[wizStep] : pane) === 'identidad' ? (
           <section onInput={() => markDirty('identidad')}>
             <div className="grid">
@@ -374,8 +435,8 @@ export function ClienteFicha({ id, onClose }: { id: string | null; onClose: () =
                   // no enruta) y lo promueve a web:<slug> al marcar Activo.
                   // En un alta nueva el prompt todavía no existe en Identidad: primero
                   // mostramos Contexto y guardamos la ficha completa al salir de ese paso.
-                  if (!editing && wizStep === 0) {
-                    setWizStep(1);
+                  if (!editing && wizStep < WIZ.indexOf('contexto')) {
+                    setWizStep((s) => s + 1);
                     return;
                   }
                   if (isDirty || !editing) {
