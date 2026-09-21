@@ -11,34 +11,31 @@
 
 ## Planes y módulos — puesta en marcha de 0043
 
-Implementación y pruebas locales completadas el 2026-09-21; todavía sin desplegar.
+**Desplegado el 2026-09-21.** CI `35609974576` y CD `35610177270` en verde: migraciones,
+deploy y humo, primero staging y después producción. Worker
+`e75feb20-a98b-4e31-97c7-1c5d70d90613`. `d1 migrations list` no deja pendientes en ninguno
+de los dos entornos. Resumen de la entrega en [`IMPLEMENTADO.md`](./IMPLEMENTADO.md).
 
-- [ ] Antes del CD, revisar los planes deducidos contra los contratos de los clientes:
-      un cliente con un solo canal quedará en Esencial aunque pague Profesional.
-      La migración conserva sus módulos actuales como excepciones.
-      Consulta remota de solo lectura para preparar esa revisión:
+Reparto que aplicó la migración, verificado en D1 después: **empresa** velai y
+velai-messenger (los tenants de la casa, exentos del tarifario); **profesional** dialogos,
+gogestion y colegiale-sevilla; **esencial** zoe, hiredatavision, myxu-costura y
+tufisiooficial. Nadie perdió nada: nueve excepciones `on` conservan lo que ya estaba
+encendido — entre ellas `tufisiooficial`, que es Esencial y mantiene Calendario y Citas, y
+`colegiale-sevilla`, que mantiene Eventos. Comprobado en vivo que el arranque del widget
+sigue en 200 para cuentas Esencial y Profesional, el preflight de `/chat` en 204, el panel
+anónimo en 302 a Access y la página pública de reservas de dialogos en 200.
 
-      ```bash
-      npx wrangler d1 execute vai-leads --remote --command "SELECT slug, channel_address, web_origins, (SELECT group_concat(kind) FROM tenant_channels c WHERE c.tenant_id=t.id) AS enrutados FROM tenants t WHERE active=1 ORDER BY slug"
-      ```
-
-- [ ] Pasar CI y CD: `d1 migrations apply` por el flujo habitual, primero staging y
-      después producción. No usar `d1 execute --file` para aplicar 0043.
-- [ ] En staging, comprobar una cuenta Esencial con WhatsApp: segundo canal rechazado,
-      mensajes atendidos; conceder/revocar Eventos en una cuenta sin eventos; revocar
-      Citas y comprobar que cierra su página pública de reservas.
-- [ ] Verificar el reparto definitivo en producción y corregir los planes comerciales
-      desde Clientes → Plan y módulos. Conceder Citas permite configurar sus
-      interruptores en Calendario, pero no publica reservas ni envía recordatorios
-      automáticamente.
+- [ ] **Repasar los planes contra lo contratado** desde Clientes → Plan y módulos. La
+      migración dedujo por canales, no por factura: quien tenga un solo canal quedó en
+      Esencial aunque pague Profesional. Es reversible con dos clics y nadie pierde
+      módulos por ello, pero hasta corregirlo no podrá añadirse un segundo canal.
+- [ ] **Validar en el panel con tu sesión** (necesita Access, no se puede automatizar):
+      que Calendario y Eventos salen o no según el plan; conceder Eventos a una cuenta sin
+      eventos y verla aparecer; revocar Citas y comprobar que cierra su página pública.
 - [ ] **Avisar a Johan**: el intake firmado de eventos
       (`POST /integrations/event-reservations`, el formulario de nayaeventos.com) ahora
       exige el módulo `eventos`. Si algún día se le revoca a NAYA, ese formulario pasa
       de `201` a `403 modulo_no_contratado` — el consumidor vive fuera de este repo.
-- [ ] **Orden del CD, no negociable**: `resolveScope` es fail-closed, así que si 0043
-      no está aplicada cuando arranca el worker nuevo, TODOS los clientes se quedan sin
-      Calendario, Citas y Eventos hasta que la migración entre. El CD ya aplica
-      migraciones antes del deploy; si 0043 falla, parar y no desplegar encima.
 
 ## Resumen activo por tipo (fuente de verdad)
 
