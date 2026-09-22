@@ -587,7 +587,7 @@ async function alertUnknownTenant(env, address) {
 }
 
 // ── Gestión de tenants desde el panel (Fase 2) ──────────────────────────────
-const ADDRESS_RE = /^(whatsapp:\+[1-9]\d{6,14}|messenger:\d{5,25})$/;
+export const ADDRESS_RE = /^(whatsapp:\+[1-9]\d{6,14}|messenger:\d{5,25})$/;
 // Dirección reservada para clientes en negociación (prospectos): NO es enrutable
 // (Twilio nunca manda un To con este prefijo) y ocupa el UNIQUE sin pisar la real.
 export const PENDING_RE = /^pending:[a-z0-9][a-z0-9-]{1,39}$/;

@@ -215,7 +215,11 @@ Ahora cada cliente puede completar SU vinculación, cosa que nunca fue posible:
 - [ ] **Verificación de negocio en Meta de cada cliente** (con su CIF; añaden a Velai como socio) — bloqueante para su WhatsApp.
 - [ ] **Tope de gasto por subcuenta** en Twilio.
 - [ ] **Revisión de categoría** de `velai_solicitud_contacto` (Marketing → Utility, disponible hasta el **17 oct 2026**). Desde 2026-09-01 el panel (vista Plantillas) enseña la categoría REAL leída de Twilio por celda — en ámbar cuando difiere de la intención (la de lead de gogestion salió Marketing) — así que el efecto de esta revisión se verá solo, sin consultar Twilio a mano.
-- [ ] **Prueba real de Messenger** (¿acepta TwiML?) antes de prometer el canal.
+- [ ] **Prueba real de Messenger** (¿acepta TwiML?) antes de prometer el canal. Ya se
+      puede conectar desde la ficha (SPEC-CANALES-SOCIALES), pero sigue sin haber entrado
+      un solo mensaje por ese canal en producción: hazla con la página de Velai
+      (`messenger:1077804955422697`), que está de alta y sin tráfico. Si Meta no acepta el
+      TwiML, el cambio es a envío por API con `MessagingServiceSid`.
 - [ ] Cerrar los `[PENDIENTE:…]` de `tenants/hiredatavision.md`, `dialogos.md` y `myxu-costura.md` (3 repos inaccesibles con el token gh actual: prompts de los bots viejos sin contrastar).
 - [ ] Los workers `hiredatavision-bot` y `gogestion-bot` NO se apagan hasta que su tenant responda igual o mejor; anotar en OPERATIONS cuando se apaguen.
 
@@ -356,7 +360,11 @@ en tres horizontes: [`PLAN-PANEL.md`](./PLAN-PANEL.md) es el mapa y las decision
 - [ ] **El primer informe llega el lunes 2026-08-31 por la mañana.** Comprobar que llega a los grupos de los 6 clientes activos y que el que no tenga Telegram vinculado queda como `skipped` en `tenant_reports` (no en silencio). El código de log es `weekly_report`.
 - [ ] **Ese primer informe NO llevará comparación** con la semana anterior (el historial arrancó el 2026-08-26): es correcto y deliberado. La comparación empieza a aparecer el lunes 2026-09-14.
 - [ ] **Informe por WhatsApp** (segundo paso de H1 §2): necesita su propia plantilla aprobada por Meta (`velai_weekly_report`) provisionada por subcuenta. Comparte maquinaria con el envío de plantillas de la bandeja — se hacen juntas (alcance excluido de la bandeja, en IMPLEMENTADO.md).
-- [ ] **Instagram** (Juan, 2026-08-26): va por Meta igual que Messenger, así que cuando se conecte Facebook se conecta Instagram. Se decide al llegar a la bandeja — el filtro de canal NO se pinta hasta que el canal exista: un filtro que no filtra nada es la clase de mentira que el panel no se permite.
+- [ ] **Instagram** — corregido el 2026-09-22: **no va por Twilio** (no está entre sus
+      canales), así que NO viene solo al conectar Facebook. Exige integración directa con
+      Meta y un App Review de semanas: alcance en [`SPEC-INSTAGRAM.md`](./SPEC-INSTAGRAM.md).
+      Se arranca cuando haya un cliente que lo pida. La web ya dice «próximamente».
+      Nota original (2026-08-26): va por Meta igual que Messenger. Se decide al llegar a la bandeja — el filtro de canal NO se pinta hasta que el canal exista: un filtro que no filtra nada es la clase de mentira que el panel no se permite.
 - [ ] **Validar en vivo la regla «ESPACIO Y CIERRE»** (Juan, 2026-08-26: «no podemos dejar a un cliente a mitad de una conversación»). La red de seguridad es determinista y está en tests — nadie se queda a mitad, con modelo o sin él. Lo que SOLO se puede validar contra el modelo vivo es la *prevención*: que ante una consulta larga resuma y cierre en vez de empezar a enumerarlo todo. Herramienta: **ficha del cliente → Probar**, con la consulta de NIE de GOgestión que lo destapó. Si aún se va largo, la regla es una cadena de texto en `vai-worker.js`: se endurece y se vuelve a desplegar.
 - [ ] **Vigilar `reply_truncated` en Workers Logs.** Si sale mucho para un cliente, súbele el tope de su canal o aprieta su prompt. Si sale para un cliente que atiende en otro idioma, el cierre de emergencia (en español fijo) hay que hacerlo por tenant.
 - [ ] **Cuando la base pase de 100 MB o KV pase del 50% del cupo diario**, revisar [`VOLUMEN-Y-ALMACENAMIENTO.md`](./VOLUMEN-Y-ALMACENAMIENTO.md) (medido el 2026-08-26: la base entera pesa 332 KB y el cuello real es KV, no D1).

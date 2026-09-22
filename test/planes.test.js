@@ -86,13 +86,25 @@ test('alta y edición: límite real, cambio de primario y downgrade sin perder c
   await env.DB.prepare("INSERT INTO tenant_channels VALUES (?,?,'whatsapp','now')").bind('whatsapp:+34600000001', ID).run();
   await assert.rejects(call(env, tenantPath, { web_origins: ['https://test.invalid'], expected_updated_at: '2026-09-21' }), (e) => e.code === 'plan_channel_limit');
   assert.equal((await env.DB.prepare('SELECT web_origins FROM tenants WHERE id=?').bind(ID).first()).web_origins, null);
-  // Sustituir WhatsApp por Messenger consume una plaza, no dos.
-  assert.equal((await call(env, tenantPath, { channel_address: 'messenger:123456', expected_updated_at: '2026-09-21' })).status, 200);
+  // Las redes son del plan Pro: un Esencial no se lleva Messenger ni con su plaza libre,
+  // y el código lo dice aparte del cupo porque el arreglo es otro (subir de plan).
+  await assert.rejects(call(env, tenantPath, { channel_address: 'messenger:123456', expected_updated_at: '2026-09-21' }), (e) => e.code === 'plan_channel_kind');
   let info = await tenantPlan(env, ID);
-  assert.deepEqual(info.canales, ['messenger']);
   await call(env, planPath, config('profesional', [], info.revision));
   info = await tenantPlan(env, ID);
+  // Ya en Pro, sustituir WhatsApp por Messenger consume una plaza, no dos.
+  assert.equal((await call(env, tenantPath, { channel_address: 'messenger:123456', expected_updated_at: info.updated_at })).status, 200);
+  info = await tenantPlan(env, ID);
+  assert.deepEqual(info.canales, ['messenger']);
+  // Y bajarlo a Esencial con Messenger puesto no cuela por el cupo: es de tipo.
+  await assert.rejects(call(env, planPath, config('esencial', [], info.revision)), (e) => e.code === 'plan_channel_kind');
+  info = await tenantPlan(env, ID);
+  // Con dos canales que Esencial SÍ permite, el que corta es el cupo: código distinto
+  // para un arreglo distinto (liberar un canal, no cambiar de plan).
+  await call(env, tenantPath, { channel_address: 'whatsapp:+34600000001', expected_updated_at: info.updated_at });
+  info = await tenantPlan(env, ID);
   await call(env, tenantPath, { web_origins: ['https://test.invalid'], expected_updated_at: info.updated_at });
+  assert.deepEqual((await tenantPlan(env, ID)).canales, ['web', 'whatsapp']);
   await assert.rejects(call(env, planPath, config('esencial', [], (await tenantPlan(env, ID)).revision)), (e) => e.code === 'plan_channel_limit');
   assert.equal((await tenantPlan(env, ID)).plan, 'profesional');
   await assert.rejects(call(env, '/api/admin/tenants', { slug: 'alta', name: 'Alta', channel_address: 'whatsapp:+34600000002', web_origins: ['https://test.invalid'], system_prompt: 'x'.repeat(60), plan: 'esencial' }, admin, 'POST'), (e) => e.code === 'plan_channel_limit');
@@ -317,4 +329,54 @@ test('una activación en curso no puede reencender Citas tras revocarla', async 
     assert.equal((await f.DB.prepare('SELECT reminders_enabled FROM tenants WHERE id=?').bind(BOOKING_TEST_TENANT).first()).reminders_enabled, 0);
     assert.equal((await f.DB.prepare('SELECT booking_enabled FROM tenant_calendars WHERE tenant_id=?').bind(BOOKING_TEST_TENANT).first()).booking_enabled, 0);
   }
+});
+
+// ── Canales secundarios: la pieza que faltaba para conectar Messenger ────────
+test('canales secundarios: Messenger es del plan Pro, reemplaza en vez de duplicar y no lo toca el cliente', async (t) => {
+  const env = await fixture(t); await insert(env);
+  const path = `/api/admin/tenants/${ID}/channels`;
+  const filas = () => env.DB.prepare("SELECT address FROM tenant_channels WHERE tenant_id=? AND kind='messenger'").bind(ID).all();
+
+  // Esencial es web O WhatsApp: las redes no entran, y lo dice con su propio código
+  // para que el panel mande a subir de plan y no a liberar un canal.
+  await assert.rejects(call(env, path, { kind: 'messenger', address: '999888777666555' }, admin, 'POST'), (e) => e.code === 'plan_channel_kind');
+  assert.equal((await filas()).results.length, 0, 'nada se escribe si el plan no lo permite');
+
+  await call(env, planPath, config('profesional', [], (await tenantPlan(env, ID)).revision));
+  // El panel manda el ID de la página; el prefijo lo pone el worker (mismo criterio que
+  // el `whatsapp:` del alta del sender: no se hace teclear un prefijo).
+  const creado = await call(env, path, { kind: 'messenger', address: '999888777666555' }, admin, 'POST');
+  assert.equal(creado.status, 201);
+  assert.equal((await creado.json()).address, 'messenger:999888777666555');
+  assert.deepEqual((await filas()).results.map((r) => r.address), ['messenger:999888777666555']);
+  // El primario NO se toca: un canal secundario es una fila de enrutado.
+  assert.equal((await env.DB.prepare('SELECT channel_address FROM tenants WHERE id=?').bind(ID).first()).channel_address, 'whatsapp:+34600000001');
+  assert.deepEqual((await tenantPlan(env, ID)).canales, ['whatsapp', 'messenger']);
+
+  // Cambiar de página reemplaza; UNIQUE(tenant_id,kind) no admite dos Messenger.
+  assert.equal((await call(env, path, { kind: 'messenger', address: 'messenger:222222222222' }, admin, 'POST')).status, 201);
+  assert.deepEqual((await filas()).results.map((r) => r.address), ['messenger:222222222222']);
+
+  // Una página que ya enruta a OTRO cliente no se roba.
+  await insert(env, { id: '00000000-0000-4000-8000-000000000092', address: 'web:otro', plan: 'profesional' });
+  await assert.rejects(call(env, `/api/admin/tenants/00000000-0000-4000-8000-000000000092/channels`,
+    { kind: 'messenger', address: '222222222222' }, admin, 'POST'), (e) => e.code === 'address_taken');
+
+  // Formatos y tipos inválidos, antes de tocar nada.
+  for (const malo of [{ kind: 'telegram', address: '1' }, { kind: 'instagram', address: '1' }]) {
+    await assert.rejects(call(env, path, malo, admin, 'POST'), (e) => e.code === 'invalid_channel_kind');
+  }
+  await assert.rejects(call(env, path, { kind: 'messenger', address: 'no-es-un-id' }, admin, 'POST'), (e) => e.code === 'invalid_channel_address');
+
+  // El rol cliente no conecta canales: no es autoservicio, y cae antes de tocar D1.
+  const cliente = { role: 'cliente', tenantId: ID, email: 'cliente@test.invalid', modulos: [] };
+  await assert.rejects(call(env, path, { kind: 'messenger', address: '333333333333' }, cliente, 'POST'), (e) => e.status === 403);
+  await assert.rejects(call(env, `${path}/messenger`, null, cliente, 'DELETE'), (e) => e.status === 403);
+
+  // Retirar deja de enrutar y queda auditado.
+  assert.equal((await call(env, `${path}/messenger`, null, admin, 'DELETE')).status, 200);
+  assert.equal((await filas()).results.length, 0);
+  const audit = await env.DB.prepare("SELECT note FROM tenant_versions WHERE tenant_id=? AND note LIKE 'canal messenger%' ORDER BY id DESC").bind(ID).all();
+  assert.ok(audit.results.some((r) => r.note.includes('retirado')) && audit.results.some((r) => r.note.includes('conectado')), 'conectar y retirar quedan en el historial');
+  await assert.rejects(call(env, `${path}/messenger`, null, admin, 'DELETE'), (e) => e.code === 'not_found');
 });

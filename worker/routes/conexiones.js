@@ -5,6 +5,7 @@
 // monolítico — misma conducta, mismos códigos.
 import { Hono } from 'hono';
 import { partesAdmin, assertOwnTenant } from '../middleware.js';
+import { assertPlanChannelLimit } from '../tenant-planes.js';
 import { encryptSecret } from '../crypto.js';
 import {
   HttpError, json, NO_STORE, clean, readJson, rateLimited, sendTelegramText,
@@ -14,6 +15,7 @@ import {
   assertTeamNotFrom, weeklyStats, weeklyReportText, tenantTelegramToken,
   telegramSetWebhook, telegramBotUsername, createTelegramTopic,
   UUID_RE, CONV_TRACKING_SINCE, TELEGRAM_BOT_TOKEN_RE,
+  assertChannelFree, ADDRESS_RE,
 } from '../app.js';
 
 export const conexiones = new Hono();
@@ -149,6 +151,67 @@ conexiones.get('/api/admin/tenants/:id/channels', async (c) => {
     FROM tenants WHERE id=?`).bind(id).first();
   if (!row) throw new HttpError(404, 'not_found');
   return json({ channels: channelsForScope(scope, await tenantChannelSummary(env, row)) }, 200, NO_STORE);
+});
+
+// ── Canales SECUNDARIOS (SPEC-CANALES-SOCIALES) ───────────────────────────
+// Hasta ahora el panel solo escribía el canal PRIMARIO (`tenants.channel_address`), así
+// que un cliente con WhatsApp no podía además tener Messenger aunque el enrutado lo
+// soportara desde la migración 0017. Estas dos rutas son la pieza que faltaba.
+// Solo rol Velai (fuera de clienteAllowed): conectar una página en Twilio no es
+// autoservicio. El primario NO se toca — un canal secundario es una fila de enrutado, y
+// la respuesta ya sale por el canal de llegada porque el TwiML es síncrono.
+// Solo lo que existe de verdad. Instagram entra aquí el día que haya integración
+// (SPEC-INSTAGRAM.md): ofrecer un canal que el webhook ni siquiera acepta es la clase de
+// mentira que el panel no se permite — la misma regla que mantiene su filtro sin pintar.
+const SECUNDARIOS = ['messenger'];
+
+conexiones.post('/api/admin/tenants/:id/channels', async (c) => {
+  const { env, request, scope, actor } = partesAdmin(c);
+  // En línea y no en un helper: es el veto que reconoce scripts/check-aislamiento.mjs,
+  // y esconderlo tras una función deja la consulta marcada como alcanzable por un cliente.
+  if (scope.role !== 'velai') throw new HttpError(403, 'not_authorized');
+  const id = c.req.param('id');
+  if (!UUID_RE.test(id)) throw new HttpError(404, 'not_found');
+  const tenant = await env.DB.prepare('SELECT id,slug,plan,channel_address,web_origins FROM tenants WHERE id=?').bind(id).first();
+  if (!tenant) throw new HttpError(404, 'not_found');
+  const body = await readJson(request, 2000);
+  const kind = clean(body.kind, 20);
+  if (!SECUNDARIOS.includes(kind)) throw new HttpError(400, 'invalid_channel_kind');
+  // El panel manda el ID de la página y pone el prefijo; aceptar ambas formas evita el
+  // mismo tropiezo que el `whatsapp:` pegado a mano en el alta del sender.
+  const address = clean(body.address, 60).startsWith(`${kind}:`) ? clean(body.address, 60) : `${kind}:${clean(body.address, 60)}`;
+  if (!ADDRESS_RE.test(address)) throw new HttpError(400, 'invalid_channel_address');
+  // Orden deliberado: primero lo que el plan permite (local), después lo que colisiona.
+  await assertPlanChannelLimit(env, id, tenant.plan ?? 'profesional', { addChannel: { kind, address } }, tenant);
+  await assertChannelFree(env, address, id);
+  const now = new Date().toISOString();
+  // UNIQUE(tenant_id, kind): cambiar de página REEMPLAZA, no duplica.
+  await env.DB.batch([
+    env.DB.prepare('DELETE FROM tenant_channels WHERE tenant_id=? AND kind=?').bind(id, kind),
+    env.DB.prepare('INSERT INTO tenant_channels(address,tenant_id,kind,created_at) VALUES (?,?,?,?)').bind(address, id, kind, now),
+    env.DB.prepare('INSERT INTO tenant_versions (tenant_id,actor_email,field,previous_value,note,created_at) VALUES (?,?,?,?,?,?)')
+      .bind(id, actor, 'config', null, `canal ${kind} conectado (${address})`, now),
+  ]);
+  await invalidateTenantCache(env, [tenant, { channel_address: address }]);
+  return json({ ok: true, kind, address }, 201, NO_STORE);
+});
+
+conexiones.delete('/api/admin/tenants/:id/channels/:kind', async (c) => {
+  const { env, scope, actor } = partesAdmin(c);
+  if (scope.role !== 'velai') throw new HttpError(403, 'not_authorized');
+  const id = c.req.param('id'); const kind = c.req.param('kind');
+  if (!UUID_RE.test(id)) throw new HttpError(404, 'not_found');
+  if (!SECUNDARIOS.includes(kind)) throw new HttpError(400, 'invalid_channel_kind');
+  const row = await env.DB.prepare('SELECT address FROM tenant_channels WHERE tenant_id=? AND kind=?').bind(id, kind).first();
+  if (!row) throw new HttpError(404, 'not_found');
+  const now = new Date().toISOString();
+  await env.DB.batch([
+    env.DB.prepare('DELETE FROM tenant_channels WHERE tenant_id=? AND kind=?').bind(id, kind),
+    env.DB.prepare('INSERT INTO tenant_versions (tenant_id,actor_email,field,previous_value,note,created_at) VALUES (?,?,?,?,?,?)')
+      .bind(id, actor, 'config', row.address, `canal ${kind} retirado`, now),
+  ]);
+  await invalidateTenantCache(env, [{ channel_address: row.address }]);
+  return json({ ok: true }, 200, NO_STORE);
 });
 
 // ── WhatsApp del tenant (SPEC-CONEXIONES PR2): estado de SOLO LECTURA para el

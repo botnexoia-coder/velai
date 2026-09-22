@@ -20,6 +20,8 @@ import {
   useProvisionStep,
   useTenantDetail,
   useTenantPlan,
+  useTenantChannelAdd,
+  useTenantChannelDelete,
   useTenantSave,
   useTenantUsers,
   useTenantVersions,
@@ -340,9 +342,10 @@ export function ClienteFicha({ id, onClose }: { id: string | null; onClose: () =
               <div className="card cardwide">
                 <b>Canales del cliente</b>
                 <Channels channels={detail?.channels ?? null} isNew={!editing} />
+                {editing ? <ConectarRed tenantId={editing.id} plan={plan} canales={detail?.channels ?? null} /> : null}
                 <small className="muted">
-                  Se leen del enrutado real, no se escriben: cada canal se da de alta en Conexiones. La web funciona desde
-                  el primer día por el slug. {err('channel_address')}
+                  Se leen del enrutado real: la web funciona desde el primer día por el slug y WhatsApp llega con su
+                  aprovisionamiento. {err('channel_address')}
                 </small>
               </div>
               <Card label="Twilio From">
@@ -467,6 +470,66 @@ function Card({ label, children }: { label: string; children: ReactNode }) {
     <div className="card">
       <b>{label}</b>
       {children}
+    </div>
+  );
+}
+
+// Conectar una red al cliente. Solo Velai y solo sobre una ficha ya creada: enlazar una
+// página en Twilio no es autoservicio. El primario no se toca — esto escribe una fila de
+// enrutado, y la respuesta ya sale por el canal de llegada (el TwiML es síncrono).
+function ConectarRed({ tenantId, plan, canales }: { tenantId: string; plan: Plan; canales: TenantChannel[] | null }) {
+  const toast = useToast();
+  const add = useTenantChannelAdd();
+  const del = useTenantChannelDelete();
+  const [pagina, setPagina] = useState('');
+  const permitido = plan !== 'esencial';
+  const puesto = (canales ?? []).find((c) => c.kind === 'messenger' && c.address);
+  if (!permitido) {
+    return (
+      <p className="muted mt8">
+        Messenger va en el plan Profesional. Cámbialo en «Plan y módulos» y aquí podrás conectar su página.
+      </p>
+    );
+  }
+  if (puesto) {
+    return (
+      <div className="chrow mt8">
+        <span className="chk">messenger</span>
+        <span className="chaddr">{String(puesto.address).replace(/^messenger:/, '')}</span>
+        <button
+          className="btn alt" type="button" disabled={del.isPending}
+          onClick={() => {
+            void (async () => {
+              if (!(await confirmar({ titulo: '¿Retirar Messenger?', cuerpo: 'El bot dejará de atender los mensajes de esa página. La conversación y los leads ya guardados se conservan.', accion: 'Retirar', peligro: true }))) return;
+              del.mutate({ id: tenantId, kind: 'messenger' }, {
+                onSuccess: () => toast('Messenger retirado', true),
+                onError: (e) => toast(traducir(e), false),
+              });
+            })();
+          }}
+        >
+          Retirar
+        </button>
+      </div>
+    );
+  }
+  return (
+    <div className="chrow mt8">
+      <span className="chk">messenger</span>
+      <input
+        className="w150" value={pagina} onChange={(e) => setPagina(e.target.value)}
+        placeholder="ID de la página" aria-label="ID de la página de Facebook"
+        title="El ID numérico de la página, no su nombre ni su URL. El prefijo lo pone el panel."
+      />
+      <button
+        className="btn alt" type="button" disabled={add.isPending || !pagina.trim()}
+        onClick={() => add.mutate({ id: tenantId, kind: 'messenger', address: pagina.trim() }, {
+          onSuccess: () => { setPagina(''); toast('Messenger conectado', true); },
+          onError: (e) => toast(traducir(e), false),
+        })}
+      >
+        Conectar
+      </button>
     </div>
   );
 }

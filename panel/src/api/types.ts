@@ -8,7 +8,7 @@
 export type Plan = 'esencial' | 'profesional' | 'empresa';
 export type Modulo = 'calendario' | 'citas' | 'eventos';
 export interface ModuloExcepcion { modulo: Modulo; estado: 'on' | 'off'; otorgado_por?: string; otorgado_en?: string }
-export interface PlanInfo { id: Plan; nombre: string; canales: number | null; modulos: Modulo[] }
+export interface PlanInfo { id: Plan; nombre: string; canales: number | null; kinds: string[]; modulos: Modulo[] }
 export interface TenantPlanResponse {
   plan: Plan; revision: string; updated_at: string; modulos: Modulo[];
   excepciones: ModuloExcepcion[]; canales: string[]; limite: number | null; catalogo: PlanInfo[];

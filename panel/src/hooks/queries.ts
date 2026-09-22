@@ -833,6 +833,22 @@ export function useMediaMutation(tenantId: string) {
   });
 }
 
+export function useTenantChannelAdd() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, kind, address }: { id: string; kind: string; address: string }) =>
+      apiPost<OkResponse>(`/api/admin/tenants/${id}/channels`, { kind, address }),
+    onSuccess: (_d, { id }) => { invalidateTenant(client, id); void client.invalidateQueries({ queryKey: ['tenant-plan', id] }); },
+  });
+}
+export function useTenantChannelDelete() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, kind }: { id: string; kind: string }) => apiDelete<OkResponse>(`/api/admin/tenants/${id}/channels/${kind}`),
+    onSuccess: (_d, { id }) => { invalidateTenant(client, id); void client.invalidateQueries({ queryKey: ['tenant-plan', id] }); },
+  });
+}
+
 export function useTenantPlan(id: string | null) {
   return useQuery({ queryKey: ['tenant-plan', id], queryFn: () => api<TenantPlanResponse>(id ? `/api/admin/tenants/${id}/plan` : '/api/admin/planes') });
 }
