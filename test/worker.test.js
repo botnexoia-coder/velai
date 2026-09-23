@@ -2,7 +2,7 @@ import test from 'node:test';
 import { sqliteD1 } from './helpers/sqlite-d1.js';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
-import { createWorker, testing } from '../worker/app.js';
+import { createWorker, processConversationFollowups, testing } from '../worker/app.js';
 import { esSocio } from '../worker/middleware.js';
 import { encryptSecret, decryptSecret } from '../worker/crypto.js';
 import { deploymentDecision, deploymentScope, deploymentScopeForPush } from '../scripts/deploy-scope.mjs';
@@ -4202,6 +4202,22 @@ test('el plan de IA se edita desde la ficha: sin eso, el aviso al 80% mandaría 
   assert.throws(() => testing.validateTenant({ ai_daily_limit: '0' }, { partial: true }), 'un cupo de 0 dejaría al cliente mudo');
 });
 
+test('seguimiento: la ficha valida interruptor, tiempo y mensaje por cliente', () => {
+  assert.deepEqual(testing.validateTenant({
+    followup_enabled: true,
+    followup_delay_minutes: '180',
+    followup_message: 'Cierre propio del cliente',
+  }, { partial: true }), {
+    followup_enabled: 1,
+    followup_delay_minutes: 180,
+    followup_message: 'Cierre propio del cliente',
+  });
+  assert.equal(testing.validateTenant({ followup_enabled: '0' }, { partial: true }).followup_enabled, 0);
+  assert.throws(() => testing.validateTenant({ followup_delay_minutes: '5' }, { partial: true }));
+  assert.throws(() => testing.validateTenant({ followup_delay_minutes: '1440' }, { partial: true }));
+  assert.throws(() => testing.validateTenant({ followup_message: 'x'.repeat(1201) }, { partial: true }));
+});
+
 test('el panel no referencia ids que no existen: uno solo mata TODO el script', async () => {
   // Clase de fallo que el check del bundle NO puede cazar (su DOM stub devuelve un proxy
   // para cualquier querySelector) y que deja el panel entero en blanco: un $('#x').onclick
@@ -6507,6 +6523,73 @@ test('eventos: un saludo o un sí sin resumen confirmado nunca crea una reserva'
       { role: 'user', content: 'Sí' },
     ]);
   assert.equal(writes.length, 0);
+});
+
+test('seguimiento: envía una sola vez, solo tras silencio del cliente y nunca retroactivo', async (t) => {
+  const DB = await sqliteD1(); t.after(() => DB.close());
+  const tenantId = '60000000-0000-4000-8000-0000000000f1';
+  await DB.prepare(`INSERT INTO tenants
+    (id,slug,name,channel_address,twilio_from,system_prompt,active,followup_enabled,
+     followup_delay_minutes,followup_message,followup_enabled_at,created_at,updated_at)
+    VALUES (?,?,?,?,?,'prompt de prueba suficientemente largo para ser válido',1,1,180,?,?,?,?)`)
+    .bind(tenantId, 'naya-test', 'NAYA Test', 'whatsapp:+34657724192', 'whatsapp:+34657724192',
+      'Cierro esta solicitud pendiente. Si vuelves, revisamos disponibilidad.',
+      '2026-09-23T08:00:00.000Z', '2026-09-23T08:00:00.000Z', '2026-09-23T08:00:00.000Z').run();
+  const convId = '50000000-0000-4000-8000-0000000000f1';
+  await DB.prepare(`INSERT INTO conversations
+    (id,tenant_id,channel,external_id,demo,lead_id,msgs,unanswered,started_at,last_at,
+     expires_at,inbox_address,last_inbound_at,state)
+    VALUES (?,?,'whatsapp','whatsapp:+34600000001','','lead-1',2,0,?,?,?,?,?,'bot')`)
+    .bind(convId, tenantId, '2026-09-23T09:00:00.000Z', '2026-09-23T09:01:00.000Z',
+      '2026-12-23T09:00:00.000Z', 'whatsapp:+34657724192', '2026-09-23T09:00:00.000Z').run();
+  await DB.prepare("INSERT INTO conv_messages(conversation_id,role,text,created_at) VALUES (?,'user','somos cuatro',?)")
+    .bind(convId, '2026-09-23T09:00:00.000Z').run();
+  await DB.prepare("INSERT INTO conv_messages(conversation_id,role,text,created_at) VALUES (?,'assistant','¿Qué entradas preferís?',?)")
+    .bind(convId, '2026-09-23T09:01:00.000Z').run();
+
+  const realFetch = globalThis.fetch;
+  const sent = [];
+  globalThis.fetch = async (_url, init) => { sent.push(String(init.body)); return new Response('{}', { status: 201 }); };
+  try {
+    const env = { DB, TWILIO_ACCOUNT_SID: 'AC' + '1'.repeat(32), TWILIO_AUTH_TOKEN: 'token' };
+    assert.deepEqual(await processConversationFollowups(env, '2026-09-23T12:05:00.000Z'), { candidates: 1, sent: 1 });
+    assert.equal(sent.length, 1);
+    const state = await DB.prepare('SELECT followup_sent_at,followup_attempts FROM conversations WHERE id=?').bind(convId).first();
+    assert.equal(state.followup_attempts, 1);
+    assert.ok(state.followup_sent_at);
+    const messages = (await DB.prepare('SELECT role,text FROM conv_messages WHERE conversation_id=? ORDER BY id').bind(convId).all()).results;
+    assert.equal(messages.at(-1).text, 'Cierro esta solicitud pendiente. Si vuelves, revisamos disponibilidad.');
+    assert.deepEqual(await processConversationFollowups(env, '2026-09-23T12:10:00.000Z'), { candidates: 0, sent: 0 });
+    assert.equal(sent.length, 1, 'el cron repetido no duplica el seguimiento');
+  } finally { globalThis.fetch = realFetch; }
+});
+
+test('seguimiento: no cierra si falta respuesta del negocio, hay reserva o es un número del equipo', async (t) => {
+  const DB = await sqliteD1(); t.after(() => DB.close());
+  const tenantId = '60000000-0000-4000-8000-0000000000f2';
+  await DB.prepare(`INSERT INTO tenants
+    (id,slug,name,channel_address,team_whatsapp,system_prompt,active,followup_enabled,
+     followup_delay_minutes,followup_message,followup_enabled_at,created_at,updated_at)
+    VALUES (?,?,'Cliente','web:cliente','whatsapp:+34600000002','prompt de prueba suficientemente largo para ser válido',1,1,180,'Cierre','2026-09-23T08:00:00.000Z',?,?)`)
+    .bind(tenantId, 'cliente-test', '2026-09-23T08:00:00.000Z', '2026-09-23T08:00:00.000Z').run();
+  const addConv = async (id, external, lastRole) => {
+    await DB.prepare(`INSERT INTO conversations
+      (id,tenant_id,channel,external_id,demo,lead_id,msgs,unanswered,started_at,last_at,
+       expires_at,inbox_address,last_inbound_at,state)
+      VALUES (?,?,'whatsapp',?,'','lead-x',1,0,?,?,?,?,?,'bot')`)
+      .bind(id, tenantId, external, '2026-09-23T09:00:00.000Z', '2026-09-23T09:01:00.000Z',
+        '2026-12-23T09:00:00.000Z', 'whatsapp:+34657724192', '2026-09-23T09:00:00.000Z').run();
+    await DB.prepare('INSERT INTO conv_messages(conversation_id,role,text,created_at) VALUES (?,?,?,?)')
+      .bind(id, lastRole, lastRole === 'user' ? '¿Hola?' : '¿Te reservo?', '2026-09-23T09:01:00.000Z').run();
+  };
+  await addConv('50000000-0000-4000-8000-0000000000f2', 'whatsapp:+34600000001', 'user');
+  await addConv('50000000-0000-4000-8000-0000000000f3', 'whatsapp:+34600000002', 'assistant');
+  await addConv('50000000-0000-4000-8000-0000000000f4', 'whatsapp:+34600000003', 'assistant');
+  await DB.prepare(`INSERT INTO event_reservations
+    (id,tenant_id,conversation_id,lead_id,kind,name,contact,status,created_at,updated_at)
+    VALUES ('40000000-0000-4000-8000-0000000000f4',?,?,'lead-x','event_reservation','Ana Ruiz','whatsapp:+34600000003','pending',?,?)`)
+    .bind(tenantId, '50000000-0000-4000-8000-0000000000f4', '2026-09-23T09:00:00.000Z', '2026-09-23T09:00:00.000Z').run();
+  assert.deepEqual(await processConversationFollowups({ DB }, '2026-09-23T12:05:00.000Z'), { candidates: 1, sent: 0 });
 });
 
 test('consentimiento: un sí aislado no vale, la pregunta explícita sí y BAJA siempre revoca', async () => {

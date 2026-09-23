@@ -455,6 +455,10 @@ export interface TenantDetail {
   ai_daily_limit: number | null;
   support_hours: string | null;
   support_tz: string | null;
+  followup_enabled: number;
+  followup_delay_minutes: number;
+  followup_message: string | null;
+  followup_enabled_at: string | null;
   active: number;
   created_at: string;
   updated_at: string;

@@ -1518,3 +1518,15 @@ de toque por CDP. Suite **168/168**.
 
 **Lo que NO entra:** unificar `.card` en todo el panel — esta vista usa su propia caja (`.cxbox`) y el
 resto de vistas siguen con la de antes; y la nav del móvil sigue siendo la barra lateral aplanada.
+
+## Seguimiento automático por cliente (2026-09-23)
+
+- La ficha de cada cliente incluye interruptor, espera en minutos y mensaje propio. Todo nace apagado.
+- El cron de cinco minutos solo envía por WhatsApp si el último turno es del asistente, existe un lead,
+  sigue abierta la ventana de Meta y ha vencido la espera configurada.
+- Nunca procesa conversaciones anteriores a la activación, números del equipo, demos, bajas, reservas
+  ya creadas, conversaciones en control humano ni hilos cuyo último turno sea del cliente.
+- La conversación se reclama antes de enviar y registra un único seguimiento; los fallos de proveedor
+  se reintentan con un máximo de tres intentos.
+- Cuando el último turno sí es del cliente, la bandeja muestra «Pendiente de responder»: es una deuda
+  interna del equipo y nunca se confunde con el cierre automático hacia el cliente.

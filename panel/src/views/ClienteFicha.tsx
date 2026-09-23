@@ -68,6 +68,9 @@ const TF_KEYS = [
   'theme',
   'ai_monthly_tokens',
   'ai_daily_limit',
+  'followup_enabled',
+  'followup_delay_minutes',
+  'followup_message',
 ] as const;
 type TFKey = (typeof TF_KEYS)[number];
 type Form = Record<TFKey, string>;
@@ -75,6 +78,8 @@ type Form = Record<TFKey, string>;
 function emptyForm(): Form {
   const form = Object.fromEntries(TF_KEYS.map((k) => [k, ''])) as Form;
   form.meta_partner_status = 'pendiente';
+  form.followup_enabled = '0';
+  form.followup_delay_minutes = '180';
   return form;
 }
 
@@ -186,6 +191,7 @@ export function ClienteFicha({ id, onClose }: { id: string | null; onClose: () =
   async function saveTenant(): Promise<boolean> {
     setFieldErrs({});
     const body: TenantSaveBody = { ...form };
+    body.followup_enabled = form.followup_enabled === '1';
     body['chips_json'] = linesFrom(chipsText, 5);
     body['web_origins'] = linesFrom(originsText, 6);
     body['active'] = active;
@@ -623,6 +629,42 @@ function ContextoPane({
         ) : null}
         <textarea rows={14} className="promptbox" value={form.system_prompt} onChange={(e) => set('system_prompt')(e.target.value)} aria-label="Contexto del negocio" />
         {err('system_prompt')}
+      </div>
+      <div className="card mt12">
+        <b>Seguimiento automático</b>
+        <label className="plan-toggle mt8">
+          <input
+            type="checkbox"
+            aria-label="Activar seguimiento automático"
+            checked={form.followup_enabled === '1'}
+            onChange={(e) => set('followup_enabled')(e.target.checked ? '1' : '0')}
+          />{' '}
+          {form.followup_enabled === '1' ? 'Activo' : 'Desactivado'}
+        </label>
+        <div className="formrow mt8">
+          <label>
+            Espera antes de cerrar (minutos)
+            <input
+              type="number" min={15} max={1380} step={15}
+              value={form.followup_delay_minutes}
+              onChange={(e) => set('followup_delay_minutes')(e.target.value)}
+              aria-label="Minutos antes del seguimiento"
+            />
+          </label>
+        </div>
+        {err('followup_delay_minutes')}
+        <label className="mt8">
+          Mensaje propio de este cliente
+          <textarea
+            rows={7} maxLength={1200} className="promptbox"
+            value={form.followup_message}
+            onChange={(e) => set('followup_message')(e.target.value)}
+            aria-label="Mensaje de seguimiento automático"
+            placeholder="Mensaje que se enviará una sola vez si el cliente deja de responder…"
+          />
+        </label>
+        {err('followup_message')}
+        <p className="muted mt6">Solo WhatsApp y dentro de la ventana de Meta. Se aplica a conversaciones futuras desde que se activa, nunca a números del equipo, pruebas, bajas, reservas ya creadas ni conversaciones tomadas por una persona.</p>
       </div>
       <div className="card mt12">
         <b>Probar el borrador (no guarda nada)</b>

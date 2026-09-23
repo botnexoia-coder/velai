@@ -80,6 +80,10 @@ const detailTenant: TenantDetail = {
   ai_daily_limit: null,
   support_hours: null,
   support_tz: null,
+  followup_enabled: 0,
+  followup_delay_minutes: 180,
+  followup_message: null,
+  followup_enabled_at: null,
   active: 1,
   created_at: '2026-08-01T00:00:00.000Z',
   updated_at: '2026-08-20T00:00:00.000Z',
@@ -189,6 +193,29 @@ describe('vista Clientes', () => {
       expect(body['web_origins']).toEqual(['https://barberia.com']);
       // El token NO viaja si no se escribió (write-only).
       expect('twilio_auth_token' in body).toBe(false);
+    });
+  });
+
+  it('cada cliente configura su propio seguimiento y tiempo desde Contexto', async () => {
+    const { calls } = renderClientes();
+    const user = userEvent.setup();
+    await user.click(await screen.findByText('Barbería López'));
+    const dialog = await screen.findByRole('dialog', { hidden: true });
+    await user.click(within(dialog).getByRole('button', { name: 'Contexto' }));
+    const toggle = within(dialog).getByLabelText('Activar seguimiento automático');
+    expect(toggle).not.toBeChecked();
+    await user.click(toggle);
+    const minutes = within(dialog).getByLabelText('Minutos antes del seguimiento');
+    await user.clear(minutes);
+    await user.type(minutes, '180');
+    await user.type(within(dialog).getByLabelText('Mensaje de seguimiento automático'), 'Mensaje propio de esta barbería.');
+    await user.click(within(dialog).getByRole('button', { name: 'Guardar' }));
+    await waitFor(() => {
+      const patch = calls.find((c) => c.init?.method === 'PATCH' && c.url.endsWith(`/api/admin/tenants/${detailTenant.id}`));
+      const body = JSON.parse(String(patch?.init?.body)) as Record<string, unknown>;
+      expect(body['followup_enabled']).toBe(true);
+      expect(body['followup_delay_minutes']).toBe('180');
+      expect(body['followup_message']).toBe('Mensaje propio de esta barbería.');
     });
   });
 

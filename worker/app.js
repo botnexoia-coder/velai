@@ -620,6 +620,9 @@ const HEX_COLOR_RE = /^#[0-9a-f]{6}$/i;
 const ORIGIN_RE = /^https:\/\/[a-z0-9-]+(\.[a-z0-9-]+)+$/;
 const WA_DIGITS_RE = /^[1-9]\d{5,14}$/;
 const THEMES = new Set(['auto', 'light', 'dark']);
+const FOLLOWUP_MINUTES_MIN = 15;
+const FOLLOWUP_MINUTES_MAX = 23 * 60;
+const FOLLOWUP_MESSAGE_MAX = 1200;
 
 export function validateTenant(body, { partial = false } = {}) {
   const out = {}; const bad = (f) => { throw new HttpError(400, `invalid_${f}`); };
@@ -739,6 +742,17 @@ export function validateTenant(body, { partial = false } = {}) {
   }
   if (has('active')) out.active = body.active ? 1 : 0;
   if (has('weekly_report')) out.weekly_report = body.weekly_report ? 1 : 0;
+  if (has('followup_enabled')) out.followup_enabled = [true, 1, '1'].includes(body.followup_enabled) ? 1 : 0;
+  if (has('followup_delay_minutes')) {
+    const raw = String(body.followup_delay_minutes ?? '').trim();
+    const n = Number(raw);
+    if (!Number.isInteger(n) || n < FOLLOWUP_MINUTES_MIN || n > FOLLOWUP_MINUTES_MAX) bad('followup_delay_minutes');
+    out.followup_delay_minutes = n;
+  }
+  if (has('followup_message')) {
+    out.followup_message = String(body.followup_message ?? '').trim() || null;
+    if (out.followup_message && out.followup_message.length > FOLLOWUP_MESSAGE_MAX) bad('followup_message');
+  }
   // Saldo mensual de tokens del plan (contador, no corta) y cupo diario de llamadas
   // (guarda anti-abuso, sí corta). Vacío = NULL = el default del toml, para no tener que
   // tocar seis filas cuando cambie el plan estándar.
@@ -4368,6 +4382,59 @@ async function expireTakeovers(env) {
 
 const MINUTE_CRON = '* * * * *';
 
+// Seguimiento comercial tras silencio. Solo WhatsApp: en web no hay un navegador
+// necesariamente abierto y fuera del canal no existe una entrega fiable. La ventana se
+// limita a 23 h para no rozar el cierre de texto libre de Meta. Cada conversación se
+// reclama antes de enviar y solo puede producir una salida correcta.
+const FOLLOWUP_CLOSED_RE = /(?:hasta pronto|cuando quieras[, ]+aqu[ií]|aqu[ií] estar[eé]|(?:conversaci[oó]n|solicitud).{0,40}cerrad)/i;
+export async function processConversationFollowups(env, now = new Date().toISOString()) {
+  const rows = (await env.DB.prepare(`
+    SELECT c.id,c.tenant_id,c.external_id,c.inbox_address,c.demo,c.msgs,c.last_at,
+           t.slug,t.team_whatsapp,t.followup_message,
+           (SELECT m.text FROM conv_messages m WHERE m.conversation_id=c.id ORDER BY m.id DESC LIMIT 1) AS last_text
+    FROM conversations c JOIN tenants t ON t.id=c.tenant_id
+    WHERE t.active=1 AND t.followup_enabled=1 AND t.followup_enabled_at IS NOT NULL
+      AND t.followup_message IS NOT NULL AND c.channel='whatsapp' AND c.state='bot'
+      AND c.lead_id IS NOT NULL AND c.inbox_address IS NOT NULL
+      AND c.followup_sent_at IS NULL AND COALESCE(c.followup_attempts,0)<3
+      AND c.last_inbound_at IS NOT NULL
+      AND datetime(c.last_at, printf('+%d minutes',t.followup_delay_minutes)) <= datetime(?)
+      AND datetime(c.last_inbound_at) >= datetime(?,'-23 hours')
+      AND datetime(c.last_inbound_at) >= datetime(t.followup_enabled_at)
+      AND (SELECT m.role FROM conv_messages m WHERE m.conversation_id=c.id ORDER BY m.id DESC LIMIT 1)='assistant'
+      AND NOT EXISTS (SELECT 1 FROM event_reservations r WHERE r.tenant_id=c.tenant_id AND r.conversation_id=c.id)
+      AND NOT EXISTS (SELECT 1 FROM contact_consents cc WHERE cc.tenant_id=c.tenant_id
+        AND cc.contact=c.external_id AND cc.status='withdrawn')
+    ORDER BY c.last_at ASC LIMIT 10`).bind(now, now).all()).results || [];
+  let sent = 0;
+  for (const c of rows) {
+    const team = String(c.team_whatsapp || '').split(',').map((v) => v.trim()).filter(Boolean);
+    if (c.demo || team.includes(c.external_id) || FOLLOWUP_CLOSED_RE.test(String(c.last_text || ''))) continue;
+    const claimedAt = new Date().toISOString();
+    const claim = await env.DB.prepare(`UPDATE conversations
+      SET followup_sent_at=?,followup_attempts=COALESCE(followup_attempts,0)+1
+      WHERE id=? AND followup_sent_at IS NULL AND last_at=?`).bind(claimedAt, c.id, c.last_at).run();
+    if (!claim.meta || !claim.meta.changes) continue;
+    try {
+      const tenant = await env.DB.prepare('SELECT * FROM tenants WHERE id=?').bind(c.tenant_id).first();
+      if (!tenant) throw new Error('tenant_missing');
+      const delivered = await sendTwilioText(env, tenant, c.inbox_address, c.external_id, c.followup_message);
+      if (!delivered.ok) throw new Error(delivered.error || 'twilio_failed');
+      await convAppend(env, {
+        id: c.id, tenant: c.tenant_id, channel: 'whatsapp', externalId: c.external_id,
+        inbox: c.inbox_address, demo: '', msgs: c.msgs, isNew: false,
+      }, [{ role: 'assistant', content: c.followup_message }]);
+      sent++;
+      console.log(JSON.stringify({ level: 'info', code: 'conversation_followup_sent', tenant: c.slug }));
+    } catch (error) {
+      await env.DB.prepare('UPDATE conversations SET followup_sent_at=NULL WHERE id=? AND followup_sent_at=?')
+        .bind(c.id, claimedAt).run();
+      console.log(JSON.stringify({ level: 'error', code: 'conversation_followup_failed', tenant: c.slug, error: clean(String(error.message || error), 60) }));
+    }
+  }
+  return { candidates: rows.length, sent };
+}
+
 async function scheduled(env, cron) {
   if (!env.DB) return;
   const now = new Date().toISOString();
@@ -4391,6 +4458,9 @@ async function scheduled(env, cron) {
   // fuera: un fallo aquí no puede impedir que se entreguen los avisos de leads.
   try { await processReminders(env); } catch (error) {
     console.log(JSON.stringify({ level: 'error', code: 'reminders_cron_failed', error: clean(String(error.message || error), 80) }));
+  }
+  try { await processConversationFollowups(env, now); } catch (error) {
+    console.log(JSON.stringify({ level: 'error', code: 'conversation_followups_cron_failed', error: clean(String(error.message || error), 80) }));
   }
   if (bookingOrigin(env)) {
     try {

@@ -148,6 +148,7 @@ tenants.post('/api/admin/tenants', async (c) => {
     body.channel_address = willBeActive === 1 ? `web:${base}` : `pending:${base}`;
   }
   const fields = validateTenant(body, { partial: false });
+  if (fields.followup_enabled && !fields.followup_message) throw new HttpError(400, 'invalid_followup_message');
   const planConfig = validarPlan(body);
   await assertPlanChannelLimit(env, null, planConfig.plan, fields);
   const revision = crypto.randomUUID();
@@ -159,8 +160,9 @@ tenants.post('/api/admin/tenants', async (c) => {
     await env.DB.batch([env.DB.prepare(`INSERT INTO tenants
       (id,slug,name,channel_address,team_whatsapp,telegram_chat_id,lead_template_sid,twilio_from,twilio_subaccount_sid,waba_id,twilio_auth_token_enc,meta_partner_status,system_prompt,
        bot_name,brand_name,logo_url,portrait_url,accent_color,teaser_title,teaser_copy,teaser_title_en,teaser_copy_en,brand_color,brand_color_2,agent_color,greeting,greeting_en,chips_json,placeholder,wa_number,theme,web_origins,
+       followup_enabled,followup_delay_minutes,followup_message,followup_enabled_at,
        active,created_at,updated_at,plan,plan_revision)
-      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
       .bind(tenantId, fields.slug, fields.name, fields.channel_address, fields.team_whatsapp ?? null,
         fields.telegram_chat_id ?? null, fields.lead_template_sid ?? null, fields.twilio_from ?? null,
         fields.twilio_subaccount_sid ?? null, fields.waba_id ?? null, tokenColumn,
@@ -170,6 +172,8 @@ tenants.post('/api/admin/tenants', async (c) => {
         fields.brand_color ?? null, fields.brand_color_2 ?? null, fields.agent_color ?? null, fields.greeting ?? null,
         fields.greeting_en ?? null, fields.chips_json ?? null, fields.placeholder ?? null,
         fields.wa_number ?? null, fields.theme ?? null, fields.web_origins ?? null,
+        fields.followup_enabled ?? 0, fields.followup_delay_minutes ?? 180, fields.followup_message ?? null,
+        fields.followup_enabled ? now : null,
         fields.active ?? 1, now, now, planConfig.plan, revision),
       ...planStatements(env, tenantId, planConfig, actor, now, revision),
       ...primaryChannelStatements(env, tenantId, null, fields.channel_address, revision),
@@ -277,6 +281,7 @@ const grupoTenant = async (c) => {
       bot_name, brand_name, logo_url, portrait_url, accent_color, teaser_title, teaser_copy, teaser_title_en, teaser_copy_en, brand_color, brand_color_2, agent_color, greeting, greeting_en, chips_json,
       placeholder, wa_number, theme, web_origins, sender_sid, sender_status, telegram_chat_title,
       ai_monthly_tokens, ai_daily_limit, support_hours, support_tz,
+      followup_enabled, followup_delay_minutes, followup_message, followup_enabled_at,
       active, created_at, updated_at, twilio_auth_token_enc IS NOT NULL AS has_twilio_token
       FROM tenants WHERE id=?`).bind(tenantId).first();
     if (!tenant) throw new HttpError(404, 'not_found');
@@ -287,6 +292,9 @@ const grupoTenant = async (c) => {
     const previous = await env.DB.prepare('SELECT * FROM tenants WHERE id=?').bind(tenantId).first();
     if (!previous) throw new HttpError(404, 'not_found');
     const fields = validateTenant(body, { partial: true });
+    const followupEnabled = fields.followup_enabled ?? previous.followup_enabled;
+    const followupMessage = fields.followup_message !== undefined ? fields.followup_message : previous.followup_message;
+    if (followupEnabled && !followupMessage) throw new HttpError(400, 'invalid_followup_message');
     const planBefore = body.plan !== undefined || body.excepciones !== undefined ? await tenantPlan(env, tenantId) : null;
     if (planBefore && body.expected_revision !== planBefore.revision) throw new HttpError(409, 'stale_tenant');
     const planConfig = planBefore ? validarPlan(body, planBefore) : null;
@@ -312,6 +320,10 @@ const grupoTenant = async (c) => {
       await assertPlanChannelLimit(env, tenantId, planConfig?.plan ?? previous.plan ?? 'profesional', fields, previous);
     }
     const now = new Date().toISOString();
+    if (fields.followup_enabled !== undefined) {
+      fields.followup_enabled_at = fields.followup_enabled && !previous.followup_enabled
+        ? now : (fields.followup_enabled ? previous.followup_enabled_at : null);
+    }
     // `columns` alimenta también el versionado: el token va aparte y jamás entra ahí.
     if (planConfig) fields.plan = planConfig.plan;
     if (planConfig || channelChanged || fields.web_origins !== undefined) fields.plan_revision = revision;

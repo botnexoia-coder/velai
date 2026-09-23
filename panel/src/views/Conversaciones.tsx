@@ -263,6 +263,8 @@ function ConvRow({ c, isOn, onOpen }: { c: InboxRow; isOn: boolean; onOpen: () =
             <span className="cvwait">{espera}′ esperando</span>
           ) : c.state === 'humano' ? (
             <span className="cvwhen">{c.agent_email ? c.agent_email.split('@')[0] : 'en curso'}</span>
+          ) : c.preview_role === 'user' ? (
+            <span className="cvpending">Pendiente de responder</span>
           ) : (
             <span className="cvwhen">{fmtShort(c.last_at)}</span>
           )}

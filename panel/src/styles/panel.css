@@ -360,6 +360,7 @@ body.dark .ch-ig{color:#e0a6d0}
 .cvwho{display:block;flex:1;min-width:0;font-weight:700;font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .cvwhen{font-size:11px;color:var(--muted2);white-space:nowrap;font-variant-numeric:tabular-nums}
 .cvwait{font-size:11px;font-weight:700;color:var(--bad);white-space:nowrap;font-variant-numeric:tabular-nums}
+.cvpending{font-size:11px;font-weight:700;color:#b45309;white-space:nowrap}
 .cvbot{display:flex;gap:9px;align-items:baseline;margin-top:2px}
 .cvprev{display:block;flex:1;min-width:0;font-size:12px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .cvprev i{font-style:normal;opacity:.7}

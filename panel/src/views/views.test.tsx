@@ -171,6 +171,8 @@ describe('vista Conversaciones', () => {
     expect(screen.getByRole('button', { name: 'Instagram' })).toBeInTheDocument();
     // La que espera enseña los minutos, no la hora del último mensaje.
     expect(screen.getByText(/4′ esperando/)).toBeInTheDocument();
+    // Si el último mensaje es del cliente, la bandeja lo separa del seguimiento saliente.
+    expect(screen.getByText('Pendiente de responder')).toBeInTheDocument();
     // Disponibilidad resuelta por el servidor.
     expect(screen.getByText('Asesor disponible')).toBeInTheDocument();
   });
