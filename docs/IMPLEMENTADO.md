@@ -31,6 +31,11 @@ dominio en `frame-ancestors`. **Verificado mirándolo** en zoetravelspain.com a 
 cabecera de Zoe, stepper y las dos modalidades. El idioma del iframe sigue al navegador,
 no al botón ES/EN de la web.
 
+Al usarlo salió un fallo del embed que afectaba a todos: `notifySize` mandaba
+`documentElement.scrollHeight`, que nunca baja de la altura del propio iframe, así que tras
+ver las horas (1262 px) el marco se quedaba alto con un hueco enorme. Ahora mide el `body`
+(`d4fe98f`); comprobado en la web real: 528 → 715 → 1262 → 528 px al volver.
+
 ## Planes y módulos por cuenta (2026-09-21, migración 0043; implementación local, pendiente de CD)
 
 Plan + excepciones por cuenta, conservando las decisiones de la spec revisada:
