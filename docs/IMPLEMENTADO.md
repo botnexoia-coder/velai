@@ -20,6 +20,17 @@
 
 ---
 
+## Zoe Travel: el calendario de reservas en su portada — 2026-09-29
+
+Primer cliente con el embed de Autoagenda en su propia web. En `botnexoia-coder/Zoe`
+(commit `9b44bd8`, publicado por Pages): sección «Reserva tu asesoría personalizada»
+(`#reserva`) antes de «Cotiza», con `data-vai-citas="zoe"` + `vai-citas.js?v=20`, enlace
+«Agenda» en los dos menús y textos ES/EN en su i18n. No hizo falta tocar Velai: Zoe ya tenía
+Calendario y Citas, `booking_enabled=1`, dos servicios de 30 min (vídeo y teléfono) y su
+dominio en `frame-ancestors`. **Verificado mirándolo** en zoetravelspain.com a 1280 y 390:
+cabecera de Zoe, stepper y las dos modalidades. El idioma del iframe sigue al navegador,
+no al botón ES/EN de la web.
+
 ## Planes y módulos por cuenta (2026-09-21, migración 0043; implementación local, pendiente de CD)
 
 Plan + excepciones por cuenta, conservando las decisiones de la spec revisada:
