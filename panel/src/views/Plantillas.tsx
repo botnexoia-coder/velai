@@ -16,6 +16,7 @@
 import { useEffect, useState } from 'react';
 import { confirmar, pedirTexto } from '../components/Confirmar';
 import { CrearPlantilla } from '../components/CrearPlantilla';
+import { EditorTexto } from '../components/EditorTexto';
 import { traducir } from '../api/errors';
 import { useToast } from '../components/Toasts';
 import { IcoClock, IcoTick, IcoX } from '../components/icons';
@@ -40,11 +41,13 @@ export function Plantillas() {
   return <PlantillasVelai data={data} error={error} />;
 }
 
-// ── Vista del CLIENTE: solo lectura — sus plantillas y lo que ve su cliente final ──
+// ── Vista del CLIENTE: sus plantillas y lo que ve su cliente final ────────────
 // Estados en su idioma, y la pieza central: la vista previa estilo WhatsApp del
 // mensaje real, con LOS BOTONES QUE ÉL TIENE elegidos (tenant_templates.opciones de
 // su fila; sin opciones o sin plantilla, la pareja por defecto del catálogo).
-// SIN botones de crear ni interruptores: la gestión sigue siendo de Velai.
+// Las plantillas de CITAS (config.texto) llevan además el editor del texto
+// (SPEC-NOTIFICACION-CITA): el cliente lo reescribe con variables con nombre y lo manda
+// a revisión de WhatsApp él mismo. Botones y antelación siguen yendo por solicitud.
 function PlantillasCliente({ data, error }: { data: PlantillasResponse | undefined; error: unknown }) {
   const mio = data?.tenants[0] ?? null;
   const { data: sols } = useSolicitudes(Boolean(data));
@@ -59,12 +62,12 @@ function PlantillasCliente({ data, error }: { data: PlantillasResponse | undefin
       {error ? <p className="error">{traducir(error)}</p> : null}
       {data && mio
         ? data.kinds.map((k) => (
-            <KindCardCliente key={k.kind} k={k} celda={mio.plantillas[k.kind]} hours={mio.hours ?? 24} solicitudes={sols?.solicitudes ?? []} />
+            <KindCardCliente key={k.kind} k={k} tenant={mio} celda={mio.plantillas[k.kind]} hours={mio.hours ?? 24} solicitudes={sols?.solicitudes ?? []} />
           ))
         : null}
       <p className="muted mt12">
-        Estas plantillas las gestiona el equipo de Velai y las revisa WhatsApp antes de poder enviarse. ¿Quieres
-        activar alguna o cambiar algo más? Escríbenos y lo dejamos listo.
+        WhatsApp revisa cada plantilla antes de poder enviarse. El texto de las de citas lo puedes cambiar tú. ¿Algo
+        más? Escríbenos y lo dejamos listo.
       </p>
     </div>
   );
@@ -81,11 +84,13 @@ function estadoCliente(celda: PlantillasResponse['tenants'][number]['plantillas'
 
 function KindCardCliente({
   k,
+  tenant,
   celda,
   hours,
   solicitudes,
 }: {
   k: PlantillaKind;
+  tenant: { id: string; name: string };
   celda: PlantillasResponse['tenants'][number]['plantillas'][string];
   hours: number;
   solicitudes: Solicitud[];
@@ -122,7 +127,15 @@ function KindCardCliente({
         {cat ? <span className="flag off">{cat.label}</span> : null}
         {k.descripcion ? <span className="plk-desc">{k.descripcion}</span> : null}
       </div>
-      {k.config?.preview ? (
+      {k.config?.texto ? (
+        <EditorTexto
+          tenantId={tenant.id}
+          kind={k}
+          celda={celda}
+          negocio={tenant.name}
+          botones={parejas.length ? textos : null}
+        />
+      ) : k.config?.preview ? (
         <>
           <p className="muted mt6">Así le llega a tu cliente{k.kind === 'aviso_lead' ? ' (a tu equipo)' : ''}:</p>
           <div className="wapre">
@@ -280,8 +293,9 @@ function PlantillasVelai({ data, error }: { data: PlantillasResponse | undefined
       {data ? <SolicitudesBlock data={data} /> : null}
       {data ? data.kinds.map((k) => <KindCard key={k.kind} k={k} data={data} clienteId={clienteId} estado={estado} onTodas={() => setEstado('')} />) : null}
       <p className="muted mt12">
-        El cuerpo de cada plantilla vive en el código (es un contrato con quien la envía); aquí se gestiona su alta y
-        su estado por cliente. El worker revisa la aprobación de Meta cada 5 minutos y avisa por Telegram cuando una
+        El cuerpo por defecto de cada plantilla vive en el código (es un contrato con quien la envía); el de las de
+        citas lo puede reescribir cada cliente, con variables con nombre — elige un cliente arriba para editarlo desde
+        aquí. Aquí se gestiona su alta y su estado por cliente. El worker revisa la aprobación de Meta cada 5 minutos y avisa por Telegram cuando una
         plantilla pasa a aprobada o rechazada. La categoría junto a cada cliente es la REAL de Twilio («—» mientras no
         se haya leído); en ámbar cuando difiere de la del catálogo — Marketing es más cara y con topes.
       </p>
@@ -390,6 +404,13 @@ function KindCard({
 }) {
   const chips = chipsDeKind(data, k.kind);
   const { visibles, ocultos, atenuada } = filtraChips(chips, clienteId, estado);
+  // Con UN cliente elegido, Velai edita su texto con el mismo editor que ve el cliente.
+  const elegido = clienteId && k.config?.texto ? data.tenants.find((t) => t.id === clienteId) ?? null : null;
+  const celdaElegido = elegido ? elegido.plantillas[k.kind] : undefined;
+  const parejas = k.config?.botones ?? [];
+  const botonesElegido = parejas.length
+    ? celdaElegido?.opciones?.textos ?? parejas.find((b) => b.id === (celdaElegido?.opciones?.botones ?? k.config?.botonesDefault)) ?? parejas[0] ?? null
+    : null;
   return (
     <div className={`panelcard plk${atenuada ? ' atenuada' : ''}`}>
       <div className="plk-head">
@@ -409,6 +430,9 @@ function KindCard({
           </button>
         ) : null}
       </div>
+      {elegido ? (
+        <EditorTexto tenantId={elegido.id} kind={k} celda={celdaElegido} negocio={elegido.name} quien={`los clientes de ${elegido.name}`} botones={botonesElegido} />
+      ) : null}
     </div>
   );
 }

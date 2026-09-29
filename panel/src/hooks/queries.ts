@@ -33,6 +33,7 @@ import type {
   LeadDetail,
   LeadsResponse,
   PlantillasResponse,
+  TextoValidado,
   SolicitudesResponse,
   LogoUploadResponse,
   PortraitUploadResponse,
@@ -638,6 +639,26 @@ export function usePlantillas(enabled: boolean) {
     queryKey: ['plantillas'],
     queryFn: () => api<PlantillasResponse>('/api/admin/plantillas'),
     enabled,
+  });
+}
+/**
+ * TEXTO de una plantilla de citas (SPEC-NOTIFICACION-CITA). `validar: true` solo
+ * comprueba (sin efectos, lo usa el editor mientras se escribe); sin él crea la
+ * plantilla nueva en Twilio y la manda a revisión de Meta — si ya hay una aprobada, esa
+ * sigue enviándose hasta que la nueva se apruebe.
+ */
+export function usePlantillaTextoValidar() {
+  return useMutation({
+    mutationFn: ({ id, kind, texto }: { id: string; kind: string; texto: string }) =>
+      apiPost<TextoValidado>(`/api/admin/tenants/${id}/plantillas/${kind}`, { texto, validar: true }),
+  });
+}
+export function usePlantillaTextoGuardar() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, kind, texto }: { id: string; kind: string; texto: string }) =>
+      apiPost<{ ok: true; kind: string; status: 'pending'; modo: 'revision' | 'principal' }>(`/api/admin/tenants/${id}/plantillas/${kind}`, { texto }),
+    onSettled: () => void client.invalidateQueries({ queryKey: ['plantillas'] }),
   });
 }
 /** Solicitudes de cambio (0032): el cliente ve las suyas; velai las pendientes. */

@@ -184,6 +184,9 @@ export function clienteAllowed(path, method) {
   // Sus SOLICITUDES de cambio: crear (validada contra el catálogo, tenant del scope,
   // 1 pendiente por tipo) y ver las suyas. Aprobar/rechazar sigue siendo solo-Velai.
   if (path === '/api/admin/solicitudes' && ['GET', 'POST'].includes(method)) return true;
+  // El TEXTO de sus plantillas de citas (SPEC-NOTIFICACION-CITA): el handler exige que el
+  // :id sea el suyo (ajeno = 404), valida contra el catálogo y el resto lo revisa Meta.
+  if (/^\/api\/admin\/tenants\/[0-9a-f-]+\/plantillas\/[a-z0-9_-]+$/i.test(path) && method === 'POST') return true;
   // Calendario en autoservicio: el cliente conecta y gestiona SU calendario. El
   // handler exige que el :id sea el suyo (ajeno = 404, nunca 403).
   if (/^\/api\/admin\/tenants\/[0-9a-f-]+\/calendar$/i.test(path) && ['GET', 'PATCH', 'DELETE'].includes(method)) return true;
@@ -323,6 +326,7 @@ export function partesAdmin(c) {
 export const RUTA_MODULO = [
   [/^\/api\/admin\/appointments(?:\/|$)/, 'calendario'],
   [/^\/api\/admin\/tenants\/[^/]+\/calendar(?:\/|$)/, 'calendario'],
+  [/^\/api\/admin\/tenants\/[^/]+\/plantillas(?:\/|$)/, 'calendario'],
   [/^\/api\/admin\/tenants\/[^/]+\/(?:booking|services|reminders)(?:\/|$)/, 'citas'],
   [/^\/api\/admin\/events(?:\/|$)/, 'eventos'],
 ];

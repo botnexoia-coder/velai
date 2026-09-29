@@ -5583,7 +5583,8 @@ test('el cron marca approved/rejected las plantillas del catálogo y avisa', asy
   const db = { prepare: (sql) => {
     const stmt = (args = []) => ({
       bind: (...a) => stmt(a),
-      all: async () => ({ results: /FROM tenant_templates tt/.test(sql) ? [{
+      // La consulta de REVISIONES (0047) no es la de este caso: esa responde vacía.
+      all: async () => ({ results: /FROM tenant_templates tt/.test(sql) && !/revision_status = 'pending'/.test(sql) ? [{
         kind: 'recordatorio_cita', sid: 'HX' + 'c'.repeat(32), template_status: 'pending', categoria: null,
         id: 't-conf', slug: 'conf', name: 'Clínica Conf',
         twilio_subaccount_sid: 'AC' + 's'.repeat(32), twilio_auth_token_enc: enc,
@@ -5621,7 +5622,8 @@ test('backfill autocurativo de categoría: la approved con categoría NULL se cu
   const db = { prepare: (sql) => {
     const stmt = (args = []) => ({
       bind: (...a) => stmt(a),
-      all: async () => ({ results: /FROM tenant_templates tt/.test(sql) ? [{
+      // La consulta de REVISIONES (0047) no es la de este caso: esa responde vacía.
+      all: async () => ({ results: /FROM tenant_templates tt/.test(sql) && !/revision_status = 'pending'/.test(sql) ? [{
         // Ya resuelta (approved) pero sin categoría: el caso gogestion.
         kind: 'recordatorio_cita', sid: 'HX' + 'c'.repeat(32), template_status: 'approved', categoria: null,
         id: 't-conf', slug: 'conf', name: 'Clínica Conf',
@@ -5848,7 +5850,7 @@ test('GET /plantillas por rol: velai la matriz global con opciones; el cliente S
   assert.deepEqual(alfa.plantillas.recordatorio_cita, {
     sid: 'HX' + 'r'.repeat(32), status: 'approved', updated_at: '2026-09-01T10:00:00Z',
     opciones: { botones: 'si_voy_no_puedo', textos: { confirmar: 'Sí, voy', cancelar: 'No puedo ir' } },
-    categoria: 'UTILITY',
+    categoria: 'UTILITY', texto: null, revision: null,
   });
   // La categoría de la celda es la REAL de Twilio (la de gogestion es Marketing aunque
   // el catálogo la sometiera como Utility) — la legacy la trae de tenants.
@@ -6279,11 +6281,12 @@ test('aprobar APLICA: antelación a reminder_hours y botones distintos recrean l
   const { db, state } = solicitudesDb({ tenant, template, solicitudes: [solicitud] });
   const env = { DB: db, KV: mapKV(), SECRETS_KEK: TEST_KEK };
   const twilioCalls = [];
+  const approvalNames = [];
   const realFetch = globalThis.fetch;
   globalThis.fetch = async (url, init) => {
     const u = String(url);
     if (u === 'https://content.twilio.com/v1/Content') { twilioCalls.push(JSON.parse(String(init.body))); return new Response(JSON.stringify({ sid: 'HX' + 'n'.repeat(32) }), { status: 201 }); }
-    if (u.includes('/ApprovalRequests/whatsapp')) return new Response('{}', { status: 201 });
+    if (u.includes('/ApprovalRequests/whatsapp')) { approvalNames.push(JSON.parse(String(init.body)).name); return new Response('{}', { status: 201 }); }
     return new Response('{}', { status: 200 });
   };
   try {
@@ -6296,8 +6299,12 @@ test('aprobar APLICA: antelación a reminder_hours y botones distintos recrean l
     // La antelación fue a la fila del tenant y la solicitud quedó approved.
     assert.ok(state.updates.some((u) => /reminder_hours=\?/.test(u.sql) && u.args[0] === '12'));
     assert.equal(state.solicitudes[0].status, 'approved');
-    // El upsert del registro dejó la fila pending con las opciones nuevas.
-    assert.ok(state.updates.some((u) => /INSERT INTO tenant_templates/.test(u.sql) && String(u.args[3]).includes('si_voy_no_puedo')));
+    // Había una APROBADA: la nueva entra como REVISIÓN (0047) y la aprobada sigue
+    // enviándose mientras Meta revisa — no se sustituye la fila activa.
+    assert.ok(state.updates.some((u) => /SET revision_sid=\?, revision_status='pending'/.test(u.sql) && String(u.args[2]).includes('si_voy_no_puedo')));
+    assert.ok(!state.updates.some((u) => /INSERT INTO tenant_templates/.test(u.sql)), 'la aprobada no se pisa');
+    // Nombre de revisión con sufijo: el nombre de una plantilla es único por WABA.
+    assert.ok(approvalNames.some((n) => /^recordatorio_cita_mio_r\d{12}$/.test(n)), approvalNames.join(','));
   } finally { globalThis.fetch = realFetch; }
 });
 

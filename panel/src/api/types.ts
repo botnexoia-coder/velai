@@ -857,6 +857,12 @@ export interface PlantillaCelda {
   /** La categoría REAL leída de Twilio por el poll (0032). null = aún no leída: se
    *  enseña «—», JAMÁS la intención del catálogo como si fuera un hecho. */
   categoria?: string | null;
+  /** El texto de la plantilla ACTIVA con variables con nombre (0047). null = el texto
+   *  por defecto del catálogo (`config.texto.defecto`). */
+  texto?: string | null;
+  /** Revisión en curso o rechazada de un texto/botones nuevos. Mientras está
+   *  'pending' se sigue enviando la aprobada. */
+  revision?: { status: string; texto: string | null; motivo: string | null; at: string | null } | null;
 }
 
 // ── Solicitudes de cambio del cliente (tenant_solicitudes, 0032) ─────────────
@@ -899,6 +905,29 @@ export interface PlantillaConfig {
   antelacionDefault?: number;
   botones?: ParejaBotones[];
   botonesDefault?: string;
+  /** Presente solo en los kinds cuyo TEXTO edita el cliente (SPEC-NOTIFICACION-CITA). */
+  texto?: PlantillaTextoConfig;
+}
+/** Una variable con nombre que el cliente puede insertar ({{clave}}). */
+export interface CampoTexto {
+  clave: string;
+  label: string;
+  obligatoria: boolean;
+  /** El valor de ejemplo de la vista previa (y el que se somete a Meta). */
+  ejemplo: string;
+}
+export interface PlantillaTextoConfig {
+  defecto: string;
+  /** Límite de Meta para el cuerpo (ya numerado). */
+  max: number;
+  campos: CampoTexto[];
+}
+/** POST /tenants/:id/plantillas/:kind con validar:true — lo decide el worker. */
+export interface TextoValidado {
+  ok: boolean;
+  errores: { code: string; clave?: string }[];
+  preview: string;
+  longitud: number;
 }
 /** Un kind del catálogo (worker/plantillas.js): TODO lo que la vista pinta viene de
  *  aquí — nada por kind se hardcodea en el panel. */

@@ -5,7 +5,8 @@
 // Estados = el ciclo de aprobación de Meta que guarda el worker (pending/approved/
 // rejected; 'received' es cómo llama Twilio a un pending recién entregado). Un estado
 // desconocido cuenta como pendiente: mejor «esperando» que esconderlo.
-import type { PlantillaCelda, PlantillasResponse } from '../api/types';
+import type { CampoTexto, PlantillaCelda, PlantillasResponse } from '../api/types';
+import { TERRS } from '../api/errors';
 
 export type EstadoPlantilla = 'approved' | 'pending' | 'rejected' | 'sin';
 
@@ -138,4 +139,45 @@ export function cuentaPlantillas(data: PlantillasResponse): CuentaPlantillas {
     }
   }
   return out;
+}
+
+// ── Texto editable (SPEC-NOTIFICACION-CITA) ──────────────────────────────────
+// Las REGLAS viven solo en el worker (validarTexto): el editor le pregunta con
+// validar:true. Aquí solo lo que es presentación: pintar la vista previa al instante,
+// insertar una variable donde está el cursor y poner el error en palabras.
+
+const TOKEN = /\{\{\s*([^{}]*?)\s*\}\}/g;
+
+/** Vista previa inmediata: cada {{clave}} conocida por su ejemplo; lo desconocido se
+ *  deja tal cual (el worker lo marcará como error). */
+export function renderTextoLocal(texto: string, campos: CampoTexto[], negocio?: string): string {
+  return texto.replace(TOKEN, (todo, clave: string) =>
+    clave === 'negocio' && negocio ? negocio : campos.find((c) => c.clave === clave)?.ejemplo ?? todo);
+}
+
+/** Inserta {{clave}} en la posición del cursor, con un espacio de separación si hace
+ *  falta. Devuelve el texto nuevo y dónde queda el cursor. */
+export function insertarVariable(texto: string, inicio: number, fin: number, clave: string): { texto: string; cursor: number } {
+  const antes = texto.slice(0, inicio);
+  const despues = texto.slice(fin);
+  const token = `{{${clave}}}`;
+  const pre = antes && !/\s$/.test(antes) ? ' ' : '';
+  const post = despues && !/^[\s.,;:!?)]/.test(despues) ? ' ' : '';
+  const nuevo = antes + pre + token + post + despues;
+  return { texto: nuevo, cursor: (antes + pre + token).length };
+}
+
+/** Las variables que aparecen en el texto (para marcar los chips ya usados). */
+export function variablesUsadas(texto: string): string[] {
+  return [...texto.matchAll(TOKEN)].map((m) => m[1] ?? '');
+}
+
+/** Un error de validación del worker, en palabras, con la variable concreta. */
+export function mensajeTexto(e: { code: string; clave?: string }, campos: CampoTexto[]): string {
+  const campo = e.clave ? campos.find((c) => c.clave === e.clave) : undefined;
+  const nombre = campo ? `{{${campo.clave}}} (${campo.label.toLowerCase()})` : e.clave ? `{{${e.clave}}}` : '';
+  if (e.code === 'falta_variable' && nombre) return `Falta ${nombre}: es obligatoria.`;
+  if (e.code === 'variable_desconocida' && nombre) return `${nombre} no existe: usa solo las variables de los botones.`;
+  if (e.code === 'variable_repetida' && nombre) return `${nombre} aparece más de una vez: déjala solo una.`;
+  return TERRS[e.code] ?? e.code;
 }

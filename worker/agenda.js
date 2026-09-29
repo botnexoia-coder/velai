@@ -173,7 +173,16 @@ export async function bookAppointment(env, cal, service, input, meta) {
   await env.DB.batch([
     env.DB.prepare("UPDATE appointments SET status='confirmed',provider_event_id=? WHERE id=? AND tenant_id=? AND request_id=? AND status IN ('error','confirmed')")
       .bind(eventId, id, cal.tenant_id, requestId),
-    env.DB.prepare("INSERT INTO booking_notifications(appointment_id,tenant_id,updated_at) SELECT ?,id,? FROM tenants WHERE id=? AND reminders_enabled=1 AND ?='web_reserva' ON CONFLICT(appointment_id) DO NOTHING").bind(id, now, cal.tenant_id, meta.channel),
+    // Confirmación por WhatsApp de la cita agendada (SPEC-NOTIFICACION-CITA): para las
+    // citas de la web de reservas y del chat web, y SOLO si el tenant ya tiene aprobada
+    // la plantilla confirmacion_reserva (sembrar sin ella dejaba filas pending para
+    // siempre). No depende del addon de recordatorios. Las agendadas por Vai dentro de
+    // una conversación de WhatsApp/Messenger no se siembran: la ventana de 24 h está
+    // abierta y Vai ya lo confirma en el hilo (withManageLink añade el enlace).
+    env.DB.prepare(`INSERT INTO booking_notifications(appointment_id,tenant_id,updated_at) SELECT ?,t.id,? FROM tenants t
+      WHERE t.id=? AND t.active=1 AND ? IN ('web_reserva','web') AND EXISTS (SELECT 1 FROM tenant_templates tt
+        WHERE tt.tenant_id=t.id AND tt.kind='confirmacion_reserva' AND tt.status='approved' AND tt.sid IS NOT NULL)
+      ON CONFLICT(appointment_id) DO NOTHING`).bind(id, now, cal.tenant_id, meta.channel),
     env.DB.prepare("UPDATE booking_claims SET state='booked' WHERE id=? AND tenant_id=? AND appointment_id=?").bind(claimId, cal.tenant_id, id),
     env.DB.prepare('UPDATE tenant_calendars SET booking_revision=booking_revision+1 WHERE tenant_id=?').bind(cal.tenant_id),
   ]);

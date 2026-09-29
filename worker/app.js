@@ -26,7 +26,7 @@ import { encryptSecret, decryptSecret } from './crypto.js';
 import { cloudflareConfigured, syncTurnstileDomains, syncAccessGroup, syncAdminGroup, verifyCfToken } from './cloudflare.js';
 import { createSubaccount, fetchSubaccount, findSubaccountByName, createContentTemplate, submitTemplateApproval, fetchApprovalStatus, createWhatsAppSender, verifySender, fetchSenderStatus, listWhatsAppSenders, updateSenderWebhook, updateSenderProfile, fetchSender } from './twilio.js';
 import { calendarTools, CALENDAR_TOOLS, CALENDAR_GUARDRAILS, DEFAULT_BUSINESS_HOURS, freeSlots, localToUtcMs, localDateStr, localWeekday, utcToLocalHHMM, googleAuthUrl, exchangeGoogleCode, refreshGoogleToken, revokeGoogleToken, googleBusy, createGoogleEvent, deleteGoogleEvent } from './calendar.js';
-import { templateKind, templateOptions } from './plantillas.js';
+import { templateKind, templateOptions, variablesPara, validarTexto, textoEditable, nombreRevision } from './plantillas.js';
 
 const JSON_HEADERS = { 'Content-Type': 'application/json; charset=utf-8' };
 // URL pública del worker: webhook de Twilio (senders) y de Telegram apuntan aquí.
@@ -2198,7 +2198,10 @@ function calendarExecutor(env, tenant, cal, meta) {
       const service = await serviceFor(env, cal, clean(input.servicio, 60));
       try {
         const appt = await bookAppointment(env, cal, service, { fecha_hora: fechaHora, nombre, telefono: meta.defaultPhone || telefono, motivo }, meta);
-        return JSON.stringify({ ok: true, fecha, hora: hhmm, nombre: appt.customer_name, duracion_min: service.minutes });
+        // El enlace privado de gestión NO pasa por el modelo (no puede mutilarlo ni
+        // inventarlo): el canal lo añade a la respuesta final con withManageLink.
+        meta.booked = { id: appt.id, url: appt.manage_token && bookingOrigin(env) && tenant.slug ? `${bookingOrigin(env)}/${tenant.slug}/cita/${appt.manage_token}` : null };
+        return JSON.stringify({ ok: true, fecha, hora: hhmm, nombre: appt.customer_name, duracion_min: service.minutes, nota: 'el enlace para gestionar la cita se añade solo al final de tu respuesta: no escribas ningún enlace' });
       } catch (error) {
         if (!(error instanceof HttpError) || error.status >= 500) throw error;
         return JSON.stringify({ error: error.code, alternativas: error.code === 'hueco_ocupado' ? (await availableSlots(env, cal, fecha, service)).slice(0, 6) : [] });
@@ -2253,6 +2256,17 @@ function calendarExecutor(env, tenant, cal, meta) {
   };
 }
 
+// Cita agendada por Vai DENTRO de una conversación (SPEC-NOTIFICACION-CITA): Vai ya
+// confirma fecha y hora en el hilo, así que no se manda además la plantilla (sería un
+// duplicado); lo único que faltaba es el enlace privado para consultar, cancelar o
+// cambiar la cita. Se añade de forma determinista al final de la respuesta, una vez.
+export function withManageLink(reply, meta) {
+  const url = meta && meta.booked && meta.booked.url;
+  const text = String(reply || '');
+  if (!url || text.includes(url)) return text;
+  return `${text.trim()}\n\nPuedes consultar, cancelar o cambiar tu cita aquí: ${url}`.trim();
+}
+
 // ── Confirmaciones (SPEC-CONFIRMACIONES F1): recordatorio de cita por WhatsApp ─
 // Recordatorio 24 h antes de cada cita, por la subcuenta del tenant y SIN modelo
 // (nada de esto pasa por aiBudgetGuard). Mismo molde que lead_notifications:
@@ -2302,29 +2316,48 @@ function reminderWhen(appt) {
   };
 }
 
-// CONTRATO con la plantilla recordatorio_cita (worker/plantillas.js): 1 nombre,
-// 2 negocio, 3 fecha local, 4 hora local, 5 motivo, 6 id de la cita (el payload de
-// los botones). Si cambias la plantilla, cambia esto en el mismo commit.
-export function reminderTemplateVariables(tenant, appt) {
+// Valores por NOMBRE de las variables de las plantillas de citas (worker/plantillas.js,
+// CAMPOS_TEXTO). La numeración {{1}}..{{n}} NO vive aquí: la saca variablesPara() del
+// MISMO texto con el que se creó la plantilla activa (tenant_templates.texto; NULL = el
+// defecto del catálogo), así que un texto editado por el cliente no puede desalinear
+// el contrato.
+function appointmentTemplateValues(tenant, appt) {
   const { fecha, hora } = reminderWhen(appt);
-  return JSON.stringify({
-    1: templateVar(appt.customer_name, 'Hola'),
-    2: templateVar(tenant.brand_name || tenant.name, 'el negocio'),
-    3: templateVar(fecha, 'próximamente'),
-    4: templateVar(hora, 'la hora acordada'),
-    5: templateVar(appt.reason, 'tu cita'),
-    6: appt.id,
-  });
+  return {
+    nombre: templateVar(appt.customer_name, 'Hola'),
+    negocio: templateVar(tenant.brand_name || tenant.name, 'el negocio'),
+    servicio: templateVar(appt.reason, 'tu cita'),
+    fecha: templateVar(fecha, 'próximamente'),
+    hora: templateVar(hora, 'la hora acordada'),
+  };
+}
+
+// CONTRATO con recordatorio_cita: con el texto por defecto sale lo de siempre (1 nombre,
+// 2 negocio, 3 fecha, 4 hora, 5 motivo, 6 id); con texto propio, el orden de aparición
+// y el id de la cita (payload de los botones) en la variable siguiente a las del cuerpo.
+export function reminderTemplateVariables(tenant, appt, texto = null) {
+  return JSON.stringify(variablesPara(templateKind('recordatorio_cita'), texto, appointmentTemplateValues(tenant, appt), [appt.id]));
+}
+
+// CONTRATO con confirmacion_reserva: lo mismo más el enlace privado de gestión.
+export function confirmationTemplateVariables(env, tenant, appt, texto = null) {
+  const valores = { ...appointmentTemplateValues(tenant, appt), enlace: `${bookingOrigin(env)}/${tenant.slug}/cita/${appt.manage_token}` };
+  return JSON.stringify(variablesPara(templateKind('confirmacion_reserva'), texto, valores));
 }
 
 // Estado de UNA plantilla del catálogo para este tenant (tenant_templates, 0030).
 // try/catch por si la tabla aún no existe (deploy antes de migrar): sin fila no hay
 // plantilla, y el resto del sistema lo trata como no configurado — nunca revienta.
 export async function tenantTemplate(env, tenantId, kind) {
-  try {
-    return await env.DB.prepare('SELECT sid, status FROM tenant_templates WHERE tenant_id=? AND kind=?')
-      .bind(tenantId, kind).first();
-  } catch (_) { return null; }
+  // Con texto/revisión (0047) y, si la migración aún no está, la forma anterior: el
+  // texto NULL es el defecto del catálogo, que casa con las plantillas creadas antes.
+  for (const cols of ['sid, status, opciones, texto, revision_sid, revision_status, revision_texto, revision_motivo, revision_at', 'sid, status, opciones', 'sid, status']) {
+    try {
+      return await env.DB.prepare(`SELECT ${cols} FROM tenant_templates WHERE tenant_id=? AND kind=?`)
+        .bind(tenantId, kind).first();
+    } catch (_) { /* columna o tabla aún sin migrar: siguiente forma */ }
+  }
+  return null;
 }
 
 // Envía UN recordatorio. Regla de oro de deliver(): los recursos de una subcuenta se
@@ -2333,6 +2366,13 @@ export async function tenantTemplate(env, tenantId, kind) {
 // {ok} | {skipped, error} | {error}.
 async function deliverReminder(env, tenant, template, appt, variables = null) {
   if (!Number(tenant.reminders_enabled)) return { skipped: true, error: 'reminders_disabled' };
+  return deliverAppointmentTemplate(env, tenant, template, appt, variables || reminderTemplateVariables(tenant, appt, template && template.texto));
+}
+
+// El envío en sí, sin la puerta del addon de recordatorios: la confirmación de cita
+// agendada NO depende de reminders_enabled (SPEC-NOTIFICACION-CITA §decisiones) — su
+// opt-in es tener la plantilla confirmacion_reserva creada y aprobada.
+async function deliverAppointmentTemplate(env, tenant, template, appt, variables) {
   if (!template || !template.sid) return { skipped: true, error: 'template_not_configured' };
   if (template.status !== 'approved') return { skipped: true, error: 'template_not_approved' };
   const sub = tenant.twilio_subaccount_sid;
@@ -2350,21 +2390,29 @@ async function deliverReminder(env, tenant, template, appt, variables = null) {
       From: fromAddress,
       To: `whatsapp:${phone.startsWith('+') ? phone : `+${phone}`}`,
       ContentSid: template.sid,
-      ContentVariables: variables || reminderTemplateVariables(tenant, appt),
+      ContentVariables: variables,
     }),
     signal: AbortSignal.timeout(8000),
   });
   return response.ok ? { ok: true } : { error: `twilio_${response.status}` };
 }
 
+// Confirmación de cita AGENDADA (plantilla confirmacion_reserva). La fila la siembra
+// bookAppointment solo cuando el tenant YA tiene la plantilla aprobada (agenda.js); aquí
+// se entrega. Puertas: tenant activo + plantilla aprobada — NO el addon de
+// recordatorios. BOOKING_NOTIFY_FRESH_MS: una confirmación que no salió en las dos
+// primeras horas ya no se manda (llegaría como ruido, horas o días después).
+const BOOKING_NOTIFY_FRESH_MS = 2 * 3600000;
 export async function processBookingNotifications(env, appointmentId = null) {
   if (!bookingOrigin(env)) return;
+  const nowMs = Date.now();
   const due = (await env.DB.prepare(`SELECT n.appointment_id,n.tenant_id FROM booking_notifications n
     JOIN appointments a ON a.id=n.appointment_id AND a.tenant_id=n.tenant_id
-    JOIN tenants t ON t.id=n.tenant_id AND t.active=1 AND t.reminders_enabled=1
-    JOIN tenant_templates tt ON tt.tenant_id=t.id AND tt.kind='confirmacion_reserva' AND tt.status='approved'
-    WHERE n.status IN ('pending','failed') AND n.attempts<3 AND a.status='confirmed' AND a.starts_at>?
-    AND (? IS NULL OR n.appointment_id=?) ORDER BY n.updated_at LIMIT 5`).bind(new Date().toISOString(), appointmentId, appointmentId).all()).results || [];
+    JOIN tenants t ON t.id=n.tenant_id AND t.active=1
+    JOIN tenant_templates tt ON tt.tenant_id=t.id AND tt.kind='confirmacion_reserva' AND tt.status='approved' AND tt.sid IS NOT NULL
+    WHERE n.status IN ('pending','failed') AND n.attempts<3 AND a.status='confirmed' AND a.starts_at>? AND a.created_at>?
+    AND (? IS NULL OR n.appointment_id=?) ORDER BY n.updated_at LIMIT 5`)
+    .bind(new Date(nowMs).toISOString(), new Date(nowMs - BOOKING_NOTIFY_FRESH_MS).toISOString(), appointmentId, appointmentId).all()).results || [];
   for (const n of due) {
     const claimed = await env.DB.prepare("UPDATE booking_notifications SET status='sending',attempts=attempts+1,updated_at=? WHERE appointment_id=? AND tenant_id=? AND status IN ('pending','failed') AND attempts<3").bind(new Date().toISOString(),n.appointment_id,n.tenant_id).run();
     if (!claimed.meta.changes) continue;
@@ -2375,10 +2423,9 @@ export async function processBookingNotifications(env, appointmentId = null) {
       const appt = await env.DB.prepare("SELECT * FROM appointments WHERE id=? AND tenant_id=? AND status='confirmed'").bind(n.appointment_id,n.tenant_id).first();
       if (!tenant || !appt || !appt.manage_token) continue;
       const template = await tenantTemplate(env,n.tenant_id,'confirmacion_reserva');
-      const when = reminderWhen(appt);
-      const variables = JSON.stringify({1:templateVar(appt.customer_name,'Hola'),2:templateVar(tenant.brand_name||tenant.name,'el negocio'),3:when.fecha,4:when.hora,5:`${bookingOrigin(env)}/${tenant.slug}/cita/${appt.manage_token}`});
-      const result = await deliverReminder(env,tenant,template,appt,variables);
+      const result = await deliverAppointmentTemplate(env,tenant,template,appt,confirmationTemplateVariables(env,tenant,appt,template && template.texto));
       await env.DB.prepare('UPDATE booking_notifications SET status=?,updated_at=? WHERE appointment_id=? AND tenant_id=?').bind(result.ok?'sent':'failed',new Date().toISOString(),appt.id,tenant.id).run();
+      console.log(JSON.stringify({ level: result.ok ? 'info' : 'warn', code: result.ok ? 'booking_notification_sent' : 'booking_notification_failed', tenant: tenant.slug, error: result.error || undefined }));
     } catch (_) { console.log(JSON.stringify({level:'warn',code:'booking_notification_uncertain',tenant:n.tenant_id})); }
   }
 }
@@ -2446,7 +2493,7 @@ async function sendDueReminders(env, nowMs) {
     else if (Date.parse(job.starts_at) <= nowMs) outcome = { skipped: true, error: 'cita_pasada' };
     else {
       const template = await tenantTemplate(env, job.tenant_id, 'recordatorio_cita');
-      try { outcome = await deliverReminder(env, tenant, template, job); }
+      try { outcome = await deliverReminder(env, tenant, template, job, reminderTemplateVariables(tenant, job, template && template.texto)); }
       catch (error) { outcome = { error: error.name === 'TimeoutError' ? 'timeout' : 'network_error' }; }
     }
     const attempts = outcome.skipped ? job.reminder_attempts : job.reminder_attempts + 1;
@@ -2675,6 +2722,12 @@ export async function handleChat(request, env, cors, ctx, config) {
       system: mediaSystem(cal ? calendarSystem(config, tenant, cal, hayAsesor) : systemWithHandoff(config, tenant, hayAsesor), media), messages: history,
     }, [...(cal ? calendarTools(cal, Boolean(bookingOrigin(env))) : []), ...mediaTools(media.length > 0)], mediaExecutor(env, tenant, bookingMeta, conv, cal ? calendarExecutor(env, tenant, cal, bookingMeta) : null), { tenant, closing: cal ? 'cita' : 'equipo' });
     reply = reply || (bookingMeta.attachment ? `Te comparto ${bookingMeta.attachment.name}.` : cal ? 'Ahora mismo no puedo consultar la agenda. Déjame tu nombre y teléfono y el equipo te confirma la cita enseguida.' : 'No puedo consultar el material ahora mismo. El equipo puede ayudarte.');
+    if (bookingMeta.booked) {
+      reply = withManageLink(reply, bookingMeta);
+      // En el chat web no hay ventana de WhatsApp abierta: la confirmación sale por la
+      // plantilla aprobada al teléfono que dio el cliente (si el tenant la tiene).
+      ctx.waitUntil(processBookingNotifications(env, bookingMeta.booked.id).catch(() => {}));
+    }
   } else {
     reply = await callAnthropic(env, {
       model: 'claude-sonnet-4-6', max_tokens: WEB_MAX_TOKENS,
@@ -3283,8 +3336,8 @@ export async function handleTwilio(request, env, ctx, config) {
     return twiml(reply, meta.attachment ? [meta.attachment.url] : []);
   }
   ctx.waitUntil((async () => {
-    const raw = await runToolLoop(env, payload, tools, executor, { ...waOpts, timeoutMs: 5000 }, first)
-      || (meta.attachment ? `Te comparto ${meta.attachment.name}.` : 'No he podido completar la consulta ahora mismo; el equipo te escribe enseguida.');
+    const raw = withManageLink(await runToolLoop(env, payload, tools, executor, { ...waOpts, timeoutMs: 5000 }, first)
+      || (meta.attachment ? `Te comparto ${meta.attachment.name}.` : 'No he podido completar la consulta ahora mismo; el equipo te escribe enseguida.'), meta);
     if (!meta.attachment) {
       const reply = await settleTwilioReply(config, env, ctx, tenant, from, message, conv, raw);
       if (reply) {
@@ -3574,35 +3627,61 @@ export async function pushSenderProfile(env, tenant) {
   }
 }
 
-// Recrea (o crea) la plantilla de un kind del REGISTRO con otra pareja de botones —
-// el camino de la aprobación de una solicitud del cliente. Misma maquinaria que el
-// alta configurable: plantilla NUEVA en Twilio + nueva revisión de Meta (cambiar los
-// botones no se puede en caliente); los payloads conf:/canc: no cambian jamás. El
-// upsert sustituye sid/estado/opciones de la fila y RESETEA la categoría real (la de
-// la plantilla vieja no describe a la nueva — el poll la volverá a leer). La vieja
-// queda en Twilio: histórico y rollback manual. Las credenciales se comprueban ANTES
-// de tocar nada: sin subcuenta o sin token, el error sale limpio y no se aplicó nada.
-export async function recreateTemplateWithOptions(env, ctx, tenant, def, pareja, actor) {
+// Crea en Twilio una plantilla NUEVA de un kind del REGISTRO (otra pareja de botones
+// y/o otro texto) y la somete a Meta. Dos caminos, y el porqué:
+//  · si el tenant ya tiene una plantilla APROBADA, la nueva entra como REVISIÓN
+//    (revision_*, 0047): la aprobada sigue enviándose mientras Meta revisa, y el poll la
+//    promueve al aprobarse — nunca hay un hueco sin confirmaciones ni recordatorios;
+//  · si no la tiene (nunca creada, pendiente o rechazada), la nueva ocupa la fila
+//    principal como antes (upsert pending) — no hay nada aprobado que preservar.
+// Lo que no se pide se conserva: cambiar el texto mantiene los botones vigentes y
+// cambiar los botones mantiene el texto. El nombre en Meta lleva sufijo de revisión:
+// es único por WABA. La plantilla vieja queda en Twilio (histórico y rollback manual).
+// Las credenciales se comprueban ANTES de tocar nada: sin subcuenta o sin token, el
+// error sale limpio y no se aplicó nada.
+export async function submitTemplateRevision(env, ctx, tenant, def, cambio, actor) {
   if (!tenant.twilio_subaccount_sid) throw new HttpError(400, 'subaccount_required');
   const token = await twilioAuthTokenFor(env, tenant);
   if (!token) throw new HttpError(400, 'twilio_auth_token_missing');
   const credentials = { sid: tenant.twilio_subaccount_sid, token };
-  const now = new Date().toISOString();
-  const { contentSid } = await createContentTemplate(credentials, def.content(tenant.slug, tenant.name, pareja));
-  const opcionesJson = JSON.stringify({ botones: pareja.id, textos: { confirmar: pareja.confirmar, cancelar: pareja.cancelar } });
+  const actual = await tenantTemplate(env, tenant.id, def.kind);
+  const nowMs = Date.now();
+  const now = new Date(nowMs).toISOString();
+  let opcionesActuales = null;
+  try { opcionesActuales = actual && actual.opciones ? JSON.parse(actual.opciones) : null; } catch (_) {}
+  const pareja = cambio.pareja
+    || (def.botones ? (def.botones.find((b) => b.id === (opcionesActuales && opcionesActuales.botones)) || def.botones.find((b) => b.id === def.botonesDefault) || null) : null);
+  const texto = cambio.texto !== undefined ? cambio.texto : (actual && actual.texto) || null;
+  const opcionesJson = pareja ? JSON.stringify({ botones: pareja.id, textos: { confirmar: pareja.confirmar, cancelar: pareja.cancelar } }) : null;
+  const comoRevision = Boolean(actual && actual.sid && actual.status === 'approved');
+  const { contentSid } = await createContentTemplate(credentials, def.content(tenant.slug, tenant.name, pareja, texto));
   try {
-    await submitTemplateApproval(credentials, contentSid, def.approvalName(tenant.slug), def.categoria);
-    await env.DB.prepare(`INSERT INTO tenant_templates (tenant_id,kind,sid,status,opciones,categoria,created_at,updated_at)
-      VALUES (?,?,?,'pending',?,NULL,?,?)
-      ON CONFLICT(tenant_id,kind) DO UPDATE SET sid=excluded.sid, status='pending', opciones=excluded.opciones, categoria=NULL, updated_at=excluded.updated_at`)
-      .bind(tenant.id, def.kind, contentSid, opcionesJson, now, now).run();
+    await submitTemplateApproval(credentials, contentSid, nombreRevision(def, tenant.slug, nowMs), def.categoria);
+    if (comoRevision) {
+      await env.DB.prepare(`UPDATE tenant_templates SET revision_sid=?, revision_status='pending', revision_texto=?, revision_opciones=?,
+        revision_motivo=NULL, revision_at=?, updated_at=? WHERE tenant_id=? AND kind=?`)
+        .bind(contentSid, texto, opcionesJson, now, now, tenant.id, def.kind).run();
+    } else {
+      await env.DB.prepare(`INSERT INTO tenant_templates (tenant_id,kind,sid,status,opciones,categoria,texto,created_at,updated_at)
+        VALUES (?,?,?,'pending',?,NULL,?,?,?)
+        ON CONFLICT(tenant_id,kind) DO UPDATE SET sid=excluded.sid, status='pending', opciones=excluded.opciones, categoria=NULL,
+          texto=excluded.texto, revision_sid=NULL, revision_status=NULL, revision_texto=NULL, revision_opciones=NULL, revision_motivo=NULL, revision_at=NULL,
+          updated_at=excluded.updated_at`)
+        .bind(tenant.id, def.kind, contentSid, opcionesJson, texto, now, now).run();
+    }
   } catch (error) {
     if (error instanceof HttpError) throw error;
-    await provisionOrphan(env, ctx, tenant, `plantilla ${def.kind} (recreación)`, contentSid, error);
+    await provisionOrphan(env, ctx, tenant, `plantilla ${def.kind} (${comoRevision ? 'revisión' : 'recreación'})`, contentSid, error);
   }
+  const que = [cambio.pareja ? `botones «${pareja.confirmar}»/«${pareja.cancelar}»` : null, cambio.texto !== undefined ? 'texto nuevo' : null].filter(Boolean).join(' y ');
   await provisionAudit(env, ctx, tenant, actor,
-    `plantilla ${def.approvalName(tenant.slug)} RECREADA (${contentSid}) con botones «${pareja.confirmar}»/«${pareja.cancelar}» — nueva revisión de Meta`);
-  return contentSid;
+    `plantilla ${def.approvalName(tenant.slug)} ${comoRevision ? 'en REVISIÓN (la aprobada sigue activa)' : 'RECREADA'} (${contentSid}) con ${que || 'los mismos datos'} — nueva revisión de Meta`);
+  return { sid: contentSid, modo: comoRevision ? 'revision' : 'principal' };
+}
+
+// El camino de la aprobación de una solicitud de botones del cliente.
+export async function recreateTemplateWithOptions(env, ctx, tenant, def, pareja, actor) {
+  return (await submitTemplateRevision(env, ctx, tenant, def, { pareja }, actor)).sid;
 }
 
 async function runProvisionStep(request, env, ctx, tenant, tenantId, step, actor) {
@@ -4185,6 +4264,47 @@ async function pollTemplateApprovals(env) {
         error: clean(error.message, 80) }));
     }
   }
+  await pollTemplateRevisions(env);
+}
+
+// REVISIONES en curso (0047): texto o botones nuevos de una plantilla ya aprobada. La
+// aprobada sigue enviándose hasta que Meta resuelva; al aprobarse, la revisión la
+// sustituye ENTERA (sid + texto + opciones van juntos: quien envía numera las variables
+// a partir del texto) y la categoría se vuelve a leer. Rechazada: la activa no cambia y
+// el motivo queda para el panel del cliente.
+async function pollTemplateRevisions(env) {
+  let rows = [];
+  try {
+    rows = (await env.DB.prepare(`SELECT tt.kind, tt.revision_sid, t.id, t.slug, t.name, t.twilio_subaccount_sid, t.twilio_auth_token_enc
+      FROM tenant_templates tt JOIN tenants t ON t.id = tt.tenant_id
+      WHERE tt.revision_status = 'pending' AND tt.revision_sid IS NOT NULL
+      ORDER BY tt.revision_at ASC LIMIT 5`).all()).results || [];
+  } catch (_) { return; } // 0047 sin aplicar
+  for (const row of rows) {
+    try {
+      const token = await twilioAuthTokenFor(env, row);
+      if (!token || !row.twilio_subaccount_sid) continue;
+      const approval = await fetchApprovalStatus({ sid: row.twilio_subaccount_sid, token }, row.revision_sid);
+      if (approval.status !== 'approved' && approval.status !== 'rejected') continue;
+      const now = new Date().toISOString();
+      if (approval.status === 'approved') {
+        await env.DB.prepare(`UPDATE tenant_templates SET sid=revision_sid, status='approved', texto=revision_texto,
+          opciones=COALESCE(revision_opciones, opciones), categoria=?, revision_sid=NULL, revision_status=NULL, revision_texto=NULL,
+          revision_opciones=NULL, revision_motivo=NULL, revision_at=NULL, updated_at=? WHERE tenant_id=? AND kind=? AND revision_sid=?`)
+          .bind(approval.categoria || null, now, row.id, row.kind, row.revision_sid).run();
+      } else {
+        await env.DB.prepare(`UPDATE tenant_templates SET revision_status='rejected', revision_motivo=?, updated_at=?
+          WHERE tenant_id=? AND kind=? AND revision_sid=?`)
+          .bind(approval.reason ? clean(String(approval.reason), 300) : null, now, row.id, row.kind, row.revision_sid).run();
+      }
+      console.log(JSON.stringify({ level: 'info', code: 'template_revision_resolved', tenant: row.slug, kind: row.kind, status: approval.status }));
+      await sendTelegramText(env, approval.status === 'approved'
+        ? `✅ <b>Velai</b>: el texto nuevo de <b>${escapeHtml(row.kind)}</b> de <b>${escapeHtml(row.name)}</b> ya está aprobado y en uso.`
+        : `❌ <b>Velai</b>: Meta rechazó el texto nuevo de <b>${escapeHtml(row.kind)}</b> de <b>${escapeHtml(row.name)}</b>${approval.reason ? `: ${escapeHtml(approval.reason)}` : ''}. Sigue en uso el aprobado.`);
+    } catch (error) {
+      console.log(JSON.stringify({ level: 'error', code: 'template_revision_poll_failed', tenant: row.slug, kind: row.kind, error: clean(error.message, 80) }));
+    }
+  }
 }
 
 // ── Informe semanal al canal del cliente (H1 §2, migración 0022) ─────────────
@@ -4616,4 +4736,4 @@ export function createWorker(config) {
   };
 }
 
-export const testing = { senderPhone, PLANES, MODULOS, modulosDe, canalesOcupados, assertPlanChannelLimit, scheduled, MINUTE_CRON, processReminders, reminderHoursFor, reminderTemplateVariables, samePhone, tenantTemplate, pollTemplateApprovals, REMINDER_KIND, waitedMin, QUEUE_MAX_MIN, QUEUE_WAIT_TEXT, canAttend, velaiTenantId, handleChatPoll, handleEventIntake, eventIntakeToken, VISITOR_AWAY_MS, expireTakeovers, NO_ADVISOR_TEXT, graceExpired, systemWithHandoff, HANDOFF_ON, HANDOFF_OFF, supportWindows, withinSupportHours, advisorAvailable, CONV_STATES, TAKEOVER_GRACE_MIN, settleReply, TRUNCATED_CLOSING, trimToSentence, waBody, replyWindow, reportPeriod, reportMetric, weeklyReportText, weeklyStats, sendWeeklyReports, convLoad, convAppend, convLinkLead, convFilters, convRetentionDays, UNANSWERED_RE, CONV_WINDOW, cloudflareUsage, CF_FREE_LIMITS, recordConversation, aiCost, recordAiUsage, rateLimited, memLimited, applySenderProfile, pushSenderProfile, clean, persistLead, leadAlertStatus, captureWhatsAppLead, leadFromSummary, leadCaptureDone, activeTenantEvent, captureEventInterest, eventClosingState, eventReservationPricing, eventPaymentProofReply, eventConsentReply, notificationText, errorResponseParts, tenantByAddress, syncPrimaryChannel, assertChannelFree, normalizePhone, extractPhone, extractPhoneFromMessages, safeUtm, publicCors, validTwilioSignature, callAnthropic, callAnthropicRaw, runToolLoop, calendarExecutor, calendarSystem, tenantCalendar, validCalendarDate, availableSlots, handleCalendarCallback, calendarCallbackFor, sendTwilioText, timingSafeEqual, telegramBotUsername, telegramSetWebhook, telegramWebhookInfo, handleTelegramWebhook, sendTelegramText, tenantTelegramToken, telegramThreadFor, registerTelegramTopic, csvCell, expiryDate, leadFilters, isDemoKey, templateVar, leadTemplateVariables, readJson, deliver, drainQueuedLeads, verifyTurnstile, systemFor, validateTenant, invalidateTenantCache, tenantWriteError, assertNotActivePending, tenantChannelSummary, channelsForScope, routingChannelState, handleProvision, pollProvisioning, fillSeries, resolveScope, scopeClause, assertOwnTenant, clienteAllowed, adminRouter, recordAuthFailure, handleAdmin, handleWidgetBoot, allowedOrigins, envOrigins, syncPanelGate, envAdmins, syncAdminGate, getSetting, setSetting, withCfToken };
+export const testing = { withManageLink, confirmationTemplateVariables, pollTemplateRevisions, senderPhone, PLANES, MODULOS, modulosDe, canalesOcupados, assertPlanChannelLimit, scheduled, MINUTE_CRON, processReminders, reminderHoursFor, reminderTemplateVariables, samePhone, tenantTemplate, pollTemplateApprovals, REMINDER_KIND, waitedMin, QUEUE_MAX_MIN, QUEUE_WAIT_TEXT, canAttend, velaiTenantId, handleChatPoll, handleEventIntake, eventIntakeToken, VISITOR_AWAY_MS, expireTakeovers, NO_ADVISOR_TEXT, graceExpired, systemWithHandoff, HANDOFF_ON, HANDOFF_OFF, supportWindows, withinSupportHours, advisorAvailable, CONV_STATES, TAKEOVER_GRACE_MIN, settleReply, TRUNCATED_CLOSING, trimToSentence, waBody, replyWindow, reportPeriod, reportMetric, weeklyReportText, weeklyStats, sendWeeklyReports, convLoad, convAppend, convLinkLead, convFilters, convRetentionDays, UNANSWERED_RE, CONV_WINDOW, cloudflareUsage, CF_FREE_LIMITS, recordConversation, aiCost, recordAiUsage, rateLimited, memLimited, applySenderProfile, pushSenderProfile, clean, persistLead, leadAlertStatus, captureWhatsAppLead, leadFromSummary, leadCaptureDone, activeTenantEvent, captureEventInterest, eventClosingState, eventReservationPricing, eventPaymentProofReply, eventConsentReply, notificationText, errorResponseParts, tenantByAddress, syncPrimaryChannel, assertChannelFree, normalizePhone, extractPhone, extractPhoneFromMessages, safeUtm, publicCors, validTwilioSignature, callAnthropic, callAnthropicRaw, runToolLoop, calendarExecutor, calendarSystem, tenantCalendar, validCalendarDate, availableSlots, handleCalendarCallback, calendarCallbackFor, sendTwilioText, timingSafeEqual, telegramBotUsername, telegramSetWebhook, telegramWebhookInfo, handleTelegramWebhook, sendTelegramText, tenantTelegramToken, telegramThreadFor, registerTelegramTopic, csvCell, expiryDate, leadFilters, isDemoKey, templateVar, leadTemplateVariables, readJson, deliver, drainQueuedLeads, verifyTurnstile, systemFor, validateTenant, invalidateTenantCache, tenantWriteError, assertNotActivePending, tenantChannelSummary, channelsForScope, routingChannelState, handleProvision, pollProvisioning, fillSeries, resolveScope, scopeClause, assertOwnTenant, clienteAllowed, adminRouter, recordAuthFailure, handleAdmin, handleWidgetBoot, allowedOrigins, envOrigins, syncPanelGate, envAdmins, syncAdminGate, getSetting, setSetting, withCfToken };

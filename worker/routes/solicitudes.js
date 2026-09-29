@@ -3,11 +3,13 @@
 // aprobación. La tabla tenant_solicitudes (0032) es genérica (tipo + payload JSON);
 // hoy el único tipo es 'plantilla_recordatorio' (pareja de botones y/o antelación).
 import { Hono } from 'hono';
-import { partesAdmin } from '../middleware.js';
-import { templateKind } from '../plantillas.js';
+import { partesAdmin, assertOwnTenant } from '../middleware.js';
+import { templateKind, textoEditable, validarTexto, renderTexto } from '../plantillas.js';
+import { assertTenantModulo } from '../tenant-planes.js';
 import {
   HttpError, json, NO_STORE, clean, readJson, rateLimited, sendTelegramText, escapeHtml,
   invalidateTenantCache, reminderHoursFor, tenantTemplate, recreateTemplateWithOptions,
+  submitTemplateRevision, UUID_RE,
 } from '../app.js';
 
 export const solicitudes = new Hono();
@@ -180,3 +182,45 @@ const resolver = async (c) => {
   return json({ ok: true, status: 'approved', aplicado }, 200, NO_STORE);
 };
 solicitudes.post('/api/admin/solicitudes/:id/:accion{aprobar|rechazar}', resolver);
+
+// ── TEXTO de una plantilla de citas (SPEC-NOTIFICACION-CITA) ──────────────────
+// El cliente edita el cuerpo de SUS plantillas confirmacion_reserva y
+// recordatorio_cita desde la vista Plantillas, SIN pasar por una solicitud: la puerta
+// que protege el contrato es validarTexto (variables con nombre de una lista cerrada,
+// obligatorias, reglas de Meta) y la que protege el contenido es la propia revisión de
+// Meta. Guardar = plantilla NUEVA en Twilio + revisión de Meta; si ya hay una aprobada,
+// esa sigue enviándose hasta que la nueva se apruebe (submitTemplateRevision).
+// `validar: true` = solo comprobar (lo que usa el editor mientras se escribe): sin
+// efectos, sin Twilio y sin gastar cupo. Velai puede usarla para cualquier tenant.
+solicitudes.post('/api/admin/tenants/:id/plantillas/:kind', async (c) => {
+  const { env, request, ctx, scope, actor } = partesAdmin(c);
+  const tenantId = c.req.param('id');
+  if (!UUID_RE.test(tenantId)) throw new HttpError(404, 'not_found');
+  assertOwnTenant(scope, tenantId);
+  const def = templateKind(c.req.param('kind'));
+  if (!textoEditable(def)) throw new HttpError(404, 'not_found');
+  const body = await readJson(request, 6000);
+  if (typeof body.texto !== 'string' || body.texto.length > 2000) throw new HttpError(400, 'invalid_texto');
+  const tenant = await env.DB.prepare('SELECT * FROM tenants WHERE id = ?').bind(tenantId).first();
+  if (!tenant) throw new HttpError(404, 'not_found');
+  const v = validarTexto(def, body.texto);
+  const preview = renderTexto(v.texto, tenant.brand_name || tenant.name);
+  // `longitud` = la del cuerpo YA numerado ({{1}}…), que es la que cuenta Meta.
+  if (body.validar === true) return json({ ok: !v.errores.length, errores: v.errores, preview, longitud: v.cuerpo.length }, 200, NO_STORE);
+  if (v.errores.length) throw new HttpError(400, v.errores[0].code, v.errores[0].clave);
+  // Las plantillas de citas son del módulo Calendario: sin él no hay citas que avisar.
+  await assertTenantModulo(env, tenantId, 'calendario');
+  const actual = await tenantTemplate(env, tenantId, def.kind);
+  // Una revisión a la vez: cada guardado es una plantilla nueva en Twilio y otra cola en
+  // Meta; hasta que se resuelva la anterior no se somete otra.
+  if ((actual && actual.sid && actual.status === 'pending') || (actual && actual.revision_status === 'pending')) throw new HttpError(409, 'plantilla_en_revision');
+  const vigente = (actual && actual.texto) || def.texto.defecto;
+  if (actual && actual.sid && actual.status === 'approved' && v.texto === vigente) throw new HttpError(400, 'nothing_to_update');
+  if (await rateLimited(env, actor, 'plantilla_texto', 3)) throw new HttpError(429, 'rate_limited');
+  // El defecto se guarda como NULL: la fila sigue «sin personalizar» y un cambio futuro
+  // del defecto en el catálogo no la deja desalineada (el sid manda: se envía lo creado).
+  const texto = v.texto === def.texto.defecto ? null : v.texto;
+  const out = await submitTemplateRevision(env, ctx, tenant, def, { texto }, actor);
+  console.log(JSON.stringify({ level: 'info', code: 'template_text_submitted', tenant: tenant.slug, kind: def.kind, modo: out.modo }));
+  return json({ ok: true, kind: def.kind, status: 'pending', modo: out.modo, preview }, 201, NO_STORE);
+});
