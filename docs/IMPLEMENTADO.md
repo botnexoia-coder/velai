@@ -1546,3 +1546,34 @@ resto de vistas siguen con la de antes; y la nav del móvil sigue siendo la barr
   se reintentan con un máximo de tres intentos.
 - Cuando el último turno sí es del cliente, la bandeja muestra «Pendiente de responder»: es una deuda
   interna del equipo y nunca se confunde con el cierre automático hacia el cliente.
+
+## Citas: QR con logo, antelaciones cortas, confirmación por WhatsApp y texto editable (2026-09-29, `SPEC-NOTIFICACION-CITA.md`, migración 0047)
+
+Desplegado el 2026-09-29, commit `8cfe0d0`. La 0047 está aplicada en staging y en producción.
+
+- **QR de reservas con logo.** El botón «QR» de Reservas online abre un diálogo:
+  - vista previa del QR;
+  - logo del centro a elegir: logo propio del QR (en R2, `qr/<tenantId>`, sin tocar D1), logo del negocio o ninguno;
+  - descarga en SVG autocontenido (logo como data URI, sin URL externa) o en PNG.
+
+  Con logo usa corrección H, con el logo como mucho al 22 % del lado sobre un recuadro blanco alineado a la rejilla. Que escanea está probado con jsQR, en unit y en e2e. Ruta: `GET/POST/DELETE /api/admin/tenants/:id/booking/qr-logo`.
+- **Antelación del recordatorio:** 1, 2, 6, 8, 12, 24 o 48 h; la de por defecto sigue en 24.
+  - La siembra de `seedReminders` filtra en SQL por la antelación de cada negocio. Antes, un negocio con muchas citas cercanas llenaba el cupo de 10 y dejaba sin sembrar a los demás.
+  - Con 1 h, el recordatorio sale entre 55 y 60 min antes (cron `*/5`). Los reintentos que caerían después de la cita se descartan.
+- **Confirmación de cita agendada (causa raíz):**
+  - Ningún tenant tenía la plantilla `confirmacion_reserva`, y solo Velai podía crearla.
+  - El aviso solo se sembraba con `reminders_enabled=1` y para citas de la web de reservas.
+  - Las 14 filas `pending` de gogestion nunca salieron.
+- **Confirmación: cómo queda.**
+  - Ya no depende del addon de recordatorios: la activa tener la plantilla aprobada.
+  - Sale para las citas de `web_reserva` y del chat web, siempre que la cita se haya creado hace menos de 2 h (`BOOKING_NOTIFY_FRESH_MS`).
+  - En WhatsApp y Messenger no se manda plantilla, porque Vai ya confirma en el hilo. Lo que se añade, de forma determinista, es el enlace privado de gestión al final de su respuesta (`withManageLink`).
+- **Texto editable de `confirmacion_reserva` y `recordatorio_cita`:**
+  - **Variables:** se escriben con nombre (`{{nombre}}`, `{{negocio}}`, `{{servicio}}`, `{{fecha}}`, `{{hora}}` y `{{enlace}}`, este solo en la confirmación). El worker las numera por orden de aparición, al crear la plantilla y al enviar.
+  - **Validación:** una sola implementación, `validarTexto`, con las reglas de Meta, las variables obligatorias y el máximo de 1.024 caracteres. El panel la consulta con `validar:true`.
+  - **Dónde se edita:** el cliente edita desde su tarjeta de Plantillas (`POST /api/admin/tenants/:id/plantillas/:kind`). Velai, desde el filtro por cliente y desde el diálogo «Crear», que acepta `texto` en `/provision/plantillas/:kind`.
+  - **Revisión:** si ya hay una plantilla aprobada, la nueva entra como revisión (`revision_*`) y la aprobada sigue enviándose hasta que Meta resuelva. Los nombres de revisión llevan el sufijo `_rYYYYMMDDHHMM`.
+  - **Límites:** una revisión a la vez y un máximo de 3 por minuto.
+- **Arreglos de paso:**
+  - El diálogo «Crear» mandaba siempre `antelacion: 24`, y la confirmación de reserva lo rechazaba con `invalid_antelacion`, así que no se podía crear.
+  - Las solicitudes de botones ahora leen los botones vigentes del cliente.

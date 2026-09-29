@@ -119,6 +119,16 @@ decide quién puede cerrar cada cosa:
       después; si falla, descargar el artifact `playwright-report-*` para ver la traza.
 - [ ] Activar Confirmaciones en un tenant de prueba después de que su plantilla esté
       aprobada y hacer el recorrido real de ambos botones.
+- [ ] Crear y aprobar la plantilla `confirmacion_reserva` (cita agendada) para gogestion, zoe,
+      dialogos y tufisiooficial. Puede hacerlo el cliente desde Plantillas o Velai con «Crear».
+      Sin ella no sale la confirmación por WhatsApp (ver IMPLEMENTADO, 2026-09-29).
+- [ ] tufisiooficial no tiene WhatsApp aprovisionado (`twilio_from` NULL): no recibe
+      confirmaciones hasta conectarlo.
+- [ ] Recordatorios parados en todos los tenants: gogestion y zoe tienen el addon encendido sin
+      plantilla `recordatorio_cita`, y dialogos tiene la plantilla aprobada con el addon apagado.
+      Decidirlo y corregirlo desde el panel.
+- [ ] Las 14 filas `pending` de gogestion en `booking_notifications` no saldrán (regla de las 2 h):
+      dejarlas como histórico o limpiarlas.
 
 ### TERCEROS
 
