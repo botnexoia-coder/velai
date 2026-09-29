@@ -2264,11 +2264,11 @@ function calendarExecutor(env, tenant, cal, meta) {
 export const REMINDER_KIND = 'previo';
 const REMINDER_MAX_ATTEMPTS = 5;
 const REMINDER_BATCH = 10; // presupuesto D1 del cron acotado (plan gratuito: 50 consultas/tick)
-// La mayor antelación curada del catálogo (12/24/48): fija la ventana del SQL de
-// siembra — un valor por encima nunca vencería dentro de ella.
+// La mayor antelación curada del catálogo (1/2/6/8/12/24/48): fija la ventana del SQL
+// de siembra — un valor por encima nunca vencería dentro de ella.
 const REMINDER_MAX_HOURS = 48;
 
-// Antelación del tenant: curada 12/24/48 con default 24 (evolución del 2026-09-01;
+// Antelación del tenant: curada 1/2/6/8/12/24/48 con default 24 (evolución del 2026-09-01;
 // se elige en el diálogo de alta de la plantilla y se edita después sin nueva
 // aprobación — es config del addon, no de la plantilla). reminder_hours sigue siendo
 // CSV por si un día hay varios recordatorios: se lee el primer valor, acotado a
@@ -2388,9 +2388,11 @@ export async function processBookingNotifications(env, appointmentId = null) {
 // cliente acaba de hablar con Vai y recordarle lo recién agendado sería ruido.
 async function seedReminders(env, nowMs) {
   const now = new Date(nowMs).toISOString();
-  // Ventana = la mayor antelación curada. Las citas aún no vencidas (antelación menor)
-  // se refetchean cada tick hasta vencer: el ORDER BY starts_at ASC pone primero las
-  // más cercanas — las que de verdad tocan — así que no se produce inanición.
+  // Ventana = la mayor antelación curada. Además el SQL filtra las que YA vencen con la
+  // antelación de SU tenant (espejo de reminderHoursFor: primer valor del CSV, fuera de
+  // [1, REMINDER_MAX_HOURS] → 24): sin ese filtro, con antelaciones cortas (1-2 h) diez
+  // citas aún no vencidas de un tenant llenaban el LIMIT cada tick y dejaban sin sembrar
+  // la cita ya vencida de otro tenant con 24/48 h (inanición entre tenants).
   const max = new Date(nowMs + REMINDER_MAX_HOURS * 3600000).toISOString();
   let rows = [];
   try {
@@ -2402,12 +2404,14 @@ async function seedReminders(env, nowMs) {
         AND tt.status = 'approved' AND tt.sid IS NOT NULL
       WHERE t.active = 1 AND t.reminders_enabled = 1
         AND a.status = 'confirmed' AND a.starts_at > ? AND a.starts_at <= ?
+        AND julianday(a.starts_at) - (CASE WHEN CAST(t.reminder_hours AS INTEGER) BETWEEN 1 AND ${REMINDER_MAX_HOURS}
+          THEN CAST(t.reminder_hours AS INTEGER) ELSE 24 END) / 24.0 <= julianday(?)
         AND NOT EXISTS (SELECT 1 FROM appointment_reminders r WHERE r.appointment_id = a.id AND r.kind = ?)
-      ORDER BY a.starts_at ASC LIMIT ?`).bind(now, max, REMINDER_KIND, REMINDER_BATCH).all()).results || [];
+      ORDER BY a.starts_at ASC LIMIT ?`).bind(now, max, now, REMINDER_KIND, REMINDER_BATCH).all()).results || [];
   } catch (_) { return; } // tabla aún sin migrar: el cron no revienta
   for (const appt of rows) {
     const dueMs = Date.parse(appt.starts_at) - reminderHoursFor(appt) * 3600000;
-    if (dueMs > nowMs) continue; // antelación menor que 24 h: aún no vence
+    if (dueMs > nowMs) continue; // el SQL ya filtra; esto es la red por si difieren
     const recien = Date.parse(appt.created_at) >= dueMs;
     try {
       await env.DB.prepare(`INSERT INTO appointment_reminders (appointment_id,kind,status,attempts,last_error,updated_at)

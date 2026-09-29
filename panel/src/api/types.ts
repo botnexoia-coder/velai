@@ -801,7 +801,7 @@ export interface CalendarRow {
  *  recordatorio_cita) — el catálogo de plantillas vive en worker/plantillas.js. */
 export interface Confirmaciones {
   enabled: boolean;
-  /** Antelación en horas (decisión vigente: 24 única). */
+  /** Antelación en horas: una de las curadas del catálogo (1/2/6/8/12/24/48, default 24). */
   hours: number;
   template: { sid: string | null; status: string | null };
 }

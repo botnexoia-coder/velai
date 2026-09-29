@@ -6021,7 +6021,7 @@ test('el catálogo del endpoint lleva config con preview renderizada, parejas y 
   const kinds = catalogKinds();
   const rec = kinds.find((k) => k.kind === 'recordatorio_cita');
   assert.ok(rec.config, 'el kind creable lleva config');
-  assert.deepEqual(rec.config.antelaciones, [12, 24, 48]);
+  assert.deepEqual(rec.config.antelaciones, [1, 2, 6, 8, 12, 24, 48]);
   assert.equal(rec.config.antelacionDefault, 24);
   assert.equal(rec.config.botonesDefault, 'confirmo_cancelar');
   assert.equal(rec.config.botones.length, 4);
@@ -6045,6 +6045,8 @@ test('el catálogo del endpoint lleva config con preview renderizada, parejas y 
   assert.equal(templateOptions(def, {}).antelacion, 24);
   assert.equal(templateOptions(def, { botones: 'constructor' }).error, 'invalid_botones');
   assert.equal(templateOptions(def, { antelacion: 36 }).error, 'invalid_antelacion');
+  assert.equal(templateOptions(def, { antelacion: 3 }).error, 'invalid_antelacion', 'solo las curadas');
+  assert.equal(templateOptions(def, { antelacion: 1 }).antelacion, 1);
   assert.equal(templateOptions(def, null).antelacion, 24, 'body basura no revienta');
 });
 
@@ -6088,6 +6090,49 @@ test('cron con antelación no-24: 12 h y 48 h venzan cuando toca, con el kind ge
   } finally { globalThis.fetch = realFetch; }
 });
 
+test('cron con antelación corta (1 h y 2 h) sobre SQLite real: vence a tiempo y no mata de hambre a otro tenant', async (t) => {
+  const DB = await sqliteD1(); t.after(() => DB.close());
+  const nowMs = Date.now();
+  const iso = (h) => new Date(nowMs + h * 3600000).toISOString();
+  const T1 = 't-1h', T2 = 't-2h', T24 = 't-24h';
+  for (const [id, hours] of [[T1, '1'], [T2, '2'], [T24, '24']]) {
+    await DB.prepare(`INSERT INTO tenants(id,slug,name,channel_address,system_prompt,reminders_enabled,reminder_hours,created_at,updated_at)
+      VALUES (?,?,?,?,'test',1,?,?,?)`).bind(id, id, id, `web:${id}`, hours, iso(-100), iso(-100)).run();
+    await DB.prepare(`INSERT INTO tenant_templates(tenant_id,kind,sid,status,created_at,updated_at) VALUES (?,'recordatorio_cita',?,'approved',?,?)`)
+      .bind(id, 'HX' + 'c'.repeat(32), iso(-100), iso(-100)).run();
+  }
+  let n = 0;
+  const cita = async (tenant, horas, creadaHace = 80) => {
+    const id = `00000000-0000-4000-8000-${String(++n).padStart(12, '0')}`;
+    await DB.prepare(`INSERT INTO appointments(id,tenant_id,request_id,channel,customer_name,customer_phone,starts_at,ends_at,timezone,status,created_at)
+      VALUES (?,?,?,'whatsapp','Eva','+34600111777',?,?,'Europe/Madrid','confirmed',?)`)
+      .bind(id, tenant, `req-${id}`, iso(horas), iso(horas + 0.5), iso(-creadaHace)).run();
+    return id;
+  };
+  // 12 citas del tenant de 1 h entre 1,5 h y 12,5 h: ninguna vence aún y, sin el
+  // filtro de vencimiento en el SQL, llenaban el LIMIT 10 de la siembra cada tick.
+  for (let i = 0; i < 12; i++) await cita(T1, 1.5 + i);
+  const debida1h = await cita(T1, 0.9);          // dentro de su hora: vence
+  const recien1h = await cita(T1, 0.8, 0.1);     // agendada hace 6 min, ya dentro de la ventana
+  const debida2h = await cita(T2, 1.9);
+  const noDebida2h = await cita(T2, 2.2);
+  const debida24h = await cita(T24, 20);         // la que antes quedaba sin sembrar
+  const sends = [];
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = async (url, init) => { if (String(url).includes('api.twilio.com')) sends.push(new URLSearchParams(String(init.body))); return new Response('{}', { status: 201 }); };
+  try {
+    await testing.processReminders({ DB, TWILIO_ACCOUNT_SID: 'AC' + 'p'.repeat(32), TWILIO_AUTH_TOKEN: 'tok' }, nowMs);
+  } finally { globalThis.fetch = realFetch; }
+  const rows = (await DB.prepare('SELECT appointment_id, status, last_error FROM appointment_reminders ORDER BY appointment_id').all()).results;
+  const by = Object.fromEntries(rows.map((r) => [r.appointment_id, r]));
+  assert.deepEqual(Object.keys(by).sort(), [debida1h, recien1h, debida2h, debida24h].sort(), 'se siembra justo lo vencido, de los tres tenants');
+  assert.equal(by[recien1h].status, 'skipped');
+  assert.equal(by[recien1h].last_error, 'creada_dentro_de_ventana', 'recién agendada con Vai: no se recuerda');
+  assert.ok(!by[noDebida2h], 'a 2,2 h con antelación 2 h aún no toca');
+  assert.equal(testing.reminderHoursFor({ reminder_hours: '1' }), 1);
+  assert.equal(testing.reminderHoursFor({ reminder_hours: '2' }), 2);
+});
+
 test('PATCH /reminders acepta hours de la lista curada y rechaza el resto', async () => {
   const TID = '00000000-0000-4000-8000-0000000000c1';
   const updates = [];
@@ -6109,7 +6154,10 @@ test('PATCH /reminders acepta hours de la lista curada y rechaza el resto', asyn
   // Componen: enabled y hours en el mismo PATCH.
   const ambos = await (await patch({ enabled: true, hours: 48 })).json();
   assert.deepEqual(ambos, { ok: true, enabled: true, hours: 48 });
+  const una = await (await patch({ hours: 1 })).json();
+  assert.deepEqual(una, { ok: true, hours: 1 }, '1 h es de la lista curada');
   await assert.rejects(patch({ hours: 13 }), (e) => e.code === 'invalid_hours');
+  await assert.rejects(patch({ hours: 3 }), (e) => e.code === 'invalid_hours');
   await assert.rejects(patch({ hours: '24; DROP' }), (e) => e.code === 'invalid_hours');
   await assert.rejects(patch({}), (e) => e.code === 'nothing_to_update');
 });

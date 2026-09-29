@@ -18,7 +18,7 @@ const KIND: PlantillaKind = {
   descripcion: 'Recuerda la cita.',
   config: {
     preview: 'Hola María, te escribimos de Clínica Ejemplo para recordarte tu cita del jueves, 4 de septiembre a las 10:00 (consulta). ¿Podrás venir?',
-    antelaciones: [12, 24, 48],
+    antelaciones: [1, 2, 6, 8, 12, 24, 48],
     antelacionDefault: 24,
     botones: [
       { id: 'confirmo_cancelar', confirmar: 'Confirmo', cancelar: 'Cancelar' },
@@ -57,7 +57,7 @@ describe('CrearPlantilla (diálogo de alta configurable)', () => {
     // 1. Antelación: select curado con default 24 y la aclaración honesta.
     const sel = screen.getByLabelText('Antelación del recordatorio') as HTMLSelectElement;
     expect(sel.value).toBe('24');
-    expect(sel.options.length).toBe(3);
+    expect(sel.options.length).toBe(7);
     expect(screen.getByText('Se puede cambiar después sin nueva aprobación.')).toBeInTheDocument();
     // 2. Botones: tarjetas-radio con la pareja por defecto marcada y la advertencia.
     const radios = screen.getAllByRole('radio');
@@ -79,11 +79,13 @@ describe('CrearPlantilla (diálogo de alta configurable)', () => {
     const posts = renderDialogo(cerrado);
     await user.click(screen.getByRole('radio', { name: /Sí, voy/ }));
     expect([...document.querySelectorAll('.wapre-btns span')].map((e) => e.textContent)).toEqual(['Sí, voy', 'No puedo ir']);
-    await user.selectOptions(screen.getByLabelText('Antelación del recordatorio'), '12');
+    const sel = screen.getByLabelText('Antelación del recordatorio');
+    expect([...sel.querySelectorAll('option')].map((o) => o.textContent)[0]).toBe('1 h antes de la cita');
+    await user.selectOptions(sel, '1');
     await user.click(screen.getByRole('button', { name: 'Enviar a aprobación' }));
     await waitFor(() => expect(posts.length).toBe(1));
     expect(posts[0]!.url).toContain('/api/admin/tenants/t-1/provision/plantillas/recordatorio_cita');
-    expect(posts[0]!.body).toEqual({ botones: 'si_voy_no_puedo', antelacion: 12 });
+    expect(posts[0]!.body).toEqual({ botones: 'si_voy_no_puedo', antelacion: 1 });
     await waitFor(() => expect(cerrado).toHaveBeenCalled());
   });
 
