@@ -119,15 +119,84 @@ test('CRUD admin: cliente crea/configura solo lo suyo, valida excepciones y desa
  assert.equal((await f.DB.prepare('SELECT booking_enabled FROM tenant_calendars WHERE tenant_id=?').bind(TID).first()).booking_enabled,0);
 });
 
-test('confirmación WhatsApp espera plantilla aprobada y no duplica entre entregas simultáneas',async(t)=>{
+// SPEC-NOTIFICACION-CITA: la confirmación de cita agendada NO depende del addon de
+// recordatorios; su opt-in es la plantilla confirmacion_reserva aprobada. Sin ella no se
+// siembra nada (antes quedaban filas pending para siempre: 14 de gogestion en prod).
+const HX_CONF='HX'+'a'.repeat(32);
+function twilioSpy(f){Object.assign(f.env,{TWILIO_ACCOUNT_SID:'AC'+'a'.repeat(32),TWILIO_AUTH_TOKEN:'test'});const deliveries=[];
+ globalThis.fetch=async(url,init)=>{if(String(url).includes('api.twilio.com')){deliveries.push(new URLSearchParams(init.body));return Response.json({sid:'SMtest'});}return f.fetchProvider(url,init);};return deliveries;}
+// Las entregas inmediatas (waitUntil de la reserva) se recogen para esperarlas.
+function waits(f){const pend=[];f.ctx.waitUntil=(p)=>pend.push(p);return ()=>Promise.allSettled(pend);}
+const aprobarConfirmacion=(f,texto=null)=>f.DB.prepare("INSERT INTO tenant_templates(tenant_id,kind,sid,status,texto,created_at,updated_at) VALUES (?,'confirmacion_reserva',?,'approved',?,?,?)").bind(TID,HX_CONF,texto,new Date().toISOString(),new Date().toISOString()).run();
+
+test('confirmación: sin plantilla aprobada no se siembra ni se envía, aunque el addon esté encendido',async(t)=>{
  const f=await fixture(t);await f.DB.exec("UPDATE tenants SET reminders_enabled=1,twilio_from='whatsapp:+15005550006' WHERE slug='dialogos'");
- await book(f);assert.equal((await f.DB.prepare('SELECT status FROM booking_notifications').first()).status,'pending');
- await processBookingNotifications(f.env);assert.equal((await f.DB.prepare('SELECT attempts FROM booking_notifications').first()).attempts,0);
- await f.DB.prepare("INSERT INTO tenant_templates(tenant_id,kind,sid,status,created_at,updated_at) VALUES (?,'confirmacion_reserva',?,'approved',?,?)").bind(TID,'HX'+'a'.repeat(32),new Date().toISOString(),new Date().toISOString()).run();
- Object.assign(f.env,{TWILIO_ACCOUNT_SID:'AC'+'a'.repeat(32),TWILIO_AUTH_TOKEN:'test'});const deliveries=[];
- globalThis.fetch=async(url,init)=>{if(String(url).includes('api.twilio.com')){deliveries.push(new URLSearchParams(init.body));return Response.json({sid:'SMtest'});}return f.fetchProvider(url,init);};
- await Promise.all([processBookingNotifications(f.env),processBookingNotifications(f.env)]);assert.equal(deliveries.length,1);
- assert.match(JSON.parse(deliveries[0].get('ContentVariables'))['5'],/^https:\/\/citas.hirevai.com\/dialogos\/cita\/[a-f0-9]{32}$/);
+ const deliveries=twilioSpy(f);const settle=waits(f);
+ await book(f);await settle();await processBookingNotifications(f.env);
+ assert.equal((await f.DB.prepare('SELECT count(*) n FROM booking_notifications').first()).n,0);
+ assert.equal(deliveries.length,0);
+});
+
+test('confirmación: con plantilla aprobada sale UNA vez con el enlace, aunque los recordatorios estén apagados',async(t)=>{
+ const f=await fixture(t);await f.DB.exec("UPDATE tenants SET reminders_enabled=0,twilio_from='whatsapp:+15005550006' WHERE slug='dialogos'");
+ await aprobarConfirmacion(f);const deliveries=twilioSpy(f);const settle=waits(f);
+ const origin=f.env.BOOKING_ORIGIN;
+ // La entrega inmediata (waitUntil de la reserva) compite con dos ticks del cron.
+ await book(f);
+ await Promise.all([processBookingNotifications(f.env),processBookingNotifications(f.env),settle()]);
+ await settle();await processBookingNotifications(f.env);
+ assert.equal(deliveries.length,1,'entregas simultáneas y repetidas, un solo mensaje');
+ assert.equal(deliveries[0].get('ContentSid'),HX_CONF);
+ assert.equal(deliveries[0].get('To'),'whatsapp:+34612345678');
+ const vars=JSON.parse(deliveries[0].get('ContentVariables'));
+ assert.equal(Object.keys(vars).length,5,'el texto por defecto numera nombre, negocio, fecha, hora, enlace');
+ assert.match(vars['5'],new RegExp('^'+origin.replace(/\./g,'\\.')+'/dialogos/cita/[a-f0-9]{32}$'));
+ assert.equal((await f.DB.prepare('SELECT status FROM booking_notifications').first()).status,'sent');
+});
+
+test('confirmación: con TEXTO propio las variables siguen el orden del texto guardado',async(t)=>{
+ const f=await fixture(t);await f.DB.exec("UPDATE tenants SET twilio_from='whatsapp:+15005550006' WHERE slug='dialogos'");
+ await aprobarConfirmacion(f,'Tu reserva del {{fecha}} a las {{hora}} para {{servicio}} está lista. Gestiónala aquí: {{enlace}} Un saludo.');
+ const deliveries=twilioSpy(f);const settle=waits(f);
+ await book(f);await settle();
+ assert.equal(deliveries.length,1);
+ const vars=JSON.parse(deliveries[0].get('ContentVariables'));
+ assert.deepEqual(Object.keys(vars),['1','2','3','4']);
+ assert.match(vars['2'],/^\d{2}:\d{2}$/,'{{2}} es la hora: el orden de aparición manda');
+ assert.equal(vars['3'],'Sesión presencial');
+ assert.match(vars['4'],/\/dialogos\/cita\/[a-f0-9]{32}$/);
+});
+
+test('confirmación: una cita de hace más de 2 h ya no se confirma (llegaría como ruido)',async(t)=>{
+ const f=await fixture(t);await f.DB.exec("UPDATE tenants SET twilio_from='whatsapp:+15005550006' WHERE slug='dialogos'");
+ await aprobarConfirmacion(f);
+ // La entrega inmediata falla con red caída: la fila queda pendiente de reintento.
+ globalThis.fetch=async(url,init)=>{if(String(url).includes('api.twilio.com'))return new Response('{}',{status:503});return f.fetchProvider(url,init);};
+ Object.assign(f.env,{TWILIO_ACCOUNT_SID:'AC'+'a'.repeat(32),TWILIO_AUTH_TOKEN:'test'});const settle=waits(f);
+ await book(f);await settle();
+ assert.equal((await f.DB.prepare('SELECT status FROM booking_notifications').first()).status,'failed');
+ await f.DB.exec("UPDATE appointments SET created_at='2020-01-01T00:00:00.000Z'");
+ const deliveries=twilioSpy(f);await processBookingNotifications(f.env);
+ assert.equal(deliveries.length,0);
+});
+
+test('Vai: en el chat web siembra la plantilla; dentro de WhatsApp no, y añade el enlace al hilo',async(t)=>{
+ const f=await fixture(t);await aprobarConfirmacion(f);
+ const cal=await f.DB.prepare('SELECT * FROM tenant_calendars WHERE tenant_id=?').bind(TID).first();
+ const tenant={id:TID,slug:'dialogos'};
+ const web={channel:'web',conversationKey:'c-web',defaultPhone:''};
+ const r1=JSON.parse(await testing.calendarExecutor(f.env,tenant,cal,web)('agendar_cita',{fecha_hora:date()+'T10:00',nombre:'Ana',telefono:'+34611111111',servicio:'presencial'}));
+ assert.equal(r1.ok,true,JSON.stringify(r1));assert.ok(!JSON.stringify(r1).includes('/cita/'),'el enlace no pasa por el modelo');
+ assert.equal((await f.DB.prepare('SELECT count(*) n FROM booking_notifications WHERE appointment_id=?').bind(web.booked.id).first()).n,1);
+ const wa={channel:'whatsapp',conversationKey:'whatsapp:+34622222222',defaultPhone:'+34622222222'};
+ const r2=JSON.parse(await testing.calendarExecutor(f.env,tenant,cal,wa)('agendar_cita',{fecha_hora:date()+'T11:00',nombre:'Luis',servicio:'presencial'}));
+ assert.equal(r2.ok,true,JSON.stringify(r2));
+ assert.equal((await f.DB.prepare('SELECT count(*) n FROM booking_notifications WHERE appointment_id=?').bind(wa.booked.id).first()).n,0,'ventana abierta: sin plantilla duplicada');
+ assert.match(wa.booked.url,/^https:\/\/citas\.hirevai\.com\/dialogos\/cita\/[a-f0-9]{32}$/);
+ const reply=testing.withManageLink('¡Listo, Luis! Te espero el jueves a las 11:00.',wa);
+ assert.ok(reply.endsWith(wa.booked.url));
+ assert.equal(testing.withManageLink(reply,wa),reply,'una sola vez');
+ assert.equal(testing.withManageLink('Hola',{channel:'whatsapp'}),'Hola','sin cita no se toca');
 });
 
 test('el chat solo emite la tarjeta estructurada desde la tool habilitada del tenant',async(t)=>{

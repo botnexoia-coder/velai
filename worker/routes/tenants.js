@@ -75,6 +75,12 @@ function plantillasDe(t, registroRows, { sinSid = false } = {}) {
       // La categoría REAL leída de Twilio por el poll (0032); null = aún no leída y el
       // panel enseña «—» — JAMÁS la intención del catálogo como si fuera un hecho.
       categoria: r.categoria || null,
+      // El texto de la ACTIVA (0047; null = el defecto del catálogo) y, si la hay, la
+      // revisión en curso o rechazada: la aprobada sigue enviándose mientras tanto.
+      texto: r.texto || null,
+      revision: r.revision_status ? {
+        status: r.revision_status, texto: r.revision_texto || null, motivo: r.revision_motivo || null, at: r.revision_at || null,
+      } : null,
     };
   }
   if (t.lead_template_sid || t.lead_template_status) {
@@ -87,13 +93,14 @@ function plantillasDe(t, registroRows, { sinSid = false } = {}) {
   return { id: t.id, slug: t.slug, name: t.name, active: t.active, plantillas };
 }
 
-// tenant_templates puede ir por detrás de las migraciones (0030/0031/0032): primero
+// tenant_templates puede ir por detrás de las migraciones (0030/0031/0032/0047): primero
 // con `categoria` y `opciones`, luego sin las columnas que falten, y si la tabla
 // falta, vacío — la vista sale igualmente con lo que viva en columnas.
 async function leerRegistro(env, tenantId) {
   const where = tenantId ? ' WHERE tenant_id = ?' : '';
   const args = tenantId ? [tenantId] : [];
   for (const cols of [
+    'tenant_id, kind, sid, status, opciones, categoria, texto, revision_status, revision_texto, revision_motivo, revision_at, updated_at',
     'tenant_id, kind, sid, status, opciones, categoria, updated_at',
     'tenant_id, kind, sid, status, opciones, updated_at',
     'tenant_id, kind, sid, status, updated_at',
