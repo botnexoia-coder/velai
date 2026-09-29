@@ -728,6 +728,19 @@ dialog.cfm{width:min(460px,calc(100% - 24px));padding:20px 22px}
 .modebtn.is-on{background:rgba(255,107,26,.10);border-color:var(--orange);color:var(--chip-t);font-weight:700}
 .otradur{display:inline-flex!important;align-items:center;gap:8px;margin:0!important}
 .otradur input{width:78px!important;margin:0!important}
+/* Diálogo del QR de reservas: vista previa SIEMPRE sobre blanco (es como se imprime) */
+.qrdlg{width:min(680px,calc(100% - 24px))}
+.qrbody{display:grid;grid-template-columns:auto minmax(0,1fr);gap:22px;align-items:start}
+.qrprev{display:flex;flex-direction:column;align-items:center;gap:8px}
+.qrprev img{display:block;width:220px;height:220px;background:#fff;border-radius:12px;border:1px solid var(--line);padding:6px}
+.qrside{min-width:0}
+.qrurl{margin:0;font-size:13px;overflow-wrap:anywhere}
+.qrside .modes{margin-top:12px}
+.qrup{display:flex;flex-wrap:wrap;align-items:center;gap:8px}
+.qrdlg .qrup label.btn{display:inline-block;margin:0;font-size:12px;color:var(--white)}
+.qrup label[aria-disabled=true]{opacity:.55;pointer-events:none}
+.qrhint{display:block}
+@media(max-width:600px){.qrbody{grid-template-columns:1fr}.qrprev img{width:min(220px,100%);height:auto;aspect-ratio:1}}
 @media(max-width:1100px){.agenda{grid-template-columns:1fr}.kpis{grid-template-columns:repeat(2,minmax(0,1fr))}
   .resestado,.resgrid{grid-template-columns:1fr}.resestado-b{padding-left:0;border-left:0;padding-top:16px;border-top:1px solid var(--line)}
   .excform{grid-template-columns:1fr}}

@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { clienteAllowed } from '../worker/middleware.js';
 import { detectMedia, mediaExecutor, mediaSystem, mediaTools, mediaCatalogText, purgeMedia, tenantMedia } from '../worker/biblioteca.js';
 import { testing, mediaPut, twiml, handleChat, handleTwilio } from '../worker/app.js';
 import { bibliotecaFixture, mediaBytes, MEDIA_TENANT, MEDIA_OTHER } from './helpers/biblioteca-fixture.js';
@@ -215,4 +216,51 @@ test('media pública: MIME verificado y cabeceras de seguridad incluso desde cac
     assert.equal(res.status,200);assert.equal(res.headers.get('Content-Type'),'application/pdf');
     assert.equal(res.headers.get('X-Content-Type-Options'),'nosniff');assert.equal(res.headers.get('Content-Security-Policy'),"default-src 'none'; sandbox");assert.equal(res.headers.get('X-Robots-Tag'),'noindex');
   }
+});
+test('logo del QR de reservas: R2 con clave fija por tenant, tipo real, 2 MB, ajeno 404 y se sirve por /media', async (t) => {
+  const f = await fixture(t);
+  const base = `https://admin.hirevai.com/api/admin/tenants/${MEDIA_TENANT}/booking/qr-logo`;
+  // Vive bajo /booking: lo cubre la puerta del módulo «citas», como el resto de Reservas.
+  const cliente = { ...f.scope, modulos: ['calendario', 'citas'] };
+  const qr = (method = 'GET', body, as = cliente, url = base) => {
+    const u = new URL(url);
+    const request = new Request(u, { method, ...(body ? { body, headers: { 'Content-Type': 'image/png', 'Content-Length': String(body.length) } } : {}) });
+    return testing.adminRouter(request, f.env, f.ctx, u.pathname, u, f.config, as);
+  };
+  await assert.rejects(qr('GET', undefined, f.scope), error(403, 'modulo_no_contratado'));
+  await f.DB.prepare('UPDATE tenants SET logo_url=? WHERE id=?').bind('https://api.hirevai.com/media/logos/x.png?v=1', MEDIA_TENANT).run();
+  const vacio = await (await qr()).json();
+  assert.deepEqual({ qr: vacio.qr_logo_url, logo: vacio.logo_url, ready: vacio.storage_ready }, { qr: null, logo: 'https://api.hirevai.com/media/logos/x.png?v=1', ready: true });
+  // El rol cliente llega por la lista blanca (no solo por el router de tests).
+  for (const m of ['GET', 'POST', 'DELETE']) assert.equal(clienteAllowed(new URL(base).pathname, m), true, m);
+  assert.equal(clienteAllowed(new URL(base).pathname, 'PUT'), false);
+  const png = new Uint8Array(200); png.set([137, 80, 78, 71, 13, 10, 26, 10]);
+  const subido = await (await qr('POST', png)).json();
+  assert.match(subido.qr_logo_url, new RegExp(`^https://api\\.hirevai\\.com/media/qr/${MEDIA_TENANT}\\?v=\\d+$`));
+  assert.equal(f.objects.get(`qr/${MEDIA_TENANT}`).contentType, 'image/png');
+  // Se sirve por /media como cualquier logo, también en el host del panel (el panel lo
+  // pide por ruta relativa: mismo origen, sin CORS).
+  const previousCaches = globalThis.caches; t.after(() => { if (previousCaches === undefined) delete globalThis.caches; else globalThis.caches = previousCaches; });
+  globalThis.caches = { default: { match: async () => undefined, put: async () => {} } };
+  const media = await f.worker.fetch(new Request(subido.qr_logo_url.replace('https://api.hirevai.com', 'https://admin.hirevai.com')), f.env, f.ctx); await f.drain();
+  assert.equal(media.status, 200); assert.equal(media.headers.get('Content-Type'), 'image/png');
+  // Tipo por magic bytes, no por cabecera; 2 MB máximo; nada se guarda al rechazar.
+  await assert.rejects(qr('POST', mediaBytes('<svg onload=alert(1)>', 200)), error(400, 'invalid_image'));
+  await assert.rejects(qr('POST', mediaBytes('%PDF-1.7', 200)), error(400, 'invalid_image'));
+  const grande = new Uint8Array(2 * 1024 * 1024 + 1); grande.set([137, 80, 78, 71, 13, 10, 26, 10]);
+  await assert.rejects(qr('POST', grande), error(413, 'image_too_large'));
+  assert.equal(f.objects.size, 1);
+  // Ajeno = 404 antes de tocar nada, en los tres métodos.
+  const ajeno = base.replace(MEDIA_TENANT, MEDIA_OTHER);
+  for (const m of ['GET', 'POST', 'DELETE']) await assert.rejects(qr(m, m === 'POST' ? png : undefined, cliente, ajeno), error(404, 'not_found'));
+  assert.equal(f.objects.size, 1);
+  // Sin R2 no se sube (el fallback a KV no admite HEAD barato).
+  const r2 = f.env.MEDIA; delete f.env.MEDIA;
+  await assert.rejects(qr('POST', png), error(503, 'media_store_required'));
+  f.env.MEDIA = r2;
+  // Quitar lo borra de R2 y vuelve al logo del negocio; todo queda auditado.
+  const quitado = await (await qr('DELETE')).json();
+  assert.equal(quitado.qr_logo_url, null); assert.equal(f.objects.size, 0);
+  const notas = (await f.DB.prepare("SELECT note FROM tenant_versions WHERE tenant_id=? AND field='calendar' ORDER BY id").bind(MEDIA_TENANT).all()).results.map((r) => r.note);
+  assert.deepEqual(notas, ['logo del QR de reservas subido (png, 0 KB)', 'logo del QR de reservas eliminado']);
 });

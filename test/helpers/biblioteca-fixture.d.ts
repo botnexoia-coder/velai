@@ -12,6 +12,9 @@ export function bibliotecaFixture(): Promise<{
   DB: { prepare(sql: string): Statement; exec(sql: string): Promise<unknown> };
   scope: { role: string; tenantId: string | null; email: string };
   request(request: Request): Promise<Response>;
-  objects: Map<string, { bytes: Uint8Array; contentType: string }>;
+  worker: { fetch(request: Request, env: unknown, ctx: unknown): Promise<Response> };
+  env: Record<string, unknown>;
+  ctx: { waitUntil(promise: Promise<unknown>): void };
+  objects: Map<string, { bytes: Uint8Array; contentType: string; uploaded: Date }>;
   close(): Promise<void>;
 }>;

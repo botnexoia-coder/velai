@@ -11,6 +11,8 @@ import { googleAuthUrl, revokeGoogleToken } from '../calendar.js';
 import { decryptSecret } from '../crypto.js';
 import { HttpError, json, NO_STORE, clean, readJson, UUID_RE, reminderHoursFor, tenantTemplate, invalidateTenantCache } from '../app.js';
 import { templateKind } from '../plantillas.js';
+import { detectMedia } from '../biblioteca.js';
+import { mediaPut, publicMediaBase } from '../app.js';
 
 export const calendario = new Hono();
 
@@ -280,3 +282,45 @@ calendario.get('/api/admin/tenants/:id/services',bookingAdmin);
 calendario.post('/api/admin/tenants/:id/services',bookingAdmin);
 calendario.patch('/api/admin/tenants/:id/services/:serviceId',bookingAdmin);
 calendario.delete('/api/admin/tenants/:id/services/:serviceId',bookingAdmin);
+
+// ── Logo del QR de reservas ──────────────────────────────────────────────────
+// El QR se genera en el PANEL (qrcode-generator); aquí solo se guarda la imagen que
+// el cliente quiera en su centro, si no quiere la del negocio. Sin columna nueva en D1:
+// la clave de R2 es fija por tenant (qr/<id>) y su existencia + fecha de subida (que
+// versiona la URL) salen de un HEAD. Mismas reglas que el logo de marca: tipo por
+// magic bytes (png/jpeg/webp), 2 MB, tenant propio (ajeno = 404 antes de tocar nada).
+// R2 obligatorio: el fallback a KV de los logos antiguos no admite HEAD barato.
+const QR_LOGO_MAX = 2 * 1024 * 1024;
+const qrLogoKey = (tenantId) => `qr/${tenantId}`;
+const qrLogoAdmin = async (c) => {
+  const { request, env, scope, actor } = partesAdmin(c);
+  const tenantId = c.req.param('id');
+  if (!UUID_RE.test(tenantId)) throw new HttpError(404, 'not_found');
+  assertOwnTenant(scope, tenantId);
+  const tenant = await env.DB.prepare('SELECT id,logo_url FROM tenants WHERE id=?').bind(tenantId).first();
+  if (!tenant) throw new HttpError(404, 'not_found');
+  const key = qrLogoKey(tenantId);
+  const audit = (note) => env.DB.prepare('INSERT INTO tenant_versions(tenant_id,actor_email,field,previous_value,note,created_at) VALUES (?,?,?,?,?,?)')
+    .bind(tenantId, actor, 'calendar', null, note, new Date().toISOString()).run();
+  if (request.method === 'POST') {
+    if (!env.MEDIA) throw new HttpError(503, 'media_store_required');
+    const length = Number(request.headers.get('Content-Length'));
+    if (Number.isSafeInteger(length) && length > QR_LOGO_MAX) throw new HttpError(413, 'image_too_large');
+    const body = new Uint8Array(await request.arrayBuffer());
+    if (body.byteLength > QR_LOGO_MAX) throw new HttpError(413, 'image_too_large');
+    const format = detectMedia(body);
+    if (body.byteLength < 64 || !format || format.kind !== 'image') throw new HttpError(400, 'invalid_image');
+    await mediaPut(env, key, body, format.mime, { required: true });
+    await audit(`logo del QR de reservas subido (${format.ext}, ${Math.round(body.byteLength / 1024)} KB)`);
+  } else if (request.method === 'DELETE') {
+    if (env.MEDIA) await env.MEDIA.delete(key);
+    await audit('logo del QR de reservas eliminado');
+  }
+  const head = env.MEDIA ? await env.MEDIA.head(key) : null;
+  const version = head && head.uploaded ? new Date(head.uploaded).getTime() : 0;
+  const logo = typeof tenant.logo_url === 'string' && /^https:\/\//i.test(tenant.logo_url) ? tenant.logo_url : null;
+  return json({ ok: true, qr_logo_url: head ? `${publicMediaBase(env)}/media/${key}?v=${version}` : null, logo_url: logo, max_bytes: QR_LOGO_MAX, storage_ready: Boolean(env.MEDIA) }, 200, NO_STORE);
+};
+calendario.get('/api/admin/tenants/:id/booking/qr-logo', qrLogoAdmin);
+calendario.post('/api/admin/tenants/:id/booking/qr-logo', qrLogoAdmin);
+calendario.delete('/api/admin/tenants/:id/booking/qr-logo', qrLogoAdmin);
