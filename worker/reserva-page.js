@@ -255,7 +255,9 @@ export function reservationApp(data) {
     return function(){node.classList.remove('is-busy');node.removeAttribute('aria-busy');root.classList.remove('is-waiting');};
   }
   function withSpin(node,fn){var stop=spin(node);var t=task(fn);if(t&&t.then)t.then(stop,stop);else stop();return t;}
-  function notifySize(){if(parentOrigin&&window.parent!==window)window.parent.postMessage({type:'vai-citas:resize',height:document.documentElement.scrollHeight},parentOrigin);}
+  // Se mide el body y no el documento: scrollHeight nunca baja de la altura del propio
+  // iframe, así que el marco crecía al ver las horas y ya no volvía a encoger.
+  function notifySize(){if(parentOrigin&&window.parent!==window)window.parent.postMessage({type:'vai-citas:resize',height:Math.ceil(document.body.getBoundingClientRect().height)},parentOrigin);}
   window.addEventListener('message',function(e){if(e.source===window.parent&&data.origins.indexOf(e.origin)!==-1&&e.data&&e.data.type==='vai-citas:init'){parentOrigin=e.origin;notifySize();}});
   if(window.ResizeObserver)new ResizeObserver(notifySize).observe(document.body);
   function fail(err){var messages={hueco_ocupado:tr('Ese horario acaba de ocuparse. Elige otro.','That time is no longer available. Choose another.'),hold_expired:tr('La reserva temporal ha caducado. Vuelve a elegir hora.','Your temporary reservation expired. Choose a time again.'),rate_limited:tr('Demasiados intentos. Espera un minuto.','Too many attempts. Wait a minute.'),booking_limit_or_in_progress:tr('No se pudo completar: límite de citas o reserva en curso.','Unable to complete: appointment limit or booking in progress.'),human_verification_failed:tr('No se pudo verificar. Inténtalo de nuevo.','Verification failed. Please retry.'),
