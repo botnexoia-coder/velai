@@ -24,7 +24,7 @@ const RESP: PlantillasResponse = {
       descripcion: 'Recuerda la cita al cliente final con antelación.',
       config: {
         preview: 'Hola María, te escribimos de Clínica Ejemplo para recordarte tu cita.',
-        antelaciones: [12, 24, 48],
+        antelaciones: [1, 2, 6, 8, 12, 24, 48],
         antelacionDefault: 24,
         botones: [
           { id: 'confirmo_cancelar', confirmar: 'Confirmo', cancelar: 'Cancelar' },

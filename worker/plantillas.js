@@ -55,11 +55,11 @@ export const TEMPLATE_CATALOG = {
     descripcion: 'Recuerda la cita al cliente final con antelación, con botones para confirmar o cancelar.',
     fuente: 'registro', // estado en tenant_templates; se crea con el POST genérico plantillas/<kind>
     categoria: 'UTILITY', // mensaje iniciado por el negocio: SIEMPRE plantilla aprobada (63016)
-    // Antelación CURADA (12/24/48, default 24). Es config del ADDON, no de la
+    // Antelación CURADA (1/2/6/8/12/24/48, default 24). Es config del ADDON, no de la
     // plantilla: vive en tenants.reminder_hours y se cambia después sin nueva
     // aprobación — por eso el CUERPO de abajo es NEUTRO respecto al tiempo (nada de
     // «mañana»: la fecha y la hora van en variables).
-    antelaciones: [12, 24, 48],
+    antelaciones: [1, 2, 6, 8, 12, 24, 48],
     antelacionDefault: 24,
     botones: PAREJAS_RECORDATORIO,
     botonesDefault: 'confirmo_cancelar',

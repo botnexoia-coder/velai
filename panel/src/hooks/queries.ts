@@ -621,7 +621,7 @@ export function useRemindersPatch() {
 export function useTemplateCreate() {
   const client = useQueryClient();
   return useMutation({
-    // opciones: {botones: <id de pareja curada>, antelacion: 12|24|48} — el worker las
+    // opciones: {botones: <id de pareja curada>, antelacion: 1|2|6|8|12|24|48} — el worker las
     // valida contra el catálogo; sin opciones aplica los defaults (retrocompatible).
     mutationFn: ({ id, kind, opciones }: { id: string; kind: string; opciones?: { botones?: string; antelacion?: number } }) =>
       apiPost<{ ok: true; kind: string; sid: string; status: string }>(`/api/admin/tenants/${id}/provision/plantillas/${kind}`, opciones ?? {}),
