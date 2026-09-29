@@ -83,6 +83,22 @@ export const TERRS: Record<string, string> = {
   webhook_secret_invalid: 'Configuración del worker: el TELEGRAM_WEBHOOK_SECRET tiene caracteres que Telegram no admite (solo letras, números, guion y guion bajo). No es culpa del token del cliente — hay que regenerarlo en el worker.',
   webhook_url_invalid: 'Telegram no acepta la URL del webhook del worker: revisa WORKER_PUBLIC_URL.',
   telegram_rate_limited: 'Telegram esta limitando las peticiones de ese bot: espera un minuto y reintenta.',
+  // Texto editable de las plantillas de citas (SPEC-NOTIFICACION-CITA). El detalle
+  // por variable lo compone mensajeTexto (lib/plantillas.ts) con la clave.
+  plantilla_en_revision: 'WhatsApp todavía está revisando el último texto: espera a que lo apruebe o lo rechace para enviar otro.',
+  invalid_texto: 'Escribe el texto del mensaje (máximo 2.000 caracteres).',
+  texto_vacio: 'Escribe el texto del mensaje.',
+  texto_largo: 'El mensaje supera los 1.024 caracteres que admite WhatsApp.',
+  variable_desconocida: 'Hay una variable que no existe: usa solo las de los botones.',
+  variable_repetida: 'Cada variable solo puede aparecer una vez.',
+  falta_variable: 'Falta una variable obligatoria.',
+  empieza_con_variable: 'WhatsApp no admite que el mensaje empiece por una variable: pon texto delante.',
+  termina_con_variable: 'WhatsApp no admite que el mensaje termine en una variable: añade una frase al final.',
+  variables_juntas: 'Dos variables no pueden ir seguidas: escribe texto entre ellas.',
+  llaves_sueltas: 'Hay llaves {{ }} sueltas: las variables se insertan con los botones.',
+  saltos_excesivos: 'Como mucho una línea en blanco seguida.',
+  espacios_excesivos: 'Sin tabuladores ni más de cuatro espacios seguidos.',
+  pocas_palabras: 'Demasiadas variables para tan poco texto: WhatsApp lo rechazaría. Escribe algo más.',
   // Códigos que en el v1 vivían fuera de TERRS pero también llegan al panel:
   not_authorized: 'Tu correo no tiene acceso a este panel.',
   not_found: 'Eso ya no existe (o no es tuyo).',
