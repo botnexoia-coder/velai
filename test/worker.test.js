@@ -5575,6 +5575,42 @@ test('provision plantillas/<kind>: crea, somete a aprobación y registra en tena
   } finally { globalThis.fetch = realFetch; }
 });
 
+test('provision plantillas/confirmacion_reserva: el diálogo de alta manda texto propio, validado antes de Twilio', async () => {
+  const TID = '00000000-0000-4000-8000-0000000000d2';
+  const enc = await encryptSecret({ SECRETS_KEK: TEST_KEK }, TID, 'a1b2c3d4e5f60718293a4b5c6d7e8f90');
+  const tenantRow = { id: TID, slug: 'conf2', name: 'Clínica Conf', twilio_subaccount_sid: 'AC' + 's'.repeat(32), twilio_auth_token_enc: enc };
+  const inserts = [];
+  const db = { prepare: (sql) => ({ bind: (...args) => ({
+    first: async () => (/FROM tenants WHERE id=\?/.test(sql) ? tenantRow : null),
+    all: async () => ({ results: [] }),
+    run: async () => { if (/INSERT INTO tenant_templates/.test(sql)) inserts.push({ sql, args }); return { meta: { changes: 1 } }; },
+  }) }), batch: async () => [] };
+  const env = { DB: db, KV: mapKV(), SECRETS_KEK: TEST_KEK };
+  const ctx = { waitUntil() {} };
+  const contents = [];
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = async (url, init) => {
+    const u = String(url);
+    if (u === 'https://content.twilio.com/v1/Content') { contents.push(JSON.parse(String(init.body))); return new Response(JSON.stringify({ sid: 'HX' + 'd'.repeat(32) }), { status: 201 }); }
+    return new Response('{}', { status: 201 });
+  };
+  const path = `/api/admin/tenants/${TID}/provision/plantillas/confirmacion_reserva`;
+  const call = (body) => testing.adminRouter(adminReq(path, { method: 'POST', body: JSON.stringify(body), headers: { 'Content-Type': 'application/json' } }),
+    env, ctx, path, new URL('https://x' + path), {}, VELAI);
+  try {
+    // Sin el enlace obligatorio: 400 y NADA llega a Twilio.
+    await assert.rejects(call({ texto: 'Hola {{nombre}}, tu cita es el {{fecha}} a las {{hora}}, gracias.' }), (e) => e.status === 400);
+    assert.equal(contents.length, 0);
+    const texto = 'Hola {{nombre}}, te esperamos el {{fecha}} a las {{hora}}. Gestiona tu cita aquí: {{enlace}} Un saludo.';
+    const res = await call({ texto });
+    assert.equal(res.status, 201);
+    // A Twilio va el cuerpo numerado; en D1 queda el texto con nombres.
+    assert.equal(contents[0].types['twilio/text'].body, 'Hola {{1}}, te esperamos el {{2}} a las {{3}}. Gestiona tu cita aquí: {{4}} Un saludo.');
+    assert.ok(/texto/.test(inserts[0].sql));
+    assert.ok(inserts[0].args.includes(texto));
+  } finally { globalThis.fetch = realFetch; }
+});
+
 test('el cron marca approved/rejected las plantillas del catálogo y avisa', async () => {
   const env0 = { SECRETS_KEK: TEST_KEK };
   const enc = await encryptSecret(env0, 't-conf', 'a1b2c3d4e5f60718293a4b5c6d7e8f90');

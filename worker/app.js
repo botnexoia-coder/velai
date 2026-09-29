@@ -3834,13 +3834,22 @@ async function runProvisionStep(request, env, ctx, tenant, tenantId, step, actor
     // una antelación fuera de la lista curada es 400 — jamás texto arbitrario a Meta.
     let body = {};
     if ((request.headers.get('Content-Type') || '').includes('application/json')) {
-      body = await readJson(request, 2000);
+      body = await readJson(request, 6000);
     }
     const opciones = templateOptions(def, body);
     if (opciones.error) throw new HttpError(400, opciones.error);
+    // Texto personalizado desde el mismo diálogo de alta (SPEC-NOTIFICACION-CITA): pasa
+    // la MISMA puerta que el editor (validarTexto). El defecto se guarda como NULL.
+    let texto = null;
+    if (body.texto !== undefined) {
+      if (!textoEditable(def) || typeof body.texto !== 'string' || body.texto.length > 2000) throw new HttpError(400, 'invalid_texto');
+      const v = validarTexto(def, body.texto);
+      if (v.errores.length) throw new HttpError(400, v.errores[0].code, v.errores[0].clave);
+      texto = v.texto === def.texto.defecto ? null : v.texto;
+    }
     const existing = await tenantTemplate(env, tenantId, def.kind);
     if (existing && (existing.sid || existing.status)) throw new HttpError(409, 'already_provisioned');
-    const { contentSid } = await createContentTemplate(credentials, def.content(tenant.slug, tenant.name, opciones.pareja));
+    const { contentSid } = await createContentTemplate(credentials, def.content(tenant.slug, tenant.name, opciones.pareja, texto));
     // Lo elegido se persiste (0031): para enseñarlo y para recrear tras un rechazo.
     const opcionesJson = opciones.pareja
       ? JSON.stringify({ botones: opciones.pareja.id, textos: { confirmar: opciones.pareja.confirmar, cancelar: opciones.pareja.cancelar } })
@@ -3851,9 +3860,9 @@ async function runProvisionStep(request, env, ctx, tenant, tenantId, step, actor
       // clics simultáneos no crean dos filas — el segundo es un orphan visible.
       let res;
       try {
-        res = await env.DB.prepare(`INSERT INTO tenant_templates (tenant_id,kind,sid,status,opciones,created_at,updated_at)
-          VALUES (?,?,?,'pending',?,?,?) ON CONFLICT(tenant_id,kind) DO NOTHING`)
-          .bind(tenantId, def.kind, contentSid, opcionesJson, now, now).run();
+        res = await env.DB.prepare(`INSERT INTO tenant_templates (tenant_id,kind,sid,status,opciones,texto,created_at,updated_at)
+          VALUES (?,?,?,'pending',?,?,?,?) ON CONFLICT(tenant_id,kind) DO NOTHING`)
+          .bind(tenantId, def.kind, contentSid, opcionesJson, texto, now, now).run();
       } catch (e) {
         // Worker desplegado antes de aplicar la 0031: la columna opciones no existe
         // aún. La plantilla YA vive en Twilio — perderla por una columna sería un

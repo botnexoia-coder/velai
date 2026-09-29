@@ -7,9 +7,10 @@ import { dirname, extname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { plantillasFixture, PLANTILLAS_TENANT } from '../../test/helpers/plantillas-fixture.js';
 
-const test = base.extend<{ pl: Awaited<ReturnType<typeof plantillasFixture>> }>({
-  pl: async ({ page }, use) => {
-    const f = await plantillasFixture();
+const test = base.extend<{ comoVelai: boolean; pl: Awaited<ReturnType<typeof plantillasFixture>> }>({
+  comoVelai: [false, { option: true }],
+  pl: async ({ page, comoVelai }, use) => {
+    const f = await plantillasFixture(comoVelai ? { email: 'admin@velai.test' } : {});
     const dist = join(dirname(fileURLToPath(import.meta.url)), '..', 'dist');
     await page.route('**/*', async (route) => {
       const req = route.request(), url = new URL(req.url());
@@ -84,4 +85,35 @@ test('el cliente personaliza la confirmación de cita: chips, validación del wo
   await expect(conf.getByRole('button', { name: 'Editar el texto' })).toBeDisabled();
   await page.screenshot({ path: test.info().outputPath('plantillas-en-revision.png'), fullPage: true });
   expect(errors).toEqual([]);
+});
+
+test.describe('Velai', () => {
+  test.use({ comoVelai: true });
+  test('el diálogo «Crear» de la confirmación deja editar el texto y lo manda a Twilio', async ({ page, pl }) => {
+    const errors: string[] = []; page.on('pageerror', (e) => errors.push(e.message));
+    await page.goto('/plantillas');
+    const conf = card(page, 'Cita agendada (confirmación)');
+    await conf.locator('.plchip.sin').filter({ hasText: 'Diálogos' }).getByRole('button', { name: 'Crear' }).click();
+    const dlg = page.locator('dialog[open]');
+    const area = dlg.getByRole('textbox');
+    await expect(area).toBeEditable();
+    await expect(dlg.getByLabel('Antelación del recordatorio')).toHaveCount(0);
+    await area.fill('Hola {{nombre}}, tu cita es el {{fecha}} a las {{hora}}, gracias');
+    await expect(dlg.getByText('Falta {{enlace}} (enlace para gestionar la cita): es obligatoria.')).toBeVisible();
+    await expect(dlg.getByRole('button', { name: 'Enviar a aprobación' })).toBeDisabled();
+    await area.fill('Hola {{nombre}}, tu cita es el {{fecha}} a las {{hora}}. Gestiónala aquí: {{enlace}} ¡Gracias!');
+    await expect(dlg.getByText('Cumple las reglas de WhatsApp ✓')).toBeVisible();
+    await expect(dlg.locator('.wapre-body')).toContainText('Hola María, tu cita es el jueves, 4 de septiembre a las 10:00. Gestiónala aquí: https://citas.hirevai.com/');
+    await page.screenshot({ path: test.info().outputPath('crear-dialogo-claro.png') });
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.screenshot({ path: test.info().outputPath('crear-dialogo-movil.png') });
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+    await page.setViewportSize({ width: 1280, height: 900 });
+    await dlg.getByRole('button', { name: 'Enviar a aprobación' }).click();
+    await expect(page.getByText('Plantilla creada y enviada a aprobación de Meta ✓')).toBeVisible();
+    expect(pl.twilio.content[0]!.types['twilio/text']!.body).toBe('Hola {{1}}, tu cita es el {{2}} a las {{3}}. Gestiónala aquí: {{4}} ¡Gracias!');
+    const row = await pl.DB.prepare("SELECT status, texto FROM tenant_templates WHERE tenant_id=? AND kind='confirmacion_reserva'").bind(PLANTILLAS_TENANT).first();
+    expect(row).toMatchObject({ status: 'pending', texto: 'Hola {{nombre}}, tu cita es el {{fecha}} a las {{hora}}. Gestiónala aquí: {{enlace}} ¡Gracias!' });
+    expect(errors).toEqual([]);
+  });
 });

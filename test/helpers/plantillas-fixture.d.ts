@@ -6,7 +6,7 @@ interface Statement {
   run(): Promise<unknown>;
 }
 export const PLANTILLAS_TENANT: string;
-export function plantillasFixture(): Promise<{
+export function plantillasFixture(opts?: { email?: string }): Promise<{
   DB: { prepare(sql: string): Statement; exec(sql: string): Promise<unknown> };
   twilio: { content: { types: Record<string, { body: string }> }[]; approvals: { name: string }[] };
   twilioFetch: typeof fetch;

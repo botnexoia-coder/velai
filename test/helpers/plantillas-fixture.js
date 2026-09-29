@@ -1,12 +1,13 @@
 // Fixture del e2e de Plantillas (SPEC-NOTIFICACION-CITA): D1 real (migraciones
 // incluidas), el router admin real con el scope de un CLIENTE resuelto como en
-// producción y Twilio simulado. Lo usa panel/e2e/plantillas.spec.ts.
+// producción (o el de un admin de Velai con `email: 'admin@velai.test'`) y Twilio simulado. Lo usa panel/e2e/plantillas.spec.ts.
 import { bookingFixture, BOOKING_TEST_TENANT } from './booking-fixture.js';
 import { testing } from '../../worker/app.js';
 import { encryptSecret } from '../../worker/crypto.js';
 export const PLANTILLAS_TENANT = BOOKING_TEST_TENANT;
-export async function plantillasFixture() {
+export async function plantillasFixture({ email = 'cliente@dialogos.test' } = {}) {
   const f = await bookingFixture();
+  f.env.ADMIN_EMAILS = 'admin@velai.test';
   f.env.SECRETS_KEK = btoa(String.fromCharCode(...new Uint8Array(32).fill(9)));
   f.env.ADMIN_ORIGIN = 'https://panel.test';
   const enc = await encryptSecret(f.env, BOOKING_TEST_TENANT, 'a1b2c3d4e5f60718293a4b5c6d7e8f90');
@@ -33,7 +34,7 @@ export async function plantillasFixture() {
     async request(request) {
       const url = new URL(request.url);
       try {
-        const scope = await testing.resolveScope(f.env, 'cliente@dialogos.test');
+        const scope = await testing.resolveScope(f.env, email);
         return await testing.adminRouter(request, f.env, f.ctx, url.pathname, url, {}, scope);
       } catch (e) { return new Response(JSON.stringify({ ok: false, error: e.code || 'internal_error' }), { status: e.status || 500, headers: { 'Content-Type': 'application/json' } }); }
     },

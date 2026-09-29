@@ -8,12 +8,15 @@
 // sistema (modal-h/modal-b, showModal).
 //
 // TODO lo configurable viene del catálogo vía el endpoint (kind.config): parejas
-// CURADAS — nunca texto libre hacia Twilio (decisión de Juan) —, antelaciones y la
-// preview renderizada. Aquí no vive ni un literal del cuerpo.
+// CURADAS, antelaciones y la preview renderizada. Las plantillas de citas con texto
+// editable (config.texto, SPEC-NOTIFICACION-CITA) se personalizan aquí mismo con el
+// editor compartido (TextoConVariables): variables con nombre y las reglas del worker.
 import { useEffect, useRef, useState } from 'react';
 import { traducir } from '../api/errors';
 import { useToast } from './Toasts';
+import { TextoConVariables } from './EditorTexto';
 import { useTemplateCreate } from '../hooks/queries';
+import { renderTextoLocal } from '../lib/plantillas';
 import type { PlantillaKind } from '../api/types';
 
 export function CrearPlantilla({
@@ -33,6 +36,9 @@ export function CrearPlantilla({
   const config = kind.config;
   const [antelacion, setAntelacion] = useState<number>(config?.antelacionDefault ?? 24);
   const [pareja, setPareja] = useState<string>(config?.botonesDefault ?? '');
+  const txCfg = config?.texto;
+  const [texto, setTexto] = useState<string>(txCfg?.defecto ?? '');
+  const [textoOk, setTextoOk] = useState(false);
 
   useEffect(() => {
     const d = ref.current;
@@ -102,11 +108,25 @@ export function CrearPlantilla({
             </p>
           </div>
         ) : null}
-        {config.preview ? (
+        {txCfg ? (
+          <div className="crp-bloque tx-edit">
+            <b>Texto del mensaje</b>
+            <p className="muted mt6">Escríbelo a tu gusto; las variables se llenan con los datos reales de cada cita.</p>
+            <TextoConVariables tenantId={tenantId} kind={kind} value={texto} onChange={setTexto} onValido={setTextoOk} />
+            {texto !== txCfg.defecto ? (
+              <div className="actions actions0">
+                <button className="btn btnsm alt" type="button" onClick={() => setTexto(txCfg.defecto)}>
+                  Texto por defecto
+                </button>
+              </div>
+            ) : null}
+          </div>
+        ) : null}
+        {txCfg || config.preview ? (
           <div className="crp-bloque">
             <b>Vista previa del mensaje</b>
             <div className="wapre mt6">
-              <div className="wapre-body">{config.preview}</div>
+              <div className="wapre-body">{txCfg ? renderTextoLocal(texto, txCfg.campos, tenantName) : config.preview}</div>
               {elegida ? (
                 <div className="wapre-btns">
                   <span>{elegida.confirmar}</span>
@@ -121,10 +141,18 @@ export function CrearPlantilla({
           <button
             className="btn"
             type="button"
-            disabled={crear.isPending}
+            disabled={crear.isPending || (Boolean(txCfg) && !textoOk)}
             onClick={() =>
               crear.mutate(
-                { id: tenantId, kind: kind.kind, opciones: { ...(elegida ? { botones: elegida.id } : {}), antelacion } },
+                {
+                  id: tenantId,
+                  kind: kind.kind,
+                  opciones: {
+                    ...(elegida ? { botones: elegida.id } : {}),
+                    ...(config.antelaciones?.length ? { antelacion } : {}),
+                    ...(txCfg && texto !== txCfg.defecto ? { texto } : {}),
+                  },
+                },
                 {
                   onSuccess: () => {
                     toast('Plantilla creada y enviada a aprobación de Meta ✓');

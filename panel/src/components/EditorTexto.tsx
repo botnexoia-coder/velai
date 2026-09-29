@@ -35,50 +35,22 @@ export function EditorTexto({
 }) {
   const cfg = kind.config?.texto;
   const toast = useToast();
-  const validar = usePlantillaTextoValidar();
   const guardar = usePlantillaTextoGuardar();
-  const ref = useRef<HTMLTextAreaElement>(null);
   const vigente = celda?.texto ?? cfg?.defecto ?? '';
   const revision = celda?.revision ?? null;
   const enRevision = revision?.status === 'pending' || (Boolean(celda?.status) && celda?.status !== 'approved' && celda?.status !== 'rejected');
   const [abierto, setAbierto] = useState(false);
   const [borrador, setBorrador] = useState(vigente);
-  const [check, setCheck] = useState<(TextoValidado & { de: string }) | null>(null);
+  const [valido, setValido] = useState(false);
   useEffect(() => setBorrador(revision?.status === 'rejected' && revision.texto ? revision.texto : vigente), [vigente, revision?.status, revision?.texto]);
 
-  // Validación en el worker, con respiro de 400 ms entre pulsaciones.
-  const { mutate: validarMutate } = validar;
-  useEffect(() => {
-    if (!abierto || !cfg) return;
-    const texto = borrador;
-    const t = setTimeout(() => {
-      validarMutate({ id: tenantId, kind: kind.kind, texto }, { onSuccess: (r) => setCheck({ ...r, de: texto }) });
-    }, 400);
-    return () => clearTimeout(t);
-  }, [abierto, borrador, cfg, kind.kind, tenantId, validarMutate]);
-
   if (!cfg) return null;
-  const actual = check && check.de === borrador ? check : null;
-  const usadas = variablesUsadas(borrador);
   const cambiado = borrador.trim() !== vigente.trim();
   const crear = !celda?.status;
-  const puedeEnviar = Boolean(actual?.ok) && (cambiado || crear) && !enRevision && !guardar.isPending;
+  const puedeEnviar = valido && (cambiado || crear) && !enRevision && !guardar.isPending;
   // Lo que enseña la preview: con el editor abierto, el borrador; si hay una revisión
   // pendiente, el texto que está revisando WhatsApp; si no, el vigente.
   const mostrado = abierto ? borrador : revision?.status === 'pending' && revision.texto ? revision.texto : vigente;
-
-  function insertar(clave: string) {
-    const el = ref.current;
-    const inicio = el?.selectionStart ?? borrador.length;
-    const fin = el?.selectionEnd ?? borrador.length;
-    const r = insertarVariable(borrador, inicio, fin, clave);
-    setBorrador(r.texto);
-    requestAnimationFrame(() => {
-      if (!ref.current) return;
-      ref.current.focus();
-      ref.current.setSelectionRange(r.cursor, r.cursor);
-    });
-  }
 
   async function enviar() {
     if (
@@ -141,48 +113,14 @@ export function EditorTexto({
         </div>
       ) : (
         <div className="tx-edit mt6">
-          <div className="tx-chips" role="group" aria-label="Insertar variable">
-            {cfg.campos.map((c) => (
-              <button
-                key={c.clave}
-                type="button"
-                className={`tx-chip${usadas.includes(c.clave) ? ' on' : ''}`}
-                title={`${c.label}${c.obligatoria ? ' (obligatoria)' : ''} — ejemplo: ${c.ejemplo}`}
-                onClick={() => insertar(c.clave)}
-              >
-                {`{{${c.clave}}}`}
-                {c.obligatoria ? <span aria-label="obligatoria">*</span> : null}
-              </button>
-            ))}
-          </div>
-          <textarea
-              ref={ref}
-              value={borrador}
-              rows={6}
-              maxLength={2000}
-              aria-label={`Texto de ${kind.label}`}
-              aria-invalid={actual ? !actual.ok : undefined}
-              onChange={(e) => setBorrador(e.target.value)}
-            />
-          <div className="tx-meta">
-            <span className="muted">
-              Pulsa una variable para insertarla donde está el cursor. * = obligatoria.
-            </span>
-            <span className={`tx-count${actual && actual.longitud > cfg.max ? ' bad' : ''}`}>
-              {actual ? actual.longitud : borrador.length}/{cfg.max}
-            </span>
-          </div>
-          {actual && actual.errores.length ? (
-            <ul className="tx-errores" aria-live="polite">
-              {actual.errores.map((e) => (
-                <li key={e.code + (e.clave ?? '')}>{mensajeTexto(e, cfg.campos)}</li>
-              ))}
-            </ul>
-          ) : actual?.ok ? (
-            <p className="tx-ok" aria-live="polite">
-              {cambiado || crear ? 'Cumple las reglas de WhatsApp ✓' : 'Es el texto que ya tienes.'}
-            </p>
-          ) : null}
+          <TextoConVariables
+            tenantId={tenantId}
+            kind={kind}
+            value={borrador}
+            onChange={setBorrador}
+            okLabel={cambiado || crear ? 'Cumple las reglas de WhatsApp ✓' : 'Es el texto que ya tienes.'}
+            onValido={setValido}
+          />
           <div className="actions actions0">
             <button className="btn btnsm" type="button" disabled={!puedeEnviar} onClick={() => void enviar()}>
               {guardar.isPending ? 'Enviando…' : crear ? 'Crear y enviar a WhatsApp' : 'Enviar a revisión'}
@@ -206,5 +144,103 @@ export function EditorTexto({
         </div>
       )}
     </div>
+  );
+}
+
+// Chips de variables + textarea + validación en el worker. Lo comparten el editor de
+// la tarjeta y el diálogo de alta (CrearPlantilla): un solo sitio, mismas reglas.
+export function TextoConVariables({
+  tenantId,
+  kind,
+  value,
+  onChange,
+  onValido,
+  okLabel = 'Cumple las reglas de WhatsApp ✓',
+}: {
+  tenantId: string;
+  kind: PlantillaKind;
+  value: string;
+  onChange: (texto: string) => void;
+  /** Se llama con true solo cuando el worker validó ESTE texto sin errores. */
+  onValido: (ok: boolean) => void;
+  okLabel?: string;
+}) {
+  const cfg = kind.config?.texto;
+  const ref = useRef<HTMLTextAreaElement>(null);
+  const [check, setCheck] = useState<(TextoValidado & { de: string }) | null>(null);
+  const { mutate: validarMutate } = usePlantillaTextoValidar();
+
+  // Validación en el worker, con respiro de 400 ms entre pulsaciones.
+  useEffect(() => {
+    if (!cfg) return;
+    const texto = value;
+    const t = setTimeout(() => {
+      validarMutate({ id: tenantId, kind: kind.kind, texto }, { onSuccess: (r) => setCheck({ ...r, de: texto }) });
+    }, 400);
+    return () => clearTimeout(t);
+  }, [value, cfg, kind.kind, tenantId, validarMutate]);
+
+  const actual = check && check.de === value ? check : null;
+  useEffect(() => onValido(Boolean(actual?.ok)), [actual, onValido]);
+
+  if (!cfg) return null;
+  const usadas = variablesUsadas(value);
+
+  function insertar(clave: string) {
+    const el = ref.current;
+    const inicio = el?.selectionStart ?? value.length;
+    const fin = el?.selectionEnd ?? value.length;
+    const r = insertarVariable(value, inicio, fin, clave);
+    onChange(r.texto);
+    requestAnimationFrame(() => {
+      if (!ref.current) return;
+      ref.current.focus();
+      ref.current.setSelectionRange(r.cursor, r.cursor);
+    });
+  }
+
+  return (
+    <>
+      <div className="tx-chips" role="group" aria-label="Insertar variable">
+        {cfg.campos.map((c) => (
+          <button
+            key={c.clave}
+            type="button"
+            className={`tx-chip${usadas.includes(c.clave) ? ' on' : ''}`}
+            title={`${c.label}${c.obligatoria ? ' (obligatoria)' : ''} — ejemplo: ${c.ejemplo}`}
+            onClick={() => insertar(c.clave)}
+          >
+            {`{{${c.clave}}}`}
+            {c.obligatoria ? <span aria-label="obligatoria">*</span> : null}
+          </button>
+        ))}
+      </div>
+      <textarea
+        ref={ref}
+        value={value}
+        rows={6}
+        maxLength={2000}
+        aria-label={`Texto de ${kind.label}`}
+        aria-invalid={actual ? !actual.ok : undefined}
+        onChange={(e) => onChange(e.target.value)}
+      />
+      <div className="tx-meta">
+        <span className="muted">Pulsa una variable para insertarla donde está el cursor. * = obligatoria.</span>
+        <span className={`tx-count${actual && actual.longitud > cfg.max ? ' bad' : ''}`}>
+          {actual ? actual.longitud : value.length}/{cfg.max}
+        </span>
+      </div>
+      {actual && actual.errores.length ? (
+        <ul className="tx-errores" aria-live="polite">
+          {actual.errores.map((e) => (
+            <li key={e.code + (e.clave ?? '')}>{mensajeTexto(e, cfg.campos)}</li>
+          ))}
+        </ul>
+      ) : actual?.ok ? (
+        <p className="tx-ok" aria-live="polite">
+          {okLabel}
+        </p>
+      ) : null}
+    </>
   );
 }

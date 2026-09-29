@@ -97,4 +97,62 @@ describe('CrearPlantilla (diálogo de alta configurable)', () => {
     expect(posts.length).toBe(0);
     await waitFor(() => expect(cerrado).toHaveBeenCalled());
   });
+
+  it('confirmación de reserva: el texto se edita con variables y el envío lo manda, sin antelación', async () => {
+    const user = userEvent.setup();
+    const KIND_CONF: PlantillaKind = {
+      kind: 'confirmacion_reserva',
+      label: 'Confirmación de reserva online',
+      fuente: 'registro',
+      categoria: 'UTILITY',
+      descripcion: 'Datos de la reserva.',
+      config: {
+        preview: 'Hola María, tu cita con Clínica Ejemplo está reservada.',
+        texto: {
+          defecto: 'Hola {{nombre}}, tu cita es el {{fecha}} a las {{hora}}. Gestiónala aquí: {{enlace}} ¡Te esperamos!',
+          max: 1024,
+          campos: [
+            { clave: 'nombre', label: 'Nombre', obligatoria: false, ejemplo: 'María' },
+            { clave: 'fecha', label: 'Fecha', obligatoria: true, ejemplo: 'jueves, 4 de septiembre' },
+            { clave: 'hora', label: 'Hora', obligatoria: true, ejemplo: '10:00' },
+            { clave: 'enlace', label: 'Enlace', obligatoria: true, ejemplo: 'https://citas.hirevai.com/x' },
+          ],
+        },
+      },
+    };
+    const posts: { url: string; body: Record<string, unknown> }[] = [];
+    vi.stubGlobal('fetch', (async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+      const body = JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown>;
+      if (body.validar) {
+        const ok = String(body.texto).includes('{{enlace}}');
+        return Response.json({ ok, errores: ok ? [] : [{ code: 'texto_falta_variable', clave: 'enlace' }], preview: '', longitud: 60 });
+      }
+      posts.push({ url, body });
+      return new Response(JSON.stringify({ ok: true, kind: 'confirmacion_reserva', sid: 'HX1', status: 'pending' }), { status: 201, headers: { 'Content-Type': 'application/json' } });
+    }) as typeof fetch);
+    render(
+      <QueryClientProvider client={createQueryClient()}>
+        <ToastProvider>
+          <CrearPlantilla tenantId="t-1" tenantName="Clínica Alfa" kind={KIND_CONF} onClose={() => {}} />
+        </ToastProvider>
+      </QueryClientProvider>,
+    );
+    const area = screen.getByLabelText('Texto de Confirmación de reserva online') as HTMLTextAreaElement;
+    expect(screen.queryByLabelText('Antelación del recordatorio')).toBeNull();
+    // Sin el enlace obligatorio el envío queda bloqueado.
+    await user.clear(area);
+    await user.type(area, 'Hola, tu cita del {{{{}fecha}} a las {{{{}hora}} está lista, gracias');
+    const enviar = screen.getByRole('button', { name: 'Enviar a aprobación' });
+    await waitFor(() => expect(enviar).toBeDisabled());
+    // El chip inserta la variable y la vista previa usa el ejemplo.
+    await user.click(screen.getByRole('button', { name: /\{\{enlace\}\}/ }));
+    await waitFor(() => expect(enviar).toBeEnabled());
+    expect(document.querySelector('.wapre-body')?.textContent).toContain('https://citas.hirevai.com/x');
+    await user.click(enviar);
+    await waitFor(() => expect(posts.length).toBe(1));
+    expect(posts[0]!.url).toContain('/provision/plantillas/confirmacion_reserva');
+    expect(posts[0]!.body).toEqual({ texto: area.value });
+    expect(String(posts[0]!.body.texto)).toContain('{{enlace}}');
+  });
 });
