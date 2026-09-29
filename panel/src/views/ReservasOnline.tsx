@@ -11,11 +11,11 @@
 // pantalla es la misma para Velai y para cada cliente en su propio panel.
 import { useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import qrcode from 'qrcode-generator';
 import { api } from '../api/client';
 import { useToast } from '../components/Toasts';
 import { HoursGrid } from '../components/HoursGrid';
 import { confirmar } from '../components/Confirmar';
+import { QrReservas } from '../components/QrReservas';
 import { gridFromHours, gridVacio, hoursFromGrid } from '../lib/horario';
 
 type Service = { id?: string; slug: string; name: string; description: string; minutes: number; mode: string; location: string; buffer_min: number; active: number; position: number };
@@ -56,6 +56,7 @@ export function ReservasOnline({ tenantId, dominios, isCliente = false }: { tena
   const [snippetService, setSnippetService] = useState('');
   const [forma, setForma] = useState<'enlace' | 'inline' | 'popup'>('inline');
   const [preview, setPreview] = useState(false);
+  const [qr, setQr] = useState(false);
 
   async function save(suffix: string, method: string, body?: unknown) {
     setSaving(true);
@@ -67,12 +68,6 @@ export function ReservasOnline({ tenantId, dominios, isCliente = false }: { tena
     finally { setSaving(false); }
   }
   async function copy(text: string) { try { await navigator.clipboard.writeText(text); toast('Copiado'); } catch { toast('No se pudo copiar. Selecciona el texto y cópialo.', false); } }
-  function downloadQR(url: string) {
-    const code = qrcode(0, 'M'); code.addData(url); code.make();
-    const objectUrl = URL.createObjectURL(new Blob([code.createSvgTag(6, 24)], { type: 'image/svg+xml' }));
-    const a = document.createElement('a'); a.href = objectUrl; a.download = 'reservas-qr.svg'; a.click();
-    setTimeout(() => URL.revokeObjectURL(objectUrl), 1000);
-  }
 
   if (booking.error || services.error) return <div className="card" role="alert">No se pudo cargar Reservas online. <button className="btn alt" onClick={() => { void booking.refetch(); void services.refetch(); }}>Reintentar</button></div>;
   if (!booking.data || !services.data) return <p>Cargando reservas online…</p>;
@@ -125,7 +120,7 @@ export function ReservasOnline({ tenantId, dominios, isCliente = false }: { tena
                 <span className="muted"><Ico d={ICO.mundo} s={17} /></span>
                 <span className="u">{chosenUrl.replace(/^https:\/\//, '')}</span>
                 <button className="btn alt btnsm" type="button" onClick={() => void copy(chosenUrl)}><Ico d={ICO.copiar} s={14} /> Copiar</button>
-                <button className="btn alt btnsm" type="button" onClick={() => downloadQR(chosenUrl)}><Ico d={ICO.qr} s={14} /> QR</button>
+                <button className="btn alt btnsm" type="button" onClick={() => setQr(true)}><Ico d={ICO.qr} s={14} /> QR</button>
                 <a className="btn alt btnsm" href={chosenUrl} target="_blank" rel="noopener noreferrer"><Ico d={ICO.abrir} s={14} /> Abrir</a>
               </div>
               <p className="muted mt6">La página usa el logo y los colores de la ficha del negocio, y lleva el distintivo «Tecnología Velai».</p>
@@ -263,6 +258,7 @@ export function ReservasOnline({ tenantId, dominios, isCliente = false }: { tena
         </div>
       ) : null}
 
+      {qr && url ? <QrReservas tenantId={tenantId} url={chosenUrl} onClose={() => setQr(false)} /> : null}
       {editing ? <ServicioDialog servicio={editing} saving={saving} onClose={() => setEditing(null)} onSave={async (s) => { if (await save('/services' + (s.id ? '/' + s.id : ''), s.id ? 'PATCH' : 'POST', s)) setEditing(null); }} /> : null}
     </section>
   );

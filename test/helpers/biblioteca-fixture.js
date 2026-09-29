@@ -17,7 +17,8 @@ export async function bibliotecaFixture() {
     ALLOWED_WEB_ORIGINS: 'https://library.test', DEFAULT_TENANT_SLUG: 'biblioteca', TURNSTILE_SECRET_KEY: 'test', ANTHROPIC_API_KEY: 'test', TWILIO_ACCOUNT_SID: 'AC' + 'a'.repeat(32), TWILIO_AUTH_TOKEN: 'test-token',
     KV: { get: async (key, type) => { const v = kv.get(key) || null; return type === 'json' && v ? JSON.parse(v) : v; }, put: async (key, value) => kv.set(key, value), delete: async (key) => kv.delete(key), getWithMetadata: async () => null },
     MEDIA: {
-      async put(key, bytes, options) { objects.set(key, { bytes: new Uint8Array(bytes), contentType: options.httpMetadata.contentType }); },
+      async put(key, bytes, options) { objects.set(key, { bytes: new Uint8Array(bytes), contentType: options.httpMetadata.contentType, uploaded: new Date() }); },
+      async head(key) { const r = objects.get(key); return r ? { uploaded: r.uploaded, httpMetadata: { contentType: r.contentType } } : null; },
       async get(key) { const r = objects.get(key); return r ? { body: r.bytes, httpMetadata: { contentType: r.contentType }, httpEtag: '"test"' } : null; },
       async delete(key) { objects.delete(key); },
     },

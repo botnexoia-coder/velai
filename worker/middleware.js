@@ -189,6 +189,8 @@ export function clienteAllowed(path, method) {
   if (/^\/api\/admin\/tenants\/[0-9a-f-]+\/calendar$/i.test(path) && ['GET', 'PATCH', 'DELETE'].includes(method)) return true;
   if (/^\/api\/admin\/tenants\/[0-9a-f-]+\/calendar\/connect$/i.test(path) && method === 'POST') return true;
   if (/^\/api\/admin\/tenants\/[0-9a-f-]+\/booking$/i.test(path) && ['GET', 'PATCH'].includes(method)) return true;
+  // El logo del centro de SU QR de reservas: el handler exige que el :id sea el suyo.
+  if (/^\/api\/admin\/tenants\/[0-9a-f-]+\/booking\/qr-logo$/i.test(path) && ['GET', 'POST', 'DELETE'].includes(method)) return true;
   if (/^\/api\/admin\/tenants\/[0-9a-f-]+\/services$/i.test(path) && ['GET', 'POST'].includes(method)) return true;
   if (/^\/api\/admin\/tenants\/[0-9a-f-]+\/media$/i.test(path) && ['GET', 'POST'].includes(method)) return true;
   if (/^\/api\/admin\/tenants\/[0-9a-f-]+\/media\/[0-9a-f-]+$/i.test(path) && ['PATCH', 'DELETE'].includes(method)) return true;
