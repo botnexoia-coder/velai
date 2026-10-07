@@ -13,7 +13,7 @@
     "check:aislamiento": "node scripts/check-aislamiento.mjs",
     "check:entornos": "node scripts/check-entornos.mjs",
     "test": "node scripts/check-test-catalog.mjs && npm run test:backend",
-    "test:backend": "node --test test/planes.test.js test/worker.test.js test/aislamiento.test.js test/agenda.test.js test/reserva.test.js test/finanzas.test.js test/biblioteca.test.js test/plantilla-texto.test.js",
+    "test:backend": "node --test test/planes.test.js test/worker.test.js test/aislamiento.test.js test/agenda.test.js test/reserva.test.js test/finanzas.test.js test/biblioteca.test.js test/plantilla-texto.test.js test/web-delivery.test.js",
     "test:panel": "cd panel && npm test -- --run"
   },
   "dependencies": {

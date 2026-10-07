@@ -2663,11 +2663,20 @@ export async function handleChatPoll(request, env, cors, url) {
   }, 200, cors);
 }
 
+async function acceptedHumanMessage(env, conv, messageId, message) {
+  const row = await env.DB.prepare("SELECT id,text FROM conv_messages WHERE conversation_id=? AND client_message_id=? AND role='user'")
+    .bind(conv.id, messageId).first();
+  if (row && row.text !== message) throw new HttpError(409, 'message_id_conflict');
+  return row;
+}
+
 export async function handleChat(request, env, cors, ctx, config) {
   const body = await readJson(request, 8000);
   if (!UUID_RE.test(body.conversationId || '')) throw new HttpError(400, 'invalid_conversation_id');
   const message = clean(body.message, 2000);
   if (!message) throw new HttpError(400, 'invalid_message');
+  if (body.messageId != null && (typeof body.messageId !== 'string' || !UUID_RE.test(body.messageId))) throw new HttpError(400, 'invalid_message_id');
+  if (body.messageId) body.messageId = body.messageId.toLowerCase();
   if (body.demo && !isDemoKey(config, body.demo)) throw new HttpError(400, 'invalid_demo');
   // La conversación vive en D1 desde la migración 0021 (antes en KV, con TTL de 24 h y
   // recortada a 20 mensajes). Sin base no hay memoria, y responder sin memoria es peor
@@ -2684,6 +2693,10 @@ export async function handleChat(request, env, cors, ctx, config) {
     if (!conv.demo) ctx.waitUntil(recordConversation(env, tenant, 'web'));
   }
   if (body.demo && conv.demo !== body.demo) throw new HttpError(409, 'conversation_mode_mismatch');
+  // El recibo se consulta antes del estado: reintentar una entrega humana ya aceptada
+  // nunca la reenvía a la IA si el asesor terminó entre ambas peticiones.
+  const accepted = body.messageId && !conv.isNew ? await acceptedHumanMessage(env, conv, body.messageId, message) : null;
+  if (accepted) return json({ reply: null, state: conv.state, lastId: accepted.id, accepted: true }, 200, cors);
   // Mismas reglas que WhatsApp desde la migración 0026. La cuenta atrás vence aquí además
   // de en el cron: si el visitante vuelve a escribir y el plazo pasó, la IA le contesta en
   // este mismo mensaje en vez de hacerle esperar otra ventana del cron.
@@ -2695,9 +2708,17 @@ export async function handleChat(request, env, cors, ctx, config) {
   // Con una persona al mando el bot NO contesta: el mensaje se guarda y el widget lo
   // recogerá por el sondeo. Dos voces en el mismo hilo es peor que ninguna.
   if (['esperando', 'humano'].includes(conv.state)) {
-    await convAppend(env, conv, [{ role: 'user', content: message }]);
+    conv.clientMessageId = body.messageId || null;
+    const saved = await convAppend(env, conv, [{ role: 'user', content: message }]);
+    if (!saved) {
+      // Un duplicado concurrente revierte TODO el batch (incluido msgs). Solo un
+      // recibo durable del mismo texto permite aceptar la segunda petición.
+      const duplicate = body.messageId ? await acceptedHumanMessage(env, conv, body.messageId, message) : null;
+      if (!duplicate) throw new HttpError(503, 'conversation_message_not_saved');
+      conv.lastId = duplicate.id;
+    }
     console.log(JSON.stringify({ level: 'info', code: 'bot_paused', tenant: tenant.slug, state: conv.state, channel: 'web' }));
-    return json({ reply: null, state: conv.state, lastId: conv.lastId || 0 }, 200, cors);
+    return json({ reply: null, state: conv.state, lastId: conv.lastId || 0, accepted: true }, 200, cors);
   }
   // El widget DECLARA que sabe recibir respuestas (`live`). Sin eso no se cede el turno:
   // los widgets cacheados en las webs de clientes (v=8, caché de un año) no saben sondear,
@@ -2865,8 +2886,11 @@ export async function convAppend(env, conv, turns) {
       .bind(list.length, unanswered, now, expires, conv.inbox || null, inbound, conv.id);
   try {
     const out = await env.DB.batch([head, ...list.map((t) => env.DB
-      .prepare('INSERT INTO conv_messages (conversation_id,role,agent_email,text,created_at,attachments_json) VALUES (?,?,?,?,?,?)')
-      .bind(conv.id, t.role, t.agentEmail || null, t.content, now, t.attachments?.length ? JSON.stringify(t.attachments) : null))]);
+      .prepare(conv.clientMessageId
+        ? 'INSERT INTO conv_messages (conversation_id,role,agent_email,text,created_at,attachments_json,client_message_id) VALUES (?,?,?,?,?,?,?)'
+        : 'INSERT INTO conv_messages (conversation_id,role,agent_email,text,created_at,attachments_json) VALUES (?,?,?,?,?,?)')
+      .bind(conv.id, t.role, t.agentEmail || null, t.content, now, t.attachments?.length ? JSON.stringify(t.attachments) : null,
+        ...(conv.clientMessageId ? [t.role === 'user' ? conv.clientMessageId : null] : [])))]);
     const last = out && out[out.length - 1];
     if (last && last.meta && last.meta.last_row_id) conv.lastId = last.meta.last_row_id;
     else {
