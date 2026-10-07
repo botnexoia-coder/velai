@@ -1507,18 +1507,25 @@ async function deliver(env, channel, lead, tenant) {
   if (channel === 'telegram') {
     // Entrega DUAL (decisión de Juan, 2026-08-21): el aviso del cliente va a SU chat
     // — y sin chat propio es un skip VISIBLE, no un fallback silencioso — pero a
-    // Velai le llega SIEMPRE una copia operativa de cada lead, deduplicada por lead
-    // para que los reintentos del ledger no dupliquen el ping.
+    // Velai intenta una copia operativa best effort de cada lead. Solo una respuesta
+    // confirmada activa la deduplicación; KV no garantiza exclusión entre concurrencias.
     const chatId = tenant ? tenant.telegram_chat_id : env.TELEGRAM_CHAT_ID;
     if (env.TELEGRAM_CHAT_ID && String(chatId || '') !== String(env.TELEGRAM_CHAT_ID)) {
       try {
         const dedupeId = lead.id || lead.request_id || '';
         const opsKey = `opsping:${dedupeId}`;
         if (!dedupeId || !env.KV || !(await env.KV.get(opsKey))) {
-          if (dedupeId && env.KV) await env.KV.put(opsKey, '1', { expirationTtl: 30 * 86400 });
-          await sendTelegramText(env, notificationText(env, lead, tenant), env.TELEGRAM_CHAT_ID);
+          const opsOutcome = await sendTelegramText(env, notificationText(env, lead, tenant), env.TELEGRAM_CHAT_ID);
+          if (opsOutcome.ok) {
+            if (dedupeId && env.KV) await env.KV.put(opsKey, '1', { expirationTtl: 30 * 86400 });
+          } else {
+            console.log(JSON.stringify({ level: 'warn', code: 'lead_ops_notify_failed', leadId: lead.id || null, error: opsOutcome.error || 'not_delivered' }));
+          }
         }
-      } catch (_) { /* la copia de Velai jamás decide el estado del aviso del cliente */ }
+      } catch (error) {
+        // Best effort: visible failure, without changing the tenant's delivery ledger.
+        console.log(JSON.stringify({ level: 'warn', code: 'lead_ops_notify_failed', leadId: lead.id || null, error: error.name || 'network_error' }));
+      }
     }
     if (tenant && !chatId) return { skipped: true, error: 'telegram_not_configured' };
     // Marca blanca: el aviso del cliente sale desde SU bot si lo configuró; y si el
@@ -1613,7 +1620,7 @@ function inputToNotifiable(input) {
   };
 }
 
-// Degradación controlada: D1 → aviso directo → cola en KV (TTL 7 días, drenada por el
+// Degradación controlada: D1 → aviso directo → cola en KV (TTL 30 días, drenada por el
 // cron). Una caída de D1 no puede costar leads; la respuesta indica la garantía obtenida
 // via `stored` ('d1' | 'kv' | 'notification') y `degraded`.
 async function storeLead(env, ctx, input) {
@@ -1649,7 +1656,7 @@ async function storeLead(env, ctx, input) {
     let queued = false;
     if (env.KV) {
       try {
-        await env.KV.put(`leadq:${input.requestId}`, JSON.stringify({ ...input, notified, notifiedChannels }), { expirationTtl: 30 * 86400 });
+        await env.KV.put(`leadq:${encodeURIComponent(input.tenantId || '')}:${encodeURIComponent(input.requestId)}`, JSON.stringify({ ...input, notified, notifiedChannels }), { expirationTtl: 30 * 86400 });
         queued = true;
       } catch (_) {}
     }
@@ -1657,10 +1664,14 @@ async function storeLead(env, ctx, input) {
     if (env.KV) {
       try {
         if (!(await env.KV.get('alert:degraded'))) {
-          await env.KV.put('alert:degraded', '1', { expirationTtl: 3600 });
-          await sendTelegramText(env, '⚠️ <b>Velai</b>: D1 no disponible, leads en cola KV. Revisar el binding DB del worker.');
+          const backup = queued ? 'cola KV' : alerted ? 'aviso directo al equipo' : 'sin respaldo confirmado';
+          const alertOutcome = await sendTelegramText(env, `⚠️ <b>Velai</b>: D1 no disponible. Respaldo de este lead: ${backup}. Revisar el binding DB del worker.`);
+          if (alertOutcome.ok) await env.KV.put('alert:degraded', '1', { expirationTtl: 3600 });
+          else console.log(JSON.stringify({ level: 'warn', code: 'lead_degraded_alert_failed', error: alertOutcome.error || 'not_delivered' }));
         }
-      } catch (_) {}
+      } catch (error) {
+        console.log(JSON.stringify({ level: 'warn', code: 'lead_degraded_alert_failed', error: error.name || 'network_error' }));
+      }
     }
     if (!queued && !alerted) throw error;
     console.log(JSON.stringify({ level: 'error', code: 'lead_degraded', stored: queued ? 'kv' : 'notification' }));

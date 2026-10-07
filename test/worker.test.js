@@ -2,7 +2,7 @@ import test from 'node:test';
 import { sqliteD1 } from './helpers/sqlite-d1.js';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
-import { createWorker, processConversationFollowups, testing } from '../worker/app.js';
+import { createWorker, handleLead, processConversationFollowups, testing } from '../worker/app.js';
 import { esSocio } from '../worker/middleware.js';
 import { encryptSecret, decryptSecret } from '../worker/crypto.js';
 import { deploymentDecision, deploymentScope, deploymentScopeForPush } from '../scripts/deploy-scope.mjs';
@@ -6809,4 +6809,66 @@ test('event intake: same valid UUID in two authenticated tenants links each rese
     assert.deepEqual(linked, { lead_tenant: id, reservation_tenant: id });
   }
   await Promise.allSettled(waits); assert.notEqual(ids[0], ids[1]);
+});
+
+
+test('degraded lead queue retains both tenants sharing a request UUID and drains both', async (t) => {
+  const DB = await sqliteD1(); t.after(() => DB.close());
+  const entries = new Map();
+  const KV = { async get(k, type) { const v = entries.get(k); return v && type === 'json' ? JSON.parse(v) : v || null; }, async put(k,v) { entries.set(k,v); }, async delete(k) { entries.delete(k); }, async list({prefix}) { return { keys: [...entries.keys()].filter(k=>k.startsWith(prefix)).map(name=>({name})) }; } };
+  t.mock.method(globalThis, 'fetch', async (url) => { assert.equal(String(url), 'https://challenges.cloudflare.com/turnstile/v0/siteverify'); return Response.json({ success: true, action: 'lead' }); });
+  const requestId = '00000000-0000-4000-8000-0000000000f4', now = new Date().toISOString();
+  const broken = { prepare: DB.prepare, async batch() { throw Error('synthetic_d1_down'); } };
+  for (let i=0;i<2;i++) {
+    const id = `00000000-0000-4000-8000-0000000000${i ? 'b4' : 'a4'}`, slug = `queue-security-${i}`;
+    await DB.prepare('INSERT INTO tenants(id,slug,name,channel_address,system_prompt,active,created_at,updated_at) VALUES (?,?,?,?,?,1,?,?)').bind(id,slug,'Synthetic',`web:${slug}`,'Synthetic',now,now).run();
+    const response = await handleLead(new Request('https://isolated.invalid/lead', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({requestId,tenant:slug,nombre:`Person ${i}`,whatsapp:'+34600000000',turnstileToken:'synthetic'})}), {DB:broken,KV,TURNSTILE_SECRET_KEY:'synthetic'}, {}, {waitUntil(){throw Error('No D1 success expected');}});
+    assert.equal(response.status,201); assert.equal((await response.json()).stored,'kv');
+  }
+  assert.equal([...entries.keys()].filter(k=>k.startsWith('leadq:')).length,2);
+  await testing.drainQueuedLeads({DB,KV});
+  const rows = (await DB.prepare('SELECT tenant_id,name FROM leads WHERE tenant_request_id=? ORDER BY name').bind(requestId).all()).results;
+  assert.equal(rows.length,2); assert.notEqual(rows[0].tenant_id,rows[1].tenant_id);
+  assert.deepEqual(rows.map(r=>r.name),['Person 0','Person 1']);
+  assert.equal([...entries.keys()].filter(k=>k.startsWith('leadq:')).length,0);
+});
+
+test('operational lead copy does not mark failed Telegram delivery as deduplicated', async (t) => {
+  const entries = new Map(), calls = [];
+  const KV = { async get(k){return entries.get(k)||null;}, async put(k,v){entries.set(k,v);} };
+  t.mock.method(globalThis,'fetch',async(url)=>{calls.push(String(url));if(calls.length===1)return new Response('{}',{status:503});if(calls.length===2)return new Response('malformed',{status:200});if(calls.length===3)throw Error('synthetic_network_failure');return Response.json({ok:true});});
+  const env={KV,TELEGRAM_TOKEN:'synthetic',TELEGRAM_CHAT_ID:'ops-synthetic'};
+  const lead={id:'synthetic-lead',name:'Synthetic'};
+  const tenant={id:'synthetic-tenant',name:'Synthetic',telegram_chat_id:null};
+  assert.equal((await testing.deliver(env,'telegram',lead,tenant)).skipped,true);
+  assert.equal(entries.has('opsping:synthetic-lead'),false);
+  assert.equal((await testing.deliver(env,'telegram',lead,tenant)).skipped,true);
+  assert.equal(entries.has('opsping:synthetic-lead'),false);
+  await testing.deliver(env,'telegram',lead,tenant); assert.equal(entries.has('opsping:synthetic-lead'),false);
+  await testing.deliver(env,'telegram',lead,tenant);
+  assert.equal(calls.length,4); assert.equal(entries.has('opsping:synthetic-lead'),true);
+  await testing.deliver(env,'telegram',lead,tenant); assert.equal(calls.length,4);
+});
+
+
+test('degraded warning retries after Telegram rejects it and describes notification-only backup', async (t) => {
+  const DB = await sqliteD1(); t.after(() => DB.close());
+  const now = new Date().toISOString(), id = '00000000-0000-4000-8000-0000000000a5';
+  await DB.prepare('INSERT INTO tenants(id,slug,name,channel_address,system_prompt,active,created_at,updated_at) VALUES (?,?,?,?,?,1,?,?)').bind(id,'silent-warning','Synthetic','web:silent-warning','Synthetic',now,now).run();
+  const entries = new Map(), warnings = [];
+  const KV = {async get(k,type){const v=entries.get(k);return v&&type==='json'?JSON.parse(v):v||null;},async put(k,v){if(k.startsWith('leadq:'))throw Error('synthetic_kv_down');entries.set(k,v);}};
+  t.mock.method(globalThis,'fetch',async(url,init)=>{
+    if(String(url)==='https://challenges.cloudflare.com/turnstile/v0/siteverify') return Response.json({success:true,action:'lead'});
+    assert.ok(String(url).startsWith('https://api.telegram.org/'));
+    const text=JSON.parse(init.body).text;
+    if(text.startsWith('⚠️')) {warnings.push(text);return warnings.length===1?new Response('{}',{status:503}):Response.json({ok:true});}
+    return Response.json({ok:true});
+  });
+  const env={DB:{prepare:DB.prepare,async batch(){throw Error('synthetic_d1_down');}},KV,TURNSTILE_SECRET_KEY:'synthetic',TELEGRAM_TOKEN:'synthetic',TELEGRAM_CHAT_ID:'synthetic'};
+  const send=()=>handleLead(new Request('https://isolated.invalid/lead',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({requestId:'00000000-0000-4000-8000-0000000000f5',tenant:'silent-warning',nombre:'Synthetic',whatsapp:'+34600000000',turnstileToken:'synthetic'})}),env,{}, {waitUntil(){throw Error('Unexpected durable success');}});
+  assert.equal((await (await send()).json()).stored,'notification');
+  assert.equal(entries.has('alert:degraded'),false);
+  assert.equal((await (await send()).json()).stored,'notification');
+  assert.equal(warnings.length,2); assert.equal(entries.has('alert:degraded'),true);
+  assert.ok(warnings.every(text=>text.includes('aviso directo al equipo')&&!text.includes('cola KV')));
 });
