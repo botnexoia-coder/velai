@@ -1373,26 +1373,28 @@ async function persistLead(env, input) {
   if (!env.DB) throw new HttpError(503, 'lead_storage_not_configured');
   const now = new Date().toISOString();
   const id = crypto.randomUUID();
+  // Keep the legacy globally unique storage key separate from caller idempotency.
+  // 0049 preserves historical request IDs and scopes tenant_request_id, including NULL.
   const args = [
-    id, input.tenantId || null, input.requestId, input.conversationId || null, input.source, input.name || null,
+    id, input.tenantId || null, crypto.randomUUID(), input.conversationId || null, input.source, input.name || null,
     input.whatsapp || null, input.phone || null, input.sector || null, input.messagesPerDay || null,
     input.channel || null, input.currentResponder || null, input.score, input.note || null,
     input.need || null, input.context || null, JSON.stringify(input.utm || {}), input.pageUrl || null,
-    now, now, expiryDate(env),
+    now, now, expiryDate(env), input.requestId,
   ];
   try {
     await env.DB.batch([
       env.DB.prepare(`INSERT INTO leads
-        (id,tenant_id,request_id,conversation_id,source,name,whatsapp,whatsapp_normalized,sector,messages_per_day,channel,current_responder,score,note,need,context,attribution_json,page_url,created_at,updated_at,expires_at)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).bind(...args),
+        (id,tenant_id,request_id,conversation_id,source,name,whatsapp,whatsapp_normalized,sector,messages_per_day,channel,current_responder,score,note,need,context,attribution_json,page_url,created_at,updated_at,expires_at,tenant_request_id)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).bind(...args),
       env.DB.prepare("INSERT INTO lead_notifications (lead_id,channel,status,updated_at) VALUES (?,'telegram','pending',?)").bind(id, now),
       env.DB.prepare("INSERT INTO lead_notifications (lead_id,channel,status,updated_at) VALUES (?,'whatsapp','pending',?)").bind(id, now),
     ]);
     return { id, created: true };
   } catch (error) {
     if (!/UNIQUE|constraint/i.test(String(error))) throw error;
-    const existing = await env.DB.prepare('SELECT id FROM leads WHERE request_id = ? OR (conversation_id = ? AND whatsapp_normalized = ?) LIMIT 1')
-      .bind(input.requestId, input.conversationId || '', input.phone || '').first();
+    const existing = await env.DB.prepare('SELECT id FROM leads WHERE tenant_id IS ? AND (tenant_request_id = ? OR (conversation_id = ? AND whatsapp_normalized = ?)) ORDER BY (tenant_request_id = ?) DESC LIMIT 1')
+      .bind(input.tenantId || null, input.requestId, input.conversationId || '', input.phone || '', input.requestId).first();
     if (!existing) throw error;
     // Recaptura sobre un lead YA guardado: rellena solo los HUECOS. El motivo se sabe al
     // segundo mensaje pero el nombre llega más tarde, y antes la fila se quedaba «sin
@@ -1401,8 +1403,8 @@ async function persistLead(env, input) {
     const fill = [['name', input.name], ['sector', input.sector], ['need', input.need], ['context', input.context]]
       .filter(([, val]) => val);
     if (fill.length) {
-      await env.DB.prepare(`UPDATE leads SET ${fill.map(([col]) => `${col}=COALESCE(${col},?)`).join(',')}, updated_at=? WHERE id=?`)
-        .bind(...fill.map(([, val]) => val), now, existing.id).run();
+      await env.DB.prepare(`UPDATE leads SET ${fill.map(([col]) => `${col}=COALESCE(${col},?)`).join(',')}, updated_at=? WHERE id=? AND tenant_id IS ?`)
+        .bind(...fill.map(([, val]) => val), now, existing.id, input.tenantId || null).run();
     }
     return { id: existing.id, created: false, enriched: fill.length > 0 };
   }
@@ -1979,7 +1981,7 @@ async function linkMarkedCapture(env, tenant, requestId, markerValue, convId, cu
   let leadId = UUID_RE.test(String(markerValue || '')) ? String(markerValue) : '';
   if (!leadId && env.DB) {
     try {
-      const existing = await env.DB.prepare('SELECT id FROM leads WHERE tenant_id=? AND request_id=? LIMIT 1')
+      const existing = await env.DB.prepare('SELECT id FROM leads WHERE tenant_id=? AND tenant_request_id=? LIMIT 1')
         .bind(tenant.id, requestId).first();
       leadId = existing && existing.id ? String(existing.id) : '';
     } catch (error) {

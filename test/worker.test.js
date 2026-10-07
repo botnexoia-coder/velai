@@ -2940,7 +2940,7 @@ test('captura de lead: los DOS canales exigen un asunto y reintentan mientras fa
       '1077804955422697', turns(2), 'conv-messenger',
     );
     assert.equal(stored.at(-1)[0].args[4], 'messenger');
-    assert.equal(stored.at(-1)[0].args[2], 'messenger:t1:1077804955422697');
+    assert.equal(stored.at(-1)[0].args[21], 'messenger:t1:1077804955422697');
     assert.equal(stored.at(-1)[0].args[3], 'conv-messenger', 'el aviso puede enlazar al hilo que originó el lead');
     assert.deepEqual(stored.at(-1)[0].args.slice(6, 8), [null, null], 'un PSID no se guarda como teléfono');
   } finally { globalThis.fetch = realFetch; }
@@ -6536,7 +6536,7 @@ test('formulario externo firmado crea una sola vez lead, reserva, consentimiento
   assert.equal((await retry.json()).duplicate, true);
   await Promise.allSettled(waits);
 
-  assert.equal((await DB.prepare('SELECT COUNT(*) AS n FROM leads WHERE request_id=?').bind(requestId).first()).n, 1);
+  assert.equal((await DB.prepare('SELECT COUNT(*) AS n FROM leads WHERE tenant_request_id=?').bind(requestId).first()).n, 1);
   assert.equal((await DB.prepare('SELECT COUNT(*) AS n FROM event_reservations WHERE request_id=?').bind(requestId).first()).n, 1);
   const consent = await DB.prepare('SELECT status,channel FROM contact_consents WHERE request_id=?').bind(requestId).first();
   assert.deepEqual(consent, { status: 'accepted', channel: 'web' });
@@ -6734,4 +6734,79 @@ test('planes: sender y sender/sync no añaden WhatsApp a un Esencial web', async
     assert.equal(calls.length, 1); assert.equal(calls[0].method, 'GET');
     assert.equal(h.updates.length, 0);
   } finally { globalThis.fetch = originalFetch; }
+});
+
+// Security regression: real SQLite, scoped idempotency and historical FK retention.
+test('leads: request and conversation dedup stay inside tenant, including null tenant', async (t) => {
+  const DB = await sqliteD1(); t.after(() => DB.close());
+  const now = new Date().toISOString();
+  const tenants = ['00000000-0000-4000-8000-0000000000a1', '00000000-0000-4000-8000-0000000000b1'];
+  for (const [i, id] of tenants.entries()) await DB.prepare('INSERT INTO tenants(id,slug,name,channel_address,system_prompt,active,created_at,updated_at) VALUES (?,?,?,?,?,1,?,?)')
+    .bind(id, `security-${i}`, 'Synthetic', `web:security-${i}`, 'Synthetic', now, now).run();
+  const key = '00000000-0000-4000-8000-0000000000c1';
+  const base = { requestId: key, source: 'test', score: null };
+  const a = await testing.persistLead({ DB }, { ...base, tenantId: tenants[0] });
+  const b = await testing.persistLead({ DB }, { ...base, tenantId: tenants[1], context: 'B only' });
+  const legacy = await testing.persistLead({ DB }, base);
+  assert.notEqual(a.id, b.id); assert.notEqual(legacy.id, a.id);
+  assert.equal((await DB.prepare('SELECT context FROM leads WHERE id=?').bind(a.id).first()).context, null);
+  for (const [tenantId, expected] of [[tenants[0], a], [tenants[1], b], [null, legacy]]) {
+    const retry = await testing.persistLead({ DB }, { ...base, tenantId });
+    assert.equal(retry.id, expected.id); assert.equal(retry.created, false);
+  }
+  const chat = { source: 'test', score: null, conversationId: '00000000-0000-4000-8000-0000000000d1', phone: '+34600000000' };
+  const chatIds = [];
+  for (const [i, tenantId] of [...tenants, null].entries()) {
+    const first = await testing.persistLead({ DB }, { ...chat, tenantId, requestId: `chat-first-${i}` });
+    const retry = await testing.persistLead({ DB }, { ...chat, tenantId, requestId: `chat-second-${i}`, context: `Context ${i}` });
+    assert.equal(retry.id, first.id); assert.equal(retry.created, false); chatIds.push(first.id);
+  }
+  assert.equal(new Set(chatIds).size, 3);
+  assert.equal((await DB.prepare('SELECT COUNT(*) AS n FROM leads').first()).n, 6);
+  const ambiguous = await testing.persistLead({ DB }, { ...chat, ...base, tenantId: tenants[0], context: 'Request key wins' });
+  assert.equal(ambiguous.id, a.id, 'the same request key wins over another row matching chat/phone');
+  assert.equal((await DB.prepare('SELECT context FROM leads WHERE id=?').bind(chatIds[0]).first()).context, 'Context 0');
+});
+
+test('0049 preserves historical null-tenant lead and notification/note/event references', async (t) => {
+  const DB = await sqliteD1({ through: '0048' }); t.after(() => DB.close());
+  await DB.exec('PRAGMA foreign_keys=ON'); // Local SQLite must exercise D1 FK enforcement.
+  const id = '00000000-0000-4000-8000-0000000000e1', requestId = '00000000-0000-4000-8000-0000000000f1';
+  await DB.prepare("INSERT INTO leads(id,request_id,source,created_at,updated_at,expires_at) VALUES (?,?,'test','now','now','later')").bind(id, requestId).run();
+  await DB.prepare("INSERT INTO lead_notifications(lead_id,channel,updated_at) VALUES (?,'telegram','now')").bind(id).run();
+  await DB.prepare("INSERT INTO lead_notes(lead_id,author_email,text,created_at) VALUES (?,'synthetic@example.invalid','note','now')").bind(id).run();
+  await DB.prepare("INSERT INTO lead_events(lead_id,actor_email,event_type,created_at) VALUES (?,'synthetic@example.invalid','test','now')").bind(id).run();
+  const { readFile } = await import('node:fs/promises');
+  await DB.exec(await readFile(new URL('../migrations/0049_leads_tenant_idempotency.sql', import.meta.url), 'utf8'));
+  assert.deepEqual(await DB.prepare('SELECT id,request_id,tenant_request_id,tenant_id FROM leads WHERE id=?').bind(id).first(), { id, request_id: requestId, tenant_request_id: requestId, tenant_id: null });
+  for (const table of ['lead_notifications', 'lead_notes', 'lead_events']) assert.equal((await DB.prepare(`SELECT COUNT(*) AS n FROM ${table} WHERE lead_id=?`).bind(id).first()).n, 1);
+  const retry = await testing.persistLead({ DB }, { requestId, source: 'test', score: null, context: 'Historical retry' });
+  assert.equal(retry.id, id); assert.equal(retry.created, false);
+  // Previous worker inserts between migration and rollout must remain discoverable.
+  const rollingId = '00000000-0000-4000-8000-0000000000e2', rollingKey = '00000000-0000-4000-8000-0000000000f3';
+  await DB.prepare("INSERT INTO leads(id,request_id,source,created_at,updated_at,expires_at) VALUES (?,?,'test','now','now','later')").bind(rollingId, rollingKey).run();
+  const rollingRetry = await testing.persistLead({ DB }, { requestId: rollingKey, source: 'test', score: null });
+  assert.equal(rollingRetry.id, rollingId); assert.equal(rollingRetry.created, false);
+});
+
+test('event intake: same valid UUID in two authenticated tenants links each reservation to its own lead', async (t) => {
+  const DB = await sqliteD1(); t.after(() => DB.close());
+  t.mock.method(globalThis, 'fetch', async () => { throw Error('No network expected'); });
+  const now = new Date().toISOString(), waits = [];
+  const ctx = { waitUntil(p) { waits.push(p); } };
+  const env = { DB, EVENT_INTAKE_SECRET: 'synthetic-security-integration-secret' };
+  const worker = createWorker({ SYSTEM: '', DEMOS: {}, GUARDRAILS: '' });
+  const requestId = '00000000-0000-4000-8000-0000000000f2';
+  const ids = [];
+  for (let i = 0; i < 2; i++) {
+    const id = `00000000-0000-4000-8000-0000000000${i ? 'b2' : 'a2'}`, slug = `security-intake-${i}`;
+    await DB.prepare('INSERT INTO tenants(id,slug,name,channel_address,system_prompt,active,created_at,updated_at) VALUES (?,?,?,?,?,1,?,?)').bind(id, slug, 'Synthetic', `web:${slug}`, 'Synthetic', now, now).run();
+    await DB.prepare("INSERT INTO tenant_modulos VALUES (?,'eventos','on','test','now')").bind(id).run();
+    const token = await testing.eventIntakeToken(env.EVENT_INTAKE_SECRET, slug);
+    const response = await worker.fetch(new Request('https://api.hirevai.com/integrations/event-reservations', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` }, body: JSON.stringify({ requestId, tenant: slug, name: 'Synthetic person', whatsapp: '+34600000000', event: 'Organizar mi propio evento', contactConsent: true }) }), env, ctx);
+    assert.equal(response.status, 201); ids.push((await response.json()).leadId);
+    const linked = await DB.prepare('SELECT l.tenant_id AS lead_tenant,r.tenant_id AS reservation_tenant FROM event_reservations r JOIN leads l ON l.id=r.lead_id WHERE r.tenant_id=?').bind(id).first();
+    assert.deepEqual(linked, { lead_tenant: id, reservation_tenant: id });
+  }
+  await Promise.allSettled(waits); assert.notEqual(ids[0], ids[1]);
 });

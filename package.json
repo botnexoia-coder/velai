@@ -17,6 +17,6 @@
     "test:panel": "cd panel && npm test -- --run"
   },
   "dependencies": {
-    "hono": "^4.13.5"
+    "hono": "^4.13.7"
   }
 }
