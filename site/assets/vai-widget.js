@@ -1,5 +1,5 @@
 /* ══════════════════════════════════════════════════════════════════════════
-   VAI CHAT WIDGET — autocontenido (CSS + markup + lógica) · v20
+   VAI CHAT WIDGET — autocontenido (CSS + markup + lógica) · v21
    ──────────────────────────────────────────────────────────────────────────
    OJO CON LA VERSIÓN: este archivo se sirve con Cache-Control immutable durante un
    año (_headers, /*.js), así que el `?v=N` de la URL ES la clave de caché. Cambiar el
@@ -9,7 +9,7 @@
    falla si las dos no coinciden.
 
    Se carga en TODAS las páginas con una sola línea:
-     <script src="/assets/vai-widget.js?v=18" defer></script>
+     <script src="/assets/vai-widget.js?v=21" defer></script>
 
    En la web de un CLIENTE van dos líneas (la primera declara el tenant):
      <script>window.VELAI_TENANT='zoe';</script>
@@ -181,7 +181,7 @@
     document.getElementById('vaiGreeting').textContent = script().greeting;
     document.getElementById('vaiHeaderKicker').textContent = botName() + ' · ' + T.kicker;
   }
-  function updateSend() { el.send.disabled = busy || !el.input.value.trim(); }
+  function updateSend() { el.send.disabled = busy || !!pendingMessage || !el.input.value.trim(); if (el.retry) el.retry.disabled = busy; }
 
   function renderLauncher() {
     var title = open ? T.closeConv : T.talk + botName();
@@ -256,6 +256,7 @@
     ".vai-b-who{font-size:11px;font-weight:750;color:var(--vai-agentac);margin-bottom:4px}" +
     ".vai-b-t{font-size:14px;line-height:1.5;white-space:pre-wrap;overflow-wrap:anywhere}" +
     ".vai-b-h{font-size:11px;opacity:.6;text-align:right;margin-top:4px}" +
+    ".vai-pending{padding:10px 16px;color:var(--vai-text);font-size:13px;background:var(--vai-bot)}.vai-pending[hidden]{display:none}.vai-pending button{margin:8px 8px 0 0;padding:8px;border:1px solid var(--vai-muted);border-radius:8px;background:var(--vai-bot);color:var(--vai-text);cursor:pointer}.vai-pending button:focus-visible{outline:2px solid var(--vai-acc);outline-offset:2px}" +
     ".vai-live{text-align:center;font-size:12px;color:var(--vai-muted);padding:6px 0;flex-shrink:0}" +
     "#vaiTyping{display:none;padding:0 16px 10px}#vaiTyping.is-on{display:block}" +
     ".vai-tb{display:inline-flex;gap:4px;align-items:center;padding:12px;background:var(--vai-bot);border-radius:4px 16px 16px 16px}" +
@@ -292,6 +293,7 @@
       '<div class="vai-hero"><div class="vai-hero-av" id="vaiHeroAvatar" aria-hidden="true"></div><h2 id="vaiGreeting"></h2><p>' + esc(T.heroStatus) + '</p></div>' +
       '<div id="vaiMessages" role="log" aria-live="polite"></div>' +
       '<div id="vaiTyping"><div class="vai-tb"><span class="vai-td"></span><span class="vai-td"></span><span class="vai-td"></span></div></div>' +
+      '<div id="vaiPending" class="vai-pending" role="status" hidden><span>' + esc(LANG === 'en' ? 'Message pending. Its delivery has not been confirmed. A new message does not change the previous one.' : 'Mensaje pendiente. No se ha confirmado su entrega. Otro envío no modifica el anterior.') + '</span><button id="vaiRetry" type="button">' + esc(LANG === 'en' ? 'Retry message' : 'Reintentar mensaje') + '</button><button id="vaiEditPending" type="button">' + esc(LANG === 'en' ? 'Prepare another message' : 'Preparar otro envío') + '</button></div>' +
       '<div id="vaiChips"></div><div class="vai-in-wrap"><div class="vai-in-shell">' +
         '<textarea id="vaiInput" placeholder="' + esc(T.placeholder) + '" rows="1" maxlength="2000" aria-label="' + esc(T.msg) + '"></textarea></div>' +
         '<button id="vaiSend" type="button" disabled aria-label="' + esc(T.send) + '"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M12 19V5m-6 6 6-6 6 6"/></svg></button>' +
@@ -369,19 +371,24 @@
   var conversationId = ''; // se genera en el primer envío (o se restaura de la sesión)
   var demo = '';
   var history = [];
+  var pendingMessage = null; // texto + UUID conservados hasta confirmar aceptación
   var wasOpen = false; // el panel estaba abierto en la página anterior
   var el = {};
 
   function saveState() {
     try {
-      sessionStorage.setItem(SS_STATE, JSON.stringify({ conversationId: conversationId, demo: demo, history: history, sent: sent, open: open, humanVerified: humanVerified, liveState: liveState, lastId: lastId }));
+      sessionStorage.setItem(SS_STATE, JSON.stringify({ conversationId: conversationId, demo: demo, history: history, sent: sent, open: open, humanVerified: humanVerified, liveState: liveState, lastId: lastId, tenant: TENANT, pendingMessage: pendingMessage }));
     } catch (e) {}
   }
   function loadState() {
     try {
       var s = JSON.parse(sessionStorage.getItem(SS_STATE));
       if (!s || !Array.isArray(s.history) || !s.history.length) return;
+      if (s.tenant != null && s.tenant !== TENANT) return;
       history = s.history;
+      if (s.tenant === TENANT && s.pendingMessage && /^[0-9a-f-]{36}$/i.test(s.pendingMessage.id) && typeof s.pendingMessage.text === 'string' && s.pendingMessage.text.length <= 2000) {
+        pendingMessage = { id: s.pendingMessage.id, text: s.pendingMessage.text };
+      }
       if (typeof s.conversationId === 'string') conversationId = s.conversationId;
       if (typeof s.liveState === 'string') liveState = s.liveState;
       if (typeof s.lastId === 'number') lastId = s.lastId;
@@ -438,6 +445,18 @@
     el.input = root.querySelector('#vaiInput');
     el.iconClose = root.querySelector('#vaiIconClose');
     el.send = root.querySelector('#vaiSend');
+    el.pending = root.querySelector('#vaiPending');
+    el.retry = root.querySelector('#vaiRetry');
+    el.retry.addEventListener('click', function () { send(null, 'retry', true); });
+    root.querySelector('#vaiEditPending').addEventListener('click', function () {
+      if (busy || !pendingMessage) return;
+      var abandoned = pendingMessage;
+      history = history.filter(function (m) { return m.messageId !== abandoned.id; });
+      sent = Math.max(0, sent - 1);
+      pendingMessage = null;
+      el.input.value = abandoned.text;
+      renderHistory(); renderPending(); saveState(); el.input.focus();
+    });
 
     el.bubble.addEventListener('click', function () { toggle(); });
     // Tocar fuera cierra, que es lo que hace cualquier hoja en un móvil.
@@ -465,6 +484,7 @@
     track('chat_view', { page: location.pathname });
 
     loadState();
+    renderPending();
 
     // Apertura automática con ?chat=1 (respeta ?demo=)
     try {
@@ -607,7 +627,8 @@
     // Cambiar de demo reinicia la conversación (el system prompt del worker cambia)
     if (open && typeof demoKey === 'string' && demoKey !== demo) {
       demo = demoKey;
-      started = false; sent = 0; history = []; conversationId = ''; humanVerified = false;
+      started = false; sent = 0; history = []; conversationId = ''; humanVerified = false; pendingMessage = null;
+      renderPending();
       el.msgs.innerHTML = '';
       saveState();
     }
@@ -770,20 +791,31 @@
   }
   function stopLive() { if (pollTimer) { clearInterval(pollTimer); pollTimer = null; pollEvery = 0; } }
 
-  async function send(preset, source) {
+  function renderPending() {
+    if (el.pending) el.pending.hidden = !pendingMessage;
+    updateSend();
+  }
+
+  async function send(preset, source, retry) {
     if (busy) return;
-    var text = (preset || el.input.value).trim();
+    if (pendingMessage && !retry) { el.retry.focus(); return; }
+    if (retry && !pendingMessage) return;
+    var text = retry ? pendingMessage.text : (preset || el.input.value).trim();
     if (!text) return;
     busy = true;
     updateSend();
     await new Promise(function (resolve) { withBrand(resolve); });
     if (!history.length) addMsg('bot', script().greeting);
-    if (!preset) { el.input.value = ''; el.input.style.height = 'auto'; }
+    if (!retry && !preset) { el.input.value = ''; el.input.style.height = 'auto'; }
     el.chips.classList.add('is-off');
 
-    addMsg('user', text);
-    history.push({ role: 'user', content: text, t: Date.now() });
-    sent++;
+    if (!retry) {
+      pendingMessage = { id: uuid(), text: text };
+      addMsg('user', text);
+      history.push({ role: 'user', content: text, t: Date.now(), messageId: pendingMessage.id });
+      sent++;
+    }
+    renderPending();
     saveState();
     if (sent === 1) track('chat_first_message', { source: source || 'input', page: location.pathname, demo: demo || 'none' });
     track('chat_message', { n: sent, demo: demo || 'none' });
@@ -796,16 +828,17 @@
       if (!conversationId) { conversationId = uuid(); saveState(); }
       var data;
       try {
-        data = await postChat(text);
+        data = await postChat(text, pendingMessage.id);
       } catch (err) {
         // El servidor perdió el estado (KV caducado) y vuelve a exigir verificación:
         // reintentar UNA vez con token fresco en vez de dejar la sesión rota.
         if (err && err.status === 403 && humanVerified) {
           humanVerified = false; saveState();
-          data = await postChat(text);
+          data = await postChat(text, pendingMessage.id);
         } else { throw err; }
       }
       humanVerified = true;
+      pendingMessage = null; renderPending();
       if (typeof data.lastId === 'number' && data.lastId > lastId) lastId = data.lastId;
       el.typing.classList.remove('is-on');
       // Sin reply el bot no ha hablado (lo lleva una persona): no se pinta una burbuja
@@ -830,7 +863,7 @@
       track('chat_error', { msg: code });
     } finally {
       busy = false;
-      updateSend();
+      renderPending();
     }
   }
 
@@ -899,10 +932,11 @@
     });
   }
 
-  async function postChat(text) {
+  async function postChat(text, messageId) {
     var payload = {
       conversationId: conversationId,
       message: text,
+      messageId: messageId,
       pageUrl: location.href.slice(0, 500),
       // VELAI_getUTM es de funnel.js: en la web de un cliente no existe y el utm va
       // vacío — correcto, la medición de Velai no pinta nada fuera de hirevai.com.
