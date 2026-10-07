@@ -6872,3 +6872,25 @@ test('degraded warning retries after Telegram rejects it and describes notificat
   assert.equal(warnings.length,2); assert.equal(entries.has('alert:degraded'),true);
   assert.ok(warnings.every(text=>text.includes('aviso directo al equipo')&&!text.includes('cola KV')));
 });
+
+
+test('lead queue keeps an enumerated entry through temporary null read and drains once visible', async (t) => {
+  const DB = await sqliteD1(); t.after(() => DB.close());
+  const requestId = '00000000-0000-4000-8000-0000000000f6', key = `leadq:${requestId}`;
+  const entries = new Map([[key, JSON.stringify({requestId,source:'synthetic transient KV read',name:'Synthetic',notifiedChannels:[]})]]);
+  let emptyRead = true, deletes = 0;
+  const KV = {
+    async list(){return {keys:[...entries.keys()].map(name=>({name}))};},
+    async get(k,type){if(emptyRead){emptyRead=false;return null;}const value=entries.get(k);return value&&type==='json'?JSON.parse(value):value||null;},
+    async delete(k){deletes++;entries.delete(k);},
+  };
+  await testing.drainQueuedLeads({DB,KV});
+  assert.equal(entries.has(key),true); assert.equal(deletes,0);
+  assert.equal((await DB.prepare('SELECT COUNT(*) AS n FROM leads WHERE tenant_request_id=?').bind(requestId).first()).n,0);
+  await testing.drainQueuedLeads({DB,KV});
+  assert.equal(entries.has(key),false); assert.equal(deletes,1);
+  assert.equal((await DB.prepare('SELECT COUNT(*) AS n FROM leads WHERE tenant_request_id=?').bind(requestId).first()).n,1);
+  await testing.drainQueuedLeads({DB,KV});
+  assert.equal(deletes,1);
+  assert.equal((await DB.prepare('SELECT COUNT(*) AS n FROM leads WHERE tenant_request_id=?').bind(requestId).first()).n,1);
+});

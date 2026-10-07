@@ -4160,7 +4160,12 @@ async function drainQueuedLeads(env) {
   try { list = await env.KV.list({ prefix: 'leadq:', limit: 25 }); } catch (_) { return; }
   for (const entry of list.keys) {
     const input = await env.KV.get(entry.name, 'json');
-    if (!input) { await env.KV.delete(entry.name); continue; }
+    if (!input) {
+      // KV may return a cached negative read while list already exposes the key.
+      // Preserve the only backup for a later read; never log keys containing contacts.
+      console.log(JSON.stringify({ level: 'warn', code: 'lead_queue_entry_missing' }));
+      continue;
+    }
     try {
       const result = await persistLead(env, input);
       // Solo los canales que entregaron durante el fallback se marcan 'sent';
