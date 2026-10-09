@@ -1,5 +1,6 @@
 // Contabilidad interna: la guarda vive en CADA handler, además de clienteGate.
 import { Hono } from 'hono';
+import { uuidOpcional, errorEscrituraGestion } from '../gestion-financiera.js';
 import { esSocio, partesAdmin } from '../middleware.js';
 import { HttpError, json, NO_STORE, readJson, csvCell, PANEL_EMAIL_RE } from '../app.js';
 
@@ -26,7 +27,9 @@ function writeError(e) {
   if (/UNIQUE constraint failed: fin_conceptos/.test(e.message)) throw new HttpError(409, 'concepto_duplicado');
   if (/UNIQUE constraint failed:.*fin_socios/.test(e.message)) throw new HttpError(409, 'socio_duplicado');
   if (e.message.includes('fin_beneficiario_inactivo')) fail('beneficiario_desconocido');
-  throw e;
+  // Partida creada por Administración (0050): inmutable también por debajo del panel.
+  if (e.message.includes('fin_movimiento_gestion')) throw new HttpError(409, 'movimiento_de_gestion');
+  errorEscrituraGestion(e);
 }
 function socioEmail(value) {
   if (typeof value !== 'string' || value.trim().length > 200 || !PANEL_EMAIL_RE.test(value.trim())) fail('email_invalido');
@@ -64,21 +67,36 @@ function filters(url) {
 const SELECT_MOV = `SELECT m.*, c.nombre AS concepto_nombre, t.name AS tenant_name FROM fin_movimientos m
   JOIN fin_conceptos c ON c.id = m.concepto_id LEFT JOIN tenants t ON t.id = m.tenant_id`;
 const ORDER = ' ORDER BY m.fecha DESC, m.created_at DESC, m.id DESC';
-const TOTALS = `SELECT moneda, SUM(CASE WHEN tipo='ingreso' THEN importe ELSE 0 END) AS ingresos,
-  SUM(CASE WHEN tipo='gasto' THEN importe ELSE 0 END) AS gastos,
-  SUM(CASE WHEN tipo='egreso' THEN importe ELSE 0 END) AS egresos FROM fin_movimientos m`;
+// Desde 0050 cada partida lleva naturaleza y signo (reversos = -1). La financiación
+// (abono de préstamo, devolución de principal) entra y sale de CAJA pero no es venta
+// ni beneficio: se suma aparte. Las filas anteriores son 'operativo' con signo 1.
+const TOTALS = `SELECT moneda, SUM(CASE WHEN tipo='ingreso' AND naturaleza<>'financiacion' THEN importe*signo ELSE 0 END) AS ingresos,
+  SUM(CASE WHEN tipo='gasto' AND naturaleza<>'compra' THEN importe*signo ELSE 0 END) AS gastos,
+  SUM(CASE WHEN naturaleza='compra' THEN importe*signo ELSE 0 END) AS compras,
+  SUM(CASE WHEN tipo='egreso' AND naturaleza<>'financiacion' THEN importe*signo ELSE 0 END) AS egresos,
+  SUM(CASE WHEN tipo='ingreso' AND naturaleza='financiacion' THEN importe*signo ELSE 0 END) AS fin_entradas,
+  SUM(CASE WHEN tipo='egreso' AND naturaleza='financiacion' THEN importe*signo ELSE 0 END) AS fin_salidas FROM fin_movimientos m`;
 const REPARTIDO = `SELECT m.beneficiario AS email, COALESCE(s.nombre,m.beneficiario) AS nombre, m.moneda, SUM(m.importe) AS importe
   FROM fin_movimientos m LEFT JOIN fin_socios s ON lower(s.email)=m.beneficiario
   WHERE m.beneficiario IS NOT NULL GROUP BY m.beneficiario, m.moneda ORDER BY nombre`;
 // Todas las cuentas salen del libro; caja ignora SIEMPRE los filtros del periodo.
+const VACIO = { ingresos: 0, gastos: 0, egresos: 0, compras: 0, fin_entradas: 0, fin_salidas: 0 };
 function cuentas(periodo, acumulado) {
   return Object.fromEntries(MONEDAS.map((moneda) => {
-    const p = periodo.find((r) => r.moneda === moneda) || { ingresos: 0, gastos: 0, egresos: 0 };
-    const a = acumulado.find((r) => r.moneda === moneda) || { ingresos: 0, gastos: 0, egresos: 0 };
-    const caja = a.ingresos - a.gastos - a.egresos;
-    return [moneda, { ingresos: p.ingresos, gastos: p.gastos, egresos: p.egresos, beneficio: p.ingresos - p.gastos, caja, sin_repartir: caja }];
+    const p = periodo.find((r) => r.moneda === moneda) || VACIO;
+    const a = acumulado.find((r) => r.moneda === moneda) || VACIO;
+    // La caja es dinero real: incluye la financiación. Ingresos/beneficio, no.
+    const sin_repartir = a.ingresos - a.gastos - a.egresos - a.compras;
+    const caja = sin_repartir + a.fin_entradas - a.fin_salidas;
+    return [moneda, { ingresos: p.ingresos, gastos: p.gastos, egresos: p.egresos, beneficio: p.ingresos - p.gastos, caja, sin_repartir }];
   }));
 }
+// Financiación del periodo, aparte de las cuentas de siempre (el contrato de `monedas`
+// lo fija el panel): entradas = abonos de préstamo, salidas = principal devuelto.
+const financiacion = (periodo) => Object.fromEntries(MONEDAS.map((moneda) => {
+  const p = periodo.find((r) => r.moneda === moneda) || VACIO;
+  return [moneda, { entradas: p.fin_entradas, salidas: p.fin_salidas, neto: p.fin_entradas - p.fin_salidas }];
+}));
 async function validateMovimiento(env, b, previous) {
   const tipo = enumValue(b.tipo, TIPOS, 'tipo_invalido');
   const moneda = enumValue(b.moneda, MONEDAS, 'moneda_invalida');
@@ -86,18 +104,27 @@ async function validateMovimiento(env, b, previous) {
   const concepto = await env.DB.prepare('SELECT * FROM fin_conceptos WHERE id = ?').bind(concepto_id).first();
   if (!concepto) fail('concepto_invalido');
   if (concepto.tipo !== tipo) fail('concepto_de_otro_tipo');
+  if (concepto.clave && previous?.concepto_id !== concepto_id) fail('concepto_de_gestion');
   // Una corrección de nota/importe conserva el concepto histórico desactivado.
   if (!concepto.activo && previous?.concepto_id !== concepto_id) fail('concepto_inactivo');
   if (b.reparto_id || b.beneficiario) fail('usar_repartos');
   const tenant_id = b.tenant_id || null;
   if (tenant_id && (tipo === 'egreso' || typeof tenant_id !== 'string')) fail('cliente_invalido');
   if (tenant_id && !await env.DB.prepare('SELECT id FROM tenants WHERE id = ?').bind(tenant_id).first()) fail('cliente_invalido');
-  return { tipo, moneda, importe, fecha: dia, concepto_id, nota: nota(b.nota), tenant_id };
+  const cuenta_id = uuidOpcional(b.cuenta_id, 'cuenta_invalida');
+  let entidad_id = null;
+  if (cuenta_id) {
+    const cuenta = await env.DB.prepare('SELECT id,moneda,entidad_id FROM g_cuentas WHERE id=?').bind(cuenta_id).first();
+    if (!cuenta) fail('cuenta_invalida');
+    if (cuenta.moneda !== moneda) fail('moneda_distinta');
+    entidad_id = cuenta.entidad_id;
+  }
+  return { tipo, moneda, importe, fecha: dia, concepto_id, nota: nota(b.nota), tenant_id, cuenta_id, entidad_id };
 }
 function insertMovimiento(env, m, actor, now, repartoId = null, beneficiario = null) {
   return env.DB.prepare(`INSERT INTO fin_movimientos
-    (id,tipo,concepto_id,fecha,moneda,importe,nota,tenant_id,beneficiario,reparto_id,created_by,created_at)
-    VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`).bind(m.id, m.tipo, m.concepto_id, m.fecha, m.moneda, m.importe, m.nota, m.tenant_id, beneficiario, repartoId, actor, now);
+    (id,tipo,concepto_id,fecha,moneda,importe,nota,tenant_id,beneficiario,reparto_id,created_by,created_at,cuenta_id,entidad_id)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).bind(m.id, m.tipo, m.concepto_id, m.fecha, m.moneda, m.importe, m.nota, m.tenant_id, beneficiario, repartoId, actor, now, m.cuenta_id ?? null, m.entidad_id ?? null);
 }
 const logBorrado = (id, actor) => console.log(JSON.stringify({ level: 'warn', code: 'fin_borrado', id, actor }));
 
@@ -184,7 +211,7 @@ finanzas.patch('/api/admin/finanzas/conceptos/:id', async (c) => {
   if (![0, 1].includes(activo) || !Number.isSafeInteger(position) || position < 0) fail('concepto_invalido');
   // El concepto que firma los repartos se puede reordenar; renombrarlo o apagarlo
   // rompería el reparto siguiente, así que se cierra aquí y no en la interfaz.
-  if (old.sistema && (name !== old.nombre || activo !== old.activo)) throw new HttpError(409, 'concepto_del_sistema');
+  if ((old.sistema || old.clave) && (name !== old.nombre || activo !== old.activo)) throw new HttpError(409, 'concepto_del_sistema');
   try {
     const statements = [];
     // Las flechas desplazan el intervalo en una transacción, sin posiciones empatadas.
@@ -199,7 +226,7 @@ finanzas.delete('/api/admin/finanzas/conceptos/:id', async (c) => {
   const { env, scope } = partesAdmin(c);
   if (!esSocio(env, scope)) throw new HttpError(403, 'not_authorized');
   const old = await exists(env, 'fin_conceptos', c.req.param('id'));
-  if (old.sistema) throw new HttpError(409, 'concepto_del_sistema');
+  if (old.sistema || old.clave) throw new HttpError(409, 'concepto_del_sistema');
   const result = await env.DB.prepare('DELETE FROM fin_conceptos WHERE id=? AND NOT EXISTS (SELECT 1 FROM fin_movimientos WHERE concepto_id=?)').bind(old.id, old.id).run();
   if (!result.meta.changes) throw new HttpError(409, 'concepto_en_uso');
   return json({ ok: true }, 200, NO_STORE);
@@ -222,7 +249,7 @@ finanzas.post('/api/admin/finanzas/movimientos', async (c) => {
   const { env, scope, request, actor } = partesAdmin(c);
   if (!esSocio(env, scope)) throw new HttpError(403, 'not_authorized');
   const m = await validateMovimiento(env, await bodyOf(request)), id = crypto.randomUUID();
-  await insertMovimiento(env, { ...m, id }, actor, new Date().toISOString()).run();
+  try { await insertMovimiento(env, { ...m, id }, actor, new Date().toISOString()).run(); } catch (e) { writeError(e); }
   return json({ ok: true, id }, 201, NO_STORE);
 });
 finanzas.patch('/api/admin/finanzas/movimientos/:id', async (c) => {
@@ -230,11 +257,17 @@ finanzas.patch('/api/admin/finanzas/movimientos/:id', async (c) => {
   if (!esSocio(env, scope)) throw new HttpError(403, 'not_authorized');
   const old = await exists(env, 'fin_movimientos', c.req.param('id'));
   if (old.reparto_id) throw new HttpError(409, 'linea_de_reparto');
+  // Las partidas de Administración (préstamos, compras, reembolsos, reversos) se
+  // corrigen desde su operación, nunca a mano; el trigger de 0050 lo garantiza.
+  if (old.origen_tipo) throw new HttpError(409, 'movimiento_de_gestion');
   const b = await bodyOf(request);
-  if (Object.keys(b).some((k) => !['tipo', 'importe', 'fecha', 'concepto_id', 'nota', 'tenant_id'].includes(k))) fail('campo_no_editable');
+  if (Object.keys(b).some((k) => !['tipo', 'importe', 'fecha', 'concepto_id', 'nota', 'tenant_id', 'cuenta_id'].includes(k))) fail('campo_no_editable');
   const m = await validateMovimiento(env, { ...old, ...b }, old);
-  const result = await env.DB.prepare('UPDATE fin_movimientos SET tipo=?, importe=?, fecha=?, concepto_id=?, nota=?, tenant_id=? WHERE id=?')
-    .bind(m.tipo, m.importe, m.fecha, m.concepto_id, m.nota, m.tenant_id, old.id).run();
+  let result;
+  try {
+    result = await env.DB.prepare('UPDATE fin_movimientos SET tipo=?, importe=?, fecha=?, concepto_id=?, nota=?, tenant_id=?, cuenta_id=?, entidad_id=? WHERE id=?')
+      .bind(m.tipo, m.importe, m.fecha, m.concepto_id, m.nota, m.tenant_id, m.cuenta_id, m.entidad_id, old.id).run();
+  } catch (e) { writeError(e); }
   if (!result.meta.changes) throw new HttpError(404, 'not_found');
   return json({ ok: true }, 200, NO_STORE);
 });
@@ -243,7 +276,8 @@ finanzas.delete('/api/admin/finanzas/movimientos/:id', async (c) => {
   if (!esSocio(env, scope)) throw new HttpError(403, 'not_authorized');
   const old = await exists(env, 'fin_movimientos', c.req.param('id'));
   if (old.reparto_id) throw new HttpError(409, 'linea_de_reparto');
-  await env.DB.prepare('DELETE FROM fin_movimientos WHERE id=?').bind(old.id).run();
+  if (old.origen_tipo) throw new HttpError(409, 'movimiento_de_gestion');
+  try { await env.DB.prepare('DELETE FROM fin_movimientos WHERE id=?').bind(old.id).run(); } catch (e) { writeError(e); }
   logBorrado(old.id, actor);
   return json({ ok: true }, 200, NO_STORE);
 });
@@ -254,11 +288,11 @@ finanzas.get('/api/admin/finanzas/resumen', async (c) => {
   const [p, a, desglose, repartido] = await env.DB.batch([
     env.DB.prepare(`${TOTALS} WHERE ${f.sql} GROUP BY moneda`).bind(...f.args),
     env.DB.prepare(`${TOTALS} GROUP BY moneda`),
-    env.DB.prepare(`SELECT m.concepto_id,c.nombre,m.tipo,m.moneda,SUM(m.importe) AS importe FROM fin_movimientos m
-      JOIN fin_conceptos c ON c.id=m.concepto_id WHERE ${f.sql} GROUP BY m.concepto_id,m.moneda ORDER BY m.tipo,c.position,c.id`).bind(...f.args),
+    env.DB.prepare(`SELECT m.concepto_id,c.nombre,m.tipo,m.moneda,m.naturaleza,SUM(m.importe*m.signo) AS importe FROM fin_movimientos m
+      JOIN fin_conceptos c ON c.id=m.concepto_id WHERE ${f.sql} GROUP BY m.concepto_id,m.moneda,m.naturaleza ORDER BY m.tipo,c.position,c.id`).bind(...f.args),
     env.DB.prepare(REPARTIDO),
   ]);
-  return json({ monedas: cuentas(p.results, a.results), conceptos: desglose.results, repartido: repartido.results }, 200, NO_STORE);
+  return json({ monedas: cuentas(p.results, a.results), financiacion: financiacion(p.results), conceptos: desglose.results, repartido: repartido.results }, 200, NO_STORE);
 });
 finanzas.get('/api/admin/finanzas/repartos', async (c) => {
   const { env, scope } = partesAdmin(c);
@@ -314,8 +348,9 @@ finanzas.get('/api/admin/finanzas/export.csv', async (c) => {
   if (!esSocio(env, scope)) throw new HttpError(403, 'not_authorized');
   const f = filters(url);
   const rows = (await env.DB.prepare(`${SELECT_MOV} WHERE ${f.sql}${ORDER}`).bind(...f.args).all()).results;
-  const keys = ['id', 'fecha', 'tipo', 'concepto_nombre', 'tenant_name', 'nota', 'moneda', 'importe', 'beneficiario', 'reparto_id', 'created_by', 'created_at'];
+  const keys = ['id', 'fecha', 'tipo', 'concepto_nombre', 'tenant_name', 'nota', 'moneda', 'importe', 'beneficiario', 'reparto_id', 'created_by', 'created_at', 'naturaleza', 'origen_tipo'];
   // Importe legible en unidades monetarias; sin separador de miles, EUR con dos decimales.
-  const csv = [keys.join(','), ...rows.map((r) => keys.map((k) => csvCell(k === 'importe' ? r.moneda === 'EUR' ? (r.importe / 100).toFixed(2) : String(r.importe) : r[k])).join(','))].join('\r\n');
+  // Un reverso (signo -1) sale en negativo: la asesoría ve el libro tal como suma.
+  const csv = [keys.join(','), ...rows.map((r) => keys.map((k) => k === 'importe' ? `"${r.moneda === 'EUR' ? (r.importe * r.signo / 100).toFixed(2) : String(r.importe * r.signo)}"` : csvCell(r[k])).join(','))].join('\r\n');
   return new Response('\uFEFF' + csv, { headers: { ...NO_STORE, 'Content-Type': 'text/csv; charset=utf-8', 'Content-Disposition': 'attachment; filename="velai-finanzas.csv"' } });
 });

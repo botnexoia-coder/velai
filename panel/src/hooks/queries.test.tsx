@@ -6,7 +6,7 @@ import type { ReactNode } from 'react';
 import { createQueryClient } from '../api/queryClient';
 import { inbox, inboxConThread, leadsPage1, leadsPage2, mockFetch, stats } from '../test/fixtures';
 import { convQs, inboxAlive, leadQs, useInbox, useLeads, useStats, INBOX_IDLE_MS, INBOX_LIVE_MS } from './queries';
-import { useGlobalChannels, useTenantSave, useProvisionStep, useSenderSync, useTelegramUnlink, useVersionRestore } from './queries';
+import { useFinMutacion, useGlobalChannels, useTenantSave, useProvisionStep, useSenderSync, useTelegramUnlink, useVersionRestore } from './queries';
 
 function wrapper({ children }: { children: ReactNode }) {
   return <QueryClientProvider client={createQueryClient()}>{children}</QueryClientProvider>;
@@ -123,4 +123,13 @@ describe('useInbox: el sondeo de la bandeja', () => {
     expect(INBOX_LIVE_MS).toBe(15_000);
     expect(INBOX_IDLE_MS).toBe(60_000);
   });
+});
+
+it('un movimiento actualiza el libro y los saldos de Gestión',async()=>{
+ const client=createQueryClient();client.setQueryData(['finanzas','resumen',{}],{});client.setQueryData(['gestion','resumen?moneda=EUR'],{});
+ vi.stubGlobal('fetch',vi.fn(async()=>Response.json({ok:true,id:'nuevo'})));
+ const wrap=({children}:{children:ReactNode})=><QueryClientProvider client={client}>{children}</QueryClientProvider>;
+ const {result,unmount}=renderHook(()=>useFinMutacion('movimientos'),{wrapper:wrap});
+ await act(async()=>{await result.current.mutateAsync({method:'POST',body:{tipo:'ingreso',cuenta_id:'cuenta-eur'}});});
+ expect(client.getQueryState(['finanzas','resumen',{}])?.isInvalidated).toBe(true);expect(client.getQueryState(['gestion','resumen?moneda=EUR'])?.isInvalidated).toBe(true);unmount();client.clear();
 });
