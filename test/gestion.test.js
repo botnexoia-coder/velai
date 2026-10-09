@@ -761,3 +761,26 @@ test('completar titular NULL preserva historia sin atribuir, admite reversos y b
   await assert.rejects(api(`gestion/cuentas/${q.id}`, 'PATCH', { version: completada.version, entidad_id: otra.id }), error(409, 'cuenta_en_uso'));
   await assert.rejects(api(`gestion/cuentas/${q.id}`, 'PATCH', { version: completada.version, entidad_id: null }), error(409, 'cuenta_en_uso'));
 });
+
+
+test('guardas SQL de cuenta mantienen errores y rechazan INSERT/UPDATE incompatibles por debajo del API', async (t) => {
+  const { api, cuenta, DB, contar } = await fixture(t);
+  const e1 = (await api('gestion/entidades', 'POST', { id: nuevo(), nombre: 'Titular uno', tipo: 'sociedad' })).item;
+  const e2 = (await api('gestion/entidades', 'POST', { id: nuevo(), nombre: 'Titular dos', tipo: 'sociedad' })).item;
+  const eur = (await cuenta({ entidad_id: e1.id })).item;
+  const cop = (await cuenta({ moneda: 'COP', entidad_id: e1.id })).item;
+  const concepto = (await DB.prepare("SELECT id FROM fin_conceptos WHERE tipo='ingreso' AND clave IS NULL LIMIT 1").first()).id;
+  const insertar = (cuentaId, entidadId) => DB.prepare(`INSERT INTO fin_movimientos
+    (id,tipo,concepto_id,fecha,moneda,importe,cuenta_id,entidad_id,created_by,created_at)
+    VALUES (?,'ingreso',?,'2026-01-01','EUR',100,?,?,'test','2026-01-01')`).bind(nuevo(), concepto, cuentaId, entidadId).run();
+  await assert.rejects(insertar(nuevo(), e1.id), /cuenta_invalida/);
+  await assert.rejects(insertar(cop.id, e1.id), /moneda_distinta/);
+  await assert.rejects(insertar(eur.id, e2.id), /entidad_cuenta_distinta/);
+  await assert.rejects(insertar(eur.id, null), /entidad_cuenta_distinta/);
+  await insertar(eur.id, e1.id);
+  const mov = await DB.prepare('SELECT id FROM fin_movimientos').first();
+  await assert.rejects(DB.prepare('UPDATE fin_movimientos SET cuenta_id=? WHERE id=?').bind(cop.id, mov.id).run(), /moneda_distinta/);
+  await assert.rejects(DB.prepare('UPDATE fin_movimientos SET entidad_id=? WHERE id=?').bind(e2.id, mov.id).run(), /entidad_cuenta_distinta/);
+  assert.equal(await contar('fin_movimientos'), 1);
+  assert.deepEqual(await DB.prepare('SELECT cuenta_id,entidad_id FROM fin_movimientos WHERE id=?').bind(mov.id).first(), { cuenta_id: eur.id, entidad_id: e1.id });
+});
