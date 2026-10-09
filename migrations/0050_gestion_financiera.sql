@@ -267,26 +267,28 @@ BEGIN SELECT RAISE(ABORT,'moneda_distinta'); END;
 CREATE TRIGGER g_prestamos_cuenta_update BEFORE UPDATE OF cuenta_id ON g_prestamos
 WHEN NOT EXISTS(SELECT 1 FROM g_cuentas WHERE id=NEW.cuenta_id AND moneda='EUR')
 BEGIN SELECT RAISE(ABORT,'moneda_distinta'); END;
+-- D1 remoto puede confundir END de CASE con el cierre del trigger. Agrupar CASE
+-- conserva la expresión y evita ese corte: cloudflare/workers-sdk#4727.
 CREATE TRIGGER fin_mov_cuenta_insert BEFORE INSERT ON fin_movimientos
 WHEN NEW.cuenta_id IS NOT NULL
 BEGIN
- SELECT CASE WHEN NOT EXISTS(SELECT 1 FROM g_cuentas WHERE id=NEW.cuenta_id) THEN RAISE(ABORT,'cuenta_invalida') END;
- SELECT CASE WHEN NOT EXISTS(SELECT 1 FROM g_cuentas WHERE id=NEW.cuenta_id AND moneda=NEW.moneda) THEN RAISE(ABORT,'moneda_distinta') END;
+ SELECT (CASE WHEN NOT EXISTS(SELECT 1 FROM g_cuentas WHERE id=NEW.cuenta_id) THEN RAISE(ABORT,'cuenta_invalida') END);
+ SELECT (CASE WHEN NOT EXISTS(SELECT 1 FROM g_cuentas WHERE id=NEW.cuenta_id AND moneda=NEW.moneda) THEN RAISE(ABORT,'moneda_distinta') END);
  -- Completar el titular de una cuenta no reescribe sus partidas históricas NULL.
  -- Un reverso puede conservar ese NULL únicamente si refleja la partida original.
- SELECT CASE WHEN NOT EXISTS(SELECT 1 FROM g_cuentas WHERE id=NEW.cuenta_id AND entidad_id IS NEW.entidad_id)
+ SELECT (CASE WHEN NOT EXISTS(SELECT 1 FROM g_cuentas WHERE id=NEW.cuenta_id AND entidad_id IS NEW.entidad_id)
  AND NOT (NEW.origen_tipo='reverso' AND NEW.entidad_id IS NULL AND EXISTS(
    SELECT 1 FROM g_pagos r JOIN fin_movimientos m ON m.origen_id=r.pago_id
    WHERE r.id=NEW.origen_id AND r.clase='reverso' AND m.cuenta_id=NEW.cuenta_id
      AND m.entidad_id IS NULL AND m.tipo=NEW.tipo AND m.concepto_id=NEW.concepto_id
      AND m.importe=NEW.importe AND m.signo=-NEW.signo
- )) THEN RAISE(ABORT,'entidad_cuenta_distinta') END;
+ )) THEN RAISE(ABORT,'entidad_cuenta_distinta') END);
 END;
 CREATE TRIGGER fin_mov_cuenta_update BEFORE UPDATE OF cuenta_id,moneda,entidad_id ON fin_movimientos
 WHEN NEW.cuenta_id IS NOT NULL
 BEGIN
- SELECT CASE WHEN NOT EXISTS(SELECT 1 FROM g_cuentas WHERE id=NEW.cuenta_id AND moneda=NEW.moneda) THEN RAISE(ABORT,'moneda_distinta') END;
- SELECT CASE WHEN NOT EXISTS(SELECT 1 FROM g_cuentas WHERE id=NEW.cuenta_id AND entidad_id IS NEW.entidad_id) THEN RAISE(ABORT,'entidad_cuenta_distinta') END;
+ SELECT (CASE WHEN NOT EXISTS(SELECT 1 FROM g_cuentas WHERE id=NEW.cuenta_id AND moneda=NEW.moneda) THEN RAISE(ABORT,'moneda_distinta') END);
+ SELECT (CASE WHEN NOT EXISTS(SELECT 1 FROM g_cuentas WHERE id=NEW.cuenta_id AND entidad_id IS NEW.entidad_id) THEN RAISE(ABORT,'entidad_cuenta_distinta') END);
 END;
 -- Conceptos internos no pueden borrarse, renombrarse ni utilizarse en el alta manual.
 CREATE TRIGGER fin_concepto_gestion_delete BEFORE DELETE ON fin_conceptos WHEN OLD.clave IS NOT NULL
