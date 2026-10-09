@@ -8,7 +8,7 @@ import { ToastProvider } from '../components/Toasts';
 import { ConfirmarHost } from '../components/Confirmar';
 import { Shell } from '../shell/Shell';
 import { Finanzas } from './Finanzas';
-import type { FinConceptos, FinResumen } from '../api/types';
+import type { FinConceptos, FinCuenta, FinMovimiento, FinResumen } from '../api/types';
 
 const conceptos: FinConceptos = { conceptos: {
   ingreso: [{ id: 1, tipo: 'ingreso', nombre: 'Cuota mensual', activo: 1, position: 0 }],
@@ -19,7 +19,7 @@ const resumen: FinResumen = { monedas: {
   EUR: { ingresos: 150000, gastos: 20000, beneficio: 130000, egresos: 30000, caja: 100000, sin_repartir: 100000 },
   COP: { ingresos: 150000, gastos: 200000, beneficio: -50000, egresos: 0, caja: -50000, sin_repartir: -50000 },
 }, conceptos: [], repartido: [] };
-function mount({ socio = true, role = 'velai', path = '/finanzas' } = {}) {
+function mount({ socio = true, role = 'velai', path = '/finanzas', movimientos = [] as FinMovimiento[], cuentas = [ {id:'cuenta-eur',nombre:'Cuenta común EUR',moneda:'EUR',entidad_id:null}, {id:'cuenta-cop',nombre:'Cuenta COP',moneda:'COP',entidad_id:null} ] as FinCuenta[], extraConceptos = [] as FinConceptos['conceptos']['ingreso'] } = {}) {
   const calls: { path: string; method: string; body?: Record<string, unknown> }[] = [];
   vi.stubGlobal('fetch', vi.fn(async (input: string, init?: RequestInit) => {
     const url = new URL(String(input), 'https://panel.test'), method = init?.method || 'GET';
@@ -29,8 +29,9 @@ function mount({ socio = true, role = 'velai', path = '/finanzas' } = {}) {
       '/api/admin/me': { role, socio, tenantId: null, tenantName: null, tenantLogo: null },
       '/api/admin/tenants': { tenants: [{ id: 't1', name: 'Cliente Uno' }] },
       '/api/admin/finanzas/resumen': resumen,
-      '/api/admin/finanzas/conceptos': conceptos,
-      '/api/admin/finanzas/movimientos': { movimientos: [], nextCursor: null },
+      '/api/admin/finanzas/conceptos': {...conceptos,conceptos:{...conceptos.conceptos,ingreso:[...conceptos.conceptos.ingreso,...extraConceptos]}},
+      '/api/admin/gestion/catalogos': {cuentas},
+      '/api/admin/finanzas/movimientos': { movimientos, nextCursor: null },
       '/api/admin/finanzas/repartos': { socios: [{ email: 'uno@velai.test', nombre: 'Uno' }], repartido: [], repartos: [] },
       '/api/admin/finanzas/socios': { socios: [
         { email: 'uno+fin@velai.test', nombre: 'Uno', activo: 1, tiene_repartos: 1 },
@@ -176,3 +177,10 @@ it('la baja pide confirmación, permite cancelar y los socios inactivos se puede
   await user.click(inactivo.getByRole('button', { name: 'Reactivar' }));
   await waitFor(() => expect(calls.some((c) => c.method === 'PATCH' && c.body?.activo === 1)).toBe(true));
 });
+
+const movimientoManual:FinMovimiento={id:'mov-manual',tipo:'gasto',concepto_id:2,concepto_nombre:'Cloudflare',fecha:'2026-10-09',moneda:'EUR',importe:2900,nota:'Nota inicial',tenant_id:null,tenant_name:null,beneficiario:null,reparto_id:null,created_by:'socio@velai.test',created_at:'2026-10-09T12:00:00Z',naturaleza:'operativo',signo:1,origen_tipo:null,origen_id:null,cuenta_id:null,entidad_id:null};
+it('la cuenta queda pendiente por defecto y se limpia al cambiar de moneda',async()=>{const {user,calls}=mount();await user.click(await screen.findByRole('button',{name:'Registrar movimiento'}));const d=within(screen.getByRole('dialog',{name:'Registrar movimiento'}));const account=d.getByLabelText(/Cuenta del proyecto/);expect(account).toHaveValue('');expect(d.getByRole('option',{name:'Cuenta común EUR'})).toBeInTheDocument();expect(d.queryByRole('option',{name:'Cuenta COP'})).not.toBeInTheDocument();await user.selectOptions(account,'cuenta-eur');await user.selectOptions(d.getByLabelText('Moneda'),'COP');expect(account).toHaveValue('');expect(d.queryByRole('option',{name:'Cuenta común EUR'})).not.toBeInTheDocument();await user.selectOptions(account,'cuenta-cop');await user.type(d.getByLabelText(/Importe \(COP\)/),'50000');await user.click(d.getByRole('button',{name:'Guardar movimiento'}));await waitFor(()=>expect(calls.some(c=>c.method==='POST'&&c.path.endsWith('/movimientos'))).toBe(true));expect(calls.find(c=>c.method==='POST')?.body).toMatchObject({moneda:'COP',cuenta_id:'cuenta-cop',importe:50000});});
+it('editar una nota histórica no asigna automáticamente cuenta',async()=>{const {user,calls}=mount({movimientos:[movimientoManual]});await user.click(await screen.findByRole('button',{name:'Cloudflare'}));const d=within(screen.getByRole('dialog',{name:'Detalle del movimiento'}));expect(d.getByLabelText(/Cuenta del proyecto/)).toHaveValue('');await user.clear(d.getByLabelText('Nota'));await user.type(d.getByLabelText('Nota'),'Nota corregida');await user.click(d.getByRole('button',{name:'Guardar movimiento'}));await waitFor(()=>expect(calls.some(c=>c.method==='PATCH')).toBe(true));expect(calls.find(c=>c.method==='PATCH')?.body).toMatchObject({cuenta_id:null,nota:'Nota corregida'});});
+it('permite vincular expresamente un movimiento manual a una cuenta',async()=>{const {user,calls}=mount({movimientos:[movimientoManual]});await user.click(await screen.findByRole('button',{name:'Cloudflare'}));const d=within(screen.getByRole('dialog',{name:'Detalle del movimiento'}));await user.selectOptions(d.getByLabelText(/Cuenta del proyecto/),'cuenta-eur');await user.click(d.getByRole('button',{name:'Guardar movimiento'}));await waitFor(()=>expect(calls.some(c=>c.method==='PATCH')).toBe(true));expect(calls.find(c=>c.method==='PATCH')?.body?.cuenta_id).toBe('cuenta-eur');});
+it.each([{origen:'prestamo_desembolso',naturaleza:'financiacion',ruta:'/credito',nombre:'Crédito',signo:1},{origen:'compra_pago',naturaleza:'operativo',ruta:'/compras',nombre:'Compras',signo:1},{origen:'reverso',naturaleza:'financiero',ruta:'/credito',nombre:'Crédito',signo:-1}] as const)('un movimiento $origen queda protegido y enlaza a su módulo',async({origen,naturaleza,ruta,nombre,signo})=>{const item:FinMovimiento={...movimientoManual,id:'gestión',concepto_nombre:'Operación generada',tipo:naturaleza==='financiacion'?'ingreso':'gasto',origen_tipo:origen,origen_id:'operación',naturaleza,signo,cuenta_id:'cuenta-eur'};const {user,calls}=mount({movimientos:[item]});await user.click(await screen.findByRole('button',{name:'Operación generada'}));const d=within(screen.getByRole('dialog',{name:'Detalle del movimiento'}));expect(d.queryByRole('button',{name:'Guardar movimiento'})).not.toBeInTheDocument();expect(d.queryByRole('button',{name:'Borrar movimiento'})).not.toBeInTheDocument();expect(d.getByRole('link',{name:`Abrir ${nombre}`})).toHaveAttribute('href',ruta);if(signo===-1)expect(d.getByText('−€ 29,00')).toBeInTheDocument();if(naturaleza==='financiacion')expect(d.getByText('Financiación')).toBeInTheDocument();expect(calls.some(c=>c.method!=='GET')).toBe(false);});
+it('los conceptos propios de Gestión no se ofrecen para altas manuales',async()=>{const {user}=mount({extraConceptos:[{id:9,tipo:'ingreso',nombre:'Abono de préstamo',activo:1,position:9,sistema:1,clave:'g_financiacion'}]});await user.click(await screen.findByRole('button',{name:'Registrar movimiento'}));const d=within(screen.getByRole('dialog',{name:'Registrar movimiento'}));expect(d.queryByRole('option',{name:'Abono de préstamo'})).not.toBeInTheDocument();expect(d.getByRole('option',{name:'Cuota mensual'})).toBeInTheDocument();});

@@ -959,10 +959,14 @@ export interface PlantillasResponse {
 // Finanzas internas; importes enteros (céntimos EUR, pesos COP).
 export type FinTipo = 'ingreso' | 'gasto' | 'egreso';
 export type FinMoneda = 'EUR' | 'COP';
+export type FinNaturaleza = 'operativo' | 'financiacion' | 'financiero' | 'compra' | 'reembolso_socio';
+export type FinOrigen = 'prestamo_desembolso' | 'prestamo_pago' | 'compra_pago' | 'compra_reembolso' | 'reverso';
+export interface FinCuenta { id:string; nombre:string; moneda:FinMoneda; entidad_id:string|null }
+export interface FinCuentas { cuentas:FinCuenta[] }
 export interface FinConcepto {
   id: number; tipo: FinTipo; nombre: string; activo: number; position: number;
   /** 1 = lo usa el código (el egreso de los repartos): se reordena, pero no se renombra ni se apaga. */
-  sistema?: number;
+  sistema?: number; clave?: string | null;
 }
 export interface FinConceptos { conceptos: Record<FinTipo, FinConcepto[]> }
 export interface FinMovimiento {
@@ -970,13 +974,17 @@ export interface FinMovimiento {
   fecha: string; moneda: FinMoneda; importe: number; nota: string | null;
   tenant_id: string | null; tenant_name: string | null;
   beneficiario: string | null; reparto_id: string | null; created_by: string; created_at: string;
+  /** Optional para cachés del libro anterior a la migración 0050. */
+  naturaleza?: FinNaturaleza; signo?: 1 | -1; origen_tipo?: FinOrigen | null; origen_id?: string | null;
+  cuenta_id?: string | null; entidad_id?: string | null;
 }
 export interface FinMovimientos { movimientos: FinMovimiento[]; nextCursor: string | null }
 export interface FinTotales { ingresos: number; gastos: number; beneficio: number; egresos: number; caja: number; sin_repartir: number }
 export interface FinRepartido { email: string; nombre: string; moneda: FinMoneda; importe: number }
 export interface FinResumen {
   monedas: Record<FinMoneda, FinTotales>;
-  conceptos: { concepto_id: number; nombre: string; tipo: FinTipo; moneda: FinMoneda; importe: number }[];
+  financiacion?: Record<FinMoneda,{entradas:number;salidas:number;neto:number}>;
+  conceptos: { concepto_id: number; nombre: string; tipo: FinTipo; moneda: FinMoneda; importe: number; naturaleza?:FinNaturaleza }[];
   repartido: FinRepartido[];
 }
 export interface FinSocio { email: string; nombre: string }
@@ -990,7 +998,7 @@ export interface FinReparto {
 export interface FinRepartos { socios: FinSocio[]; repartido: FinRepartido[]; repartos: FinReparto[] }
 export interface FinMovimientoInput {
   tipo: FinTipo; concepto_id: number; fecha: string; moneda: FinMoneda; importe: number;
-  nota: string; tenant_id: string | null;
+  nota: string; tenant_id: string | null; cuenta_id?: string | null;
 }
 export interface FinRepartoInput {
   fecha: string; moneda: FinMoneda; nota: string; lineas: { beneficiario: string; importe: number }[];

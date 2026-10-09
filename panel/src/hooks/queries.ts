@@ -817,6 +817,9 @@ export function useFinMovimientos(filters: FinFilters, enabled = true) {
 export function useFinRepartos(enabled = true) {
   return useQuery({ queryKey: ['finanzas', 'repartos'], queryFn: () => api<import('../api/types').FinRepartos>('/api/admin/finanzas/repartos'), enabled });
 }
+export function useFinCuentas(enabled = true) {
+  return useQuery({ queryKey: ['gestion', 'catalogos'], queryFn: () => api<import('../api/types').FinCuentas>('/api/admin/gestion/catalogos'), enabled });
+}
 export function useFinSocios() {
   return useQuery({ queryKey: ['finanzas', 'socios'], queryFn: () => api<import('../api/types').FinSocios>('/api/admin/finanzas/socios?todos=1') });
 }
@@ -829,7 +832,7 @@ export function useFinMutacion<T>(recurso: 'movimientos' | 'conceptos' | 'repart
       type Result = { ok: true; id?: string | number; aviso?: 'caja_negativa'; desactivado?: boolean };
       return method === 'DELETE' ? apiDelete<Result>(path) : method === 'PATCH' ? apiPatch<Result>(path, body) : apiPost<Result>(path, body);
     },
-    onSuccess: () => client.invalidateQueries({ queryKey: ['finanzas'] }),
+    onSuccess: async () => { await Promise.all([client.invalidateQueries({ queryKey: ['finanzas'] }), client.invalidateQueries({ queryKey: ['gestion'] })]); },
   });
 }
 

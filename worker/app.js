@@ -18,6 +18,8 @@ import { configuracion as rutasConfig } from './routes/config.js';
 import { biblioteca as rutasBiblioteca } from './routes/biblioteca.js';
 import { purgeMedia, tenantMedia, mediaTools, mediaSystem, mediaExecutor, recordMediaSent } from './biblioteca.js';
 import { finanzas as rutasFinanzas } from './routes/finanzas.js';
+import { gestion as rutasGestion } from './routes/gestion.js';
+import { fiscal as rutasFiscal } from './routes/fiscal.js';
 import { conexiones as rutasConexiones } from './routes/conexiones.js';
 import { calendario as rutasCalendario } from './routes/calendario.js';
 import { solicitudes as rutasSolicitudes } from './routes/solicitudes.js';
@@ -4701,6 +4703,8 @@ function buildAdminApp() {
   admin.use('/api/admin/*', moduloGate);
   admin.route('/', rutasConfig);
   admin.route('/', rutasFinanzas);
+  admin.route('/', rutasGestion);
+  admin.route('/', rutasFiscal);
   admin.route('/', rutasLeads);
   admin.route('/', rutasConversaciones);
   admin.route('/', rutasConexiones);

@@ -1,249 +1,59 @@
-# Design QA — Industrias rediseñada (dirección C) — 2026-09-16
+# QA de administración financiera · 09/10/2026
 
-- Origen: Juan marca dos huecos en la sección — la mitad derecha vacía junto al titular y
-  casi nada de aire abajo — y pide rediseñar SOLO Industrias. Se dibujaron tres
-  disposiciones en un lienzo (A riel de sectores · B bento · C conversación al frente) con
-  los tokens y las fuentes reales del sitio; elige **C**.
-- Implementado: cabecera en una línea (etiqueta · titular · subtítulo comparten fila, así
-  el ancho de arriba se usa entero); sectores como barra de pestañas de borde a borde con
-  icono y subrayado del activo; y contenido en tres columnas — texto | conversación (420 px,
-  con el interruptor de canal centrado encima) | capacidades.
-- Reparto vertical, que era el encargo explícito: relleno de sección 96 px, cabecera →
-  pestañas 36 px, pestañas → contenido 44 px, y 24 px de más bajo el contenido para
-  compensar ópticamente lo que la etiqueta y la mayúscula del titular añaden arriba. Medido:
-  125 px por arriba, ~120 por abajo.
-- Dos correcciones sobre la marcha: el interruptor heredaba el `margin-left:auto` de cuando
-  vivía en la fila de pestañas y salía pegado a la derecha; y en una sola columna la tarjeta
-  se estiraba a 816 px, así que se limita a 460 y va centrada.
-- El rótulo de cada pestaña pasa a `.tab-label` porque la traducción escribía sobre el botón
-  entero con `textContent` y se habría llevado el icono por delante.
-- Comprobado a 1757, 880 y 390 px, en las cuatro pestañas y en los dos canales.
-- P0/P1/P2 pendientes: ninguno.
+El informe anterior de la web se conserva en `docs/qa/design-qa-web-historico.md`.
 
-final result: passed
+**final result: passed**
 
----
+Sin hallazgos P0/P1/P2 abiertos en el alcance revisado. Resultado referido al diseño y los flujos locales; no certifica un despliegue ni una integración fiscal.
 
-# Design QA — Industrias: aire entre pestañas y descripción, y chats centrados (2026-09-16)
+## Evidencias
 
-- Pedido: quitar el hueco entre las pestañas de sector y la descripción —dejarlo como el
-  que hay entre el subtítulo de la sección y esas pestañas— y centrar verticalmente los chats.
-- Medido: subtítulo → pestañas = **56 px**. Pestañas → descripción = **131 px** (la descripción
-  iba centrada contra una conversación que medía casi el doble que ella). Texto 284 px de
-  alto, conversación 521 (WhatsApp) y 623 (web).
-- Cambios: `.industry-tabs` pasa a 3.5rem de margen inferior (los mismos 56 px); la rejilla
-  pasa a `align-items:start`, así la descripción arranca pegada a las pestañas; y la tarjeta
-  lleva `align-self:center`.
-- Para que ese centrado se NOTE hubo que acortar la conversación: con 521 px contra 284 la
-  tarjeta manda en la fila y centrarla no cambia nada. El cuerpo se acota a 300 px con scroll
-  y se abre **por el final**, como cuando abres un chat de verdad; un degradado en el borde
-  superior convierte el corte en «esto viene de antes». Efecto lateral bueno: las dos pieles
-  miden ya casi lo mismo (383 y 390 px), así que cambiar de canal ya no da el salto de 100 px
-  que quedó anotado en la revisión anterior.
-- Coste consciente: el saludo inicial de Vai queda fuera de la primera pantalla de la
-  tarjeta; se lee subiendo. Si se prefiere verlo, se sube el tope del cuerpo.
-- Comprobado a 1757, 880 y 390 px, en las dos pieles y en dos pestañas.
-- P0/P1/P2 pendientes: ninguno.
+- Fuente visual elegida: `/Users/johan/.codex/generated_images/01a117b1-8f03-7e70-a3f4-1f3a4f606ac3/exec-69c2224c-55bd-4952-bd35-80d5d00ec186.png`.
+- Implementación renderizada: `http://127.0.0.1:8796/credito`, navegador Chrome Bot, build real React y rutas Hono con SQLite/R2 aislados.
+- Carpeta de evidencias: `/Users/johan/D/Sebas_Proyec/output/velai-finanzas-2026-10-09/qa-implementacion/`.
+- Captura final: `credito-escritorio-final.png`. Comparación conjunta abierta e inspeccionada: `comparacion-final.png`; detalle de condiciones/reserva: `detalle-final.png`.
+- Viewport escritorio: 1487×1058 CSS, DPR 1. Fuente 1487×1058 px; captura de Chrome 1472×1047 px por área útil/barra de desplazamiento. Normalización de la captura a 1487×1058 para la comparación conjunta; no se consideran diferencias de escala como defectos.
+- Móvil 390×844: `credito-movil-v3.png`; tableta 820×1180: `compra-tableta.png` y `facturacion-tableta.png`. Tema oscuro: `credito-oscuro.png`. Formulario de empresa editable: `empresa-campos-editables.png`.
 
-final result: passed
+Estado: socio autorizado, préstamo ficticio con abono, seis cuotas reservadas y documento genérico. La referencia tenía tres contratos propuestos y fecha pendiente; la prueba usa un documento genérico y fechas ficticias, con aviso visible. Los contratos reales no se incluyen en el repositorio ni en esta prueba.
 
----
+## Comparaciones y correcciones
 
-# Design QA — disposición de Industrias (2026-09-16)
-
-- Origen: captura de Juan a ~1757 px. Medido antes de tocar: la columna de texto mide 284 px
-  de alto y la conversación 509, así que quedaban **224 px de hueco muerto** bajo el texto; y
-  el interruptor de canal formaba una segunda fila de pastillas justo debajo de las de sector.
-- Cambios: (1) el interruptor sube a la MISMA fila que los sectores, pegado a la derecha —
-  son dos ejes del mismo control, no dos filas; (2) la rejilla pasa a `1.05fr .95fr` con
-  `align-items:center`, así el hueco se reparte arriba y abajo en vez de caer entero debajo
-  del texto; (3) la tarjeta se limita a 460 px y se alinea con el borde derecho de la sección
-  — estirada a la columna entera dejaba de parecer una conversación.
-- Por debajo de 900 px la tarjeta ocupa el ancho y el interruptor baja a su propia línea:
-  pegado a las pestañas de sector parecía un sector más.
-- Trampa de cascada: las reglas de móvil vivían en el bloque RESPONSIVE general, que está
-  ANTES de la hoja del chat; con la misma especificidad ganaba la última y la tarjeta seguía
-  estrecha y a la derecha a 880 px. Ahora van al final de su propia hoja.
-- Comprobado a 1757, 880 y 390 px, en las dos pieles y en varias pestañas.
-- Queda anotado: cambiar de canal mueve la altura de la tarjeta (WhatsApp 521 px, web 623),
-  así que la sección da un salto de ~100 px al pulsar. Es honesto —son dos cosas distintas—
-  pero si molesta se iguala con un `min-height`.
-- P0/P1/P2 pendientes: ninguno.
-
-final result: passed
-
----
-
-# Design QA — Industrias enseña los dos canales (2026-09-16)
-
-- Decisión: el bot vive en WhatsApp Y en la web, y cada canal lo pinta a su manera, así que
-  la sección no puede enseñar una sola apariencia. Mismo diálogo, dos pieles y un
-  interruptor «WhatsApp / Chat web» encima de la tarjeta; el canal elegido se aplica a las
-  cuatro pestañas a la vez, para no tener que volver a pulsarlo en cada sector.
-- Piel WhatsApp: la que ya había (barra de estado del móvil, iconos de llamada, burbujas
-  verdes con cola, dobles ticks azules y micrófono). Piel web: el widget real de
-  `site/assets/vai-widget.js` en tema oscuro, con sus tokens, radios y burbujas.
-  `.indchat-solo-wa` / `.indchat-solo-web` marcan lo que existe en un canal y no en el otro.
-- **Colisión de nombres cazada al mirarlo**: `site/assets/styles.css` ya define `.chat-mock`
-  (el mock de WhatsApp de otras landings) con `max-width:340px; margin-left:auto`, y también
-  existían `.chat-header` y `.chat-avatar` en la propia home. Las clases nuevas heredaban ese
-  ancho y la tarjeta salía a 340 px pegada a la derecha. Todas pasan a `indchat-*`.
-- Segundo tropiezo: el interruptor y la tarjeta eran dos hijos de una rejilla de dos
-  columnas, así que la tarjeta caía a una fila nueva. Van dentro de `.indchat-demo`.
-- Comprobado: las dos pieles en las cuatro pestañas, a 1800 y 390 px, y el interruptor
-  cambiando de canal en vivo. `npm run check:site` en verde.
-- P0/P1/P2 pendientes: ninguno.
-
-final result: passed
-
----
-
-# Design QA — la malla cinética llega hasta el final del hero (2026-09-16)
-
-- Origen: Juan marca la banda bajo la cinta de canales; la malla interactiva no la cubría.
-- Causa medida: el lienzo (`.kinetic-grid-canvas`) cubre su contenedor entero
-  (`inset:68px 0 0`), pero esa banda **no era del hero**. El hero acababa en 932 px y la
-  cinta, con su margen inferior de 56 px, dejaba 42 px de fondo de página por debajo: ahí
-  no hay ni imagen ni malla porque no hay hero que pintar.
-- Implementación: el hero se alarga 56 px por abajo (`padding-bottom:calc(8rem + 56px)`) y
-  la cinta sube otros 56 (`margin:-152px auto 70px`), con lo que las tarjetas quedan donde
-  estaban y los 70 px que las separan de «El problema» son ya hero — con imagen y malla.
-  El margen inferior de la cinta devuelve al flujo exactamente esos 70 px: sin él, la
-  sección siguiente subía y se comía la cola del hero.
-- Por debajo de 900 px no se toca nada: ahí la cinta cae ENTERA fuera del hero (su arte va
-  anclado arriba), así que el hero conserva su relleno de siempre con una regla explícita.
-- Medido después: hero 932 · lienzo 932 · cinta 862 · sección 932. Banda de hero bajo las
-  tarjetas, 70 px; solape con la sección, 0.
-- Viewports comprobados: 1800 (claro y oscuro), 880 y 500 px — los dos últimos, idénticos
-  a antes del cambio.
-- P0/P1/P2 pendientes: ninguno.
-
-final result: passed
-
----
-
-# Design QA — cinta de canales y tema claro del hero (2026-09-16)
-
-- Origen: captura de Juan a ~1800 px de ancho; la cinta de canales del hero quedaba pegada
-  al borde de la sección «El problema», sin aire entre las tarjetas y la sección siguiente.
-- Medido antes de tocar: hueco real de **0 px** entre `.channel-ribbon` y `.problem-section`
-  (la cinta sube 75 px con margen negativo y sobresalía 7 px POR DEBAJO del hero, justo
-  encima del borde de la siguiente sección). Defecto de origen, no de una entrega reciente.
-- Implementación: `.channel-ribbon` pasa a `margin:-96px auto 56px` — la cinta queda entera
-  dentro del hero (14 px de margen hasta su borde) y deja 56 px hasta la sección. En ≤900
-  px, `-55px 20px 40px`; en ≤600 px, `-48px 14px 32px`.
-- Hallazgo del paso de tema claro (barrido de luminancia sobre todo el texto del hero y de
-  la cinta): **`.channel-pill` y el botón «Hablar con Vai» heredaban el `--white` invertido**
-  y quedaban oscuros sobre el hero, que sigue siendo oscuro en tema claro. El botón
-  desaparecía por completo. Añadidas dos reglas `body.light` que les devuelven el texto claro.
-- Viewports comprobados: 1800 × 1000 (claro y oscuro), 1280 y 390 × 800. Barrido completo de
-  la página en tiras, en los dos temas, sin más hallazgos: el único hueco a 0 era este.
-- Falso positivo descartado: la figura de precios sale en blanco en capturas fuera del
-  viewport porque es `loading="lazy"`; con la sección a la vista carga y se ve correcta.
-- P0/P1/P2 pendientes: ninguno.
-
-final result: passed
-
----
-
-# Design QA — recorrido editorial de precios
-
-- Fuente visual: `exec-5b32fc4f-e2a8-4343-b9d5-f05cde6ef56a.png` (dirección 1 aprobada).
-- Implementación corregida: `site/index.html` y `site/assets/pricing-journey-editorial-v2.webp`.
-- Escritorio: se integra la composición aprobada completa; ya no se reconstruye como cuatro tarjetas superpuestas.
-- Móvil: recorrido vertical legible sobre el fondo orbital, sin desbordamiento horizontal.
-- Viewports comprobados: 1440 × 1000 y 390 × 844.
-- Evidencia: `audit/pricing-editorial-v2-desktop.png`, `audit/pricing-editorial-v2-mobile.png` y `audit/pricing-editorial-v2-comparison.png`.
-- P0/P1/P2 pendientes: ninguno.
-
-final result: passed
-
----
-
-# Design QA — escaparate de asistentes reales
-
-- Fuente visual: `/Users/johan/.codex/generated_images/01a0a552-b4a7-7140-8e31-47b131101cc4/exec-fb320f06-ed90-4a6a-87cd-6c20a6f97c79.png`.
-- Fuente original: 1487 × 1058 px; normalizada a 1440 × 1024 px en `audit/assistant-showcase-reference-1440.png`.
-- Implementación de escritorio: `audit/assistant-showcase-desktop.png`, viewport CSS 1440 × 1024, captura 1440 × 1024 px, DPR 1.
-- Implementación móvil: `audit/assistant-showcase-mobile.png`, viewport CSS y captura 390 × 844 px, DPR 1.
-- Comparación conjunta: `audit/assistant-showcase-comparison.png`.
-- Estado: tema oscuro, español, Vai seleccionado. Se verificaron también Digo seleccionado, traducción inglesa y regreso a español.
-
-## Evidencia comparada
-
-- Vista completa: la comparación conjunta conserva la jerarquía aprobada — titular editorial, reparto de asistentes, selección visual, historia expandida, resultado y CTA — dentro de la identidad existente de HireVai.
-- Región focal: el reparto y el detalle seleccionado quedan suficientemente grandes en la comparación 2880 × 1080 para revisar retratos, nombres, roles, selección, copy y CTA; no fue necesario otro recorte.
-- Diferencia intencional: el mock fusionaba retratos generados en una escena cinematográfica. La implementación conserva los assets reales y sus fondos; Zoe usa expresamente el favicon oficial de la gatita con gafas, sustituyendo la fotografía directa por indicación del usuario.
+1. `comparacion-v1.png`: P2 por peso tipográfico excesivo (900), fondo con cuadrícula y tarjeta de reserva demasiado saturada. Corregidos con pesos de marca 700/800, fondo neutro y mezcla naranja al 4 %.
+2. `comparacion-v2.png` y `detalle-condiciones-v2.png`: jerarquía, cifras, color y tarjetas corregidas. P2 adicional en `credito-movil.png`: seis importes juntos y acciones de documentos fuera del área visible. Reserva móvil reorganizada en 3×2 y documentos como fichas con Ver/Descargar visibles.
+3. `credito-movil-v3.png`, `comparacion-final.png` y `detalle-final.png`: correcciones confirmadas; ancho del documento y main 390 px para viewport 390 px. Tablas numéricas extensas conservan desplazamiento contenido. Botones de marca con texto oscuro para contraste.
 
 ## Superficies de fidelidad
 
-- Tipografía: Cabinet Grotesk/Satoshi, pesos, jerarquía, interlineado y wrapping mantienen el sistema del sitio; el titular recupera el recorrido naranja-coral-violeta de la referencia.
-- Espaciado y ritmo: la segunda captura reduce la altura del reparto para que el detalle aparezca dentro del mismo viewport y conserva una lectura continua, sin cuadrícula de tarjetas.
-- Colores: fondo `#09070a`, naranja de acción, coral-violeta del titular, bordes y opacidades corresponden a los tokens existentes de Velai.
-- Imágenes: Vai, Alma, Dara, Salo, Xu, Faby y Digo usan copias locales de sus retratos reales; Zoe usa el favicon oficial `zoe-logo.webp`. Todas conservan proporción, foco y nitidez; Dara se convirtió a WebP a 720 px para evitar una descarga PNG de 2,3 MB.
-- Copy: nombres, marcas, roles, resultados y destinos corresponden a cada proyecto. La sección tiene versión española e inglesa.
+- **Tipografía:** Cabinet Grotesk de la marca; pesos 700/800 para encabezados/cifras, fuente de lectura existente para campos. Numerales tabulares y decimales españoles. Se conserva el formato monetario del panel con símbolo antes del importe.
+- **Espaciado:** jerarquía cabecera/pestañas/métricas/dos tarjetas/documentos. Tarjetas con borde suave y radios de 12 px. En móvil pasan a una columna; documentos y cuotas siguen utilizables sin desplazamiento global horizontal.
+- **Color:** navegación oscura por regla existente, lienzo claro y acento naranja, reserva suave. Tema oscuro comprobado. El texto oscuro sobre el botón naranja es una diferencia intencional de accesibilidad respecto a la referencia.
+- **Imágenes y activos:** interfaz sin fotografías. Se conservan marca, fuentes e iconos existentes del panel; no se inventan ilustraciones para sustituir activos. El mock es una dirección visual, no un nuevo logotipo.
+- **Contenido:** préstamo, caja, reserva y pagos diferenciados. Datos legales y fechas pendientes explícitos. Botones reales de alta/edición/adjunto reemplazan elementos decorativos del mock. Se mantiene la navegación completa y el pie del producto existente.
 
-## Interacción, responsive y accesibilidad
+## Interacciones comprobadas
 
-- Selección de Vai y Digo comprobada; actualiza nombre, marca, explicación, resultado y CTA.
-- CTA de Vai abre el widget; los demás CTA y enlaces secundarios usan destinos reales con `noopener noreferrer` cuando abren otra pestaña.
-- Carrusel horizontal móvil, detalle apilado, foco visible y `aria-selected` comprobados.
-- Sin desbordamiento horizontal a 390 px (`scrollWidth = clientWidth = 390`).
-- Consola comprobada sin errores ni avisos.
-- Producción verificada en `https://hirevai.com/` tras el despliegue Pages `eac620d1`: sección cargada, favicon oficial de Zoe servido con HTTP 200, selección funcional y sin desbordamiento ni errores de consola.
+- Guardar empresa con NIF/domicilio pendientes, editar y reabrir con valores conservados.
+- Crear expediente de préstamo sin primer vencimiento confirmado.
+- Adjuntar un PDF después de guardar y descargarlo por el endpoint privado.
+- Registrar cuota de 882,64: reserva 5295,84 → 4413,20; principal 50000 → 49617,36; 1/84 cuotas. Revertir con motivo devuelve reserva/principal al valor anterior y mantiene el historial.
+- Rechazo de fecha de pago futura; valores conservados para corregir y reintentar.
+- Escape en el formulario de adjunto cierra solo el diálogo interno y conserva el detalle de compra.
+- Navegación a facturación con emisor incompleto y validación bloqueada; origen de caja, comprador y factura separados.
+- Estado sin registros, carga, error de guardado, tema oscuro y breakpoints móvil/tableta/escritorio.
 
-## Historial de comparación
+Consola: apareció una importación de chunk obsoleto durante una reconstrucción local con la pestaña abierta; se recargó el build completo y el flujo quedó operativo. Sin errores nuevos de aplicación en la navegación final. Los cálculos/idempotencia/concurrencia se verificaron además con pruebas reales SQLite, no solo con mocks de interfaz.
 
-- Primera comparación: P2 — el reparto ocupaba demasiado alto y dejaba fuera del viewport gran parte del detalle; el titular perdía el matiz violeta de la referencia.
-- Corrección: altura máxima de retratos reducida de 410 a 335 px, espaciado vertical compactado y gradiente editorial aplicado al segundo renglón.
-- Ajuste final solicitado: se mantuvo el contenido aprobado y se mejoró únicamente su presentación — peso y balance del titular, regla lateral del texto introductorio, legibilidad de nombres/roles/enlaces, kicker del detalle y ritmo de la columna de resultados. Zoe pasó al favicon oficial.
-- Segunda revisión del usuario: la composición seguía percibiéndose plana. Se convirtió en una única escena editorial con el asset operativo real de Velai como profundidad ambiental, retratos escalonados, foco elevado para el asistente seleccionado y una transición tonal continua hacia el detalle; no se añadieron tarjetas.
-- Evidencia posterior: `audit/assistant-showcase-comparison.png`; el reparto y el comienzo completo del panel de resultado caben en el viewport de escritorio, sin P0/P1/P2 pendientes.
-- Ampliación final: se incorporó Mei con su imagen oficial usada por My Xu Costura y se fijó el cierre del reparto como Mei → Faby → Digo. Evidencia: `audit/assistant-showcase-xu-desktop.png`, `audit/assistant-showcase-xu-mobile.png` y `audit/assistant-showcase-xu-mobile-selected.png`.
-- QA de la ampliación: ocho asistentes y ocho fuentes de datos, selección de Xu, CTA a `https://myxucostura.com/`, traducción preparada, orden correcto y ausencia de desbordamiento horizontal a 1440 px y 390 px.
+## Pendientes no bloqueantes
 
-## Hallazgos
+- P3: los nombres descargables se normalizan a nombres seguros; podrían conservar una etiqueta visual con espacios sin cambiar el nombre de archivo.
+- La navegación horizontal móvil es la existente del panel. Una revisión global de su menú corresponde a otro alcance.
+- Cargar los originales reales y verificar el entorno compartido después del despliegue; no forma parte de la prueba visual con datos ficticios.
 
-- P0/P1/P2 pendientes: ninguno.
-- P3 opcional: observar con datos reales si los usuarios prefieren seleccionar el retrato antes de abrir la página o ir directamente al proyecto; no bloquea el lanzamiento.
+## Lista de implementación
 
-final result: passed
-
----
-
-# Design QA — red cinética en el hero
-
-- Fuente visual: `/Users/johan/.codex/visualizations/2026/09/15/01a0a659-0ca1-7732-9ccc-b62c564eedcc/velai-spline-review/01-current-home.png` (hero anterior).
-- Implementación: `/Users/johan/.codex/visualizations/2026/09/15/01a0a659-0ca1-7732-9ccc-b62c564eedcc/velai-spline-review/06-kinetic-grid-hero-desktop.png`.
-- Comparación normalizada: `/Users/johan/.codex/visualizations/2026/09/15/01a0a659-0ca1-7732-9ccc-b62c564eedcc/velai-spline-review/09-hero-comparison-cropped.png`.
-- Vista móvil: `/Users/johan/.codex/visualizations/2026/09/15/01a0a659-0ca1-7732-9ccc-b62c564eedcc/velai-spline-review/07-kinetic-grid-hero-mobile.png`.
-- Viewport y densidad: fuente e implementación 1280 × 720 px sobre viewport CSS 1280 × 720, DPR 1. La comparación se recortó a 1280 × 580 por lado para excluir el estado distinto del consentimiento de cookies.
-- Estado: tema oscuro, español, puntero sobre el área visual derecha. También se verificó 390 × 844 para respuesta móvil.
-- Evidencia de vista completa: el hero conserva composición, proporciones, navegación, CTA, estadísticas e imagen; la única diferencia intencional es la malla naranja-violeta.
-- Evidencia focal: la comparación recortada contiene titular, texto, CTA, esfera y salidas operativas con tamaño suficiente; no fue necesario otro recorte.
-
-## Superficies de fidelidad
-
-- Tipografía: familias, pesos, tamaños, interlineado, wrapping y jerarquía permanecen sin cambios.
-- Espaciado y ritmo: hero, márgenes, CTA, estadísticas y crop de la imagen permanecen sin cambios.
-- Colores: la malla reutiliza el naranja y violeta de Velai; la máscara evita reducir el contraste del titular.
-- Imagen: se conserva el WebP original sin reescalado ni sustitución; el canvas actúa como capa decorativa.
-- Copy: no cambia ningún texto ni traducción.
-
-## Interacción y accesibilidad
-
-- Puntero, deformación y onda de clic comprobados.
-- Los CTA conservan sus destinos y el canvas usa `pointer-events: none`.
-- Sin errores ni avisos en consola.
-- En móvil y con `prefers-reduced-motion` queda un fotograma estático.
-
-## Hallazgos
-
-- P0/P1/P2 pendientes: ninguno.
-- P3 opcional: ajustar la intensidad después de observar datos o feedback real; no bloquea el despliegue.
-
-## Historial de comparación
-
-- Primera comparación: sin diferencias accionables P0/P1/P2; no fueron necesarias iteraciones correctivas.
-
-final result: passed
+- [x] Corregir tipografía, fondo y reserva.
+- [x] Verificar móvil, documentos visibles y diálogos anidados.
+- [x] Comparar de nuevo fuente y render juntos, incluida región detallada.
+- [x] Verificar estado pendiente, guardado, descarga, pago y reverso.
+- [x] Conservar datos privados fuera de Git.

@@ -120,6 +120,10 @@ export function Shell() {
             <div className="navlabel">Administración</div>
             <nav className="tabs" aria-label="Administración">
               <Tab to="/finanzas" label="Finanzas" icon={<IcoBriefcase />} />
+              <Tab to="/credito" label="Crédito y fondos" icon={<IcoDashboard />} />
+              <Tab to="/compras" label="Compras" icon={<IcoBriefcase />} />
+              <Tab to="/facturacion" label="Facturación" icon={<IcoTemplate />} />
+              <Tab to="/impuestos" label="Impuestos y asesoría" icon={<IcoSliders />} />
             </nav>
           </>
         ) : null}

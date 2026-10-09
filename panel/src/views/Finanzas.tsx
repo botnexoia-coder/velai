@@ -2,11 +2,11 @@ import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { Link, Navigate, useSearchParams } from 'react-router';
 import { qs } from '../api/client';
 import { traducir } from '../api/errors';
-import type { FinConcepto, FinMoneda, FinMovimiento, FinMovimientoInput, FinRepartoInput, FinResumen, FinSocio, FinSocioInput, FinSocioRegistro, FinTipo, TenantRow } from '../api/types';
+import type { FinConcepto, FinCuenta, FinMoneda, FinNaturaleza, FinMovimiento, FinMovimientoInput, FinRepartoInput, FinResumen, FinSocio, FinSocioInput, FinSocioRegistro, FinTipo, TenantRow } from '../api/types';
 import { confirmar } from '../components/Confirmar';
 import { TenantChip } from '../components/Pills';
 import { useToast } from '../components/Toasts';
-import { useMe, useTenants, useFinConceptos, useFinMovimientos, useFinMutacion, useFinRepartos, useFinResumen, useFinSocios, type FinFilters } from '../hooks/queries';
+import { useMe, useTenants, useFinConceptos, useFinMovimientos, useFinMutacion, useFinRepartos, useFinResumen, useFinSocios, useFinCuentas, type FinFilters } from '../hooks/queries';
 import { finDinero, finImporte } from '../lib/format';
 
 const TIPOS: FinTipo[] = ['ingreso', 'gasto', 'egreso'];
@@ -27,6 +27,12 @@ const ERRORS: Record<string, string> = {
   socio_duplicado: 'Ya hay un socio con ese correo. Si está inactivo, puedes reactivarlo.',
   email_invalido: 'Introduce un correo electrónico válido.',
   nombre_invalido: 'Introduce un nombre de hasta 120 caracteres.',
+  movimiento_de_gestion: 'Este movimiento se conserva desde Crédito o Compras. Corrige la operación de origen.',
+  cuenta_desconocida: 'La cuenta seleccionada ya no está disponible. Revisa las cuentas del proyecto.',
+  cuenta_no_encontrada: 'La cuenta seleccionada ya no está disponible. Revisa las cuentas del proyecto.',
+  moneda_distinta: 'La cuenta debe usar la misma moneda que el movimiento.',
+  cuenta_moneda_distinta: 'La cuenta debe usar la misma moneda que el movimiento.',
+  concepto_gestion_no_manual: 'Registra esta operación desde Crédito o Compras para conservar su trazabilidad.',
 };
 const mensaje = (e: unknown) => ERRORS[e instanceof Error ? e.message : ''] || traducir(e);
 const hoy = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };
@@ -37,7 +43,12 @@ function periodo(value: string): FinFilters {
   return { desde: `${y}-${String(m).padStart(2, '0')}-01`, hasta: `${y}-${String(finMes).padStart(2, '0')}-${new Date(y, finMes, 0).getDate()}` };
 }
 function ErrorFin({ error }: { error: unknown }) { return error ? <p className="error" role="alert">{mensaje(error)}</p> : null; }
-function TipoPill({ tipo }: { tipo: FinTipo }) { return <span className={`pill fin-${tipo}`}>{LABEL[tipo]}</span>; }
+function TipoPill({ tipo, naturaleza }: { tipo: FinTipo; naturaleza?:FinNaturaleza }) { return <span className={`pill fin-${tipo}`}>{naturaleza === 'financiacion' ? 'Financiación' : naturaleza === 'reembolso_socio' ? 'Reembolso a socio' : naturaleza === 'financiero' ? 'Gasto financiero' : naturaleza === 'compra' ? 'Pago de compra' : LABEL[tipo]}</span>; }
+function importeFirmado(m:FinMovimiento) { return m.importe * (m.signo ?? 1); }
+function origenMovimiento(m:FinMovimiento) {
+  const credito=m.origen_tipo?.startsWith('prestamo_') || (m.origen_tipo==='reverso' && (m.naturaleza==='financiacion'||m.naturaleza==='financiero'));
+  return credito ? {ruta:'/credito',nombre:'Crédito'} : {ruta:'/compras',nombre:'Compras'};
+}
 function Dinero({ value, moneda }: { value: number; moneda: FinMoneda }) { return <span className={`fin-money${value < 0 ? ' fin-negative' : ''}`}>{finDinero(value, moneda)}</span>; }
 
 export function Finanzas() {
@@ -64,25 +75,27 @@ function FinanzasSocio() {
       <div className="fin-overview">
         <div className="fin-period"><label>Periodo<select value={p} onChange={(e) => setP(e.target.value)}><option value="mes">Mes actual</option><option value="trimestre">Trimestre actual</option><option value="año">Año actual</option><option value="todo">Todo</option><option value="personalizado">Elegir fechas</option></select></label>
           {p === 'personalizado' ? <><label>Desde<input type="date" value={custom.desde || ''} onChange={(e) => setCustom({ ...custom, desde: e.target.value })} /></label><label>Hasta<input type="date" value={custom.hasta || ''} onChange={(e) => setCustom({ ...custom, hasta: e.target.value })} /></label></> : null}
-          <p className="muted">Ingresos − gastos = beneficio.<br />Los egresos solo restan caja.</p>
+          <p className="muted">Ingresos del negocio − gastos = resultado del libro.<br />Los préstamos y la devolución de capital se muestran como financiación.</p>
         </div>
         <div className="fin-currencies">
           {MONEDAS.map((moneda) => <section className="fin-currency" aria-label={`Resumen ${moneda}`} key={moneda}><h2>{moneda} <small>{moneda === 'EUR' ? 'Euros' : 'Pesos colombianos'}</small></h2>
             <div className="fin-metrics">{(['ingresos', 'gastos', 'beneficio', 'egresos'] as const).map((key) => <div key={key}><span>{key[0]!.toUpperCase() + key.slice(1)}</span><strong>{resumen.data ? <Dinero value={resumen.data.monedas[moneda][key]} moneda={moneda} /> : '—'}</strong></div>)}</div>
-            <div className="fin-caja"><span>Caja <small>(acumulado)</small></span><strong>{resumen.data ? <Dinero value={resumen.data.monedas[moneda].caja} moneda={moneda} /> : '—'}</strong><small>Disponible sin repartir · desde el origen</small></div>
+            {resumen.data?.financiacion?.[moneda] ? <div className="fin-metrics" aria-label={`Financiación ${moneda}`}><div><span>Préstamos recibidos</span><strong><Dinero value={resumen.data.financiacion[moneda].entradas} moneda={moneda} /></strong></div><div><span>Capital devuelto</span><strong><Dinero value={resumen.data.financiacion[moneda].salidas} moneda={moneda} /></strong></div></div> : null}
+            <div className="fin-caja"><span>Caja <small>(acumulado)</small></span><strong>{resumen.data ? <Dinero value={resumen.data.monedas[moneda].caja} moneda={moneda} /> : '—'}</strong><small>Saldo del libro · antes de reservas y compromisos</small></div>
           </section>)}
         </div>
       </div>
       <ErrorFin error={resumen.error} />
+      <p className="muted">La caja incluye los movimientos sin cuenta asignada del histórico. Consulta <Link to="/credito?vista=destino">Fondos del proyecto</Link> para ver cuentas, reservas y compromisos.</p>
       <Movimientos dates={dates} />
-      {resumen.data ? <details className="fin-breakdown"><summary>Desglose por concepto · periodo seleccionado</summary><div className="fin-table"><table><thead><tr><th>Concepto</th><th>Tipo</th><th>Moneda</th><th>Importe</th></tr></thead><tbody>{resumen.data.conceptos.map((r) => <tr key={`${r.concepto_id}-${r.moneda}`}><td>{r.nombre}</td><td><TipoPill tipo={r.tipo} /></td><td>{r.moneda}</td><td><Dinero value={r.importe} moneda={r.moneda} /></td></tr>)}</tbody></table></div>{!resumen.data.conceptos.length ? <p className="empty">No hay movimientos en este periodo.</p> : null}</details> : null}
+      {resumen.data ? <details className="fin-breakdown"><summary>Desglose por concepto · periodo seleccionado</summary><div className="fin-table"><table><thead><tr><th>Concepto</th><th>Tipo</th><th>Moneda</th><th>Importe</th></tr></thead><tbody>{resumen.data.conceptos.map((r) => <tr key={`${r.concepto_id}-${r.moneda}-${r.naturaleza||'operativo'}`}><td>{r.nombre}</td><td><TipoPill tipo={r.tipo} naturaleza={r.naturaleza} /></td><td>{r.moneda}</td><td><Dinero value={r.importe} moneda={r.moneda} /></td></tr>)}</tbody></table></div>{!resumen.data.conceptos.length ? <p className="empty">No hay movimientos en este periodo.</p> : null}</details> : null}
     </> : tab === 'repartos' ? <Repartos /> : tab === 'socios' ? <Socios /> : <Conceptos />}
   </div>;
 }
 function Movimientos({ dates }: { dates: FinFilters }) {
   const [f, setF] = useState<FinFilters>({});
   const filters = { ...dates, ...f };
-  const query = useFinMovimientos(filters), conceptos = useFinConceptos(true), tenants = useTenants(true);
+  const query = useFinMovimientos(filters), conceptos = useFinConceptos(true), tenants = useTenants(true), cuentas = useFinCuentas();
   const [editing, setEditing] = useState<FinMovimiento | 'new' | null>(null);
   const rows = query.data?.pages.flatMap((p) => p.movimientos) || [];
   return <>
@@ -93,12 +106,12 @@ function Movimientos({ dates }: { dates: FinFilters }) {
         <label>Cliente<select value={f.tenant || ''} onChange={(e) => setF({ ...f, tenant: e.target.value })}><option value="">Todos los clientes</option>{tenants.data?.tenants.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}</select></label></div>
       <div className="fin-actions"><a className="btn alt" href={`/api/admin/finanzas/export.csv${qs(filters)}`} download>Exportar CSV</a><button className="btn" type="button" onClick={() => setEditing('new')}>Registrar movimiento</button></div>
     </div>
-    <ErrorFin error={query.error || conceptos.error || tenants.error} />
-    {query.isPending ? <p role="status">Cargando movimientos…</p> : <div className="fin-table"><table><thead><tr><th>Fecha</th><th>Tipo</th><th>Concepto</th><th>Cliente</th><th>Nota</th><th>Importe</th></tr></thead><tbody>
-      {rows.map((m) => <tr key={m.id} onClick={() => setEditing(m)}><td>{m.fecha}</td><td><TipoPill tipo={m.tipo} /></td><td><button className="fin-row-open" type="button" onClick={() => setEditing(m)}>{m.concepto_nombre}</button>{m.reparto_id ? <small className="muted"> · reparto</small> : null}</td><td><TenantChip id={m.tenant_id || undefined} name={m.tenant_name} /></td><td className="fin-note">{m.nota || '—'}</td><td><Dinero value={m.importe} moneda={m.moneda} /> <small>{m.moneda}</small></td></tr>)}
+    <ErrorFin error={query.error || conceptos.error || tenants.error || cuentas.error} />
+    {query.isPending ? <p role="status">Cargando movimientos…</p> : <div className="fin-table"><table><thead><tr><th>Fecha</th><th>Tipo</th><th>Concepto</th><th>Cliente</th><th>Cuenta</th><th>Nota</th><th>Importe</th></tr></thead><tbody>
+      {rows.map((m) => <tr key={m.id} onClick={() => setEditing(m)}><td>{m.fecha}</td><td><TipoPill tipo={m.tipo} naturaleza={m.naturaleza} /></td><td><button className="fin-row-open" type="button" onClick={() => setEditing(m)}>{m.concepto_nombre}</button>{m.reparto_id ? <small className="muted"> · reparto</small> : null}{m.origen_tipo ? <small className="muted"> · {m.signo === -1 ? 'Reverso · ' : ''}{origenMovimiento(m).nombre}</small> : null}</td><td><TenantChip id={m.tenant_id || undefined} name={m.tenant_name} /></td><td>{m.cuenta_id ? cuentas.data?.cuentas?.find(c=>c.id===m.cuenta_id)?.nombre || 'Cuenta vinculada' : 'Pendiente de asignar'}</td><td className="fin-note">{m.nota || '—'}</td><td><Dinero value={importeFirmado(m)} moneda={m.moneda} /> <small>{m.moneda}</small></td></tr>)}
     </tbody></table>{!rows.length ? <p className="empty">Sin movimientos con estos filtros. Registra el primero para empezar el libro.</p> : null}</div>}
     {query.hasNextPage ? <div className="pager"><button className="btn alt" disabled={query.isFetchingNextPage} onClick={() => void query.fetchNextPage()}>Cargar más</button></div> : null}
-    {editing ? <MovimientoModal initial={editing === 'new' ? null : editing} tenants={tenants.data?.tenants || []} onClose={() => setEditing(null)} /> : null}
+    {editing ? <MovimientoModal initial={editing === 'new' ? null : editing} tenants={tenants.data?.tenants || []} cuentas={cuentas.data?.cuentas || []} cuentasError={cuentas.error} onClose={() => setEditing(null)} /> : null}
   </>;
 }
 function Modal({ title, children, close, busy = false }: { title: string; children: ReactNode; close: () => void | Promise<void>; busy?: boolean }) {
@@ -106,15 +119,16 @@ function Modal({ title, children, close, busy = false }: { title: string; childr
   useEffect(() => { ref.current?.showModal(); }, []);
   return <dialog ref={ref} className="fin-modal" aria-label={title} onCancel={(e) => { e.preventDefault(); if (!busy) void close(); }}><div className="modal-h"><strong>{title}</strong><button className="btn alt" type="button" disabled={busy} onClick={() => void close()}>Cerrar</button></div><div className="modal-b">{children}</div></dialog>;
 }
-function MovimientoModal({ initial, tenants, onClose }: { initial: FinMovimiento | null; tenants: TenantRow[]; onClose: () => void }) {
+function MovimientoModal({ initial, tenants, cuentas, cuentasError, onClose }: { initial: FinMovimiento | null; tenants: TenantRow[]; cuentas:FinCuenta[]; cuentasError:unknown; onClose: () => void }) {
   const catalogo = useFinConceptos(), mutation = useFinMutacion<Partial<FinMovimientoInput>>('movimientos'), toast = useToast();
   const [tipo, setTipo] = useState<FinTipo>(initial?.tipo || 'ingreso');
   const [concepto, setConcepto] = useState(String(initial?.concepto_id || ''));
   const [fecha, setFecha] = useState(initial?.fecha || hoy()), [moneda, setMoneda] = useState<FinMoneda>(initial?.moneda || 'EUR');
   const [importe, setImporte] = useState(initial ? String(initial.importe / (initial.moneda === 'EUR' ? 100 : 1)) : '');
   const [nota, setNota] = useState(initial?.nota || ''), [tenant, setTenant] = useState(initial?.tenant_id || '');
+  const [cuenta,setCuenta]=useState(initial?.cuenta_id || '');
   const [error, setError] = useState<unknown>(null);
-  const opciones = catalogo.data?.conceptos[tipo] || [];
+  const opciones = (catalogo.data?.conceptos[tipo] || []).filter(c=>!c.clave?.startsWith('g_'));
   const conceptoId = Number(concepto || opciones[0]?.id || 0);
   const entero = finImporte(importe, moneda);
   const original = {
@@ -122,10 +136,10 @@ function MovimientoModal({ initial, tenants, onClose }: { initial: FinMovimiento
     concepto: String(initial?.concepto_id || ''), fecha: initial?.fecha || hoy(),
     moneda: initial?.moneda || 'EUR' as FinMoneda,
     importe: initial ? String(initial.importe / (initial.moneda === 'EUR' ? 100 : 1)) : '',
-    nota: initial?.nota || '', tenant: initial?.tenant_id || '',
+    nota: initial?.nota || '', tenant: initial?.tenant_id || '', cuenta:initial?.cuenta_id || '',
   };
   const camposCambiados = Boolean((concepto && concepto !== original.concepto) || fecha !== original.fecha
-    || moneda !== original.moneda || importe !== original.importe || nota !== original.nota || tenant !== original.tenant);
+    || moneda !== original.moneda || importe !== original.importe || nota !== original.nota || tenant !== original.tenant || cuenta !== original.cuenta);
   // En un alta vacía se puede explorar Ingreso/Gasto/Egreso sin avisos. En edición,
   // cambiar el tipo sí es una modificación pendiente y debe protegerse al salir.
   const sucio = camposCambiados || Boolean(initial && tipo !== original.tipo);
@@ -143,7 +157,7 @@ function MovimientoModal({ initial, tenants, onClose }: { initial: FinMovimiento
     setTipo(next); setConcepto(''); setError(null);
     if (sucio) {
       setFecha(original.fecha); setMoneda(original.moneda); setImporte(original.importe);
-      setNota(original.nota); setTenant(next === 'egreso' ? '' : original.tenant);
+      setNota(original.nota); setTenant(next === 'egreso' ? '' : original.tenant); setCuenta(original.cuenta);
     } else if (next === 'egreso') setTenant('');
   }
   async function cerrar() { if (await descartar('cerrar')) onClose(); }
@@ -151,7 +165,7 @@ function MovimientoModal({ initial, tenants, onClose }: { initial: FinMovimiento
     e.preventDefault(); setError(null);
     if (!entero) { setError(new Error('importe_invalido')); return; }
     try {
-      await mutation.mutateAsync({ method: initial ? 'PATCH' : 'POST', id: initial?.id, body: { tipo, ...(initial ? {} : { moneda }), fecha, concepto_id: conceptoId, importe: entero, nota, tenant_id: tipo === 'egreso' ? null : tenant || null } });
+      await mutation.mutateAsync({ method: initial ? 'PATCH' : 'POST', id: initial?.id, body: { tipo, ...(initial ? {} : { moneda }), fecha, concepto_id: conceptoId, importe: entero, nota, tenant_id: tipo === 'egreso' ? null : tenant || null, cuenta_id:cuenta || null } });
       toast('Movimiento guardado'); onClose();
     } catch (e) { setError(e); }
   }
@@ -160,17 +174,18 @@ function MovimientoModal({ initial, tenants, onClose }: { initial: FinMovimiento
     try { await mutation.mutateAsync({ method: 'DELETE', id: initial.id }); toast('Movimiento borrado'); onClose(); } catch (e) { setError(e); }
   }
   return <Modal title={initial ? 'Detalle del movimiento' : 'Registrar movimiento'} close={cerrar} busy={mutation.isPending}>
-    {initial?.reparto_id ? <><p>Esta línea pertenece a un reparto para {initial.beneficiario}.</p><p><Dinero value={initial.importe} moneda={initial.moneda} /> · {initial.fecha}</p><p>Para corregirla, borra el reparto completo y vuelve a registrarlo.</p><Link className="btn" to="/finanzas?tab=repartos">Ver repartos</Link></> : <form onSubmit={(e) => void guardar(e)}>
+    {initial?.origen_tipo ? <><p><TipoPill tipo={initial.tipo} naturaleza={initial.naturaleza} /> {initial.signo === -1 ? '· Reverso' : ''}</p><h2>{initial.concepto_nombre}</h2><p><Dinero value={importeFirmado(initial)} moneda={initial.moneda} /> · {initial.fecha}</p><p>{initial.nota || 'Sin nota adicional'}</p><p className="muted">Cuenta: {cuentas.find(c=>c.id===initial.cuenta_id)?.nombre || 'Cuenta vinculada'}</p><p>Este movimiento se generó desde {origenMovimiento(initial).nombre}. Se conserva en el libro y se corrige desde la operación de origen.</p><Link className="btn" to={origenMovimiento(initial).ruta}>Abrir {origenMovimiento(initial).nombre}</Link></> : initial?.reparto_id ? <><p>Esta línea pertenece a un reparto para {initial.beneficiario}.</p><p><Dinero value={initial.importe} moneda={initial.moneda} /> · {initial.fecha}</p><p>Para corregirla, borra el reparto completo y vuelve a registrarlo.</p><Link className="btn" to="/finanzas?tab=repartos">Ver repartos</Link></> : <form onSubmit={(e) => void guardar(e)}>
       <fieldset disabled={mutation.isPending} className="fin-fieldset"><legend>Tipo de movimiento</legend><div className="fin-segment">{TIPOS.map((t) => <button type="button" key={t} className={`btn ${t === tipo ? '' : 'alt'}`} aria-pressed={t === tipo} onClick={() => void cambiarTipo(t)}>{LABEL[t]}</button>)}</div></fieldset>
       <div className="fin-form"><label>Concepto<select required value={conceptoId || ''} onChange={(e) => setConcepto(e.target.value)} disabled={mutation.isPending || !catalogo.data}>{!opciones.length ? <option value="">No hay conceptos activos</option> : null}{initial && tipo === initial.tipo && !opciones.some((c) => c.id === initial.concepto_id) ? <option value={initial.concepto_id}>{initial.concepto_nombre} (inactivo)</option> : null}{opciones.map((c) => <option key={c.id} value={c.id}>{c.nombre}</option>)}</select></label>
         <label>Fecha<input type="date" required min="2025-01-01" value={fecha} onChange={(e) => setFecha(e.target.value)} /></label>
-        <label>Moneda<select disabled={Boolean(initial)} value={moneda} onChange={(e) => { setMoneda(e.target.value as FinMoneda); setImporte(''); }}>{MONEDAS.map((m) => <option key={m}>{m}</option>)}</select></label>
+        <label>Moneda<select disabled={Boolean(initial)} value={moneda} onChange={(e) => { setMoneda(e.target.value as FinMoneda); setImporte(''); setCuenta(''); }}>{MONEDAS.map((m) => <option key={m}>{m}</option>)}</select></label>
         <label>Importe ({moneda})<input required inputMode="decimal" placeholder={moneda === 'EUR' ? '0,00' : '0'} value={importe} onChange={(e) => setImporte(e.target.value)} /><small>{moneda === 'EUR' ? 'Euros, hasta dos decimales' : 'Pesos enteros, sin decimales'}</small></label>
         {tipo !== 'egreso' ? <label>Cliente (opcional)<select value={tenant} disabled={Boolean(initial)} onChange={(e) => setTenant(e.target.value)}><option value="">Sin cliente</option>{tenants.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}</select></label> : null}
+        <label>Cuenta del proyecto (opcional)<select value={cuenta} disabled={mutation.isPending} onChange={e=>setCuenta(e.target.value)}><option value="">Pendiente de asignar</option>{cuenta&&!cuentas.some(c=>c.id===cuenta)?<option value={cuenta}>Cuenta vinculada (pendiente de cargar)</option>:null}{cuentas.filter(c=>c.moneda===moneda).map(c=><option key={c.id} value={c.id}>{c.nombre}</option>)}</select><small>Selecciona dónde entró o salió el dinero. Un histórico sin cuenta conserva esa condición.</small></label>
         <label className="fin-full">Nota<textarea maxLength={2000} rows={3} value={nota} onChange={(e) => setNota(e.target.value)} /></label>
       </div>
       {initial ? <p className="muted">Registrado por {initial.created_by} · {initial.created_at.slice(0, 10)}</p> : null}
-      <ErrorFin error={error || catalogo.error} /><div className="fin-actions"><button className="btn" disabled={mutation.isPending || !catalogo.data || !conceptoId}>Guardar movimiento</button>{initial ? <button className="btn alt" type="button" disabled={mutation.isPending} onClick={() => void borrar()}>Borrar movimiento</button> : null}</div>
+      <ErrorFin error={error || catalogo.error || cuentasError} /><div className="fin-actions"><button className="btn" disabled={mutation.isPending || !catalogo.data || !conceptoId}>Guardar movimiento</button>{initial ? <button className="btn alt" type="button" disabled={mutation.isPending} onClick={() => void borrar()}>Borrar movimiento</button> : null}</div>
     </form>}
   </Modal>;
 }
@@ -256,7 +271,7 @@ function ConceptoRow({ concepto: c, prev, next }: { concepto: FinConcepto; prev?
   const sistema = Boolean(c.sistema);
   return <div className={`fin-concepto${c.activo ? '' : ' fin-inactive'}${sistema ? ' fin-sistema' : ''}`}>
     {sistema
-      ? <p className="fin-fijo"><strong>{c.nombre}</strong><small className="muted">Lo usan los repartos del equipo: no se renombra ni se desactiva.</small></p>
+      ? <p className="fin-fijo"><strong>{c.nombre}</strong><small className="muted">{c.clave?.startsWith('g_') ? 'Lo usan Crédito y Compras: no se renombra ni se desactiva.' : 'Lo usan los repartos del equipo: no se renombra ni se desactiva.'}</small></p>
       : <form onSubmit={(e) => { e.preventDefault(); void change({ nombre }); }}><input aria-label={`Nombre de ${c.nombre}`} required maxLength={120} value={nombre} onChange={(e) => setNombre(e.target.value)} /><button className="btn alt btnsm" disabled={mutation.isPending || nombre === c.nombre}>Guardar</button></form>}
     <div className="fin-concept-actions"><span className="muted">{c.activo ? 'Activo' : 'Inactivo'}</span><button className="btn alt btnsm" aria-label={`Subir ${c.nombre}`} disabled={mutation.isPending || !prev} onClick={() => void change({ position: prev!.position })}>↑</button><button className="btn alt btnsm" aria-label={`Bajar ${c.nombre}`} disabled={mutation.isPending || !next} onClick={() => void change({ position: next!.position })}>↓</button>
       {sistema ? null : <><button className="btn alt btnsm" disabled={mutation.isPending} onClick={() => void change({ activo: c.activo ? 0 : 1 })}>{c.activo ? 'Desactivar' : 'Activar'}</button><button className="btn alt btnsm" disabled={mutation.isPending} onClick={() => void borrar()}>Borrar</button></>}</div>

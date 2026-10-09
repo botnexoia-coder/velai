@@ -68,6 +68,15 @@ if (!r2Prod.length || !r2Stg.length) fallos.push('R2 requiere bucket propio en p
 for (const bucket of r2Stg) if (r2Prod.includes(bucket)) fallos.push(`staging usa el bucket R2 de PRODUCCIÓN (${bucket})`);
 if (!prodVars.PUBLIC_MEDIA_BASE || !stgVars.PUBLIC_MEDIA_BASE || prodVars.PUBLIC_MEDIA_BASE === stgVars.PUBLIC_MEDIA_BASE) fallos.push('PUBLIC_MEDIA_BASE debe existir y ser distinto en cada entorno');
 
+// Documentación financiera siempre privada y separada de los assets públicos.
+for (const section of ['r2_buckets[]','env.staging.r2_buckets[]']) {
+  const buckets=t[section]||[];
+  const finance=buckets.find(b=>b.binding==='FINANCE_DOCS');
+  const media=buckets.find(b=>b.binding==='MEDIA');
+  if (!finance || finance.bucket_name===media?.bucket_name) fallos.push(`${section}: FINANCE_DOCS debe usar su propio bucket`);
+  if (finance?.jurisdiction!=='eu') fallos.push(`${section}: los documentos financieros deben conservar la jurisdicción eu configurada`);
+}
+
 // 2. Dominios: el fallo caro. `routes` SE HEREDA, así que su ausencia no es neutra.
 const rutasProd = t['']?.routes || '';
 // Si producción "no tiene" rutas, lo roto es este análisis o el TOML, no la realidad:

@@ -19,6 +19,10 @@ import { TipHost } from './components/Tip';
 import { ConfirmarHost } from './components/Confirmar';
 
 const Finanzas = lazy(() => import('./views/Finanzas').then((m) => ({ default: m.Finanzas })));
+const Credito = lazy(() => import('./views/gestion/Credito').then(m=>({default:m.Credito})));
+const Compras = lazy(() => import('./views/gestion/Compras').then(m=>({default:m.Compras})));
+const Facturacion = lazy(() => import('./views/gestion/Facturacion').then(m=>({default:m.Facturacion})));
+const Impuestos = lazy(() => import('./views/gestion/Impuestos').then(m=>({default:m.Impuestos})));
 
 export function App() {
   return (
@@ -33,6 +37,10 @@ export function App() {
           <Route path="/conexiones" element={<Conexiones />} />
           <Route path="/clientes" element={<Clientes />} />
           <Route path="/finanzas" element={<Suspense fallback={<p role="status">Cargando…</p>}><Finanzas /></Suspense>} />
+          <Route path="/credito" element={<Suspense fallback={<p role="status">Cargando…</p>}><Credito/></Suspense>} />
+          <Route path="/compras" element={<Suspense fallback={<p role="status">Cargando…</p>}><Compras/></Suspense>} />
+          <Route path="/facturacion" element={<Suspense fallback={<p role="status">Cargando…</p>}><Facturacion/></Suspense>} />
+          <Route path="/impuestos" element={<Suspense fallback={<p role="status">Cargando…</p>}><Impuestos/></Suspense>} />
           <Route path="/canales" element={<Canales />} />
           <Route path="/plantillas" element={<Plantillas />} />
           <Route path="/configuracion" element={<Configuracion />} />

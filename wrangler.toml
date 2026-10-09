@@ -146,6 +146,12 @@ crons = ["* * * * *", "*/5 * * * *"]
 binding = "MEDIA"
 bucket_name = "vai-media"
 
+# Contratos, facturas y justificantes: bucket privado independiente de Biblioteca.
+[[r2_buckets]]
+binding = "FINANCE_DOCS"
+bucket_name = "vai-finance-docs"
+jurisdiction = "eu"
+
 [[kv_namespaces]]
 binding = "KV"
 id = "14fbc395a218428bb677f61243c9e3f6"
@@ -258,3 +264,9 @@ database_id = "4fe5d8b0-17d8-4ac1-a3f7-216c5e085a75"
 [[env.staging.r2_buckets]]
 binding = "MEDIA"
 bucket_name = "vai-media-staging"
+
+# Sin documentos reales en staging.
+[[env.staging.r2_buckets]]
+binding = "FINANCE_DOCS"
+bucket_name = "vai-finance-docs-staging"
+jurisdiction = "eu"
