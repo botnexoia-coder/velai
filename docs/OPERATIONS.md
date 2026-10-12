@@ -390,7 +390,7 @@ La web identifica por ahora únicamente el nombre comercial Velai. **No activar 
 
 ### CLI de despliegue (12/10/2026)
 
-CD fija Wrangler 4.149.0 para usar la misma versión en el ensayo, migraciones y
+CD usa Node 22 y fija Wrangler 4.149.0 para usar la misma versión en el ensayo, migraciones y
 producción. La resolución abierta `wrangler@4` reutilizó 4.86.0 en el runner,
 que falló al leer una respuesta de deployments con HTTP 200; el primer intento
 también recibió un 504 en la API. Se mantienen todas las puertas CI, staging y

@@ -143,7 +143,7 @@ jobs:
       - uses: actions/setup-node@v4
         if: steps.fresh_start.outputs.fresh == 'true'
         with:
-          node-version: '20.19'
+          node-version: '22'
           cache: npm
       # CI ya ejecutó todos los checks. Wrangler solo necesita las dependencias de
       # runtime y el panel/dist exacto que pasó el smoke en aquel run.
