@@ -405,3 +405,32 @@ test('obligaciones globales distinguen préstamos sin abono, adquisiciones y pag
   assert.deepEqual(final.obligaciones.EUR.socios, { adelantado: 0, reembolsado: 0, pendiente: 0 });
   assert.deepEqual(final.obligaciones.EUR.compras, { adquirido: 80000, pagado_proveedores: 0, pendiente_proveedores: 80000 });
 });
+
+test('movimiento de evento infiere tenant y filtra resumen/listado/CSV; rechaza moneda, tenant y destino incoherentes', async (t) => {
+  const { DB, api, call, mov } = await fixture(t), tenant = crypto.randomUUID(), evento = crypto.randomUUID();
+  await DB.prepare('INSERT INTO tenants (id,slug,name,channel_address,system_prompt,created_at,updated_at) VALUES (?,?,?,?,?,?,?)')
+    .bind(tenant, `cliente-${tenant}`, 'Cliente ficticio', `web:${tenant}`, 'test', '2026-01-01', '2026-01-01').run();
+  await DB.prepare('INSERT INTO tenant_events (id,tenant_id,slug,name,created_at,updated_at) VALUES (?,?,?,?,?,?)')
+    .bind(evento, tenant, 'fiesta-ficticia', 'Fiesta ficticia', '2026-01-01', '2026-01-01').run();
+  const ingreso = await mov('ingreso', 'EUR', 20000, '2026-01-02', { evento_id: evento });
+  const gasto = await mov('gasto', 'EUR', 5000, '2026-01-02', { evento_id: evento });
+  await mov('ingreso', 'EUR', 90000, '2026-01-02', { tenant_id: tenant });
+  assert.equal((await DB.prepare('SELECT tenant_id FROM fin_movimientos WHERE id=?').bind(ingreso.id).first()).tenant_id, tenant);
+  const listado = await api(`finanzas/movimientos?evento=${evento}`);
+  assert.equal(listado.movimientos.length, 2); assert.ok(listado.movimientos.every((m) => m.evento_id_efectivo===evento));
+  const resumen = await api(`finanzas/resumen?evento=${evento}`);
+  assert.equal(resumen.monedas.EUR.ingresos, 20000); assert.equal(resumen.monedas.EUR.gastos, 5000);
+  assert.equal(resumen.monedas.EUR.caja, 105000); // Caja acumulada sigue global por contrato.
+  const csv = await (await call(`finanzas/export.csv?evento=${evento}`)).text();
+  assert.equal(csv.split('\r\n').length, 3); assert.match(csv, new RegExp(evento)); assert.doesNotMatch(csv, /"900\.00"/);
+  await assert.rejects(mov('ingreso', 'COP', 1, '2026-01-02', { evento_id: evento }), error(400, 'evento_moneda_invalida'));
+  await assert.rejects(mov('ingreso', 'EUR', 1, '2026-01-02', { evento_id: evento, tenant_id: crypto.randomUUID() }), error(400, 'evento_cliente_incoherente'));
+  await assert.rejects(mov('egreso', 'EUR', 1, '2026-01-02', { evento_id: evento }), error(400, 'evento_tipo_invalido'));
+  await assert.rejects(mov('ingreso', 'EUR', 1, '2026-01-02', { evento_id: crypto.randomUUID() }), error(400, 'evento_invalido'));
+  for (const path of ['resumen', 'movimientos', 'export.csv']) await assert.rejects(call(`finanzas/${path}?evento=incorrecto`), error(400, 'evento_invalido'));
+  await api(`finanzas/movimientos/${gasto.id}`, 'PATCH', { evento_id: null });
+  assert.equal((await api(`finanzas/resumen?evento=${evento}`)).monedas.EUR.gastos, 0);
+  await api(`finanzas/movimientos/${gasto.id}`, 'PATCH', { evento_id: evento, tenant_id: null });
+  assert.equal((await api(`finanzas/resumen?evento=${evento}`)).monedas.EUR.gastos, 5000);
+  await assert.rejects(DB.prepare('UPDATE fin_movimientos SET tenant_id=NULL WHERE id=?').bind(ingreso.id).run(), /evento_movimiento_incoherente/);
+});

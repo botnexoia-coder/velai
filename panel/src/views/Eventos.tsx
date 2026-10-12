@@ -1,7 +1,8 @@
+import { EventFinance } from './EventFinance';
 import { useMemo, useState } from 'react';
 import { traducir } from '../api/errors';
 import type { EventPaymentStatus, EventReservationStatus } from '../api/types';
-import { useEventReservationStatus, useEvents } from '../hooks/queries';
+import { useEventReservationStatus, useEvents, useMe } from '../hooks/queries';
 import { fmt } from '../lib/format';
 import { useToast } from '../components/Toasts';
 
@@ -16,6 +17,9 @@ function euros(cents: number | null) {
 
 export function Eventos() {
   const query = useEvents();
+  const me = useMe();
+  const canFinance = me.data?.role === 'velai' && me.data?.socio === true;
+  const [view,setView] = useState('reservas');
   const update = useEventReservationStatus();
   const toast = useToast();
   const [selected, setSelected] = useState('');
@@ -79,6 +83,8 @@ export function Eventos() {
           </div>
         </section>
       ) : null}
+      {canFinance&&current?<div className="chtabs mb12" role="group" aria-label="Vista del evento"><button className={`chtab${view==='reservas'?' is-on':''}`} type="button" aria-pressed={view==='reservas'} onClick={()=>setView('reservas')}>Reservas</button><button className={`chtab${view==='finanzas'?' is-on':''}`} type="button" aria-pressed={view==='finanzas'} onClick={()=>setView('finanzas')}>Presupuesto y gastos</button></div>:null}
+      {canFinance&&view==='finanzas'&&current?<EventFinance eventId={eventId}/>:<>
       <div className="grid eventstats">
         <div className="card"><b>Pendientes</b><strong>{pending}</strong><small>El equipo debe confirmarlas</small></div>
         <div className="card"><b>Confirmadas</b><strong>{confirmed}</strong><small>Marcadas por el equipo</small></div>
@@ -109,6 +115,7 @@ export function Eventos() {
         {consents.map((c) => <tr key={c.id}><td>{fmt(c.created_at)}</td><td className="tel">{c.contact}</td><td>{c.channel}</td><td><span className={`flag ${c.status === 'accepted' ? 'ok' : c.status === 'withdrawn' ? 'bad' : 'off'}`}>{c.status === 'accepted' ? 'Aceptó' : c.status === 'withdrawn' ? 'Baja' : 'No aceptó'}</span></td></tr>)}
         {query.data && !consents.length ? <tr><td colSpan={4} className="empty">Aún no hay preferencias registradas.</td></tr> : null}
       </tbody></table></div>
+      </>}
     </div>
   );
 }

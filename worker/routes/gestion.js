@@ -9,7 +9,7 @@ import {
   NEGOCIOS, MONEDAS, MONEDAS_PRESTAMO, TIPOS_ENTIDAD, ESTADOS_ENTIDAD, ESTADOS_COMPRA, TIPOS_DOCUMENTO, PAGADORES,
   DOC_MAX_BYTES, DOC_HEADERS, PRINCIPAL_MAX, TIN_BP_MAX, SELECT_COMPRA,
   fail, uuid, uuidOpcional, fechaCivil, fechaReal, fechaOpcional, entero, importePositivo, importeNoNegativo, enumValor, texto,
-  versionDe, soloCampos, socioEmail, condiciones, validarCalendario, prestamoItem, pagoItem, resumenPrestamo, compraItem,
+  versionDe, soloCampos, socioEmail, planPagos, validarPlanImporte, hechoCompra, EVENTO_MOVIMIENTO_SQL, condiciones, validarCalendario, prestamoItem, pagoItem, resumenPrestamo, compraItem,
   detectarDocumento, nombreSeguro, documentoItem, sha256Hex, objetoExiste, conceptosGestion, partidaCaja, partidasEspejo,
   auditoria, versionAplicada, reclamarVersion, errorEscrituraGestion, huella, idempotente,
 } from '../gestion-financiera.js';
@@ -62,13 +62,14 @@ async function actualizar(env, tabla, id, version, set, args, audit) {
 // ── Catálogos ────────────────────────────────────────────────────────────────
 gestion.get(`${BASE}/catalogos`, async (c) => {
   const { env } = abrir(c);
-  const [entidades, cuentas, socios] = await env.DB.batch([
+  const [entidades, cuentas, socios, eventos] = await env.DB.batch([
     env.DB.prepare('SELECT * FROM g_entidades ORDER BY nombre COLLATE NOCASE, id'),
     env.DB.prepare('SELECT * FROM g_cuentas ORDER BY moneda, nombre COLLATE NOCASE, id'),
     // Solo nombre y correo de los socios internos: no concede ni refleja accesos.
     env.DB.prepare('SELECT email,nombre FROM fin_socios WHERE activo=1 ORDER BY nombre COLLATE NOCASE, email'),
+    env.DB.prepare('SELECT e.id,e.tenant_id,e.name,e.starts_at,e.status,t.name AS tenant_name FROM tenant_events e JOIN tenants t ON t.id=e.tenant_id ORDER BY e.starts_at DESC,e.name'),
   ]);
-  return json({ entidades: entidades.results.map(entidadItem), cuentas: cuentas.results.map(cuentaItem), socios: socios.results, negocios: NEGOCIOS }, 200, NO_STORE);
+  return json({ entidades: entidades.results.map(entidadItem), cuentas: cuentas.results.map(cuentaItem), socios: socios.results, negocios: NEGOCIOS, eventos: eventos.results }, 200, NO_STORE);
 });
 
 // ── Entidades ────────────────────────────────────────────────────────────────
@@ -349,9 +350,13 @@ gestion.get(`${BASE}/compras`, async (c) => {
     const v = url.searchParams.get(key);
     if (v) { enumValor(v, values, `${key}_invalido`); clauses.push(`c.${key}=?`); args.push(v); }
   }
-  for (const key of ['entidad_id', 'prestamo_id']) {
+  for (const key of ['entidad_id', 'prestamo_id', 'evento_id']) {
     const value = url.searchParams.get(key);
     if (value) { clauses.push(`c.${key}=?`); args.push(uuid(value, `${key}_invalido`)); }
+  }
+  if (url.searchParams.has('sin_evento')) {
+    if (url.searchParams.get('sin_evento') !== '1') fail('filtro_evento_invalido');
+    clauses.push('c.evento_id IS NULL');
   }
   // Acotada: si hay más de 500, se dice (los totales salen de /resumen, no de aquí).
   const rows = (await env.DB.prepare(`${SELECT_COMPRA} WHERE ${clauses.join(' AND ')} ORDER BY COALESCE(c.fecha_compra, c.fecha_prevista, c.created_at) DESC, c.created_at DESC, c.id LIMIT 501`).bind(...args).all()).results;
@@ -361,9 +366,14 @@ gestion.get(`${BASE}/compras`, async (c) => {
 });
 async function referenciasCompra(env, n) {
   await entidadExiste(env, n.entidad_id);
+  if (n.evento_id) {
+    if (n.moneda !== 'EUR' || n.negocio !== 'dialogos') fail('evento_compra_incoherente');
+    if (!await env.DB.prepare('SELECT id FROM tenant_events WHERE id=?').bind(n.evento_id).first()) fail('evento_invalido');
+  }
   if (n.prestamo_id && !await env.DB.prepare('SELECT id FROM g_prestamos WHERE id=?').bind(n.prestamo_id).first()) fail('prestamo_invalido');
 }
 const campoCompra = {
+  evento_id: (v) => uuidOpcional(v, 'evento_invalido'), hecho: hechoCompra,
   concepto: (v) => texto(v, 200, 'concepto_invalido'), negocio: (v) => enumValor(v, NEGOCIOS, 'negocio_invalido'),
   entidad_id: (v) => uuidOpcional(v, 'entidad_invalida'), prestamo_id: (v) => uuidOpcional(v, 'prestamo_invalido'),
   comprador: (v) => texto(v, 120, 'comprador_invalido', { opcional: true }), proveedor: (v) => texto(v, 160, 'proveedor_invalido', { opcional: true }),
@@ -373,14 +383,18 @@ const campoCompra = {
 gestion.post(`${BASE}/compras`, async (c) => {
   const { env, request, actor, now } = abrir(c);
   const b = await bodyOf(request);
-  soloCampos(b, ['id', 'estado', 'moneda', 'estimado', ...Object.keys(campoCompra)], 'campo_desconocido');
+  soloCampos(b, ['id', 'estado', 'moneda', 'estimado', 'plan_pagos', ...Object.keys(campoCompra)], 'campo_desconocido');
   const q = { id: uuid(b.id), moneda: enumValor(b.moneda, MONEDAS, 'moneda_invalida'), estimado: importeNoNegativo(b.estimado, 'estimado_invalido'),
     estado: b.estado == null ? 'prevista' : enumValor(b.estado, ['prevista', 'comprometida'], 'estado_invalido'),
     ...Object.fromEntries(Object.entries(campoCompra).map(([k, fn]) => [k, fn(b[k])])) };
+  q.plan_pagos = planPagos(b.plan_pagos);
+  validarPlanImporte(q.plan_pagos, q.estimado);
+  const huellaCompra = await huella(q);
+  q.hecho_fecha = q.hecho ? now : null; q.hecho_por = q.hecho ? actor : null;
   await referenciasCompra(env, q);
-  const { repetida } = await idempotente(env, { id: q.id, ruta: 'compras', huella: await huella(q), actor, now }, () => [
-    env.DB.prepare(`INSERT INTO g_compras (id,concepto,negocio,entidad_id,prestamo_id,moneda,estimado,estado,comprador,proveedor,fecha_prevista,categoria,nota,version,created_by,created_at,updated_at)
-      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,1,?,?,?)`).bind(q.id, q.concepto, q.negocio, q.entidad_id, q.prestamo_id, q.moneda, q.estimado, q.estado, q.comprador, q.proveedor, q.fecha_prevista, q.categoria, q.nota, actor, now, now),
+  const { repetida } = await idempotente(env, { id: q.id, ruta: 'compras', huella: huellaCompra, actor, now }, () => [
+    env.DB.prepare(`INSERT INTO g_compras (id,concepto,negocio,entidad_id,prestamo_id,moneda,estimado,estado,comprador,proveedor,fecha_prevista,categoria,nota,evento_id,hecho,hecho_fecha,hecho_por,plan_pagos,version,created_by,created_at,updated_at)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,1,?,?,?)`).bind(q.id, q.concepto, q.negocio, q.entidad_id, q.prestamo_id, q.moneda, q.estimado, q.estado, q.comprador, q.proveedor, q.fecha_prevista, q.categoria, q.nota, q.evento_id, q.hecho, q.hecho_fecha, q.hecho_por, JSON.stringify(q.plan_pagos), actor, now, now),
     auditoria(env, { actor, accion: 'compra_alta', objeto_tipo: 'compra', objeto_id: q.id, detalle: { concepto: q.concepto, negocio: q.negocio, estimado: q.estimado, estado: q.estado }, now }),
   ]);
   return json({ item: await compraCompleta(env, q.id) }, repetida ? 200 : 201, NO_STORE);
@@ -396,7 +410,7 @@ gestion.patch(`${BASE}/compras/:id`, async (c) => {
   const old = await env.DB.prepare(`${SELECT_COMPRA} WHERE c.id=?`).bind(idRuta(c)).first();
   if (!old) throw new HttpError(404, 'not_found');
   const b = await bodyOf(request);
-  soloCampos(b, ['version', 'estado', 'moneda', 'estimado', 'fecha_compra', ...Object.keys(campoCompra)]);
+  soloCampos(b, ['version', 'estado', 'moneda', 'estimado', 'fecha_compra', 'plan_pagos', ...Object.keys(campoCompra)]);
   const version = versionDe(b);
   if (version !== old.version) throw new HttpError(409, 'version_conflicto');
   if (old.estado === 'cancelada') throw new HttpError(409, 'compra_cancelada');
@@ -414,12 +428,16 @@ gestion.patch(`${BASE}/compras/:id`, async (c) => {
     moneda: b.moneda === undefined ? old.moneda : enumValor(b.moneda, MONEDAS, 'moneda_invalida'),
     estimado: b.estimado === undefined ? old.estimado : importeNoNegativo(b.estimado, 'estimado_invalido'),
     ...Object.fromEntries(Object.entries(campoCompra).map(([k, fn]) => [k, b[k] === undefined ? old[k] : fn(b[k])])) };
+  n.plan_pagos = b.plan_pagos === undefined ? JSON.parse(old.plan_pagos) : planPagos(b.plan_pagos);
+  validarPlanImporte(n.plan_pagos, old.real ?? n.estimado);
+  n.hecho_fecha = n.hecho ? (old.hecho ? old.hecho_fecha : now) : null;
+  n.hecho_por = n.hecho ? (old.hecho ? old.hecho_por : actor) : null;
   if ((n.moneda !== old.moneda || n.entidad_id !== old.entidad_id) && old.pagado) throw new HttpError(409, 'compra_con_pagos');
   if (n.estado === 'prevista' && old.pagado) throw new HttpError(409, 'compra_con_pagos');
   if (n.estado !== 'comprada' && n.estimado < old.pagado) fail('estimado_inferior_a_pagado');
-  if (n.entidad_id !== old.entidad_id || n.prestamo_id !== old.prestamo_id) await referenciasCompra(env, n);
-  await actualizar(env, 'g_compras', old.id, version, 'concepto=?, negocio=?, entidad_id=?, prestamo_id=?, moneda=?, estimado=?, estado=?, comprador=?, proveedor=?, fecha_prevista=?, categoria=?, nota=?, fecha_compra=?',
-    [n.concepto, n.negocio, n.entidad_id, n.prestamo_id, n.moneda, n.estimado, n.estado, n.comprador, n.proveedor, n.fecha_prevista, n.categoria, n.nota, n.fecha_compra],
+  await referenciasCompra(env, n);
+  await actualizar(env, 'g_compras', old.id, version, 'concepto=?, negocio=?, entidad_id=?, prestamo_id=?, moneda=?, estimado=?, estado=?, comprador=?, proveedor=?, fecha_prevista=?, categoria=?, nota=?, fecha_compra=?, evento_id=?, hecho=?, hecho_fecha=?, hecho_por=?, plan_pagos=?',
+    [n.concepto, n.negocio, n.entidad_id, n.prestamo_id, n.moneda, n.estimado, n.estado, n.comprador, n.proveedor, n.fecha_prevista, n.categoria, n.nota, n.fecha_compra, n.evento_id, n.hecho, n.hecho_fecha, n.hecho_por, JSON.stringify(n.plan_pagos)],
     { actor, accion: 'compra_cambio', objeto_tipo: 'compra', objeto_id: old.id, detalle: { de: compraItem(old), a: n }, now });
   return json({ item: await compraCompleta(env, old.id) }, 200, NO_STORE);
 });
@@ -437,6 +455,7 @@ gestion.post(`${BASE}/compras/:id/comprar`, async (c) => {
   const n = { real: importeNoNegativo(b.real, 'real_invalido'), fecha: fechaOpcional(b.fecha, fechaReal),
     comprador: b.comprador === undefined ? old.comprador : campoCompra.comprador(b.comprador), proveedor: b.proveedor === undefined ? old.proveedor : campoCompra.proveedor(b.proveedor) };
   if (!['prevista', 'comprometida'].includes(old.estado)) throw new HttpError(409, old.estado === 'comprada' ? 'compra_cerrada' : 'compra_cancelada');
+  validarPlanImporte(JSON.parse(old.plan_pagos), n.real);
   if (n.real < old.pagado) fail('real_inferior_a_pagado');
   await actualizar(env, 'g_compras', old.id, version, "estado='comprada', real=?, fecha_compra=?, comprador=?, proveedor=?", [n.real, n.fecha, n.comprador, n.proveedor],
     { actor, accion: 'compra_efectuada', objeto_tipo: 'compra', objeto_id: old.id, detalle: { estimado: old.estimado, ...n }, now });
@@ -517,6 +536,72 @@ gestion.post(`${BASE}/compras/:id/reembolsos`, async (c) => {
     ];
   });
   return json({ item: pagoItem(await fila(env, 'g_pagos', r.id)), compra: await compraCompleta(env, old.id) }, repetida ? 200 : 201, NO_STORE);
+});
+
+// Cobro confirmado: UUID estable y transacción con auditoría/idempotencia. No usa
+// las reservas ni crea deudas ficticias; queda como ingreso operativo explícito.
+gestion.post(`${BASE}/eventos/:id/cobros`, async (c) => {
+  const { env, request, actor, now } = abrir(c), evento = await fila(env, 'tenant_events', idRuta(c));
+  const b = await bodyOf(request);
+  soloCampos(b, ['id','fecha','importe','cuenta_id','concepto_id','nota'], 'campo_desconocido');
+  const pago = { id: uuid(b.id), fecha: fechaReal(b.fecha), importe: importePositivo(b.importe), cuenta_id: uuid(b.cuenta_id,'cuenta_invalida'),
+    concepto_id: entero(b.concepto_id, { min: 1, code: 'concepto_invalido' }), nota: texto(b.nota,2000,'nota_invalida',{opcional:true}) };
+  const { repetida } = await idempotente(env, { id: pago.id, ruta: `eventos/${evento.id}/cobros`, huella: await huella(pago), actor, now }, async () => {
+    const cuenta = await cuentaDe(env,pago.cuenta_id);
+    if (cuenta.moneda !== 'EUR') fail('evento_moneda_invalida');
+    const concepto = await env.DB.prepare('SELECT tipo,activo,clave FROM fin_conceptos WHERE id=?').bind(pago.concepto_id).first();
+    if (!concepto || concepto.tipo !== 'ingreso') fail('concepto_invalido');
+    if (concepto.clave) fail('concepto_de_gestion');
+    if (!concepto.activo) fail('concepto_inactivo');
+    return [
+      env.DB.prepare(`INSERT INTO fin_movimientos (id,tipo,concepto_id,fecha,moneda,importe,nota,tenant_id,created_by,created_at,naturaleza,cuenta_id,entidad_id,evento_id)
+        VALUES (?,'ingreso',?,?,'EUR',?,?,?,?,?,'operativo',?,?,?)`)
+        .bind(pago.id,pago.concepto_id,pago.fecha,pago.importe,pago.nota,evento.tenant_id,actor,now,cuenta.id,cuenta.entidad_id,evento.id),
+      auditoria(env,{actor,accion:'evento_cobro',objeto_tipo:'evento',objeto_id:evento.id,detalle:pago,now}),
+    ];
+  });
+  return json({ item: await fila(env,'fin_movimientos',pago.id) }, repetida ? 200 : 201, NO_STORE);
+});
+
+// Finanzas de un evento: etiqueta explícita de compra/manual, nunca inferida del
+// préstamo, cuenta, comprador ni una reserva de asistente. El plan no crea caja.
+gestion.get(`${BASE}/eventos/:id/resumen`, async (c) => {
+  const { env } = abrir(c), id = idRuta(c);
+  const evento = await fila(env, 'tenant_events', id);
+  const [listado, compras, libro, socios, cantidad] = await env.DB.batch([
+    env.DB.prepare(`${SELECT_COMPRA} WHERE c.evento_id=? ORDER BY COALESCE(c.fecha_compra,c.fecha_prevista,c.created_at),c.id LIMIT 501`).bind(id),
+    env.DB.prepare(`SELECT moneda,
+      SUM(CASE WHEN estado='comprada' THEN real WHEN estado IN ('prevista','comprometida') THEN estimado ELSE 0 END) AS proyectado,
+      SUM(CASE WHEN estado='comprada' THEN real ELSE 0 END) AS realizado,
+      SUM(pagado) AS pagado_proveedores,
+      SUM(CASE WHEN estado IN ('comprometida','comprada') THEN MAX(0,COALESCE(real,estimado)-pagado) ELSE 0 END) AS pendiente_proveedores
+      FROM (${SELECT_COMPRA} WHERE c.evento_id=?) GROUP BY moneda`).bind(id),
+    env.DB.prepare(`SELECT m.moneda,
+      SUM(CASE WHEN m.tipo='gasto' AND m.naturaleza='operativo' AND m.origen_tipo IS NULL THEN m.importe*m.signo ELSE 0 END) AS gastos_operativos_manuales,
+      SUM(CASE WHEN m.tipo='gasto' AND m.naturaleza='operativo' AND m.origen_tipo IS NULL AND m.cuenta_id IS NULL THEN m.importe*m.signo ELSE 0 END) AS gastos_sin_cuenta,
+      SUM(CASE WHEN m.cuenta_id IS NOT NULL AND m.tipo IN ('gasto','egreso') AND m.naturaleza IN ('operativo','compra','reembolso_socio') THEN m.importe*m.signo ELSE 0 END) AS desembolsado_fondo_comun,
+      SUM(CASE WHEN m.tipo='ingreso' AND m.naturaleza='operativo' THEN m.importe*m.signo ELSE 0 END) AS ingresos_registrados
+      FROM fin_movimientos m WHERE ${EVENTO_MOVIMIENTO_SQL}=? GROUP BY m.moneda`).bind(id),
+    env.DB.prepare(`SELECT p.moneda,
+      SUM(CASE WHEN p.clase='pago' AND p.pagador='socio' THEN p.importe WHEN p.clase='reembolso' THEN -p.importe ELSE 0 END) AS pendiente
+      FROM g_pagos p JOIN g_compras c ON c.id=p.objeto_id WHERE p.objeto_tipo='compra' AND p.estado='activo' AND c.evento_id=? GROUP BY p.moneda`).bind(id),
+    env.DB.prepare('SELECT COUNT(*) AS n FROM g_compras WHERE evento_id=?').bind(id),
+  ]);
+  const monedas = Object.fromEntries(MONEDAS.map((moneda) => {
+    const q = compras.results.find((r) => r.moneda===moneda) || {}, m = libro.results.find((r) => r.moneda===moneda) || {};
+    const gastos_operativos_manuales = m.gastos_operativos_manuales || 0, ingresos_registrados = m.ingresos_registrados || 0;
+    const proyectado = (q.proyectado || 0) + gastos_operativos_manuales, desembolsado_fondo_comun = m.desembolsado_fondo_comun || 0;
+    return [moneda, { proyectado, realizado: (q.realizado || 0) + gastos_operativos_manuales,
+      pagado_proveedores: q.pagado_proveedores || 0, pendiente_proveedores: q.pendiente_proveedores || 0,
+      desembolsado_fondo_comun, ingresos_registrados, gastos_operativos_manuales, gastos_sin_cuenta: m.gastos_sin_cuenta || 0,
+      anticipos_socios_pendientes: socios.results.find((r) => r.moneda===moneda)?.pendiente || 0,
+      inversion_pendiente: Math.max(0, desembolsado_fondo_comun - Math.max(0, ingresos_registrados)),
+      saldo_proyectado: ingresos_registrados - proyectado }];
+  }));
+  const rows = listado.results, mas = rows.length>500;
+  if (mas) rows.pop();
+  return json({ evento: { id: evento.id, tenant_id: evento.tenant_id, name: evento.name, starts_at: evento.starts_at },
+    items: rows.map(compraItem), monedas, mas, total: cantidad.results[0].n, limite: 500 }, 200, NO_STORE);
 });
 
 // ── Resumen por moneda: confirmado separado de pendiente ─────────────────────

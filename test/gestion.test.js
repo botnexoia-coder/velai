@@ -236,7 +236,7 @@ test('CSV y listado legados clasifican las partidas de gestión y firman los rev
   await api(`gestion/prestamos/${p.id}/pagos`, 'POST', { id: pagoId, numero: 1, fecha: '2026-01-31', importe: 106619, capital: 94619, interes: 12000 });
   await api(`gestion/prestamos/${p.id}/pagos/${pagoId}/revertir`, 'POST', { id: nuevo(), fecha: '2026-02-01', motivo: 'error' });
   const text = await (await call('finanzas/export.csv')).text();
-  assert.match(text.split('\r\n')[0], /,naturaleza,origen_tipo$/);
+  assert.match(text.split('\r\n')[0], /,naturaleza,origen_tipo,evento_id,evento_id_efectivo$/);
   assert.match(text, /"-946\.19"/); assert.match(text, /"-120\.00"/); assert.match(text, /"12000\.00"/); assert.match(text, /"financiacion"/);
   const lista = (await api('finanzas/movimientos')).movimientos;
   assert.equal(lista.length, 5); assert.ok(lista.every((m) => m.origen_tipo && m.naturaleza));
@@ -783,4 +783,161 @@ test('guardas SQL de cuenta mantienen errores y rechazan INSERT/UPDATE incompati
   await assert.rejects(DB.prepare('UPDATE fin_movimientos SET entidad_id=? WHERE id=?').bind(e2.id, mov.id).run(), /entidad_cuenta_distinta/);
   assert.equal(await contar('fin_movimientos'), 1);
   assert.deepEqual(await DB.prepare('SELECT cuenta_id,entidad_id FROM fin_movimientos WHERE id=?').bind(mov.id).first(), { cuenta_id: eur.id, entidad_id: e1.id });
+});
+
+async function eventoFicticio(DB, name = 'Evento ficticio') {
+  const tenant_id = nuevo(), id = nuevo(), now = '2026-01-01';
+  await DB.prepare('INSERT INTO tenants (id,slug,name,channel_address,system_prompt,created_at,updated_at) VALUES (?,?,?,?,?,?,?)')
+    .bind(tenant_id, `evento-${tenant_id}`, 'Cliente ficticio', `web:${tenant_id}`, 'test', now, now).run();
+  await DB.prepare('INSERT INTO tenant_events (id,tenant_id,slug,name,starts_at,created_at,updated_at) VALUES (?,?,?,?,?,?,?)')
+    .bind(id, tenant_id, `fiesta-${id}`, name, '2026-10-30T20:00:00Z', now, now).run();
+  return { id, tenant_id };
+}
+
+test('compras por evento, Hecho independiente y planes históricos: validación y versiones concurrentes', async (t) => {
+  const { DB, api, compra, cuenta } = await fixture(t), evento = await eventoFicticio(DB);
+  const plan_pagos = [{ fecha: '2026-10-20', importe: 20000 }, { fecha: '2025-03-01', importe: 10000 }];
+  const c = (await compra({ negocio: 'dialogos', evento_id: evento.id, estado: 'comprometida', plan_pagos })).item;
+  assert.equal(c.evento_id, evento.id); assert.equal(c.hecho, 0); assert.equal(c.hecho_fecha, null);
+  assert.equal(c.plan_pagos[0].fecha, '2025-03-01'); assert.equal(c.pagado, 0);
+  await compra({ negocio: 'dialogos', concepto: 'Diálogos sin evento' });
+  const other = await eventoFicticio(DB, 'Otro evento'); await compra({ negocio: 'dialogos', evento_id: other.id });
+  assert.deepEqual((await api(`gestion/compras?evento_id=${evento.id}`)).items.map((r) => r.id), [c.id]);
+  assert.equal((await api('gestion/compras?negocio=dialogos&sin_evento=1')).items.length, 1);
+  assert.ok((await api('gestion/catalogos')).eventos.some((r) => r.id===evento.id && r.tenant_id===evento.tenant_id));
+  const flagged = (await api(`gestion/compras/${c.id}`, 'PATCH', { version: c.version, hecho: true })).item;
+  assert.equal(flagged.hecho, 1); assert.equal(flagged.estado, 'comprometida'); assert.equal(flagged.pagado, 0); assert.equal(flagged.hecho_por, SOCIO.email);
+  assert.ok(flagged.hecho_fecha);
+  assert.equal((await DB.prepare('SELECT COUNT(*) AS n FROM fin_movimientos').first()).n, 0);
+  const edited = (await api(`gestion/compras/${c.id}`, 'PATCH', { version: flagged.version, concepto: 'Otra descripción' })).item;
+  assert.deepEqual(edited.plan_pagos, flagged.plan_pagos); assert.equal(edited.hecho_fecha, flagged.hecho_fecha);
+  const raced = await Promise.allSettled([false, true].map((hecho) => api(`gestion/compras/${c.id}`, 'PATCH', { version: edited.version, hecho })));
+  assert.equal(raced.filter((r) => r.status==='fulfilled').length, 1);
+  assert.equal(raced.find((r) => r.status==='rejected').reason.code, 'version_conflicto');
+  let latest = (await api(`gestion/compras/${c.id}`)).item;
+  latest = (await api(`gestion/compras/${c.id}`, 'PATCH', { version: latest.version, hecho: false })).item;
+  assert.equal(latest.hecho_fecha, null); assert.equal(latest.hecho_por, null);
+  const q = (await cuenta()).item;
+  await api(`gestion/compras/${c.id}/pagos`, 'POST', { id: nuevo(), fecha: '2026-01-01', importe: 1000, pagador: 'cuenta', cuenta_id: q.id });
+  latest = (await api(`gestion/compras/${c.id}`)).item;
+  assert.equal(latest.hecho, 0); assert.equal(latest.pagado, 1000);
+  await assert.rejects(compra({ evento_id: evento.id }), error(400, 'evento_compra_incoherente'));
+  await assert.rejects(compra({ negocio: 'dialogos', evento_id: evento.id, moneda: 'COP' }), error(400, 'evento_compra_incoherente'));
+  await assert.rejects(compra({ negocio: 'dialogos', evento_id: nuevo() }), error(400, 'evento_invalido'));
+  await assert.rejects(api(`gestion/compras/${c.id}`, 'PATCH', { version: latest.version, negocio: 'velai' }), error(400, 'evento_compra_incoherente'));
+  for (const hecho of ['true', 2, null]) await assert.rejects(compra({ hecho }), error(400, 'hecho_invalido'));
+  for (const plan of [null, {}, Array.from({ length: 21 }, () => ({ fecha: '2026-10-15', importe: 1 })), [{ fecha: '2026-10-15', importe: 1, otro: true }]]) await assert.rejects(compra({ plan_pagos: plan }), error(400, 'plan_pagos_invalido'));
+  for (const fecha of ['2026-02-29', '2024-12-31', '2101-01-01']) await assert.rejects(compra({ plan_pagos: [{ fecha, importe: 1 }] }), error(400, 'plan_fecha_invalida'));
+  for (const importe of [0, -1, 1.5, '1']) await assert.rejects(compra({ plan_pagos: [{ fecha: '2026-10-15', importe }] }), error(400, 'plan_importe_invalido'));
+  await assert.rejects(compra({ plan_pagos: [{ fecha: '2026-10-15', importe: 50001 }] }), error(400, 'plan_supera_importe'));
+  await assert.rejects(api(`gestion/compras/${c.id}/comprar`, 'POST', { version: latest.version, real: 20000 }), error(400, 'plan_supera_importe'));
+  await assert.rejects(DB.prepare('UPDATE g_compras SET estimado=20000 WHERE id=?').bind(c.id).run(), /plan_supera_importe/);
+});
+
+test('resumen evento netea fondo común una vez: reclasificación explícita, compras, socios, reembolsos y reversos', async (t) => {
+  const { DB, api, call, compra, cuenta, prestamo } = await fixture(t), evento = await eventoFicticio(DB);
+  const q = (await cuenta()).item, loan = (await prestamo(q.id)).item;
+  await api(`gestion/prestamos/${loan.id}/desembolso`, 'POST', { id: nuevo(), fecha: '2026-01-01', importe: 1200000, apertura: 0 });
+  // Pago existente sin evento: etiquetar la compra después NO muta el libro.
+  const c = (await compra({ negocio: 'dialogos', estado: 'comprometida', estimado: 90000 })).item;
+  const accountPay = nuevo(), socioPay = nuevo(), refund = nuevo();
+  await api(`gestion/compras/${c.id}/pagos`, 'POST', { id: accountPay, fecha: '2026-01-02', importe: 20000, pagador: 'cuenta', cuenta_id: q.id });
+  await api(`gestion/compras/${c.id}/pagos`, 'POST', { id: socioPay, fecha: '2026-01-02', importe: 30000, pagador: 'socio', socio: SOCIO.email });
+  let latest = (await api(`gestion/compras/${c.id}`)).item;
+  latest = (await api(`gestion/compras/${c.id}/comprar`, 'POST', { version: latest.version, real: 80000 })).item;
+  latest = (await api(`gestion/compras/${c.id}`, 'PATCH', { version: latest.version, evento_id: evento.id })).item;
+  await api(`gestion/compras/${c.id}/reembolsos`, 'POST', { id: refund, pago_id: socioPay, cuenta_id: q.id, fecha: '2026-01-03', importe: 10000 });
+  await compra({ negocio: 'dialogos', evento_id: evento.id, estimado: 10000 });
+  await compra({ negocio: 'dialogos', evento_id: evento.id, estimado: 12000, estado: 'comprometida' });
+  const cancelled = (await compra({ negocio: 'dialogos', evento_id: evento.id, estimado: 8000 })).item;
+  await api(`gestion/compras/${cancelled.id}`, 'PATCH', { version: cancelled.version, estado: 'cancelada' });
+  await compra({ negocio: 'dialogos', estimado: 999999 });
+  const conceptos = (await api('finanzas/conceptos')).conceptos;
+  for (const [tipo, importe] of [['gasto', 5000], ['ingreso', 15000]]) await api('finanzas/movimientos', 'POST', {
+    tipo, concepto_id: conceptos[tipo].find((r) => !r.clave).id, moneda: 'EUR', fecha: '2026-01-03', importe, evento_id: evento.id, cuenta_id: q.id,
+  });
+  const path = `gestion/eventos/${evento.id}/resumen`, r = await api(path);
+  assert.deepEqual(r.monedas.EUR, { proyectado: 107000, realizado: 85000, pagado_proveedores: 50000, pendiente_proveedores: 42000,
+    desembolsado_fondo_comun: 35000, ingresos_registrados: 15000, gastos_operativos_manuales: 5000, gastos_sin_cuenta: 0, anticipos_socios_pendientes: 20000,
+    inversion_pendiente: 20000, saldo_proyectado: -92000 });
+  assert.equal(r.items.length, 4); assert.equal(r.total, 4); assert.equal(r.monedas.COP.proyectado, 0);
+  const ledger = (await api(`finanzas/movimientos?evento=${evento.id}`)).movimientos;
+  assert.equal(ledger.length, 4); assert.equal(ledger.find((m) => m.origen_id===accountPay).evento_id, null);
+  assert.equal(ledger.find((m) => m.origen_id===accountPay).evento_id_efectivo, evento.id);
+  assert.equal((await api(`finanzas/resumen?evento=${evento.id}`)).financiacion.EUR.entradas, 0);
+  const previewUrl = new URL(`https://admin.test/api/admin/mobile-preview/${path}`);
+  const preview = await testingPreview(previewUrl, DB);
+  assert.deepEqual(preview.monedas, r.monedas);
+  await api(`gestion/compras/${c.id}/pagos/${accountPay}/revertir`, 'POST', { id: nuevo(), fecha: '2026-01-04', motivo: 'Corrección ficticia del pago' });
+  const reversed = await api(path);
+  assert.equal(reversed.monedas.EUR.desembolsado_fondo_comun, 15000); assert.equal(reversed.monedas.EUR.inversion_pendiente, 0);
+  assert.equal(reversed.monedas.EUR.pagado_proveedores, 30000); assert.equal(reversed.monedas.EUR.pendiente_proveedores, 62000);
+  await api(`gestion/compras/${c.id}/pagos/${refund}/revertir`, 'POST', { id: nuevo(), fecha: '2026-01-04', motivo: 'Corrección ficticia de devolución' });
+  const refundReversed = await api(path);
+  assert.equal(refundReversed.monedas.EUR.desembolsado_fondo_comun, 5000); assert.equal(refundReversed.monedas.EUR.anticipos_socios_pendientes, 30000);
+  assert.equal(refundReversed.monedas.EUR.pagado_proveedores, 30000); assert.equal(refundReversed.monedas.EUR.realizado, 85000);
+  const scoped = `finanzas/movimientos?evento=${evento.id}&tenant=${evento.tenant_id}`;
+  const selected = (await api(scoped)).movimientos;
+  assert.equal(selected.length, 6); // Dos manuales, pago/reembolso y sus dos reversos.
+  assert.ok(selected.every((m) => m.tenant_id_efectivo===evento.tenant_id && m.tenant_name==='Cliente ficticio'));
+  assert.ok(selected.filter((m) => m.origen_tipo).every((m) => m.tenant_id===null)); // Original conservado.
+  const grouped = await api(`finanzas/resumen?evento=${evento.id}&tenant=${evento.tenant_id}`);
+  assert.equal(grouped.desglose.EUR.compras_pagadas, 0); assert.equal(grouped.desglose.EUR.reembolsos_socios, 0);
+  const csv = await (await call(`finanzas/export.csv?evento=${evento.id}&tenant=${evento.tenant_id}`)).text();
+  assert.equal(csv.split('\r\n').length, 7); assert.match(csv,/Cliente ficticio/);
+  const foreign = await eventoFicticio(DB,'Evento ajeno');
+  assert.equal((await api(`finanzas/movimientos?evento=${evento.id}&tenant=${foreign.tenant_id}`)).movimientos.length, 0);
+  assert.equal((await api(`finanzas/resumen?evento=${evento.id}&tenant=${foreign.tenant_id}`)).desglose.EUR.gastos_operativos, 0);
+  assert.equal((await (await call(`finanzas/export.csv?evento=${evento.id}&tenant=${foreign.tenant_id}`)).text()).split('\r\n').length, 1);
+
+});
+
+async function testingPreview(url, DB) {
+  const { testing } = await import('../worker/app.js');
+  return (await testing.adminRouter(new Request(url), { DB, SOCIOS_EMAILS: SOCIO.email }, { waitUntil() {} }, url.pathname, url, {}, SOCIO)).json();
+}
+
+test('cobro confirmado del evento es idempotente y auditado, exige cuenta EUR y concepto ingreso operativo', async (t) => {
+  const { DB, api, cuenta, compra } = await fixture(t), evento = await eventoFicticio(DB);
+  const q = (await cuenta()).item, cop = (await cuenta({ moneda: 'COP' })).item;
+  const conceptos = (await api('finanzas/conceptos')).conceptos;
+  const body = { id: nuevo(), fecha: '2026-01-01', importe: 25000, cuenta_id: q.id, concepto_id: conceptos.ingreso.find((c) => !c.clave).id, nota: 'Cobro ficticio confirmado' };
+  const path = `gestion/eventos/${evento.id}/cobros`;
+  const first = await api(path, 'POST', body), repeat = await api(path, 'POST', body);
+  assert.equal(first.item.id, body.id); assert.deepEqual(repeat.item, first.item);
+  assert.equal(first.item.tenant_id, evento.tenant_id); assert.equal(first.item.evento_id, evento.id); assert.equal(first.item.naturaleza, 'operativo');
+  assert.equal(first.item.origen_tipo, null);
+  assert.equal((await DB.prepare('SELECT COUNT(*) AS n FROM fin_movimientos WHERE id=?').bind(body.id).first()).n, 1);
+  assert.equal((await DB.prepare("SELECT COUNT(*) AS n FROM g_auditoria WHERE accion='evento_cobro'").first()).n, 1);
+  await assert.rejects(api(path, 'POST', { ...body, importe: 26000 }), error(409, 'idempotencia_conflicto'));
+  const summary = await api(`gestion/eventos/${evento.id}/resumen`);
+  assert.equal(summary.monedas.EUR.ingresos_registrados, 25000); assert.equal(summary.monedas.EUR.inversion_pendiente, 0);
+  await assert.rejects(api(path, 'POST', { ...body, id: nuevo(), cuenta_id: cop.id }), error(400, 'evento_moneda_invalida'));
+  await assert.rejects(api(path, 'POST', { ...body, id: nuevo(), cuenta_id: null }), error(400, 'cuenta_invalida'));
+  await assert.rejects(api(path, 'POST', { ...body, id: nuevo(), concepto_id: conceptos.gasto[0].id }), error(400, 'concepto_invalido'));
+  await assert.rejects(api(path, 'POST', { ...body, id: nuevo(), concepto_id: conceptos.ingreso.find((c) => c.clave==='g_financiacion').id }), error(400, 'concepto_de_gestion'));
+  await assert.rejects(api(path, 'POST', { ...body, id: nuevo(), fecha: '2099-01-01' }), error(400, 'fecha_invalida'));
+  const concurrent = { ...body, id: nuevo() };
+  const raced = await Promise.all([api(path, 'POST', concurrent), api(path, 'POST', concurrent)]);
+  assert.equal(raced[0].item.id, raced[1].item.id);
+  assert.equal((await DB.prepare('SELECT COUNT(*) AS n FROM fin_movimientos WHERE id=?').bind(concurrent.id).first()).n, 1);
+  // Hecho en el POST tampoco cambia la huella con los timestamps del servidor.
+  const id = nuevo(), done = { id, negocio: 'dialogos', evento_id: evento.id, hecho: true };
+  const created = await compra(done), retry = await compra(done);
+  assert.deepEqual(retry.item, created.item);
+});
+
+test('gasto manual de evento sin cuenta conserva coste pero no atribuye adelanto al fondo común', async (t) => {
+  const { DB, api, cuenta } = await fixture(t), evento = await eventoFicticio(DB);
+  const conceptos = (await api('finanzas/conceptos')).conceptos;
+  const movimiento = await api('finanzas/movimientos', 'POST', { tipo: 'gasto', concepto_id: conceptos.gasto.find((c) => !c.clave).id,
+    moneda: 'EUR', fecha: '2026-01-03', importe: 7000, evento_id: evento.id });
+  const path = `gestion/eventos/${evento.id}/resumen`, initial = (await api(path)).monedas.EUR;
+  assert.equal(initial.proyectado, 7000); assert.equal(initial.realizado, 7000); assert.equal(initial.gastos_sin_cuenta, 7000);
+  assert.equal(initial.desembolsado_fondo_comun, 0); assert.equal(initial.inversion_pendiente, 0); assert.equal(initial.saldo_proyectado, -7000);
+  const q = (await cuenta()).item;
+  await api(`finanzas/movimientos/${movimiento.id}`, 'PATCH', { cuenta_id: q.id });
+  const assigned = (await api(path)).monedas.EUR;
+  assert.equal(assigned.proyectado, 7000); assert.equal(assigned.realizado, 7000); assert.equal(assigned.gastos_sin_cuenta, 0);
+  assert.equal(assigned.desembolsado_fondo_comun, 7000); assert.equal(assigned.inversion_pendiente, 7000);
 });

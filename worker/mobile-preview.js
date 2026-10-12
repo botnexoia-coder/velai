@@ -9,7 +9,7 @@ const READ_ROUTES = [
   new RegExp(`^tenants/${UUID}(/(versions|users|plan|channels|whatsapp|telegram|calendar|editorial|booking|services|booking/qr-logo|media|provision))?$`, 'i'),
   /^finanzas\/(socios|conceptos|movimientos|resumen|repartos|export\.csv)$/,
   /^gestion\/(catalogos|entidades|cuentas|prestamos|compras|resumen|documentos|facturas|fiscal\/resumen|fiscal\/export\.csv|cierres)$/,
-  new RegExp(`^gestion/(prestamos/${UUID}(/resumen)?|compras/${UUID}(/pagos)?|documentos/${UUID}/archivo|facturas/${UUID})$`, 'i'),
+  new RegExp(`^gestion/(eventos/${UUID}/resumen|prestamos/${UUID}(/resumen)?|compras/${UUID}(/pagos)?|documentos/${UUID}/archivo|facturas/${UUID})$`, 'i'),
 ];
 
 export function previewTarget(path, method, scope) {

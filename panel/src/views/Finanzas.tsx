@@ -7,7 +7,7 @@ import type { FinConcepto, FinCuenta, FinMoneda, FinNaturaleza, FinMovimiento, F
 import { confirmar } from '../components/Confirmar';
 import { TenantChip } from '../components/Pills';
 import { useToast } from '../components/Toasts';
-import { useMe, useTenants, useFinConceptos, useFinMovimientos, useFinMutacion, useFinRepartos, useFinResumen, useFinSocios, useFinCuentas, type FinFilters } from '../hooks/queries';
+import { useMe, useTenants, useEvents, useFinConceptos, useFinMovimientos, useFinMutacion, useFinRepartos, useFinResumen, useFinSocios, useFinCuentas, type FinFilters } from '../hooks/queries';
 import { finDinero, finImporte } from '../lib/format';
 
 const TIPOS: FinTipo[] = ['ingreso', 'gasto', 'egreso'];
@@ -94,15 +94,16 @@ function FinanzasSocio() {
   </div>;
 }
 function FiltrosFin({ f, setF }: {f:FinFilters;setF:(next:FinFilters)=>void}) {
-  const conceptos=useFinConceptos(true), tenants=useTenants(true);
+  const conceptos=useFinConceptos(true), tenants=useTenants(true), events=useEvents();
   return <><div className="fin-toolbar fin-shared-filters"><div className="fin-filters">
     <label>Tipo<select value={f.tipo || ''} onChange={e=>setF({...f,tipo:e.target.value,concepto:''})}><option value="">Todos los tipos</option>{TIPOS.map(t=><option key={t} value={t}>{LABEL[t]}</option>)}</select></label>
     <label>Moneda<select value={f.moneda || ''} onChange={e=>setF({...f,moneda:e.target.value})}><option value="">EUR y COP</option>{MONEDAS.map(m=><option key={m}>{m}</option>)}</select></label>
     <label>Clasificación<select value={f.naturaleza || ''} onChange={e=>setF({...f,naturaleza:e.target.value})}><option value="">Todas las operaciones</option>{Object.entries(NATURALEZAS).map(([key,label])=><option key={key} value={key}>{label}</option>)}</select></label>
     <label>Concepto<select value={f.concepto || ''} onChange={e=>setF({...f,concepto:e.target.value})}><option value="">Todos los conceptos</option>{TIPOS.filter(t=>!f.tipo||t===f.tipo).flatMap(t=>conceptos.data?.conceptos[t]||[]).map(c=><option key={c.id} value={c.id}>{c.nombre}{c.activo?'':' (inactivo)'}</option>)}</select></label>
     <label>Cliente<select value={f.tenant || ''} onChange={e=>setF({...f,tenant:e.target.value})}><option value="">Todos los clientes</option>{tenants.data?.tenants.map(t=><option key={t.id} value={t.id}>{t.name}</option>)}</select></label>
+    <label>Evento<select value={f.evento || ''} onChange={e=>setF({...f,evento:e.target.value})}><option value="">Todos los eventos y producción</option>{events.data?.events?.map(event=><option key={event.id} value={event.id}>{event.tenant_name?`${event.tenant_name} · `:''}{event.name}</option>)}</select></label>
     {Object.values(f).some(Boolean)?<button className="btn alt" type="button" onClick={()=>setF({})}>Limpiar filtros</button>:null}
-  </div></div><ErrorFin error={conceptos.error||tenants.error}/></>;
+  </div></div><ErrorFin error={conceptos.error||tenants.error||events.error}/></>;
 }
 function MetricaFin({label,value,moneda}:{label:string;value:number|undefined;moneda:FinMoneda}) {
   return <div><span>{label}</span><strong>{value===undefined?'—':<Dinero value={value} moneda={moneda}/>}</strong></div>;
@@ -154,7 +155,7 @@ function Movimientos({ filters }: { filters: FinFilters }) {
     </div>
     <ErrorFin error={query.error || conceptos.error || tenants.error || cuentas.error} />
     {query.isPending ? <p role="status">Cargando movimientos…</p> : <div className="fin-table"><table><thead><tr><th>Fecha</th><th>Tipo</th><th>Concepto</th><th>Cliente</th><th>Cuenta</th><th>Nota</th><th>Importe</th></tr></thead><tbody>
-      {rows.map((m) => <tr key={m.id} onClick={() => setEditing(m)}><td>{m.fecha}</td><td><TipoPill tipo={m.tipo} naturaleza={m.naturaleza} /></td><td><button className="fin-row-open" type="button" onClick={() => setEditing(m)}>{m.concepto_nombre}</button>{m.reparto_id ? <small className="muted"> · reparto</small> : null}{m.origen_tipo ? <small className="muted"> · {m.signo === -1 ? 'Reverso · ' : ''}{origenMovimiento(m).nombre}</small> : null}</td><td><TenantChip id={m.tenant_id || undefined} name={m.tenant_name} /></td><td>{m.cuenta_id ? cuentas.data?.cuentas?.find(c=>c.id===m.cuenta_id)?.nombre || 'Cuenta vinculada' : 'Pendiente de asignar'}</td><td className="fin-note">{m.nota || '—'}</td><td><Dinero value={importeFirmado(m)} moneda={m.moneda} /> <small>{m.moneda}</small></td></tr>)}
+      {rows.map((m) => <tr key={m.id} onClick={() => setEditing(m)}><td>{m.fecha}</td><td><TipoPill tipo={m.tipo} naturaleza={m.naturaleza} /></td><td><button className="fin-row-open" type="button" onClick={() => setEditing(m)}>{m.concepto_nombre}</button>{m.evento_nombre?<small className="muted"> · {m.evento_nombre}</small>:null}{m.reparto_id ? <small className="muted"> · reparto</small> : null}{m.origen_tipo ? <small className="muted"> · {m.signo === -1 ? 'Reverso · ' : ''}{origenMovimiento(m).nombre}</small> : null}</td><td><TenantChip id={m.tenant_id || undefined} name={m.tenant_name} /></td><td>{m.cuenta_id ? cuentas.data?.cuentas?.find(c=>c.id===m.cuenta_id)?.nombre || 'Cuenta vinculada' : 'Pendiente de asignar'}</td><td className="fin-note">{m.nota || '—'}</td><td><Dinero value={importeFirmado(m)} moneda={m.moneda} /> <small>{m.moneda}</small></td></tr>)}
     </tbody></table>{!rows.length ? <p className="empty">Sin movimientos con estos filtros. Registra el primero para empezar el libro.</p> : null}</div>}
     {query.hasNextPage ? <div className="pager"><button className="btn alt" disabled={query.isFetchingNextPage} onClick={() => void query.fetchNextPage()}>Cargar más</button></div> : null}
     {editing ? <MovimientoModal initial={editing === 'new' ? null : editing} tenants={tenants.data?.tenants || []} cuentas={cuentas.data?.cuentas || []} cuentasError={cuentas.error} onClose={() => setEditing(null)} /> : null}

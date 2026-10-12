@@ -168,6 +168,27 @@ export function resumenPrestamo(prestamo, pagos) {
   };
 }
 
+// Evento efectivo: una etiqueta de compra se consulta desde su pago o reverso,
+// sin actualizar las partidas inmutables del libro ni crear movimientos duplicados.
+export const EVENTO_MOVIMIENTO_SQL = `COALESCE(m.evento_id,(SELECT c.evento_id FROM g_pagos p JOIN g_compras c ON c.id=p.objeto_id
+  WHERE p.id=m.origen_id AND p.objeto_tipo='compra' AND m.origen_tipo IN ('compra_pago','compra_reembolso','reverso')))`;
+export function planPagos(value = []) {
+  if (!Array.isArray(value) || value.length > 20) fail('plan_pagos_invalido');
+  return value.map((p) => {
+    if (!p || typeof p !== 'object' || Array.isArray(p) || Object.keys(p).some((k) => !['fecha','importe'].includes(k))) fail('plan_pagos_invalido');
+    const fecha = fechaCivil(p.fecha, 'plan_fecha_invalida');
+    if (fecha < '2025-01-01') fail('plan_fecha_invalida');
+    return { fecha, importe: importePositivo(p.importe, 'plan_importe_invalido') };
+  }).sort((a,b) => a.fecha.localeCompare(b.fecha));
+}
+export function validarPlanImporte(plan, importe) {
+  if (plan.reduce((s,p) => s + p.importe, 0) > importe) fail('plan_supera_importe');
+}
+export function hechoCompra(value = 0) {
+  if (![true,false,0,1].includes(value)) fail('hecho_invalido');
+  return value ? 1 : 0;
+}
+
 // ── Compras ──────────────────────────────────────────────────────────────────
 export function compraItem(row) {
   if (!row) return null;
@@ -175,6 +196,7 @@ export function compraItem(row) {
   const referencia = row.real ?? row.estimado;
   const pendiente = row.estado === 'cancelada' ? 0 : Math.max(0, referencia - pagado);
   return { id: row.id, concepto: row.concepto, negocio: row.negocio, entidad_id: row.entidad_id, prestamo_id: row.prestamo_id, moneda: row.moneda,
+    evento_id: row.evento_id ?? null, hecho: row.hecho || 0, hecho_fecha: row.hecho_fecha ?? null, hecho_por: row.hecho_por ?? null, plan_pagos: JSON.parse(row.plan_pagos || '[]'),
     estimado: row.estimado, real: row.real, estado: row.estado, comprador: row.comprador, proveedor: row.proveedor, fecha_prevista: row.fecha_prevista,
     fecha_compra: row.fecha_compra, categoria: row.categoria, nota: row.nota, version: row.version, pagado, pendiente, documentos_count: row.documentos_count || 0 };
 }
@@ -254,7 +276,7 @@ export function errorEscrituraGestion(e) {
   for (const code of ['version_conflicto', 'cuenta_en_uso', 'entidad_con_historico_fiscal', 'concepto_del_sistema']) {
     if (e.message.includes(code)) throw new HttpError(409, code);
   }
-  for (const code of ['moneda_distinta', 'entidad_cuenta_distinta', 'cuenta_invalida', 'concepto_de_gestion']) {
+  for (const code of ['moneda_distinta', 'entidad_cuenta_distinta', 'cuenta_invalida', 'concepto_de_gestion', 'evento_compra_incoherente', 'evento_movimiento_incoherente', 'plan_supera_importe']) {
     if (e.message.includes(code)) throw new HttpError(400, code);
   }
   throw e;

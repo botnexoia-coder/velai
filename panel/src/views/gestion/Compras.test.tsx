@@ -7,8 +7,10 @@ import { createQueryClient } from '../../api/queryClient';
 import { ConfirmarHost } from '../../components/Confirmar';
 import { Compras } from './Compras';
 import { EntityOptions, amount } from './shared';
+const previewMode=vi.hoisted(()=>({value:false}));
+vi.mock('../../mobilePreview',async importOriginal=>({...await importOriginal<typeof import('../../mobilePreview')>(),get MOBILE_PREVIEW(){return previewMode.value;}}));
 
-function mount({ socio=true, bought=false, retry=false, entities=false }={}) {
+function mount({ socio=true, bought=false, retry=false, entities=false, extended=false, initialUrl='/compras' }={}) {
  const calls:{path:string;method:string;body?:Record<string,unknown>}[]=[];
  let failed=false;
  vi.stubGlobal('fetch',vi.fn(async(input:string,init?:RequestInit)=>{
@@ -20,18 +22,18 @@ function mount({ socio=true, bought=false, retry=false, entities=false }={}) {
   }
   const data:Record<string,unknown>={
    '/api/admin/me':{role:'velai',socio,tenantId:null},
-   '/api/admin/gestion/catalogos':{entidades:[],cuentas:[{id:'cuenta',nombre:'Cuenta común',moneda:'EUR',saldo_inicial:0,version:1}],socios:[{email:'uno@velai.test',nombre:'Persona Uno'}]},
+   '/api/admin/gestion/catalogos':{entidades:[],cuentas:[{id:'cuenta',nombre:'Cuenta común',moneda:'EUR',saldo_inicial:0,version:1}],socios:[{email:'uno@velai.test',nombre:'Persona Uno'}],eventos:[{id:'evento-naya',name:'Fiesta · QA',tenant_name:'NAYA'}]},
    '/api/admin/gestion/prestamos':{items:[]},
-   '/api/admin/gestion/compras':{items:[{id:'compra',concepto:'Equipo de ejemplo',negocio:'dialogos',moneda:'EUR',estimado:90000,real:bought?79675:null,estado:bought?'comprada':'comprometida',comprador:'Persona Uno',proveedor:null,categoria:'Equipo',version:1,pagado:0,pendiente:bought?79675:90000,documentos_count:0}]},
+   '/api/admin/gestion/compras':{items:[...(extended?[{id:'idea',concepto:'Idea de grabación',negocio:'dialogos',moneda:'EUR',estimado:25000,real:null,estado:'prevista',version:2,pagado:12500,pendiente:12500,documentos_count:0,hecho:0,evento_id:null,plan_pagos:[{fecha:'2026-10-14',importe:12500},{fecha:'2026-10-15',importe:12500}]},{id:'evento',concepto:'Artista evento',negocio:'dialogos',moneda:'EUR',estimado:10000,real:null,estado:'prevista',version:1,pagado:0,pendiente:10000,documentos_count:0,hecho:1,evento_id:'evento-naya'}]:[]),{id:'compra',concepto:'Equipo de ejemplo',negocio:'dialogos',moneda:'EUR',estimado:90000,real:bought?79675:null,estado:bought?'comprada':'comprometida',comprador:'Persona Uno',proveedor:null,categoria:'Equipo',version:1,pagado:0,pendiente:bought?79675:90000,documentos_count:0}]},
    '/api/admin/gestion/documentos':{items:[]},
    '/api/admin/gestion/compras/compra/pagos':{items:[]},
   };
   return Response.json(data[url.pathname]||{});
  }));
- render(<QueryClientProvider client={createQueryClient()}><MemoryRouter initialEntries={['/compras']}><Routes><Route path="/compras" element={entities?<EntityOptions onDone={()=>{}}/>:<Compras/>}/><Route path="/" element={<h1>Inicio</h1>}/></Routes><ConfirmarHost/></MemoryRouter></QueryClientProvider>);
+ render(<QueryClientProvider client={createQueryClient()}><MemoryRouter initialEntries={[initialUrl]}><Routes><Route path="/compras" element={entities?<EntityOptions onDone={()=>{}}/>:<Compras/>}/><Route path="/" element={<h1>Inicio</h1>}/></Routes><ConfirmarHost/></MemoryRouter></QueryClientProvider>);
  return {calls,user:userEvent.setup()};
 }
-afterEach(()=>vi.unstubAllGlobals());
+afterEach(()=>{vi.unstubAllGlobals();previewMode.value=false;});
 
 it('no consulta finanzas si el usuario no es socio',async()=>{
  const {calls}=mount({socio:false});
@@ -83,4 +85,78 @@ it('distingue importe cero válido de un campo vacío y conserva céntimos',()=>
  const d=new FormData();expect(()=>amount(d,'importe')).toThrow();
  d.set('importe','0');expect(amount(d,'importe')).toBe(0);
  d.set('importe','0,29');expect(amount(d,'importe')).toBe(29);
+});
+
+it('Hecho actualiza solamente avance, sin registrar compra ni pago',async()=>{
+ const {calls,user}=mount({extended:true});
+ await user.click(await screen.findByRole('checkbox',{name:'Hecho: Idea de grabación'}));
+ await waitFor(()=>expect(calls.some(c=>c.method==='PATCH')).toBe(true));
+ const patch=calls.find(c=>c.method==='PATCH');
+ expect(patch?.body).toEqual({version:2,hecho:true});
+ expect(patch?.path).toBe('/api/admin/gestion/compras/idea');
+ expect(calls.some(c=>c.method==='POST')).toBe(false);
+});
+it('separa Diálogos sin evento y muestra cuotas previstas con anticipos descontados',async()=>{
+ const {user}=mount({extended:true});
+ await screen.findByRole('button',{name:'Idea de grabación'});
+ await user.selectOptions(screen.getByLabelText('Proyecto'),'dialogos');
+ expect(screen.queryByRole('button',{name:'Artista evento'})).not.toBeInTheDocument();
+ await user.click(screen.getByRole('button',{name:'Idea de grabación'}));
+ const detail=within(screen.getByRole('dialog',{name:'Idea de grabación'}));
+ expect(detail.getByText('14/10/2026')).toBeInTheDocument();
+ expect(detail.getByText('15/10/2026')).toBeInTheDocument();
+ expect(detail.getByText(/anticipos de socios ya pagados/)).toBeInTheDocument();
+ const cuotas=detail.getByRole('table');
+ expect(within(cuotas).getAllByRole('row')[1]).toHaveTextContent('€ 0,00');
+ expect(within(cuotas).getAllByRole('row')[2]).toHaveTextContent('€ 125,00');
+});
+it('crear previsión guarda evento y plan de dos cuotas sin pago',async()=>{
+ const {calls,user}=mount({extended:true,initialUrl:'/compras?evento_id=evento-naya'});
+ await user.click(await screen.findByRole('button',{name:'Añadir compra'}));
+ const form=within(screen.getByRole('dialog',{name:'Añadir compra prevista'}));
+ expect(form.getByLabelText('Negocio')).toHaveValue('dialogos');
+ expect(form.getByLabelText(/Evento \(opcional\)/)).toHaveValue('evento-naya');
+ await user.type(form.getByLabelText('Qué vamos a comprar'),'Prueba de grabación');
+ await user.type(form.getByLabelText('Importe previsto'),'250');
+ await user.type(form.getByLabelText('Fecha cuota 1'),'2026-10-14');
+ await user.type(form.getByLabelText('Importe cuota 1'),'125');
+ await user.type(form.getByLabelText('Fecha cuota 2'),'2026-10-15');
+ await user.type(form.getByLabelText('Importe cuota 2'),'125');
+ await user.click(form.getByRole('button',{name:'Guardar'}));
+ await waitFor(()=>expect(calls.some(c=>c.method==='POST')).toBe(true));
+ expect(calls.find(c=>c.method==='POST')?.body).toMatchObject({evento_id:'evento-naya',negocio:'dialogos',estimado:25000,plan_pagos:[{fecha:'2026-10-14',importe:12500},{fecha:'2026-10-15',importe:12500}]});
+ expect(calls.some(c=>c.method==='POST'&&c.path.endsWith('/pagos'))).toBe(false);
+});
+it('previsión total incluye ideas además de compromisos',async()=>{
+ mount({extended:true});
+ await screen.findByRole('button',{name:'Idea de grabación'});
+ const total=screen.getByText('previsión total · ideas y compromisos').parentElement!;
+ expect(total).toHaveTextContent('€ 1.250,00');
+ expect(screen.getByText('ideas · sin compromiso').parentElement).toHaveTextContent('€ 350,00');
+ expect(screen.getByText('compromisos sin realizar').parentElement).toHaveTextContent('€ 900,00');
+});
+it('prueba móvil permite consultar y desactiva Hecho y formularios',async()=>{
+ previewMode.value=true;
+ const {calls,user}=mount({extended:true});
+ const checkbox=await screen.findByRole('checkbox',{name:'Hecho: Idea de grabación'});
+ expect(checkbox).toBeDisabled();
+ expect(screen.queryByRole('button',{name:'Añadir compra'})).not.toBeInTheDocument();
+ await user.click(screen.getByRole('button',{name:'Idea de grabación'}));
+ expect(screen.queryByRole('button',{name:'Editar datos'})).not.toBeInTheDocument();
+ expect(screen.queryByRole('button',{name:'Se compró'})).not.toBeInTheDocument();
+ expect(screen.queryByRole('button',{name:'Adjuntar archivo'})).not.toBeInTheDocument();
+ expect(calls.every(c=>c.method==='GET')).toBe(true);
+});
+
+it('permite un anticipo sobre un compromiso antes de marcar trabajo realizado',async()=>{
+ const {calls,user}=mount();
+ await user.click(await screen.findByRole('button',{name:'Equipo de ejemplo'}));
+ await user.click(screen.getByRole('button',{name:'Registrar pago'}));
+ const modal=within(screen.getByRole('dialog',{name:'Registrar pago de la compra'}));
+ await user.clear(modal.getByLabelText('Importe pagado (EUR)'));await user.type(modal.getByLabelText('Importe pagado (EUR)'),'125');
+ await user.selectOptions(modal.getByLabelText('Cuenta desde la que se pagó'),'cuenta');
+ await user.click(modal.getByRole('button',{name:'Guardar'}));
+ await waitFor(()=>expect(screen.queryByRole('dialog',{name:'Registrar pago de la compra'})).not.toBeInTheDocument());
+ expect(calls.find(c=>c.method==='POST')?.body).toMatchObject({importe:12500,pagador:'cuenta'});
+ expect(calls.some(c=>c.method==='POST'&&c.path.endsWith('/comprar'))).toBe(false);
 });

@@ -1,6 +1,6 @@
 // Contabilidad interna: la guarda vive en CADA handler, además de clienteGate.
 import { Hono } from 'hono';
-import { uuidOpcional, errorEscrituraGestion, SELECT_COMPRA } from '../gestion-financiera.js';
+import { uuidOpcional, errorEscrituraGestion, SELECT_COMPRA, EVENTO_MOVIMIENTO_SQL } from '../gestion-financiera.js';
 import { esSocio, partesAdmin } from '../middleware.js';
 import { HttpError, json, NO_STORE, readJson, csvCell, PANEL_EMAIL_RE } from '../app.js';
 
@@ -8,6 +8,9 @@ export const finanzas = new Hono();
 const TIPOS = ['ingreso', 'gasto', 'egreso'];
 const MONEDAS = ['EUR', 'COP'];
 const NATURALEZAS = ['operativo', 'financiacion', 'financiero', 'reembolso_socio', 'compra'];
+// Una compra etiquetada aporta el tenant de su evento a pagos y reversos sin
+// cambiar el tenant_id original del libro. Solo afecta filtros/etiquetas de socios.
+const TENANT_MOVIMIENTO_SQL = `COALESCE((SELECT e.tenant_id FROM tenant_events e WHERE e.id=${EVENTO_MOVIMIENTO_SQL}),m.tenant_id)`;
 const fail = (code) => { throw new HttpError(400, code); };
 const enumValue = (value, values, code) => values.includes(value) ? value : fail(code);
 const positivo = (n) => Number.isSafeInteger(n) && n > 0 ? n : fail('importe_invalido');
@@ -61,12 +64,16 @@ function filters(url) {
     if (!value) continue;
     if (values) enumValue(value, values, `${key}_invalido`);
     if (key === 'concepto') idConcepto(Number(value));
-    clauses.push(`m.${column} = ?`); args.push(value);
+    clauses.push(key === 'tenant' ? `${TENANT_MOVIMIENTO_SQL} = ?` : `m.${column} = ?`); args.push(value);
+  }
+  if (p.get('evento')) {
+    const evento = uuidOpcional(p.get('evento'), 'evento_invalido');
+    clauses.push(`${EVENTO_MOVIMIENTO_SQL}=?`); args.push(evento);
   }
   return { sql: clauses.join(' AND '), args };
 }
-const SELECT_MOV = `SELECT m.*, c.nombre AS concepto_nombre, t.name AS tenant_name FROM fin_movimientos m
-  JOIN fin_conceptos c ON c.id = m.concepto_id LEFT JOIN tenants t ON t.id = m.tenant_id`;
+const SELECT_MOV = `SELECT m.*, ${EVENTO_MOVIMIENTO_SQL} AS evento_id_efectivo, ${TENANT_MOVIMIENTO_SQL} AS tenant_id_efectivo, c.nombre AS concepto_nombre, t.name AS tenant_name, e.name AS evento_nombre FROM fin_movimientos m
+  JOIN fin_conceptos c ON c.id = m.concepto_id LEFT JOIN tenants t ON t.id = ${TENANT_MOVIMIENTO_SQL} LEFT JOIN tenant_events e ON e.id=${EVENTO_MOVIMIENTO_SQL}`;
 const ORDER = ' ORDER BY m.fecha DESC, m.created_at DESC, m.id DESC';
 // Desde 0050 cada partida lleva naturaleza y signo (reversos = -1). La financiación
 // (abono de préstamo, devolución de principal) entra y sale de CAJA pero no es venta
@@ -155,7 +162,16 @@ async function validateMovimiento(env, b, previous) {
   // Una corrección de nota/importe conserva el concepto histórico desactivado.
   if (!concepto.activo && previous?.concepto_id !== concepto_id) fail('concepto_inactivo');
   if (b.reparto_id || b.beneficiario) fail('usar_repartos');
-  const tenant_id = b.tenant_id || null;
+  let tenant_id = b.tenant_id || null;
+  const evento_id = uuidOpcional(b.evento_id, 'evento_invalido');
+  if (evento_id) {
+    const evento = await env.DB.prepare('SELECT id,tenant_id FROM tenant_events WHERE id=?').bind(evento_id).first();
+    if (!evento) fail('evento_invalido');
+    if (moneda !== 'EUR') fail('evento_moneda_invalida');
+    if (tipo === 'egreso') fail('evento_tipo_invalido');
+    if (tenant_id && tenant_id !== evento.tenant_id) fail('evento_cliente_incoherente');
+    tenant_id = evento.tenant_id;
+  }
   if (tenant_id && (tipo === 'egreso' || typeof tenant_id !== 'string')) fail('cliente_invalido');
   if (tenant_id && !await env.DB.prepare('SELECT id FROM tenants WHERE id = ?').bind(tenant_id).first()) fail('cliente_invalido');
   const cuenta_id = uuidOpcional(b.cuenta_id, 'cuenta_invalida');
@@ -166,12 +182,12 @@ async function validateMovimiento(env, b, previous) {
     if (cuenta.moneda !== moneda) fail('moneda_distinta');
     entidad_id = cuenta.entidad_id;
   }
-  return { tipo, moneda, importe, fecha: dia, concepto_id, nota: nota(b.nota), tenant_id, cuenta_id, entidad_id };
+  return { tipo, moneda, importe, fecha: dia, concepto_id, nota: nota(b.nota), tenant_id, cuenta_id, entidad_id, evento_id };
 }
 function insertMovimiento(env, m, actor, now, repartoId = null, beneficiario = null) {
   return env.DB.prepare(`INSERT INTO fin_movimientos
-    (id,tipo,concepto_id,fecha,moneda,importe,nota,tenant_id,beneficiario,reparto_id,created_by,created_at,cuenta_id,entidad_id)
-    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).bind(m.id, m.tipo, m.concepto_id, m.fecha, m.moneda, m.importe, m.nota, m.tenant_id, beneficiario, repartoId, actor, now, m.cuenta_id ?? null, m.entidad_id ?? null);
+    (id,tipo,concepto_id,fecha,moneda,importe,nota,tenant_id,beneficiario,reparto_id,created_by,created_at,cuenta_id,entidad_id,evento_id)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).bind(m.id, m.tipo, m.concepto_id, m.fecha, m.moneda, m.importe, m.nota, m.tenant_id, beneficiario, repartoId, actor, now, m.cuenta_id ?? null, m.entidad_id ?? null, m.evento_id ?? null);
 }
 const logBorrado = (id, actor) => console.log(JSON.stringify({ level: 'warn', code: 'fin_borrado', id, actor }));
 
@@ -308,12 +324,12 @@ finanzas.patch('/api/admin/finanzas/movimientos/:id', async (c) => {
   // corrigen desde su operación, nunca a mano; el trigger de 0050 lo garantiza.
   if (old.origen_tipo) throw new HttpError(409, 'movimiento_de_gestion');
   const b = await bodyOf(request);
-  if (Object.keys(b).some((k) => !['tipo', 'importe', 'fecha', 'concepto_id', 'nota', 'tenant_id', 'cuenta_id'].includes(k))) fail('campo_no_editable');
+  if (Object.keys(b).some((k) => !['tipo', 'importe', 'fecha', 'concepto_id', 'nota', 'tenant_id', 'cuenta_id', 'evento_id'].includes(k))) fail('campo_no_editable');
   const m = await validateMovimiento(env, { ...old, ...b }, old);
   let result;
   try {
-    result = await env.DB.prepare('UPDATE fin_movimientos SET tipo=?, importe=?, fecha=?, concepto_id=?, nota=?, tenant_id=?, cuenta_id=?, entidad_id=? WHERE id=?')
-      .bind(m.tipo, m.importe, m.fecha, m.concepto_id, m.nota, m.tenant_id, m.cuenta_id, m.entidad_id, old.id).run();
+    result = await env.DB.prepare('UPDATE fin_movimientos SET tipo=?, importe=?, fecha=?, concepto_id=?, nota=?, tenant_id=?, cuenta_id=?, entidad_id=?, evento_id=? WHERE id=?')
+      .bind(m.tipo, m.importe, m.fecha, m.concepto_id, m.nota, m.tenant_id, m.cuenta_id, m.entidad_id, m.evento_id, old.id).run();
   } catch (e) { writeError(e); }
   if (!result.meta.changes) throw new HttpError(404, 'not_found');
   return json({ ok: true }, 200, NO_STORE);
@@ -399,7 +415,7 @@ finanzas.get('/api/admin/finanzas/export.csv', async (c) => {
   if (!esSocio(env, scope)) throw new HttpError(403, 'not_authorized');
   const f = filters(url);
   const rows = (await env.DB.prepare(`${SELECT_MOV} WHERE ${f.sql}${ORDER}`).bind(...f.args).all()).results;
-  const keys = ['id', 'fecha', 'tipo', 'concepto_nombre', 'tenant_name', 'nota', 'moneda', 'importe', 'beneficiario', 'reparto_id', 'created_by', 'created_at', 'naturaleza', 'origen_tipo'];
+  const keys = ['id', 'fecha', 'tipo', 'concepto_nombre', 'tenant_name', 'nota', 'moneda', 'importe', 'beneficiario', 'reparto_id', 'created_by', 'created_at', 'naturaleza', 'origen_tipo', 'evento_id', 'evento_id_efectivo'];
   // Importe legible en unidades monetarias; sin separador de miles, EUR con dos decimales.
   // Un reverso (signo -1) sale en negativo: la asesoría ve el libro tal como suma.
   const csv = [keys.join(','), ...rows.map((r) => keys.map((k) => k === 'importe' ? `"${r.moneda === 'EUR' ? (r.importe * r.signo / 100).toFixed(2) : String(r.importe * r.signo)}"` : csvCell(r[k])).join(','))].join('\r\n');
