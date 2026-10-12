@@ -16,7 +16,7 @@
 // Lo que NO vive aquí: scopeClause/assertOwnTenant se aplican DENTRO de cada
 // consulta — el middleware sabe QUIÉN pregunta, pero solo el handler sabe qué
 // SQL construye. Esa mitad la vigila scripts/check-aislamiento.mjs.
-import { MODULOS, modulosDe } from './planes.js';
+import { MODULOS, modulosDe, esPlan } from './planes.js';
 import { HttpError, clean, rateLimited, sendTelegramText, escapeHtml, decodeBase64Url } from './app.js';
 
 // Sin fallback silencioso: si ADMIN_ORIGIN falta o es inválida, las rutas de admin
@@ -297,6 +297,38 @@ export async function mwResolveScope(c, next) {
     throw e;
   }
   c.set('scope', scope);
+  await next();
+}
+
+// El espacio es una restricción de la identidad administrativa ya verificada.
+// Nunca resuelve otro correo, concede un permiso ni acepta un UUID de otro cliente.
+export async function workspaceGate(c, next) {
+  const original = c.get('scope'), choice = c.req.raw.headers.get('X-Velai-Workspace');
+  const admin = original.role === 'velai';
+  if (choice !== null && !admin) throw new HttpError(403, 'not_authorized');
+  if (choice !== null && !['velai','dialogos'].includes(choice)) throw new HttpError(400, 'workspace_invalido');
+  if (choice !== null && c.env.MOBILE_PREVIEW_READ_ONLY) throw new HttpError(400, 'workspace_preview_unavailable');
+  const workspace = { current: choice || 'velai', canSwitch: admin && !c.env.MOBILE_PREVIEW_READ_ONLY, canAttend: !c.env.MOBILE_PREVIEW_READ_ONLY && choice !== 'dialogos' };
+  if (workspace.canSwitch) workspace.options = [{ id:'velai',label:'Velai' },{ id:'dialogos',label:'Diálogos' }];
+  c.set('workspace', workspace);
+  if (choice === 'dialogos') {
+    if (c.req.path === '/api/admin/availability' && c.req.method === 'PATCH') throw new HttpError(403, 'velai_no_atiende_clientes');
+    let tenant, overrides;
+    try {
+      tenant = await c.env.DB.prepare("SELECT id,slug,plan,active FROM tenants WHERE slug='dialogos'").first();
+      if (!tenant) throw new HttpError(404, 'workspace_not_found');
+      if (Number(tenant.active) !== 1 || !esPlan(tenant.plan)) throw new HttpError(403, 'workspace_unavailable');
+      overrides = (await c.env.DB.prepare('SELECT modulo,estado FROM tenant_modulos WHERE tenant_id=?').bind(tenant.id).all()).results;
+      if (!Array.isArray(overrides)) throw new HttpError(503, 'workspace_unavailable');
+    } catch (e) {
+      if (e instanceof HttpError) throw e;
+      throw new HttpError(503, 'workspace_unavailable');
+    }
+    // Actor y limitación de atención originales; no transportar raíz/finanzas al
+    // espacio de cliente. Sin header la resolución ordinaria los conserva intactos.
+    c.set('scope', { role:'cliente',tenantId:tenant.id,email:original.email,plan:tenant.plan,
+      modulos:modulosDe(tenant.plan,overrides),permisos:[],raiz:false,workspaceAdmin:true });
+  }
   await next();
 }
 

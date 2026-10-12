@@ -18,6 +18,7 @@ export type Role = 'velai' | 'cliente';
 
 /** GET /api/admin/me */
 export interface Me {
+  workspace?: { current: 'velai' | 'dialogos'; canSwitch: boolean; canAttend?: boolean };
   tenantSlug?: string | null;
   editorialEditable?: boolean;
   role: Role;

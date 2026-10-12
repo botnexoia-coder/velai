@@ -1,0 +1,53 @@
+import {expect,test} from '@playwright/test';
+import {dirname,extname,join} from 'node:path';
+import {fileURLToPath} from 'node:url';
+import {mkdir} from 'node:fs/promises';
+const tid='11111111-1111-4111-8111-111111111111';
+test.use({locale:'es-ES',timezoneId:'Europe/Madrid'});
+test('admin rota a Diálogos y vuelve sin logout ni mezclar llamadas',async({page})=>{
+ await page.clock.install({time:new Date('2026-10-12T12:00:00Z')});
+ await page.setViewportSize({width:1200,height:850});
+ const seen:{path:string;workspace:string;method:string}[]=[];
+ const dist=join(dirname(fileURLToPath(import.meta.url)),'..','dist');
+ await page.route('**/*',async route=>{
+  const req=route.request(),url=new URL(req.url());
+  if(url.origin!=='https://panel.test')return route.abort();
+  if(!url.pathname.startsWith('/api/admin/')){
+   const relative=url.pathname.includes('/assets/')?url.pathname.slice(1):'index.html';
+   return route.fulfill({path:join(dist,relative),contentType:({'.js':'application/javascript','.css':'text/css','.html':'text/html'} as Record<string,string>)[extname(relative)]});
+  }
+  const ws=req.headers()['x-velai-workspace']||'velai';
+  seen.push({path:url.pathname,workspace:ws,method:req.method()});
+  const respond=(data:unknown,status=200)=>route.fulfill({status,contentType:'application/json',body:JSON.stringify(data)});
+  if(url.pathname.endsWith('/me'))return respond({role:ws==='dialogos'?'cliente':'velai',socio:ws==='velai',tenantId:ws==='dialogos'?tid:null,tenantName:ws==='dialogos'?'Diálogos que Enseñan':null,tenantLogo:null,tenantSlug:ws==='dialogos'?'dialogos':null,editorialEditable:true,modulos:['calendario'],workspace:{current:ws,canSwitch:true}});
+  if(url.pathname.endsWith('/stats'))return respond({total30:0,sinContactar:0,sinContactarDesde:null,fallidos7:0,tenantsActivos:1,porDia:[],porCanal:[],fuentes:[],captura:{conversaciones:0,leads:0,porCanal:[],desde:'2026-10-01',periodoCompleto:false}});
+  if(url.pathname.endsWith('/editorial'))return respond({entries:[],mas:false});
+  if(url.pathname.endsWith('/calendar'))return respond({calendar:null,confirmaciones:null});
+  if(url.pathname.endsWith('/tenants'))return respond({tenants:[{id:tid,slug:'dialogos',name:'Diálogos que Enseñan',active:1}]});
+  if(url.pathname.endsWith('/inbox'))return respond({items:[],counts:{all:0,needs_reply:0,unread:0}});
+  if(url.pathname.endsWith('/availability'))return respond({available:true,follow_up_enabled:false});
+  if(url.pathname.endsWith('/plantillas'))return respond({kinds:[],tenants:[]});
+  return respond({error:'not_found'},404);
+ });
+ await page.goto('/calendario');
+ const selector=page.getByRole('combobox',{name:'Espacio de trabajo',exact:true});
+ await expect(selector).toHaveValue('velai');
+ await expect(page.getByRole('tab',{name:'Finanzas',exact:true})).toBeVisible();
+ await selector.selectOption('dialogos');
+ await expect(page.getByRole('heading',{name:'Calendario — Diálogos que Enseñan',exact:true})).toBeVisible();
+ await expect(selector).toHaveValue('dialogos');
+ await expect(page.getByRole('tab',{name:'Finanzas',exact:true})).toHaveCount(0);
+ await expect(page.getByRole('button',{name:'Planificación',exact:true})).toHaveAttribute('aria-pressed','true');
+ await page.getByRole('button',{name:'2026-10-16',exact:true}).click();
+ await expect(page.getByRole('dialog',{name:'Añadir evento'}).getByLabel('Fecha')).toHaveValue('2026-10-16');
+ await page.getByRole('dialog',{name:'Añadir evento'}).getByRole('button',{name:'Cancelar',exact:true}).click();
+ expect(seen.some(c=>c.path===`/api/admin/tenants/${tid}/editorial`&&c.workspace==='dialogos')).toBe(true);
+ expect(seen.filter(c=>c.workspace==='dialogos').some(c=>c.path==='/api/admin/tenants'||c.path.startsWith('/api/admin/gestion'))).toBe(false);
+ await mkdir('/tmp/velai-workspace-qa',{recursive:true});await page.screenshot({path:'/tmp/velai-workspace-qa/dialogos-workspace-desktop.png',fullPage:true});
+ await selector.selectOption('velai');
+ await expect(selector).toHaveValue('velai');await expect(page.getByRole('tab',{name:'Finanzas',exact:true})).toBeVisible();
+ expect(seen.filter(c=>c.path==='/api/admin/me').map(c=>c.workspace)).toContain('velai');
+ expect(seen.some(c=>c.path.includes('/logout'))).toBe(false);
+ await page.setViewportSize({width:390,height:844});
+ expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
+});

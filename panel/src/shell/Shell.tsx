@@ -8,6 +8,10 @@
 // scope por su cuenta.
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { NavLink, Outlet, useLocation } from 'react-router';
+import { useIsMutating, useQueryClient } from '@tanstack/react-query';
+import { confirmar } from '../components/Confirmar';
+import { storeWorkspace, reloadWorkspace, workspaceChoice, type Workspace } from '../workspace';
+import './workspace.css';
 import { isSessionExpired, subscribeSession } from '../api/session';
 import { useMe } from '../hooks/queries';
 import { useAvisos } from '../hooks/avisos';
@@ -51,16 +55,49 @@ function Tab({ to, label, icon }: { to: string; label: string; icon: React.React
 }
 
 export function Shell() {
+  const mutations = useIsMutating();
+  const queryClient = useQueryClient();
+  const [switching, setSwitching] = useState(false);
+  const switchLock = useRef(false);
+  const dirtyForms = useRef(new WeakSet<HTMLFormElement>());
   const [mobileMenu, setMobileMenu] = useState(false);
   const moreButton = useRef<HTMLButtonElement>(null);
   const closeMobileMenu = () => { setMobileMenu(false); moreButton.current?.focus(); };
-  const { data: me } = useMe();
+  const { data: me, error: meError } = useMe();
   const [dark, setDark] = useState(readDark);
   const location = useLocation();
   const isVelai = me?.role === 'velai';
   const isCliente = me?.role === 'cliente';
   const toast = useToast();
   const avisos = useAvisos(toast);
+  const workspaceUnavailable = !MOBILE_PREVIEW && workspaceChoice() === 'dialogos' && meError instanceof Error && ['workspace_unavailable', 'workspace_not_found'].includes(meError.message);
+  useEffect(() => {
+    const changed = (event: Event) => {
+      if (!(event.target instanceof Element)) return;
+      const form = event.target.closest('form');
+      if (form instanceof HTMLFormElement) dirtyForms.current.add(form);
+    };
+    document.addEventListener('input', changed, true); document.addEventListener('change', changed, true);
+    return () => { document.removeEventListener('input', changed, true); document.removeEventListener('change', changed, true); };
+  }, []);
+  async function switchWorkspace(workspace: Workspace, recovering = false) {
+    if (MOBILE_PREVIEW || mutations || switchLock.current) return;
+    if (recovering ? !workspaceUnavailable : !me?.workspace?.canSwitch || workspace === me.workspace.current) return;
+    if (Array.from(document.querySelectorAll('dialog[open], [role="dialog"]')).some(dialog => dialog.getClientRects().length > 0)) { toast('Cierra o termina el formulario abierto antes de cambiar de espacio.', false); return; }
+    switchLock.current = true; setSwitching(true);
+    let navigating = false;
+    try {
+      const dirty = Array.from(document.querySelectorAll('form')).some(form => dirtyForms.current.has(form) && form.getClientRects().length > 0);
+      if (dirty && !(await confirmar({ titulo: '¿Cambiar de espacio?', cuerpo: 'Los cambios del formulario que no hayas guardado se perderán.', accion: 'Cambiar de espacio', peligro: true }))) return;
+      if (queryClient.isMutating()) return;
+      if (!storeWorkspace(workspace)) { toast('No se pudo recordar el espacio. Permite el almacenamiento de esta pestaña y reintenta.', false); return; }
+      await queryClient.cancelQueries(); queryClient.clear();
+      navigating = true; reloadWorkspace(workspace);
+    } finally {
+      if (!navigating) { switchLock.current = false; setSwitching(false); }
+    }
+  }
+
   useEffect(() => {
     if (document.getElementById('panel-navigation')?.contains(document.activeElement)) moreButton.current?.focus();
     setMobileMenu(false);
@@ -184,6 +221,7 @@ export function Shell() {
             onClick={() => {
               // Logout = Cloudflare Access (borra la cookie y redirige al login). La ruta
               // la atiende Access, nunca llega al worker.
+              storeWorkspace('velai');
               window.location.href = '/cdn-cgi/access/logout';
             }}
             data-tip={'Cierra tu sesión de Cloudflare Access.\nPara volver a entrar te pedirá otro código por correo.'}
@@ -194,6 +232,11 @@ export function Shell() {
         </div>
       </aside>
       <main>
+        {workspaceUnavailable ? <div className="workspace-switch" role="alert"><div><strong>No se pudo abrir Diálogos</strong><p>Vuelve a Velai para comprobar el acceso con tu sesión actual.</p></div><button className="btn alt" type="button" disabled={Boolean(mutations) || switching} onClick={() => void switchWorkspace('velai', true)}>Volver a Velai</button></div> : null}
+        {!MOBILE_PREVIEW && me?.workspace?.canSwitch ? <div className="workspace-switch">
+          <label>Espacio<select aria-label="Espacio de trabajo" value={me.workspace.current} disabled={Boolean(mutations) || switching} onChange={e => void switchWorkspace(e.target.value as Workspace)}><option value="velai">Velai · Admin</option><option value="dialogos">Diálogos que Enseñan</option></select></label>
+          <span>La misma sesión · cambia el espacio de trabajo</span>
+        </div> : null}
         {MOBILE_PREVIEW ? <p className="mobile-preview-notice">Datos reales. Esta prueba no envía mensajes ni guarda cambios.</p> : null}
         <Outlet />
       </main>

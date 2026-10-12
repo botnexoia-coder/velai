@@ -1,4 +1,4 @@
-import { adminReadHref } from '../mobilePreview';
+import { apiDownload } from '../api/client';
 // Leads: la bandeja de trabajo. Filtros arriba (la fuente sale de los DATOS, vía
 // /api/admin/stats — source es texto libre y una lista fija dejaría sin filtrar
 // cualquier landing nueva), tabla paginada por cursor y detalle en modal.
@@ -12,6 +12,8 @@ import { leadQs, useEscalations, useLeads, useMe, useResumeBot, useStats, useTen
 import { LeadDetailModal } from './LeadDetail';
 
 export function Leads() {
+  const toast = useToast();
+  const [exporting, setExporting] = useState(false);
   const { data: me } = useMe();
   const isVelai = me?.role === 'velai';
   const { data: stats } = useStats();
@@ -47,8 +49,13 @@ export function Leads() {
         <button
           className="btn alt"
           type="button"
-          onClick={() => {
-            window.location.href = adminReadHref(`/api/admin/leads/export.csv${leadQs(applied)}`);
+          disabled={exporting}
+          onClick={async () => {
+            if (exporting) return;
+            setExporting(true);
+            try { await apiDownload(`/api/admin/leads/export.csv${leadQs(applied)}`, 'leads.csv'); }
+            catch (error) { toast(`No se pudo exportar: ${traducir(error)}`, false); }
+            finally { setExporting(false); }
           }}
         >
           Exportar CSV

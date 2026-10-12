@@ -395,3 +395,23 @@ producción. La resolución abierta `wrangler@4` reutilizó 4.86.0 en el runner,
 que falló al leer una respuesta de deployments con HTTP 200; el primer intento
 también recibió un 504 en la API. Se mantienen todas las puertas CI, staging y
 smoke. Un fallo del proveedor no confirma que producción esté actualizada.
+
+### Cambiar entre los espacios Velai y Diálogos
+
+Los administradores pueden elegir «Espacio de trabajo» en el panel normal para
+consultar Velai o trabajar con la planificación propia de Diálogos. La elección
+se recuerda por pestaña en sessionStorage; no se guardan credenciales ni datos
+privados del panel. Cambiar cancela consultas, vacía la caché de la interfaz y
+recarga la página, manteniendo la identidad autenticada y su autoría.
+
+El Worker solo acepta Velai o Diálogos para una identidad administradora. En
+Diálogos valida el tenant activo, su plan y módulos y aplica las restricciones
+del cliente. Los clientes normales no pueden entrar al espacio administrador.
+Los CSV conservan el contexto; un espacio no disponible permite volver a Velai.
+La atención administrativa de conversaciones conserva sus restricciones previas.
+La prueba móvil sigue siendo de lectura y no ofrece el selector.
+
+La sesión de Cloudflare Access de admin.hirevai.com está configurada en 24 horas,
+sin modificaciones de grupos ni políticas. «Salir» cierra esa sesión y exige
+volver a autenticarse; cambiar de espacio no pasa por el logout. El selector
+cambia el espacio de la misma identidad, no inicia sesión con otro correo.

@@ -11,6 +11,8 @@ import { markSessionExpired, resetSession } from '../api/session';
 import { ToastProvider } from '../components/Toasts';
 import { availability, inbox, leadsPage1, meCliente, meVelai, mockFetch, stats, tenants } from '../test/fixtures';
 import type { Me } from '../api/types';
+import { WORKSPACE_KEY, reloadWorkspace } from '../workspace';
+vi.mock('../workspace',async importOriginal=>({...await importOriginal<typeof import('../workspace')>(),reloadWorkspace:vi.fn()}));
 
 function renderApp(me: Me, path = '/') {
   vi.stubGlobal(
@@ -28,8 +30,9 @@ function renderApp(me: Me, path = '/') {
       '/api/admin/ai-balance': { month: '2026-08', included: 1, used: 0, remaining: 1, pct: 0, over: false, usedToday: 0, calls: 0, serie: [] },
     })),
   );
-  return render(
-    <QueryClientProvider client={createQueryClient()}>
+  const client = createQueryClient();
+  const rendered = render(
+    <QueryClientProvider client={client}>
       <ToastProvider>
         <MemoryRouter initialEntries={[path]}>
           <App />
@@ -37,10 +40,12 @@ function renderApp(me: Me, path = '/') {
       </ToastProvider>
     </QueryClientProvider>,
   );
+  return {...rendered,client};
 }
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  vi.mocked(reloadWorkspace).mockClear();
   document.body.className = '';
   sessionStorage.clear();
 });
@@ -149,4 +154,75 @@ it('cuando Access caduca, el marco avisa una vez y ofrece entrar sin perder el b
   await userEvent.click(screen.getByRole('button', { name: /entrar en otra pestaña/i }));
   expect(abrir).toHaveBeenCalledWith(window.location.origin, '_blank', 'noopener');
   resetSession();
+});
+
+describe('selector del espacio autenticado',()=>{
+ it('solo aparece con capacidad autorizada y cambia a Diálogos sin logout',async()=>{
+  const user=userEvent.setup();renderApp({...meVelai,workspace:{current:'velai',canSwitch:true}});
+  const select=await screen.findByRole('combobox',{name:'Espacio de trabajo'});
+  expect(select).toHaveValue('velai');await user.selectOptions(select,'dialogos');
+  await waitFor(()=>expect(reloadWorkspace).toHaveBeenCalledWith('dialogos'));
+  expect(sessionStorage.getItem(WORKSPACE_KEY)).toBe('dialogos');
+ });
+ it('el administrador puede volver desde Diálogos a Velai en la misma sesión',async()=>{
+  sessionStorage.setItem(WORKSPACE_KEY,'dialogos');
+  const user=userEvent.setup();renderApp({...meCliente,workspace:{current:'dialogos',canSwitch:true}});
+  await user.selectOptions(await screen.findByRole('combobox',{name:'Espacio de trabajo'}),'velai');
+  await waitFor(()=>expect(reloadWorkspace).toHaveBeenCalledWith('velai'));expect(sessionStorage.getItem(WORKSPACE_KEY)).toBeNull();
+ });
+ it('cliente propio sin capacidad de cambio no ve el selector',async()=>{
+  renderApp({...meCliente,workspace:{current:'dialogos',canSwitch:false}});
+  await screen.findByText('Barbería López');expect(screen.queryByRole('combobox',{name:'Espacio de trabajo'})).not.toBeInTheDocument();
+ });
+ it('bloquea cambio si hay un diálogo abierto en lugar de descartar el formulario',async()=>{
+  const user=userEvent.setup();renderApp({...meVelai,workspace:{current:'velai',canSwitch:true}});
+  const select=await screen.findByRole('combobox',{name:'Espacio de trabajo'});
+  const dialog=document.createElement('dialog');dialog.open=true;Object.defineProperty(dialog,'getClientRects',{value:()=>[new DOMRect(0,0,50,20)]});document.body.append(dialog);
+  try{await user.selectOptions(select,'dialogos');expect(reloadWorkspace).not.toHaveBeenCalled();expect(sessionStorage.getItem(WORKSPACE_KEY)).toBeNull();}finally{dialog.remove();}
+ });
+});
+it('selector se desactiva mientras hay una mutación pendiente',async()=>{
+ const {client}=renderApp({...meVelai,workspace:{current:'velai',canSwitch:true}});
+ const select=await screen.findByRole('combobox',{name:'Espacio de trabajo'});
+ let finish!:()=>void;const mutation=client.getMutationCache().build(client,{mutationFn:()=>new Promise<void>(resolve=>{finish=resolve;})});
+ const pending=mutation.execute(undefined);await waitFor(()=>expect(select).toBeDisabled());
+ finish();await pending;await waitFor(()=>expect(select).toBeEnabled());
+});
+it('cambiar de espacio pide permiso antes de descartar un formulario modificado',async()=>{
+ const user=userEvent.setup();renderApp({...meVelai,workspace:{current:'velai',canSwitch:true}});
+ const select=await screen.findByRole('combobox',{name:'Espacio de trabajo'});
+ const form=document.createElement('form'),input=document.createElement('input');form.append(input);document.body.append(form);Object.defineProperty(form,'getClientRects',{value:()=>[new DOMRect(0,0,50,20)]});
+ try{
+  await user.type(input,'Borrador');await user.selectOptions(select,'dialogos');
+  const dialog=await screen.findByRole('dialog',{name:'¿Cambiar de espacio?'});
+  expect(reloadWorkspace).not.toHaveBeenCalled();expect(select).toBeDisabled();
+  await user.click(within(dialog).getByRole('button',{name:'Cancelar'}));
+  expect(sessionStorage.getItem(WORKSPACE_KEY)).toBeNull();await waitFor(()=>expect(select).toBeEnabled());
+  await user.selectOptions(select,'dialogos');
+  await user.click(within(await screen.findByRole('dialog',{name:'¿Cambiar de espacio?'})).getByRole('button',{name:'Cambiar de espacio'}));
+  await waitFor(()=>expect(reloadWorkspace).toHaveBeenCalledTimes(1));
+ }finally{form.remove();}
+});
+
+it.each([{code:'workspace_unavailable',status:403},{code:'workspace_unavailable',status:503},{code:'workspace_not_found',status:404}])('ofrece volver explícitamente a Velai si Diálogos falla con $code/$status',async({code,status})=>{
+ sessionStorage.setItem(WORKSPACE_KEY,'dialogos');
+ const {client}=renderApp({...meVelai,workspace:{current:'velai',canSwitch:true}});
+ await screen.findByRole('combobox',{name:'Espacio de trabajo'});
+ const clear=vi.spyOn(client,'clear');
+ const originalFetch=vi.mocked(fetch).getMockImplementation()!;
+ vi.mocked(fetch).mockImplementation(async(input:RequestInfo|URL,init?:RequestInit)=>String(input)==='/api/admin/me'?Response.json({error:code},{status}):originalFetch(input,init));
+ // The pending /me may already have been queued by render; invalidate it to exercise the failed identity lookup.
+ await client.invalidateQueries({queryKey:['me']});
+ const back=await screen.findByRole('button',{name:'Volver a Velai'});
+ expect(screen.getByText('No se pudo abrir Diálogos')).toBeInTheDocument();
+ expect(sessionStorage.getItem(WORKSPACE_KEY)).toBe('dialogos');expect(reloadWorkspace).not.toHaveBeenCalled();
+ await userEvent.setup().click(back);
+ await waitFor(()=>expect(reloadWorkspace).toHaveBeenCalledWith('velai'));
+ expect(sessionStorage.getItem(WORKSPACE_KEY)).toBeNull();expect(clear).toHaveBeenCalledTimes(1);
+});
+it('bloquea el cambio con un diálogo personalizado visible',async()=>{
+ const user=userEvent.setup();renderApp({...meVelai,workspace:{current:'velai',canSwitch:true}});
+ const select=await screen.findByRole('combobox',{name:'Espacio de trabajo'});
+ const dialog=document.createElement('div');dialog.setAttribute('role','dialog');Object.defineProperty(dialog,'getClientRects',{value:()=>[new DOMRect(0,0,50,20)]});document.body.append(dialog);
+ try{await user.selectOptions(select,'dialogos');expect(reloadWorkspace).not.toHaveBeenCalled();expect(sessionStorage.getItem(WORKSPACE_KEY)).toBeNull();}finally{dialog.remove();}
 });

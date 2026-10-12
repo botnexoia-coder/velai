@@ -1,4 +1,5 @@
-import { adminReadHref } from '../mobilePreview';
+import { apiDownload } from '../api/client';
+import { MOBILE_PREVIEW } from '../mobilePreview';
 import { messageAttachments, mediaHref } from '../lib/media';
 // Bandeja de conversaciones a pantalla completa: lista a la izquierda, hilo y cajón a
 // la derecha, contra /api/admin/inbox (UNA llamada con lista + hilo, sondeada por
@@ -37,6 +38,7 @@ const CH_ORDER: ConvChannel[] = ['whatsapp', 'web', 'messenger', 'instagram'];
 const CONVERSATION_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 export function Conversaciones() {
+  const [exporting, setExporting] = useState(false);
   const [searchParams] = useSearchParams();
   const { data: me } = useMe();
   const isVelai = me?.role === 'velai';
@@ -112,14 +114,20 @@ export function Conversaciones() {
           open={popOpen === 'avail'}
           onToggle={() => setPopOpen((p) => (p === 'avail' ? '' : 'avail'))}
           isVelai={isVelai === true}
+          canAttend={!MOBILE_PREVIEW && me?.workspace?.canAttend !== false}
         />
         <button
           className="iconbtn"
           type="button"
           aria-label="Exportar CSV"
           data-tip="Descarga lo que estás viendo AHORA, con los filtros aplicados"
-          onClick={() => {
-            window.location.href = adminReadHref(`/api/admin/conversations/export.csv${convQs(filters)}`);
+          disabled={exporting}
+          onClick={async () => {
+            if (exporting) return;
+            setExporting(true);
+            try { await apiDownload(`/api/admin/conversations/export.csv${convQs(filters)}`, 'conversations.csv'); }
+            catch (error) { toast(`No se pudo exportar: ${traducir(error)}`, false); }
+            finally { setExporting(false); }
           }}
         >
           <IcoDownload />
@@ -366,7 +374,7 @@ function FiltrosPop({
 
 // ── Disponibilidad: el interruptor es de esta persona; el horario es del cliente y lo
 // cierra por fuera. Se dice cuál de los dos manda. ───────────────────────────
-function Disponibilidad({ open, onToggle, isVelai }: { open: boolean; onToggle: () => void; isVelai: boolean }) {
+function Disponibilidad({ open, onToggle, isVelai, canAttend }: { open: boolean; onToggle: () => void; isVelai: boolean; canAttend: boolean }) {
   const { data } = useAvailability();
   const set = useSetAvailability();
   const toast = useToast();
@@ -380,7 +388,7 @@ function Disponibilidad({ open, onToggle, isVelai }: { open: boolean; onToggle: 
         onClick={onToggle}
       >
         <i />
-        <span className="avlabel">{data ? (data.offering ? 'Asesor disponible' : data.available ? 'Fuera de horario' : 'No disponible') : '—'}</span>
+        <span className="avlabel">{!canAttend ? 'Consulta' : data ? (data.offering ? 'Asesor disponible' : data.available ? 'Fuera de horario' : 'No disponible') : '—'}</span>
         <IcoChevronDown />
       </button>
       {open ? (
@@ -394,7 +402,7 @@ function Disponibilidad({ open, onToggle, isVelai }: { open: boolean; onToggle: 
               role="switch"
               aria-checked={Boolean(data?.available)}
               aria-label="Recibir conversaciones"
-              disabled={set.isPending}
+              disabled={set.isPending || !canAttend}
               onClick={() =>
                 set.mutate(!data?.available, {
                   onError: (e) => toast(`No se pudo cambiar la disponibilidad: ${traducir(e)}`, false),
@@ -404,7 +412,7 @@ function Disponibilidad({ open, onToggle, isVelai }: { open: boolean; onToggle: 
               <i />
             </button>
           </div>
-          <p>{data ? availNote(data, isVelai) : ''}</p>
+          <p>{!canAttend ? 'Este espacio permite consultar conversaciones y editar la planificación. La atención del admin permanece en Velai.' : data ? availNote(data, isVelai) : ''}</p>
           <p className="pophint">
             {data ? `${data.withinHours ? 'Dentro del horario de atención' : 'Fuera del horario de atención'} · ${data.tz}` : ''}
           </p>

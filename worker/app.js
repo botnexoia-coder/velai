@@ -6,7 +6,7 @@ import { previewTarget, readOnlyEnv } from './mobile-preview.js';
 import {
   adminOrigin, adminHost, adminCorsGuard, adminIdentity, envAdmins, resolveScope,
   recordAuthFailure, scopeClause, assertOwnTenant, clienteAllowed,
-  mwAdminHost, mwAdminCors, mwAdminIdentity, mwResolveScope, clienteGate, moduloGate,
+  mwAdminHost, mwAdminCors, mwAdminIdentity, mwResolveScope, workspaceGate, clienteGate, moduloGate,
 } from './middleware.js';
 import { publico } from './routes/publico.js';
 import { reserva } from './routes/reserva.js';
@@ -3020,7 +3020,7 @@ export async function velaiTenantId(env) {
 // Velai. Devuelve booleano y no lanza: el código de error lo elige el que llama.
 export async function canAttend(env, scope, tenantId) {
   if (!tenantId) return false;
-  if (scope.role !== 'velai') return scope.tenantId === tenantId;
+  if (scope.role !== 'velai' && !scope.workspaceAdmin) return scope.tenantId === tenantId;
   const mine = await velaiTenantId(env);
   return Boolean(mine) && tenantId === mine;
 }
@@ -4701,6 +4701,7 @@ function buildAdminApp() {
     await next();
   });
   // La lista blanca del rol cliente, ANTES de cualquier handler (403 sin tocar datos).
+  admin.use('/api/admin/*', workspaceGate);
   admin.use('/api/admin/*', clienteGate);
   admin.use('/api/admin/*', moduloGate);
   admin.route('/', rutasConfig);

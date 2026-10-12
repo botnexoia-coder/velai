@@ -27,7 +27,9 @@ configuracion.get('/api/admin/me', async (c) => {
   // tenantId: el cliente lo necesita para llamar a SUS rutas de calendario
   // (/tenants/:id/calendar); es su propio id, no filtra nada ajeno.
   const editorialEditable = !env.MOBILE_PREVIEW_READ_ONLY && (scope.role === 'velai' || (scope.role === 'cliente' && tenantSlug === 'dialogos' && scope.modulos?.includes('calendario') === true));
-  return json({ tenantSlug, editorialEditable, role: scope.role, socio: esSocio(env, scope), tenantName, tenantLogo, tenantId: scope.tenantId, plan: scope.plan ?? null, modulos: scope.modulos ?? [] }, 200, NO_STORE);
+  const workspace = c.get('workspace') || { current:'velai',canSwitch:false };
+  if (scope.role === 'cliente' && !workspace.canSwitch && tenantSlug === 'dialogos') workspace.current = 'dialogos';
+  return json({ workspace, tenantSlug, editorialEditable, role: scope.role, socio: esSocio(env, scope), tenantName, tenantLogo, tenantId: scope.tenantId, plan: scope.plan ?? null, modulos: scope.modulos ?? [] }, 200, NO_STORE);
 });
 
 configuracion.get('/api/admin/stats', async (c) => {
