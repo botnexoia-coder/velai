@@ -3,8 +3,9 @@ import {dirname,extname,join} from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {mkdir} from 'node:fs/promises';
 const tid='11111111-1111-4111-8111-111111111111';
+const nayaTid='22222222-2222-4222-8222-222222222222';
 test.use({locale:'es-ES',timezoneId:'Europe/Madrid'});
-test('admin rota a Diálogos y vuelve sin logout ni mezclar llamadas',async({page})=>{
+test('admin rota entre Velai, Diálogos y NAYA sin logout ni mezclar llamadas',async({page})=>{
  await page.clock.install({time:new Date('2026-10-12T12:00:00Z')});
  await page.setViewportSize({width:1200,height:850});
  const seen:{path:string;workspace:string;method:string}[]=[];
@@ -19,7 +20,7 @@ test('admin rota a Diálogos y vuelve sin logout ni mezclar llamadas',async({pag
   const ws=req.headers()['x-velai-workspace']||'velai';
   seen.push({path:url.pathname,workspace:ws,method:req.method()});
   const respond=(data:unknown,status=200)=>route.fulfill({status,contentType:'application/json',body:JSON.stringify(data)});
-  if(url.pathname.endsWith('/me'))return respond({role:ws==='dialogos'?'cliente':'velai',socio:ws==='velai',tenantId:ws==='dialogos'?tid:null,tenantName:ws==='dialogos'?'Diálogos que Enseñan':null,tenantLogo:null,tenantSlug:ws==='dialogos'?'dialogos':null,editorialEditable:true,modulos:['calendario'],workspace:{current:ws,canSwitch:true}});
+  if(url.pathname.endsWith('/me'))return respond({role:ws==='velai'?'velai':'cliente',socio:ws==='velai',tenantId:ws==='dialogos'?tid:ws==='naya'?nayaTid:null,tenantName:ws==='dialogos'?'Diálogos que Enseñan':ws==='naya'?'NAYA Eventos':null,tenantLogo:null,tenantSlug:ws==='dialogos'?'dialogos':ws==='naya'?'colegiale-sevilla':null,editorialEditable:ws!=='naya',modulos:['calendario','eventos'],workspace:{current:ws,canSwitch:true,canAttend:ws==='velai'}});
   if(url.pathname.endsWith('/stats'))return respond({total30:0,sinContactar:0,sinContactarDesde:null,fallidos7:0,tenantsActivos:1,porDia:[],porCanal:[],fuentes:[],captura:{conversaciones:0,leads:0,porCanal:[],desde:'2026-10-01',periodoCompleto:false}});
   if(url.pathname.endsWith('/editorial'))return respond({entries:[],mas:false});
   if(url.pathname.endsWith('/calendar'))return respond({calendar:null,confirmaciones:null});
@@ -44,6 +45,17 @@ test('admin rota a Diálogos y vuelve sin logout ni mezclar llamadas',async({pag
  expect(seen.some(c=>c.path===`/api/admin/tenants/${tid}/editorial`&&c.workspace==='dialogos')).toBe(true);
  expect(seen.filter(c=>c.workspace==='dialogos').some(c=>c.path==='/api/admin/tenants'||c.path.startsWith('/api/admin/gestion'))).toBe(false);
  await mkdir('/tmp/velai-workspace-qa',{recursive:true});await page.screenshot({path:'/tmp/velai-workspace-qa/dialogos-workspace-desktop.png',fullPage:true});
+ await selector.selectOption('naya');
+ await expect(selector).toHaveValue('naya');
+ await expect(page).toHaveURL('https://panel.test/');
+ await expect(page.getByRole('heading',{name:'Dashboard',exact:true})).toBeVisible();
+ await expect(page.getByRole('tab',{name:'Eventos',exact:true})).toBeVisible();
+ await expect(page.getByRole('tab',{name:'Finanzas',exact:true})).toHaveCount(0);
+ expect(seen.some(c=>c.path==='/api/admin/stats'&&c.workspace==='naya')).toBe(true);
+ expect(seen.filter(c=>c.workspace==='naya').some(c=>c.path==='/api/admin/tenants'||c.path.startsWith('/api/admin/gestion'))).toBe(false);
+ await page.setViewportSize({width:390,height:844});
+ expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
+ await page.screenshot({path:'/tmp/velai-workspace-qa/naya-workspace-mobile.png',fullPage:true});
  await selector.selectOption('velai');
  await expect(selector).toHaveValue('velai');await expect(page.getByRole('tab',{name:'Finanzas',exact:true})).toBeVisible();
  expect(seen.filter(c=>c.path==='/api/admin/me').map(c=>c.workspace)).toContain('velai');

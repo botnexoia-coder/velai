@@ -47,7 +47,7 @@ export async function api<T>(path: string, init?: RequestInit, options?: ApiOpti
     const workspace = workspaceChoice();
     const headers = new Headers(init?.headers);
     headers.delete('X-Velai-Workspace');
-    if (!MOBILE_PREVIEW && workspace === 'dialogos' && path.startsWith('/api/admin/')) headers.set('X-Velai-Workspace', workspace);
+    if (!MOBILE_PREVIEW && workspace !== 'velai' && path.startsWith('/api/admin/')) headers.set('X-Velai-Workspace', workspace);
     let response: Response;
     try {
       response = await fetch(path, { ...init, headers, signal: options?.signal ?? init?.signal ?? null, redirect: 'manual' });
@@ -73,7 +73,7 @@ export async function api<T>(path: string, init?: RequestInit, options?: ApiOpti
     if (!response.ok) {
       const body = data as { error?: unknown; why?: unknown };
       // A later Access login may belong to a client; only /me may retry once in its base space.
-      if (path === '/api/admin/me' && workspace === 'dialogos' && response.status === 403 && body?.error === 'not_authorized' && storeWorkspace('velai')) return api<T>(path, init, options);
+      if (path === '/api/admin/me' && workspace !== 'velai' && response.status === 403 && body?.error === 'not_authorized' && storeWorkspace('velai')) return api<T>(path, init, options);
       throw new ApiError(String(body?.error ?? 'request_failed'), response.status, String(body?.why ?? ''));
     }
     return data as T;
@@ -87,7 +87,7 @@ export async function apiDownload(path: string, filename: string): Promise<void>
   if (!path.startsWith('/api/admin/') || path.includes('..')) throw new ApiError('invalid_download', 400);
   const workspace = workspaceChoice();
   const headers = new Headers();
-  if (!MOBILE_PREVIEW && workspace === 'dialogos') headers.set('X-Velai-Workspace', workspace);
+  if (!MOBILE_PREVIEW && workspace !== 'velai') headers.set('X-Velai-Workspace', workspace);
   const target = MOBILE_PREVIEW ? adminReadHref(path) : path;
   busyStart();
   try {

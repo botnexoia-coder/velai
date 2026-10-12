@@ -306,16 +306,17 @@ export async function workspaceGate(c, next) {
   const original = c.get('scope'), choice = c.req.raw.headers.get('X-Velai-Workspace');
   const admin = original.role === 'velai';
   if (choice !== null && !admin) throw new HttpError(403, 'not_authorized');
-  if (choice !== null && !['velai','dialogos'].includes(choice)) throw new HttpError(400, 'workspace_invalido');
+  if (choice !== null && !['velai','dialogos','naya'].includes(choice)) throw new HttpError(400, 'workspace_invalido');
   if (choice !== null && c.env.MOBILE_PREVIEW_READ_ONLY) throw new HttpError(400, 'workspace_preview_unavailable');
-  const workspace = { current: choice || 'velai', canSwitch: admin && !c.env.MOBILE_PREVIEW_READ_ONLY, canAttend: !c.env.MOBILE_PREVIEW_READ_ONLY && choice !== 'dialogos' };
-  if (workspace.canSwitch) workspace.options = [{ id:'velai',label:'Velai' },{ id:'dialogos',label:'Diálogos' }];
+  const workspace = { current: choice || 'velai', canSwitch: admin && !c.env.MOBILE_PREVIEW_READ_ONLY, canAttend: !c.env.MOBILE_PREVIEW_READ_ONLY && !['dialogos','naya'].includes(choice) };
+  if (workspace.canSwitch) workspace.options = [{ id:'velai',label:'Velai' },{ id:'dialogos',label:'Diálogos' },{ id:'naya',label:'Naya Eventos' }];
   c.set('workspace', workspace);
-  if (choice === 'dialogos') {
+  if (choice === 'dialogos' || choice === 'naya') {
     if (c.req.path === '/api/admin/availability' && c.req.method === 'PATCH') throw new HttpError(403, 'velai_no_atiende_clientes');
     let tenant, overrides;
     try {
-      tenant = await c.env.DB.prepare("SELECT id,slug,plan,active FROM tenants WHERE slug='dialogos'").first();
+      const slug = choice === 'naya' ? 'colegiale-sevilla' : 'dialogos';
+      tenant = await c.env.DB.prepare('SELECT id,slug,plan,active FROM tenants WHERE slug=?').bind(slug).first();
       if (!tenant) throw new HttpError(404, 'workspace_not_found');
       if (Number(tenant.active) !== 1 || !esPlan(tenant.plan)) throw new HttpError(403, 'workspace_unavailable');
       overrides = (await c.env.DB.prepare('SELECT modulo,estado FROM tenant_modulos WHERE tenant_id=?').bind(tenant.id).all()).results;

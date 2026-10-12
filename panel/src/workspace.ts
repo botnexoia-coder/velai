@@ -1,16 +1,16 @@
 import { MOBILE_PREVIEW } from './mobilePreview';
 
-export type Workspace = 'velai' | 'dialogos';
+export type Workspace = 'velai' | 'dialogos' | 'naya';
 export const WORKSPACE_KEY = 'velai-panel-workspace';
 export function workspaceChoice(): Workspace {
   if (MOBILE_PREVIEW) return 'velai';
-  try { return sessionStorage.getItem(WORKSPACE_KEY) === 'dialogos' ? 'dialogos' : 'velai'; }
+  try { const stored = sessionStorage.getItem(WORKSPACE_KEY); return stored === 'dialogos' || stored === 'naya' ? stored : 'velai'; }
   catch { return 'velai'; }
 }
 export function storeWorkspace(workspace: Workspace): boolean {
   if (MOBILE_PREVIEW) return false;
   try {
-    if (workspace === 'dialogos') sessionStorage.setItem(WORKSPACE_KEY, workspace);
+    if (workspace !== 'velai') sessionStorage.setItem(WORKSPACE_KEY, workspace);
     else sessionStorage.removeItem(WORKSPACE_KEY);
     return true;
   } catch { return false; }

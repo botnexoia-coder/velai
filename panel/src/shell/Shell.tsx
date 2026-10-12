@@ -70,7 +70,7 @@ export function Shell() {
   const isCliente = me?.role === 'cliente';
   const toast = useToast();
   const avisos = useAvisos(toast);
-  const workspaceUnavailable = !MOBILE_PREVIEW && workspaceChoice() === 'dialogos' && meError instanceof Error && ['workspace_unavailable', 'workspace_not_found'].includes(meError.message);
+  const workspaceUnavailable = !MOBILE_PREVIEW && workspaceChoice() !== 'velai' && meError instanceof Error && ['workspace_unavailable', 'workspace_not_found'].includes(meError.message);
   useEffect(() => {
     const changed = (event: Event) => {
       if (!(event.target instanceof Element)) return;
@@ -232,9 +232,9 @@ export function Shell() {
         </div>
       </aside>
       <main>
-        {workspaceUnavailable ? <div className="workspace-switch" role="alert"><div><strong>No se pudo abrir Diálogos</strong><p>Vuelve a Velai para comprobar el acceso con tu sesión actual.</p></div><button className="btn alt" type="button" disabled={Boolean(mutations) || switching} onClick={() => void switchWorkspace('velai', true)}>Volver a Velai</button></div> : null}
+        {workspaceUnavailable ? <div className="workspace-switch" role="alert"><div><strong>No se pudo abrir {workspaceChoice() === 'naya' ? 'NAYA' : 'Diálogos'}</strong><p>Vuelve a Velai para comprobar el acceso con tu sesión actual.</p></div><button className="btn alt" type="button" disabled={Boolean(mutations) || switching} onClick={() => void switchWorkspace('velai', true)}>Volver a Velai</button></div> : null}
         {!MOBILE_PREVIEW && me?.workspace?.canSwitch ? <div className="workspace-switch">
-          <label>Espacio<select aria-label="Espacio de trabajo" value={me.workspace.current} disabled={Boolean(mutations) || switching} onChange={e => void switchWorkspace(e.target.value as Workspace)}><option value="velai">Velai · Admin</option><option value="dialogos">Diálogos que Enseñan</option></select></label>
+          <label>Espacio<select aria-label="Espacio de trabajo" value={me.workspace.current} disabled={Boolean(mutations) || switching} onChange={e => void switchWorkspace(e.target.value as Workspace)}><option value="velai">Velai · Admin</option><option value="dialogos">Diálogos que Enseñan</option><option value="naya">NAYA Eventos</option></select></label>
           <span>La misma sesión · cambia el espacio de trabajo</span>
         </div> : null}
         {MOBILE_PREVIEW ? <p className="mobile-preview-notice">Datos reales. Esta prueba no envía mensajes ni guarda cambios.</p> : null}

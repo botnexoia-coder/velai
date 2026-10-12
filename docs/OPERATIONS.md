@@ -396,17 +396,17 @@ que falló al leer una respuesta de deployments con HTTP 200; el primer intento
 también recibió un 504 en la API. Se mantienen todas las puertas CI, staging y
 smoke. Un fallo del proveedor no confirma que producción esté actualizada.
 
-### Cambiar entre los espacios Velai y Diálogos
+### Cambiar entre los espacios Velai, Diálogos y Naya
 
 Los administradores pueden elegir «Espacio de trabajo» en el panel normal para
-consultar Velai o trabajar con la planificación propia de Diálogos. La elección
+consultar Velai, trabajar con la planificación propia de Diálogos o consultar Naya Eventos. La elección
 se recuerda por pestaña en sessionStorage; no se guardan credenciales ni datos
 privados del panel. Cambiar cancela consultas, vacía la caché de la interfaz y
 recarga la página, manteniendo la identidad autenticada y su autoría.
 
-El Worker solo acepta Velai o Diálogos para una identidad administradora. En
-Diálogos valida el tenant activo, su plan y módulos y aplica las restricciones
-del cliente. Los clientes normales no pueden entrar al espacio administrador.
+El Worker solo acepta Velai, Diálogos o Naya para una identidad administradora.
+Los espacios propios resuelven los slugs permitidos `dialogos` y `colegiale-sevilla`,
+validan el tenant activo, su plan y módulos y aplican las restricciones del cliente. Los clientes normales no pueden entrar al espacio administrador.
 Los CSV conservan el contexto; un espacio no disponible permite volver a Velai.
 La atención administrativa de conversaciones conserva sus restricciones previas.
 La prueba móvil sigue siendo de lectura y no ofrece el selector.

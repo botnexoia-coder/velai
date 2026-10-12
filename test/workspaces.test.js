@@ -3,13 +3,13 @@ import assert from 'node:assert/strict';
 import { testing } from '../worker/app.js';
 import { sqliteD1 } from './helpers/sqlite-d1.js';
 
-const ADMIN_EMAIL='estiven@velai.test', DIALOGOS='00000000-0000-4000-8000-000000000d01', OTHER='00000000-0000-4000-8000-000000000d02';
+const ADMIN_EMAIL='estiven@velai.test', DIALOGOS='00000000-0000-4000-8000-000000000d01', OTHER='00000000-0000-4000-8000-000000000d02', NAYA='00000000-0000-4000-8000-000000000d03';
 const error=(status,code)=>(e)=>e.status===status&&e.code===code;
 async function fixture(t){
  const DB=await sqliteD1();t.after(()=>DB.close());
  const env={DB,ADMIN_EMAILS:'raiz@velai.test',SOCIOS_EMAILS:'raiz@velai.test'};
  await DB.prepare('INSERT INTO admin_users (email,created_by,created_at) VALUES (?,?,?)').bind(ADMIN_EMAIL,'raiz@velai.test','2026-01-01').run();
- for(const[id,slug]of[[DIALOGOS,'dialogos'],[OTHER,'otro-workspace']])await DB.prepare('INSERT INTO tenants (id,slug,name,channel_address,system_prompt,plan,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?)')
+ for(const[id,slug]of[[DIALOGOS,'dialogos'],[OTHER,'otro-workspace'],[NAYA,'colegiale-sevilla']])await DB.prepare('INSERT INTO tenants (id,slug,name,channel_address,system_prompt,plan,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?)')
   .bind(id,slug,slug==='dialogos'?'Diálogos':'Otro cliente',`web:${slug}`,'test','profesional','2026-01-01','2026-01-01').run();
  const admin=await testing.resolveScope(env,ADMIN_EMAIL),client={role:'cliente',tenantId:DIALOGOS,email:'cliente@velai.test',modulos:['calendario']};
  const call=async(path,method='GET',body,choice='dialogos',scope=admin)=>{
@@ -44,7 +44,7 @@ test('clientes reales no pueden usar header de espacio; destinos arbitrarios/ina
  const{api,env,DB,client}=await fixture(t),native=env.DB;
  env.DB={prepare(){assert.fail('Debe cerrar antes de tocar D1');}};
  try{
-  for(const choice of['velai','dialogos',OTHER,''])await assert.rejects(api('me','GET',undefined,choice,client),error(403,'not_authorized'));
+  for(const choice of['velai','dialogos','naya',OTHER,''])await assert.rejects(api('me','GET',undefined,choice,client),error(403,'not_authorized'));
   for(const choice of[OTHER,'otro-workspace','Velai',''])await assert.rejects(api('me','GET',undefined,choice),error(400,'workspace_invalido'));
  }finally{env.DB=native;}
  assert.equal((await api('me','GET',undefined,null,client)).workspace.canSwitch,false);
@@ -55,7 +55,7 @@ test('clientes reales no pueden usar header de espacio; destinos arbitrarios/ina
  await assert.rejects(api(`tenants/${DIALOGOS}/editorial`),error(403,'modulo_no_contratado'));
  await DB.prepare("UPDATE tenants SET slug='dialogos-ausente' WHERE id=?").bind(DIALOGOS).run();
  await assert.rejects(api('me'),error(404,'workspace_not_found'));
- env.DB={prepare(){return {first:async()=>({id:DIALOGOS,slug:'dialogos',active:1,plan:null})};}};
+ env.DB={prepare(){return {bind(){return this;},first:async()=>({id:DIALOGOS,slug:'dialogos',active:1,plan:null})};}};
  await assert.rejects(api('me'),error(403,'workspace_unavailable'));
  env.DB={prepare(){throw Error('Almacenamiento temporalmente ausente');}};
  try{await assert.rejects(api('me'),error(503,'workspace_unavailable'));}finally{env.DB=native;}
@@ -96,3 +96,23 @@ test('workspace conserva prohibición administrativa de atención y preview glob
   await assert.rejects(call(`mobile-preview/tenants/${DIALOGOS}/editorial`,'POST',{fecha:'2026-10-16',titulo:'No escribir'},'dialogos'),error(405,'mobile_preview_read_only'));
  }finally{env.DB=native;}
 });
+
+ test('Naya resuelve el slug propio, limita datos y conserva actor y permisos administrativos',async t=>{
+ const {api,call,DB,client}=await fixture(t);
+ const selected=await api('me','GET',undefined,'naya');
+ assert.equal(selected.tenantId,NAYA);assert.equal(selected.tenantSlug,'colegiale-sevilla');
+ assert.equal(selected.role,'cliente');assert.equal(selected.editorialEditable,false);
+ assert.equal(selected.workspace.current,'naya');assert.equal(selected.workspace.canSwitch,true);assert.equal(selected.workspace.canAttend,false);
+ const ids=[crypto.randomUUID(),crypto.randomUUID()];
+ for(const [id,tenant] of [[ids[0],NAYA],[ids[1],DIALOGOS]])await DB.prepare('INSERT INTO leads (id,request_id,source,name,status,tenant_id,created_at,updated_at,expires_at) VALUES (?,?,?,?,?,?,?,?,?)').bind(id,id,'web',tenant===NAYA?'NAYA_PROPIO':'DIALOGOS_AJENO','new',tenant,'2026-10-01','2026-10-01','2099-01-01').run();
+ assert.deepEqual((await api('leads','GET',undefined,'naya')).leads.map(r=>r.id),[ids[0]]);
+ const csv=await(await call('leads/export.csv','GET',undefined,'naya')).text();assert.match(csv,/NAYA_PROPIO/);assert.doesNotMatch(csv,/DIALOGOS_AJENO/);
+ await assert.rejects(api(`leads/${ids[1]}`,'GET',undefined,'naya'),error(404,'not_found'));
+ await assert.rejects(api('gestion/catalogos','GET',undefined,'naya'),error(403,'not_authorized'));
+ await assert.rejects(api('availability','PATCH',{available:true},'naya'),error(403,'velai_no_atiende_clientes'));
+ await assert.rejects(api('me','GET',undefined,'naya',client),error(403,'not_authorized'));
+ await assert.rejects(api('mobile-preview/me','GET',undefined,'naya'),error(400,'workspace_preview_unavailable'));
+ await DB.prepare('UPDATE tenants SET active=0 WHERE id=?').bind(NAYA).run();
+ await assert.rejects(api('me','GET',undefined,'naya'),error(403,'workspace_unavailable'));
+ assert.equal((await api('me','GET',undefined,'velai')).role,'velai');
+ });

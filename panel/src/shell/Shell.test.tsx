@@ -164,6 +164,23 @@ describe('selector del espacio autenticado',()=>{
   await waitFor(()=>expect(reloadWorkspace).toHaveBeenCalledWith('dialogos'));
   expect(sessionStorage.getItem(WORKSPACE_KEY)).toBe('dialogos');
  });
+ it('admin cambia de Diálogos a NAYA conservando sesión y borrando consultas',async()=>{
+  sessionStorage.setItem(WORKSPACE_KEY,'dialogos');
+  const user=userEvent.setup();const {client}=renderApp({...meCliente,workspace:{current:'dialogos',canSwitch:true}});
+  const clear=vi.spyOn(client,'clear');const select=await screen.findByRole('combobox',{name:'Espacio de trabajo'});
+  expect(within(select).getByRole('option',{name:'NAYA Eventos'})).toHaveValue('naya');
+  await user.selectOptions(select,'naya');
+  await waitFor(()=>expect(reloadWorkspace).toHaveBeenCalledWith('naya'));
+  expect(sessionStorage.getItem(WORKSPACE_KEY)).toBe('naya');expect(clear).toHaveBeenCalledTimes(1);
+ });
+ it('admin vuelve de NAYA a Velai y clientes NAYA normales no pueden rotar',async()=>{
+  sessionStorage.setItem(WORKSPACE_KEY,'naya');
+  const user=userEvent.setup();const {unmount}=renderApp({...meCliente,tenantName:'NAYA Eventos',tenantSlug:'colegiale-sevilla',workspace:{current:'naya',canSwitch:true}});
+  await user.selectOptions(await screen.findByRole('combobox',{name:'Espacio de trabajo'}),'velai');
+  await waitFor(()=>expect(reloadWorkspace).toHaveBeenCalledWith('velai'));expect(sessionStorage.getItem(WORKSPACE_KEY)).toBeNull();
+  unmount();renderApp({...meCliente,tenantName:'NAYA Eventos',workspace:{current:'naya',canSwitch:false}});
+  await screen.findByText('NAYA Eventos');expect(screen.queryByRole('combobox',{name:'Espacio de trabajo'})).not.toBeInTheDocument();
+ });
  it('el administrador puede volver desde Diálogos a Velai en la misma sesión',async()=>{
   sessionStorage.setItem(WORKSPACE_KEY,'dialogos');
   const user=userEvent.setup();renderApp({...meCliente,workspace:{current:'dialogos',canSwitch:true}});
@@ -225,4 +242,17 @@ it('bloquea el cambio con un diálogo personalizado visible',async()=>{
  const select=await screen.findByRole('combobox',{name:'Espacio de trabajo'});
  const dialog=document.createElement('div');dialog.setAttribute('role','dialog');Object.defineProperty(dialog,'getClientRects',{value:()=>[new DOMRect(0,0,50,20)]});document.body.append(dialog);
  try{await user.selectOptions(select,'dialogos');expect(reloadWorkspace).not.toHaveBeenCalled();expect(sessionStorage.getItem(WORKSPACE_KEY)).toBeNull();}finally{dialog.remove();}
+});
+
+it('NAYA inaccesible ofrece volver a Velai con su nombre correcto',async()=>{
+ sessionStorage.setItem(WORKSPACE_KEY,'naya');
+ const {client}=renderApp({...meVelai,workspace:{current:'velai',canSwitch:true}});
+ await screen.findByRole('combobox',{name:'Espacio de trabajo'});
+ const originalFetch=vi.mocked(fetch).getMockImplementation()!;
+ vi.mocked(fetch).mockImplementation(async(input:RequestInfo|URL,init?:RequestInit)=>String(input)==='/api/admin/me'?Response.json({error:'workspace_unavailable'},{status:403}):originalFetch(input,init));
+ await client.invalidateQueries({queryKey:['me']});
+ expect(await screen.findByText('No se pudo abrir NAYA')).toBeInTheDocument();
+ await userEvent.setup().click(screen.getByRole('button',{name:'Volver a Velai'}));
+ await waitFor(()=>expect(reloadWorkspace).toHaveBeenCalledWith('velai'));
+ expect(sessionStorage.getItem(WORKSPACE_KEY)).toBeNull();
 });

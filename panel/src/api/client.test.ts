@@ -6,16 +6,16 @@ const mode=vi.hoisted(()=>({preview:false}));
 vi.mock('../mobilePreview',async importOriginal=>({...await importOriginal<typeof import('../mobilePreview')>(),get MOBILE_PREVIEW(){return mode.preview;}}));
 beforeEach(()=>{sessionStorage.clear();resetSession();mode.preview=false;});
 afterEach(()=>{vi.unstubAllGlobals();vi.restoreAllMocks();sessionStorage.clear();mode.preview=false;resetSession();});
-it('espacio Velai omite cabecera; Diálogos la aplica y conserva JSON y FormData',async()=>{
+it.each(['dialogos','naya'] as const)('espacio Velai omite cabecera; %s la aplica y conserva JSON y FormData',async(workspace)=>{
  const fetcher=vi.fn().mockImplementation(()=>Promise.resolve(Response.json({ok:true})));vi.stubGlobal('fetch',fetcher);
  await apiPost('/api/admin/example',{value:1});
  expect(new Headers(fetcher.mock.calls[0]?.[1].headers).has('X-Velai-Workspace')).toBe(false);
- storeWorkspace('dialogos');await apiPost('/api/admin/example',{value:2});
- let headers=new Headers(fetcher.mock.calls[1]?.[1].headers);expect(headers.get('X-Velai-Workspace')).toBe('dialogos');expect(headers.get('Content-Type')).toBe('application/json');
+ storeWorkspace(workspace);await apiPost('/api/admin/example',{value:2});
+ let headers=new Headers(fetcher.mock.calls[1]?.[1].headers);expect(headers.get('X-Velai-Workspace')).toBe(workspace);expect(headers.get('Content-Type')).toBe('application/json');
  const data=new FormData();data.set('archivo','texto');await api('/api/admin/example',{method:'POST',body:data,headers:{'X-Request':'preserved'}});
- headers=new Headers(fetcher.mock.calls[2]?.[1].headers);expect(headers.get('X-Velai-Workspace')).toBe('dialogos');expect(headers.get('X-Request')).toBe('preserved');expect(headers.has('Content-Type')).toBe(false);
+ headers=new Headers(fetcher.mock.calls[2]?.[1].headers);expect(headers.get('X-Velai-Workspace')).toBe(workspace);expect(headers.get('X-Request')).toBe('preserved');expect(headers.has('Content-Type')).toBe(false);
  expect(fetcher.mock.calls[2]?.[1].body).toBe(data);
- expect(sessionStorage.getItem(WORKSPACE_KEY)).toBe('dialogos');
+ expect(sessionStorage.getItem(WORKSPACE_KEY)).toBe(workspace);
 });
 it('preview ignora elección y cabecera inyectada; rechaza métodos de escritura',async()=>{
  sessionStorage.setItem(WORKSPACE_KEY,'dialogos');mode.preview=true;
@@ -61,10 +61,10 @@ it('CSV no descarga si cambia el espacio mientras llega el archivo',async()=>{
  const download=apiDownload('/api/admin/leads/export.csv','leads.csv');storeWorkspace('dialogos');finish(new Response('CSV',{headers:{'Content-Type':'text/csv'}}));
  await expect(download).rejects.toMatchObject({message:'workspace_changed'});
 });
-it('elección antigua tras otro login reintenta /me una sola vez en el espacio propio',async()=>{
- storeWorkspace('dialogos');const fetcher=vi.fn().mockResolvedValueOnce(Response.json({error:'not_authorized'},{status:403})).mockResolvedValueOnce(Response.json({role:'cliente',tenantSlug:'zoe',workspace:{current:'velai',canSwitch:false}}));vi.stubGlobal('fetch',fetcher);
+it.each(['dialogos','naya'] as const)('elección antigua %s tras otro login reintenta /me una sola vez en el espacio propio',async(workspace)=>{
+ storeWorkspace(workspace);const fetcher=vi.fn().mockResolvedValueOnce(Response.json({error:'not_authorized'},{status:403})).mockResolvedValueOnce(Response.json({role:'cliente',tenantSlug:'zoe',workspace:{current:'velai',canSwitch:false}}));vi.stubGlobal('fetch',fetcher);
  expect(await api('/api/admin/me')).toMatchObject({role:'cliente',tenantSlug:'zoe'});expect(fetcher).toHaveBeenCalledTimes(2);
- expect(new Headers(fetcher.mock.calls[0]?.[1].headers).get('X-Velai-Workspace')).toBe('dialogos');expect(new Headers(fetcher.mock.calls[1]?.[1].headers).has('X-Velai-Workspace')).toBe(false);expect(sessionStorage.getItem(WORKSPACE_KEY)).toBeNull();
+ expect(new Headers(fetcher.mock.calls[0]?.[1].headers).get('X-Velai-Workspace')).toBe(workspace);expect(new Headers(fetcher.mock.calls[1]?.[1].headers).has('X-Velai-Workspace')).toBe(false);expect(sessionStorage.getItem(WORKSPACE_KEY)).toBeNull();
 });
 it('recuperación /me termina en dos intentos si el espacio base también deniega',async()=>{
  storeWorkspace('dialogos');const fetcher=vi.fn().mockImplementation(()=>Promise.resolve(Response.json({error:'not_authorized'},{status:403})));vi.stubGlobal('fetch',fetcher);
