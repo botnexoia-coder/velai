@@ -112,7 +112,8 @@ describe('EditorTexto', () => {
     montar(undefined);
     await user.click(screen.getByRole('button', { name: 'Personalizar y crear' }));
     await waitFor(() => expect(screen.getByText('Cumple las reglas de WhatsApp ✓')).toBeInTheDocument());
-    expect(screen.getByRole('button', { name: 'Crear y enviar a WhatsApp' })).toBeEnabled();
+    // La validación se pinta en el hijo; su efecto habilita el botón del padre en el siguiente render.
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Crear y enviar a WhatsApp' })).toBeEnabled());
   });
 
   it('con una revisión pendiente no se edita y se enseña el texto que revisa WhatsApp', async () => {
