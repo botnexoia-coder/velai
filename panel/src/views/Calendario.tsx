@@ -64,13 +64,13 @@ export function Calendario() {
     ? me?.tenantId ?? null
     : selected ?? (tenants ? (tenants.tenants.find((t) => t.slug === 'velai') ?? tenants.tenants[0])?.id ?? null : null);
   const tenantName = isCliente ? me?.tenantName : tenants?.tenants.find((t) => t.id === tenantId)?.name;
-  const tenantSlug = tenants?.tenants.find(t => t.id === tenantId)?.slug;
+  const tenantSlug = isCliente ? me?.tenantSlug : tenants?.tenants.find(t => t.id === tenantId)?.slug;
   const lastCalendarTenant = useRef<string | null>(null);
   useEffect(() => {
-    if (!tenantId || (isVelai && !tenantSlug) || lastCalendarTenant.current === tenantId) return;
+    if (!me || !tenantId || (isVelai && !tenantSlug) || lastCalendarTenant.current === tenantId) return;
     lastCalendarTenant.current = tenantId;
     setSection(tenantSlug === 'dialogos' ? 'editorial' : 'citas');
-  }, [tenantId, tenantSlug, isVelai]);
+  }, [tenantId, tenantSlug, isVelai, me]);
 
   return (
     <div>
@@ -102,7 +102,7 @@ export function Calendario() {
         <button type="button" className={`chtab${section === 'editorial' ? ' is-on' : ''}`} aria-pressed={section === 'editorial'} onClick={() => setSection('editorial')}>Planificación</button>
       </div>
       {tenantId ? section === 'editorial'
-        ? <EditorialCalendar key={tenantId} tenantId={tenantId} canEdit={isVelai === true} />
+        ? <EditorialCalendar key={tenantId} tenantId={tenantId} canEdit={me?.editorialEditable ?? (isVelai === true)} />
         : <CalendarBody tenantId={tenantId} isCliente={isCliente === true} /> : null}
     </div>
   );

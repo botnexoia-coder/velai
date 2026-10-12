@@ -43,7 +43,7 @@ test('editorial guarda fechas civiles, filtra inclusivamente, edita con versión
   assert.equal((await DB.prepare('SELECT COUNT(*) AS n FROM appointments').first()).n, 0);
 });
 
-test('lectura cliente exige tenant propio y módulo; escrituras son solo Velai incluso con módulo', async (t) => {
+test('lectura cliente exige tenant propio y módulo antes de consultar datos', async (t) => {
   const { create, api, env } = await fixture(t);
   const own = (await create()).entry, foreign = (await create({ titulo: 'Privado del otro tenant' }, B)).entry;
   assert.deepEqual((await api('', 'GET', undefined, CLIENTE)).entries.map((e) => e.id), [own.id]);
@@ -52,7 +52,10 @@ test('lectura cliente exige tenant propio y módulo; escrituras son solo Velai i
   try {
     await assert.rejects(api('', 'GET', undefined, CLIENTE, B), error(404, 'not_found'));
     await assert.rejects(api('', 'GET', undefined, { ...CLIENTE, modulos: [] }), error(403, 'modulo_no_contratado'));
-    for (const method of ['POST', 'PATCH', 'DELETE']) await assert.rejects(api(method === 'POST' ? '' : `/${own.id}`, method, {}, CLIENTE), error(403, 'not_authorized'));
+    for (const method of ['POST', 'PATCH', 'DELETE']) {
+      await assert.rejects(api(method === 'POST' ? '' : `/${own.id}`, method, {}, CLIENTE, B), error(404, 'not_found'));
+      await assert.rejects(api(method === 'POST' ? '' : `/${own.id}`, method, {}, { ...CLIENTE, modulos: [] }), error(403, 'modulo_no_contratado'));
+    }
   } finally { env.DB = db; }
   await assert.rejects(api(`/${foreign.id}`, 'PATCH', { version: 1, titulo: 'Intrusión' }), error(404, 'not_found'));
   await assert.rejects(api(`/${foreign.id}?version=1`, 'DELETE'), error(404, 'not_found'));
@@ -88,4 +91,37 @@ test('versionado atómico permite una sola edición concurrente y preview GET no
   try {
     for (const method of ['POST', 'PATCH', 'DELETE']) await assert.rejects(call('', method, {}, VELAI, A, true), error(405, 'mobile_preview_read_only'));
   } finally { env.DB = db; }
+});
+
+test('cliente Diálogos puede crear editar y borrar solo su editorial, sin citas ni cambios de identidad', async(t)=>{
+ const {api,DB}=await fixture(t);
+ const created=(await api('','POST',{fecha:'2026-10-15',titulo:'Episodio del cliente',detalle:'Guion'},CLIENTE)).entry;
+ assert.equal(created.created_by,CLIENTE.email);assert.equal(created.tenant_id,A);
+ const edited=(await api(`/${created.id}`,'PATCH',{version:1,titulo:'Guion listo'},CLIENTE)).entry;
+ assert.equal(edited.version,2);assert.equal(edited.titulo,'Guion listo');
+ assert.deepEqual(await api(`/${created.id}?version=2`,'DELETE',undefined,CLIENTE),{ok:true});
+ assert.equal((await DB.prepare('SELECT COUNT(*) AS n FROM tenant_editorial').first()).n,0);
+ assert.equal((await DB.prepare('SELECT COUNT(*) AS n FROM appointments').first()).n,0);
+});
+
+test('otros clientes conservan lectura editorial propia pero no escrituras', async(t)=>{
+ const {api,create,DB}=await fixture(t);
+ const other={...CLIENTE,tenantId:B};const entry=(await create({},B)).entry;
+ assert.equal((await api('','GET',undefined,other,B)).entries[0].id,entry.id);
+ for(const[method,path,body]of[['POST','',{fecha:'2026-10-15',titulo:'No'}],['PATCH',`/${entry.id}`,{version:1,titulo:'No'}],['DELETE',`/${entry.id}?version=1`,undefined]])await assert.rejects(api(path,method,body,other,B),error(403,'not_authorized'));
+ assert.equal((await DB.prepare('SELECT version FROM tenant_editorial WHERE id=?').bind(entry.id).first()).version,1);
+});
+
+test('me comunica permisos editoriales según slug módulo rol y preview',async(t)=>{
+ const {env}=await fixture(t);
+ const me=async(scope,preview=false)=>{
+  const path=`/api/admin/${preview?'mobile-preview/':''}me`,url=new URL('https://admin.test'+path);
+  return(await testing.adminRouter(new Request(url),env,{waitUntil(){}},path,url,{},scope)).json();
+ };
+ const own=await me(CLIENTE);assert.equal(own.tenantSlug,'dialogos');assert.equal(own.editorialEditable,true);
+ assert.equal((await me({...CLIENTE,modulos:[]})).editorialEditable,false);
+ const other=await me({...CLIENTE,tenantId:B});assert.equal(other.tenantSlug,'otro');assert.equal(other.editorialEditable,false);
+ assert.equal((await me(VELAI)).editorialEditable,true);
+ assert.equal((await me(VELAI)).tenantSlug,null);
+ assert.equal((await me(VELAI,true)).editorialEditable,false);
 });

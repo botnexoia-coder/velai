@@ -33,11 +33,13 @@ async function body(request, allowed) {
 }
 async function abrir(c, escritura = false) {
   const parts = partesAdmin(c), tenantId = c.req.param('id');
-  if (escritura && parts.scope.role !== 'velai') throw new HttpError(403, 'not_authorized');
   if (!UUID_RE.test(tenantId)) throw new HttpError(404, 'not_found');
   assertOwnTenant(parts.scope, tenantId);
   if (parts.scope.role !== 'velai' && !parts.scope.modulos?.includes('calendario')) throw new HttpError(403, 'modulo_no_contratado');
-  if (!await parts.env.DB.prepare('SELECT id FROM tenants WHERE id=?').bind(tenantId).first()) throw new HttpError(404, 'not_found');
+  const tenant = await parts.env.DB.prepare('SELECT id, slug FROM tenants WHERE id=?').bind(tenantId).first();
+  if (!tenant) throw new HttpError(404, 'not_found');
+  if (escritura && parts.env.MOBILE_PREVIEW_READ_ONLY) throw new HttpError(405, 'mobile_preview_read_only');
+  if (escritura && parts.scope.role !== 'velai' && !(parts.scope.role === 'cliente' && tenant.slug === 'dialogos' && parts.scope.modulos?.includes('calendario'))) throw new HttpError(403, 'not_authorized');
   return { ...parts, tenantId };
 }
 async function entry(env, tenantId, entryId) {

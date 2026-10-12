@@ -18,6 +18,8 @@ export type Role = 'velai' | 'cliente';
 
 /** GET /api/admin/me */
 export interface Me {
+  tenantSlug?: string | null;
+  editorialEditable?: boolean;
   role: Role;
   /** Ausente en workers anteriores: el panel mantiene cerrado el acceso. */
   socio?: boolean;

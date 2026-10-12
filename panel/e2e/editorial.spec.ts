@@ -5,7 +5,7 @@ const tid = '11111111-1111-4111-8111-111111111111';
 const velai = '22222222-2222-4222-8222-222222222222';
 const fecha = '2026-10-12';
 type Entry = { id: string; fecha: string; titulo: string; detalle: string; version: number };
-async function setup(page: Page, mobile = false) {
+async function setup(page: Page, mobile = false, dialogosClient = false) {
   await page.clock.install({ time: new Date('2026-10-12T12:00:00Z') });
   const state = { entries: [] as Entry[], conflict: false, calls: [] as { path: string; method: string; body: Record<string, unknown> | null }[] };
   const dist = join(dirname(fileURLToPath(import.meta.url)), '..', 'dist');
@@ -20,7 +20,9 @@ async function setup(page: Page, mobile = false) {
     const body = req.postDataJSON() as Record<string, unknown> | null;
     state.calls.push({ path: url.pathname, method: req.method(), body });
     const respond = (data: unknown, status = 200) => route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(data) });
-    if (path.endsWith('/me')) return respond({ role: 'velai', socio: true, tenantId: null, modulos: [] });
+    if (path.endsWith('/me')) return respond(dialogosClient
+      ? { role: 'cliente', socio: false, tenantId: tid, tenantName: 'Diálogos · QA', tenantSlug: 'dialogos', editorialEditable: true, modulos: ['calendario'] }
+      : { role: 'velai', socio: true, tenantId: null, modulos: [] });
     if (path.endsWith('/tenants')) return respond({ tenants: [{ id: tid, slug: 'dialogos', name: 'Diálogos · QA', active: 1 }, { id: velai, slug: 'velai', name: 'Velai · QA', active: 1 }] });
     if (path.endsWith('/calendar')) return respond({ calendar: null, confirmaciones: null });
     if (!path.includes('/editorial')) return respond({ error: 'not_found' }, 404);
@@ -112,5 +114,28 @@ test('prueba instalada consulta planificación sin escrituras', async ({ page })
   await expect(page.getByRole('dialog')).toHaveCount(0);
   await expect(page.getByRole('button', { name: 'Añadir planificación' })).toHaveCount(0);
   expect(state.calls.every(c => c.method === 'GET' && c.path.startsWith('/api/admin/mobile-preview/'))).toBe(true);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+});
+
+test('cuenta propia de Diálogos abre otra fecha y guarda su planificación en móvil', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  const state = await setup(page, false, true);
+  await page.goto('/calendario');
+  await expect(page.getByRole('button', { name: 'Planificación', exact: true })).toHaveAttribute('aria-pressed', 'true');
+  await page.getByRole('button', { name: '2026-10-15', exact: true }).click();
+  let dialog = page.getByRole('dialog', { name: 'Añadir evento' });
+  await expect(dialog.getByLabel('Fecha')).toHaveValue('2026-10-15');
+  await dialog.getByRole('button', { name: 'Cancelar', exact: true }).click();
+  await page.getByRole('button', { name: '2026-10-16', exact: true }).click();
+  dialog = page.getByRole('dialog', { name: 'Añadir evento' });
+  await expect(dialog.getByLabel('Fecha')).toHaveValue('2026-10-16');
+  await dialog.getByLabel('Qué grabaremos / episodio').fill('Ensayo de grabación');
+  await dialog.getByLabel('Detalles').fill('Preparar preguntas y cámaras');
+  await dialog.getByRole('button', { name: 'Guardar planificación' }).click();
+  await expect(dialog).toHaveCount(0);
+  await expect(page.getByRole('heading', { name: 'Ensayo de grabación' })).toBeVisible();
+  expect(state.entries[0]?.fecha).toBe('2026-10-16');
+  expect(state.calls.filter(c => c.method === 'POST').map(c => c.path)).toEqual([`/api/admin/tenants/${tid}/editorial`]);
+  expect(state.calls.some(c => c.path === '/api/admin/tenants')).toBe(false);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
 });

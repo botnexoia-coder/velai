@@ -15,17 +15,19 @@ export const configuracion = new Hono();
 
 configuracion.get('/api/admin/me', async (c) => {
   const { env, scope } = partesAdmin(c);
-  let tenantName = null; let tenantLogo = null;
+  let tenantName = null; let tenantLogo = null; let tenantSlug = null;
   if (scope.tenantId) {
-    const row = await env.DB.prepare('SELECT name, logo_url FROM tenants WHERE id=?').bind(scope.tenantId).first();
+    const row = await env.DB.prepare('SELECT id, name, logo_url, slug FROM tenants WHERE id=?').bind(scope.tenantId).first();
     tenantName = row ? row.name : null;
+    tenantSlug = row ? row.slug : null;
     // El panel del cliente se viste con SU logo en cuanto lo sube (pedido de Juan).
     tenantLogo = row && row.logo_url && /^https:\/\//.test(row.logo_url) ? row.logo_url : null;
 
   }
   // tenantId: el cliente lo necesita para llamar a SUS rutas de calendario
   // (/tenants/:id/calendar); es su propio id, no filtra nada ajeno.
-  return json({ role: scope.role, socio: esSocio(env, scope), tenantName, tenantLogo, tenantId: scope.tenantId, plan: scope.plan ?? null, modulos: scope.modulos ?? [] }, 200, NO_STORE);
+  const editorialEditable = !env.MOBILE_PREVIEW_READ_ONLY && (scope.role === 'velai' || (scope.role === 'cliente' && tenantSlug === 'dialogos' && scope.modulos?.includes('calendario') === true));
+  return json({ tenantSlug, editorialEditable, role: scope.role, socio: esSocio(env, scope), tenantName, tenantLogo, tenantId: scope.tenantId, plan: scope.plan ?? null, modulos: scope.modulos ?? [] }, 200, NO_STORE);
 });
 
 configuracion.get('/api/admin/stats', async (c) => {

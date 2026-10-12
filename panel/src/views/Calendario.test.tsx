@@ -1,7 +1,7 @@
 // Calendario: la lógica pura del mes (corte por tz, forma de la rejilla, «vacío ≠ {}»)
 // y la vista con conexión, rejilla y citas.
 import { QueryClientProvider } from '@tanstack/react-query';
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -12,6 +12,8 @@ import { gridFromHours, hoursFromGrid, gridVacio, copyMonday, setDay, shSummary 
 import { meCliente, meVelai, mockFetch, tenants } from '../test/fixtures';
 import { Calendario } from './Calendario';
 import type { Appointment, CalendarRow } from '../api/types';
+const previewMode=vi.hoisted(()=>({value:false}));
+vi.mock('../mobilePreview',async importOriginal=>({...await importOriginal<typeof import('../mobilePreview')>(),get MOBILE_PREVIEW(){return previewMode.value;}}));
 
 describe('lógica pura del calendario', () => {
   it('el corte de día usa la tz del CALENDARIO, no la del navegador', () => {
@@ -328,4 +330,43 @@ describe('Confirmaciones (SPEC-CONFIRMACIONES)', () => {
     expect(await screen.findByRole('button', { name: 'Enviar a aprobación' })).toBeInTheDocument();
     expect(screen.getByText(/Hola María, te escribimos de Clínica Ejemplo/)).toBeInTheDocument();
   });
+});
+
+describe('permiso editorial del cliente Diálogos',()=>{
+ afterEach(()=>{vi.unstubAllGlobals();previewMode.value=false;});
+ function mountEditorial({slug='dialogos',editable=true,preview=false}={}){
+  previewMode.value=preview;const calls:{path:string;method:string;body?:Record<string,unknown>}[]=[];
+  vi.stubGlobal('fetch',vi.fn(async(input:string,init?:RequestInit)=>{
+   const url=new URL(String(input),'https://panel.test'),method=init?.method||'GET';calls.push({path:url.pathname,method,body:init?.body?JSON.parse(String(init.body)):undefined});
+   if(url.pathname.endsWith('/me'))return Response.json({...meCliente,tenantSlug:slug,editorialEditable:editable,modulos:['calendario']});
+   if(url.pathname.includes('/editorial'))return Response.json(method==='GET'?{entries:[]}:{entry:{id:'nuevo'}},{status:method==='POST'?201:200});
+   if(url.pathname.endsWith('/calendar'))return Response.json({calendar:null,confirmaciones:null});
+   return Response.json({});
+  }));
+  render(<QueryClientProvider client={createQueryClient()}><ToastProvider><MemoryRouter><Calendario/></MemoryRouter></ToastProvider></QueryClientProvider>);
+  return{calls,user:userEvent.setup()};
+ }
+ it('Diálogos abre Planificación y permite crear en una fecha con permiso del servidor',async()=>{
+  const{calls,user}=mountEditorial();
+  const plan=await screen.findByRole('button',{name:'Planificación'});await waitFor(()=>expect(plan).toHaveAttribute('aria-pressed','true'));
+  const d=new Date(),fecha=dayKey(d.getFullYear(),d.getMonth(),1);
+  await user.click(screen.getByRole('button',{name:fecha}));
+  const dialog=within(screen.getByRole('dialog',{name:'Añadir evento'}));
+  expect(dialog.getByLabelText('Fecha')).toHaveValue(fecha);
+  await user.type(dialog.getByLabelText('Qué grabaremos / episodio'),'Guion del cliente');
+  await user.click(dialog.getByRole('button',{name:'Guardar planificación'}));
+  await waitFor(()=>expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+  expect(calls.find(c=>c.method==='POST')).toMatchObject({path:`/api/admin/tenants/${meCliente.tenantId}/editorial`,body:{fecha,titulo:'Guion del cliente',detalle:''}});
+  expect(calls.some(c=>c.path==='/api/admin/tenants')).toBe(false);
+ });
+ it.each([{slug:'zoe',editable:false,preview:false},{slug:'dialogos',editable:false,preview:false},{slug:'dialogos',editable:true,preview:true}])('mantiene solo lectura slug=$slug permiso=$editable preview=$preview',async opts=>{
+  const{calls,user}=mountEditorial(opts);
+  const plan=await screen.findByRole('button',{name:'Planificación'});
+  await user.click(plan);
+  await screen.findByText('Solo lectura');
+  const d=new Date();await user.click(screen.getByRole('button',{name:dayKey(d.getFullYear(),d.getMonth(),1)}));
+  expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  expect(screen.queryByRole('button',{name:'Añadir planificación'})).not.toBeInTheDocument();
+  expect(calls.every(c=>c.method==='GET')).toBe(true);
+ });
 });

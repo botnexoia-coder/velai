@@ -10,13 +10,15 @@ import { EntityOptions, amount } from './shared';
 const previewMode=vi.hoisted(()=>({value:false}));
 vi.mock('../../mobilePreview',async importOriginal=>({...await importOriginal<typeof import('../../mobilePreview')>(),get MOBILE_PREVIEW(){return previewMode.value;}}));
 
-function mount({ socio=true, bought=false, retry=false, entities=false, extended=false, initialUrl='/compras' }={}) {
+function mount({ socio=true, bought=false, retry=false, entities=false, extended=false, paid=0, editError='', initialUrl='/compras' }={}) {
  const calls:{path:string;method:string;body?:Record<string,unknown>}[]=[];
- let failed=false;
+ let failed=false, estimate=90000;
  vi.stubGlobal('fetch',vi.fn(async(input:string,init?:RequestInit)=>{
   const url=new URL(String(input),'https://panel.test'),method=init?.method||'GET';
   calls.push({path:url.pathname,method,body:init?.body?JSON.parse(String(init.body)):undefined});
   if(method!=='GET') {
+   if(editError&&method==='PATCH'&&!failed){failed=true;return Response.json({error:editError},{status:409});}
+   if(method==='PATCH'&&url.pathname==='/api/admin/gestion/compras/compra'){const body=JSON.parse(String(init?.body));if(typeof body.estimado==='number')estimate=body.estimado;}
    if(retry&&!failed){failed=true;return Response.json({error:'network_failed'},{status:503});}
    return Response.json({item:{id:'nuevo'}});
   }
@@ -24,7 +26,7 @@ function mount({ socio=true, bought=false, retry=false, entities=false, extended
    '/api/admin/me':{role:'velai',socio,tenantId:null},
    '/api/admin/gestion/catalogos':{entidades:[],cuentas:[{id:'cuenta',nombre:'Cuenta común',moneda:'EUR',saldo_inicial:0,version:1}],socios:[{email:'uno@velai.test',nombre:'Persona Uno'}],eventos:[{id:'evento-naya',name:'Fiesta · QA',tenant_name:'NAYA'}]},
    '/api/admin/gestion/prestamos':{items:[]},
-   '/api/admin/gestion/compras':{items:[...(extended?[{id:'idea',concepto:'Idea de grabación',negocio:'dialogos',moneda:'EUR',estimado:25000,real:null,estado:'prevista',version:2,pagado:12500,pendiente:12500,documentos_count:0,hecho:0,evento_id:null,plan_pagos:[{fecha:'2026-10-14',importe:12500},{fecha:'2026-10-15',importe:12500}]},{id:'evento',concepto:'Artista evento',negocio:'dialogos',moneda:'EUR',estimado:10000,real:null,estado:'prevista',version:1,pagado:0,pendiente:10000,documentos_count:0,hecho:1,evento_id:'evento-naya'}]:[]),{id:'compra',concepto:'Equipo de ejemplo',negocio:'dialogos',moneda:'EUR',estimado:90000,real:bought?79675:null,estado:bought?'comprada':'comprometida',comprador:'Persona Uno',proveedor:null,categoria:'Equipo',version:1,pagado:0,pendiente:bought?79675:90000,documentos_count:0}]},
+   '/api/admin/gestion/compras':{items:[...(extended?[{id:'idea',concepto:'Idea de grabación',negocio:'dialogos',moneda:'EUR',estimado:25000,real:null,estado:'prevista',version:2,pagado:12500,pendiente:12500,documentos_count:0,hecho:0,evento_id:null,plan_pagos:[{fecha:'2026-10-14',importe:12500},{fecha:'2026-10-15',importe:12500}]},{id:'evento',concepto:'Artista evento',negocio:'dialogos',moneda:'EUR',estimado:10000,real:null,estado:'prevista',version:1,pagado:0,pendiente:10000,documentos_count:0,hecho:1,evento_id:'evento-naya'}]:[]),{id:'compra',concepto:'Equipo de ejemplo',negocio:'dialogos',moneda:'EUR',estimado:estimate,real:bought?79675:null,estado:bought?'comprada':'comprometida',comprador:'Persona Uno',proveedor:null,categoria:'Equipo',version:1,pagado:paid,pendiente:(bought?79675:estimate)-paid,documentos_count:0}]},
    '/api/admin/gestion/documentos':{items:[]},
    '/api/admin/gestion/compras/compra/pagos':{items:[]},
   };
@@ -159,4 +161,55 @@ it('permite un anticipo sobre un compromiso antes de marcar trabajo realizado',a
  await waitFor(()=>expect(screen.queryByRole('dialog',{name:'Registrar pago de la compra'})).not.toBeInTheDocument());
  expect(calls.find(c=>c.method==='POST')?.body).toMatchObject({importe:12500,pagador:'cuenta'});
  expect(calls.some(c=>c.method==='POST'&&c.path.endsWith('/comprar'))).toBe(false);
+});
+
+it('editar un compromiso conserva céntimos, actualiza presupuesto pendiente y no cambia pagos',async()=>{
+ const {calls,user}=mount({paid:1000});
+ await user.click(await screen.findByRole('button',{name:'Equipo de ejemplo'}));
+ await user.click(screen.getByRole('button',{name:'Editar datos'}));
+ const dialog=within(screen.getByRole('dialog',{name:'Editar datos de la compra'}));
+ expect(dialog.getByLabelText('Importe previsto (EUR)')).toHaveValue('900');
+ await user.clear(dialog.getByLabelText('Importe previsto (EUR)'));await user.type(dialog.getByLabelText('Importe previsto (EUR)'),'120,29');
+ await user.click(dialog.getByRole('button',{name:'Guardar'}));
+ await waitFor(()=>expect(screen.queryByRole('dialog',{name:'Editar datos de la compra'})).not.toBeInTheDocument());
+ expect(calls.find(c=>c.method==='PATCH')?.body).toMatchObject({version:1,estimado:12029});
+ expect(calls.filter(c=>c.method==='POST')).toHaveLength(0);
+ const detail=within(screen.getByRole('dialog',{name:'Equipo de ejemplo'}));
+ expect(detail.getByText('saldo pendiente al proveedor').parentElement).toHaveTextContent('€ 110,29');
+});
+it('permite editar la previsión de una idea y protege pagos y cuotas manteniendo el borrador',async()=>{
+ const {calls,user}=mount({extended:true});
+ await user.click(await screen.findByRole('button',{name:'Idea de grabación'}));
+ await user.click(screen.getByRole('button',{name:'Editar datos'}));
+ const dialog=within(screen.getByRole('dialog',{name:'Editar datos de la compra'})),amountField=dialog.getByLabelText('Importe previsto (EUR)');
+ await user.clear(amountField);await user.type(amountField,'120');await user.click(dialog.getByRole('button',{name:'Guardar'}));
+ expect(await dialog.findByRole('alert')).toHaveTextContent('estimado_inferior_a_pagado');expect(amountField).toHaveValue('120');
+ expect(calls.filter(c=>c.method==='PATCH')).toHaveLength(0);
+ await user.clear(amountField);await user.type(amountField,'200');await user.click(dialog.getByRole('button',{name:'Guardar'}));
+ expect(await dialog.findByRole('alert')).toHaveTextContent('plan_supera_importe');expect(amountField).toHaveValue('200');
+ expect(calls.filter(c=>c.method==='PATCH')).toHaveLength(0);
+ await user.clear(amountField);await user.type(amountField,'260,50');await user.click(dialog.getByRole('button',{name:'Guardar'}));
+ await waitFor(()=>expect(calls.some(c=>c.method==='PATCH')).toBe(true));
+ expect(calls.find(c=>c.method==='PATCH')?.body).toMatchObject({estimado:26050,version:2,plan_pagos:[{fecha:'2026-10-14',importe:12500},{fecha:'2026-10-15',importe:12500}]});
+});
+it('un rechazo del servidor conserva importe y notas del borrador para revisar o reintentar',async()=>{
+ const {calls,user}=mount({editError:'version_conflicto'});
+ await user.click(await screen.findByRole('button',{name:'Equipo de ejemplo'}));await user.click(screen.getByRole('button',{name:'Editar datos'}));
+ const dialog=within(screen.getByRole('dialog',{name:'Editar datos de la compra'}));
+ await user.clear(dialog.getByLabelText('Importe previsto (EUR)'));await user.type(dialog.getByLabelText('Importe previsto (EUR)'),'120,29');
+ await user.type(dialog.getByLabelText('Notas'),'Corrección pendiente de revisar');await user.click(dialog.getByRole('button',{name:'Guardar'}));
+ expect(await dialog.findByRole('alert')).toHaveTextContent('Otra persona guardó cambios');
+ expect(dialog.getByLabelText('Importe previsto (EUR)')).toHaveValue('120,29');expect(dialog.getByLabelText('Notas')).toHaveValue('Corrección pendiente de revisar');
+ expect(calls.find(c=>c.method==='PATCH')?.body).toMatchObject({estimado:12029,version:1,nota:'Corrección pendiente de revisar'});
+});
+it.each([0,1000])('una compra confirmada no ofrece atajo para editar importe real o pagos (pagado %s)',async paid=>{
+ const {calls,user}=mount({bought:true,paid});
+ await user.click(await screen.findByRole('button',{name:'Equipo de ejemplo'}));await user.click(screen.getByRole('button',{name:'Editar datos'}));
+ const dialog=within(screen.getByRole('dialog',{name:'Editar datos de la compra'}));
+ expect(dialog.queryByLabelText('Importe previsto (EUR)')).not.toBeInTheDocument();expect(dialog.queryByLabelText('Importe real (EUR)')).not.toBeInTheDocument();
+ if(paid)expect(dialog.getByText(/revierte el pago desde su historial/)).toBeInTheDocument();
+ await user.type(dialog.getByLabelText('Notas'),'Corrección de descripción');await user.click(dialog.getByRole('button',{name:'Guardar'}));
+ await waitFor(()=>expect(calls.some(c=>c.method==='PATCH')).toBe(true));
+ const body=calls.find(c=>c.method==='PATCH')?.body;expect(body).not.toHaveProperty('estimado');expect(body).not.toHaveProperty('real');expect(body).not.toHaveProperty('pagado');
+ expect(calls.some(c=>c.method==='POST')).toBe(false);
 });
