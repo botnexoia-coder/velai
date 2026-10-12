@@ -442,6 +442,21 @@ test('documentos privados: multipart validado por bytes, clave propia, descarga 
   assert.equal(nombreSeguro('', 'pdf'), 'documento.pdf'); assert.equal(nombreSeguro('a'.repeat(100) + '.jpg', 'jpg').length, 64);
 });
 
+test('un movimiento conciliable admite su comprobante sin crear otro gasto ni otro pago', async (t) => {
+  const { api, contar } = await fixture(t);
+  const conceptos = (await api('finanzas/conceptos')).conceptos;
+  const movimiento = await api('finanzas/movimientos', 'POST', { tipo: 'gasto', moneda: 'EUR', importe: 3000, fecha: '2026-10-05',
+    concepto_id: conceptos.gasto[0].id, nota: 'Gasto adelantado', requiere_conciliacion: true, conciliacion_socio: 'dos@velai.test' });
+  const form = new FormData();
+  for (const [k,v] of Object.entries({ id: nuevo(), tipo: 'movimiento', objeto_id: movimiento.id, clase: 'justificante', nombre: 'reembolso.pdf' })) form.set(k,v);
+  form.set('archivo',new File([bytesDe()],'reembolso.pdf'));
+  const documento = await api('gestion/documentos','POST',form);
+  assert.equal(documento.item.tipo,'movimiento');
+  assert.equal((await api(`gestion/documentos?tipo=movimiento&objeto_id=${movimiento.id}`)).items.length,1);
+  assert.equal(await contar('fin_movimientos'),1);
+  assert.equal(await contar('g_pagos'),0);
+});
+
 test('adjuntos de factura: sin tabla g_facturas no existe el objeto; con ella, el helper informa del estado', async (t) => {
   const { env, DB, call, api } = await fixture(t, { through: '0050' });
   const facturaId = nuevo();

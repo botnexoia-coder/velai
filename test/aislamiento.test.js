@@ -314,7 +314,7 @@ test('las rutas propias del cliente no se cierran como si fueran ajenas', async 
 // nuevas rutas: recorrer el router evita que el barrido envejezca al añadir handlers.
 test('Finanzas: clienteGate rechaza cada ruta antes de tocar D1', async () => {
   const { finanzas } = await import('../worker/routes/finanzas.js');
-  assert.equal(finanzas.routes.length, 17);
+  assert.equal(finanzas.routes.length, 20);
   for (const route of finanzas.routes) {
     const path = route.path.replace(':id', A).replace(':email', 'socio%40velai.test');
     const r = await ejecutar({ path: () => path, body: {} }, route.method, A);

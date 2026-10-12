@@ -3,12 +3,13 @@ import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { Link, Navigate, useSearchParams } from 'react-router';
 import { qs } from '../api/client';
 import { traducir } from '../api/errors';
-import type { FinConcepto, FinCuenta, FinMoneda, FinNaturaleza, FinMovimiento, FinMovimientoInput, FinRepartoInput, FinResumen, FinSocio, FinSocioInput, FinSocioRegistro, FinTipo, TenantRow } from '../api/types';
+import type { FinConcepto, FinCuenta, FinMoneda, FinNaturaleza, FinMovimiento, FinMovimientoInput, FinRepartoInput, FinResumen, FinSocio, FinSocioInput, FinSocioRegistro, FinTipo, FinTraspasoInput, TenantRow } from '../api/types';
 import { confirmar } from '../components/Confirmar';
 import { TenantChip } from '../components/Pills';
 import { useToast } from '../components/Toasts';
-import { useMe, useTenants, useEvents, useFinConceptos, useFinMovimientos, useFinMutacion, useFinRepartos, useFinResumen, useFinSocios, useFinCuentas, type FinFilters } from '../hooks/queries';
+import { useMe, useTenants, useEvents, useFinConceptos, useFinMovimientos, useFinMutacion, useFinRepartos, useFinResumen, useFinSocios, useFinCuentas, useFinTraspasos, useFinTraspasoReverso, type FinFilters } from '../hooks/queries';
 import { finDinero, finImporte } from '../lib/format';
+import { Documentos } from './gestion/shared';
 
 const TIPOS: FinTipo[] = ['ingreso', 'gasto', 'egreso'];
 const MONEDAS: FinMoneda[] = ['EUR', 'COP'];
@@ -35,6 +36,16 @@ const ERRORS: Record<string, string> = {
   moneda_distinta: 'La cuenta debe usar la misma moneda que el movimiento.',
   cuenta_moneda_distinta: 'La cuenta debe usar la misma moneda que el movimiento.',
   concepto_gestion_no_manual: 'Registra esta operación desde Crédito o Compras para conservar su trazabilidad.',
+  conciliacion_solo_gasto_manual: 'La conciliación solo se activa en gastos manuales.',
+  conciliacion_cuenta_requerida: 'Selecciona la cuenta del proyecto desde la que se devolvió el dinero.',
+  conciliacion_pendiente_con_cuenta: 'Mientras el reembolso esté pendiente, la cuenta debe quedar sin asignar.',
+  conciliacion_fecha_anterior: 'La devolución no puede tener una fecha anterior al gasto.',
+  conciliacion_invalida: 'Revisa el estado, la persona y la cuenta de la conciliación.',
+  traspaso_misma_cuenta: 'El origen y el destino del traspaso deben ser cuentas distintas.',
+  traspaso_invalido: 'El traspaso no coincide con las cuentas o la moneda seleccionadas.',
+  traspaso_inmutable: 'Los traspasos no se editan: anula el original y registra uno nuevo.',
+  traspaso_ya_revertido: 'Este traspaso ya está anulado.',
+  fecha_anterior: 'La anulación no puede tener una fecha anterior al traspaso.',
 };
 const mensaje = (e: unknown) => ERRORS[e instanceof Error ? e.message : ''] || traducir(e);
 const hoy = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };
@@ -63,7 +74,7 @@ export function Finanzas() {
 }
 function FinanzasSocio() {
   const [params, setParams] = useSearchParams();
-  const tab = ['repartos', 'conceptos', 'socios'].includes(params.get('tab') || '') ? params.get('tab')! : 'movimientos';
+  const tab = ['traspasos', 'repartos', 'conceptos', 'socios'].includes(params.get('tab') || '') ? params.get('tab')! : 'movimientos';
   const [p, setP] = useState('mes');
   const [custom, setCustom] = useState<FinFilters>(periodo('mes'));
   const dates = p === 'personalizado' ? custom : periodo(p);
@@ -73,7 +84,7 @@ function FinanzasSocio() {
   return <div className="finanzas">
     <div className="vhead"><div><h1>Finanzas</h1><p>Operación, financiación y compras: cada importe en su lugar.</p></div></div>
     <nav className="fin-tabs" aria-label="Secciones de Finanzas">
-      {['movimientos', 'repartos', 'conceptos', 'socios'].map((t) => <button type="button" key={t} className={`btn ${tab === t ? '' : 'alt'}`} aria-pressed={tab === t} onClick={() => setParams((prev) => { const next = new URLSearchParams(prev); next.set('tab', t); return next; })}>{t[0]!.toUpperCase() + t.slice(1)}</button>)}
+      {['movimientos', 'traspasos', 'repartos', 'conceptos', 'socios'].map((t) => <button type="button" key={t} className={`btn ${tab === t ? '' : 'alt'}`} aria-pressed={tab === t} onClick={() => setParams((prev) => { const next = new URLSearchParams(prev); next.set('tab', t); return next; })}>{t[0]!.toUpperCase() + t.slice(1)}</button>)}
     </nav>
     {tab === 'movimientos' ? <>
       <FiltrosFin f={f} setF={setF} />
@@ -90,7 +101,7 @@ function FinanzasSocio() {
       <p className="muted">Un gasto pagado con crédito sigue siendo gasto; el préstamo financia la caja. El resultado del libro no incluye compras, amortizaciones ni operaciones todavía sin registrar. Consulta <Link to="/credito?vista=destino">Fondos del proyecto</Link> para ver cuentas, reservas y compromisos.</p>
       <Movimientos filters={filters} />
       {resumen.data ? <details className="fin-breakdown"><summary>Desglose por concepto · periodo y filtros seleccionados</summary><div className="fin-table"><table><thead><tr><th>Concepto</th><th>Tipo</th><th>Moneda</th><th>Importe</th></tr></thead><tbody>{resumen.data.conceptos.map((r) => <tr key={`${r.concepto_id}-${r.moneda}-${r.naturaleza||'operativo'}`}><td>{r.nombre}</td><td><TipoPill tipo={r.tipo} naturaleza={r.naturaleza} /></td><td>{r.moneda}</td><td><Dinero value={r.importe} moneda={r.moneda} /></td></tr>)}</tbody></table></div>{!resumen.data.conceptos.length ? <p className="empty">No hay movimientos en este periodo.</p> : null}</details> : null}
-    </> : tab === 'repartos' ? <Repartos /> : tab === 'socios' ? <Socios /> : <Conceptos />}
+    </> : tab === 'traspasos' ? <Traspasos /> : tab === 'repartos' ? <Repartos /> : tab === 'socios' ? <Socios /> : <Conceptos />}
   </div>;
 }
 function FiltrosFin({ f, setF }: {f:FinFilters;setF:(next:FinFilters)=>void}) {
@@ -109,7 +120,7 @@ function MetricaFin({label,value,moneda}:{label:string;value:number|undefined;mo
   return <div><span>{label}</span><strong>{value===undefined?'—':<Dinero value={value} moneda={moneda}/>}</strong></div>;
 }
 function ResumenMoneda({moneda,resumen}:{moneda:FinMoneda;resumen:FinResumen|undefined}) {
-  const d=resumen?.desglose?.[moneda], a=resumen?.acumulado?.[moneda], o=resumen?.obligaciones?.[moneda], legacy=resumen?.monedas[moneda];
+  const d=resumen?.desglose?.[moneda], a=resumen?.acumulado?.[moneda], o=resumen?.obligaciones?.[moneda], t=resumen?.tesoreria?.[moneda], legacy=resumen?.monedas[moneda];
   return <section className="fin-currency" aria-label={`Resumen ${moneda}`}>
     <h2>{moneda} <small>{moneda==='EUR'?'Euros':'Pesos colombianos'}</small></h2>
     <h3 className="fin-block-title">Operación <small>· periodo y filtros</small></h3>
@@ -129,7 +140,14 @@ function ResumenMoneda({moneda,resumen}:{moneda:FinMoneda;resumen:FinResumen|und
       <MetricaFin label="Repartos al equipo" value={a?.repartos} moneda={moneda}/>
       <MetricaFin label="Otros egresos" value={a?.otros_egresos} moneda={moneda}/>
     </div>
-    <div className="fin-caja"><span>Caja <small>(acumulado)</small></span><strong>{legacy?<Dinero value={legacy.caja} moneda={moneda}/>:'—'}</strong><small>Saldo de movimientos registrados, sin filtros. No es saldo bancario conciliado ni beneficio repartible.</small></div>
+    <div className="fin-caja"><span>Saldo total del libro <small>· todo el histórico</small></span><strong>{legacy?<Dinero value={legacy.caja} moneda={moneda}/>:'—'}</strong><small>Suma de movimientos registrados. No equivale al efectivo físico, al saldo bancario conciliado ni al beneficio repartible.</small></div>
+    {t?<div className="fin-treasury" aria-label={`Ubicación del dinero ${moneda}`}>
+      <h4>¿Dónde está registrado el dinero?</h4>
+      {t.cuentas.map(q=><div className="fin-treasury-row" key={q.id}><span>{q.nombre}<small>{q.conciliada?'Saldo conciliado':'Pendiente de conciliar con extracto'}</small></span><strong><Dinero value={q.saldo} moneda={moneda}/></strong></div>)}
+      <div className={`fin-treasury-row${t.sin_cuenta?' is-pending':''}`}><span>Movimientos sin cuenta asignada<small>{t.movimientos_sin_cuenta} movimiento(s): confirma si pertenecen a efectivo, banco o fondos personales.</small></span><strong><Dinero value={t.sin_cuenta} moneda={moneda}/></strong></div>
+      {t.conciliaciones_pendientes?<div className="fin-treasury-row is-pending"><span>Pagado por personas · por devolver<small>{t.conciliaciones_pendientes} conciliación(es) pendiente(s). Es una deuda con el equipo, no dinero que haya salido todavía de una cuenta del proyecto.</small></span><strong><Dinero value={t.pendiente_socios} moneda={moneda}/></strong></div>:null}
+      <div className="fin-treasury-row fin-treasury-total"><span>Fondos ubicados menos anticipos pendientes<small>Debe coincidir con el saldo total del libro cuando todos los movimientos tienen una ubicación.</small></span><strong><Dinero value={t.saldo_neto} moneda={moneda}/></strong></div>
+    </div>:null}
     {o?<>
       {o.prestamos_sin_abono.cantidad>0?<p className="fin-warning">Hay {o.prestamos_sin_abono.cantidad} préstamo(s) por <Dinero value={o.prestamos_sin_abono.principal} moneda={moneda}/> sin abono registrado. La caja está incompleta. <Link to="/credito">Revisar crédito</Link></p>:null}
       <details className="fin-obligaciones"><summary>Compras y obligaciones · todo el histórico</summary>
@@ -155,11 +173,50 @@ function Movimientos({ filters }: { filters: FinFilters }) {
     </div>
     <ErrorFin error={query.error || conceptos.error || tenants.error || cuentas.error} />
     {query.isPending ? <p role="status">Cargando movimientos…</p> : <div className="fin-table"><table><thead><tr><th>Fecha</th><th>Tipo</th><th>Concepto</th><th>Cliente</th><th>Cuenta</th><th>Nota</th><th>Importe</th></tr></thead><tbody>
-      {rows.map((m) => <tr key={m.id} onClick={() => setEditing(m)}><td>{m.fecha}</td><td><TipoPill tipo={m.tipo} naturaleza={m.naturaleza} /></td><td><button className="fin-row-open" type="button" onClick={() => setEditing(m)}>{m.concepto_nombre}</button>{m.evento_nombre?<small className="muted"> · {m.evento_nombre}</small>:null}{m.reparto_id ? <small className="muted"> · reparto</small> : null}{m.origen_tipo ? <small className="muted"> · {m.signo === -1 ? 'Reverso · ' : ''}{origenMovimiento(m).nombre}</small> : null}</td><td><TenantChip id={m.tenant_id || undefined} name={m.tenant_name} /></td><td>{m.cuenta_id ? cuentas.data?.cuentas?.find(c=>c.id===m.cuenta_id)?.nombre || 'Cuenta vinculada' : 'Pendiente de asignar'}</td><td className="fin-note">{m.nota || '—'}</td><td><Dinero value={importeFirmado(m)} moneda={m.moneda} /> <small>{m.moneda}</small></td></tr>)}
+      {rows.map((m) => <tr key={m.id} onClick={() => setEditing(m)}><td>{m.fecha}</td><td><TipoPill tipo={m.tipo} naturaleza={m.naturaleza} />{m.requiere_conciliacion?<small className={`fin-reconciliation-tag ${m.conciliada?'done':'pending'}`}>{m.conciliada?'Conciliado':'Conciliación pendiente'}</small>:null}</td><td><button className="fin-row-open" type="button" onClick={() => setEditing(m)}>{m.concepto_nombre}</button>{m.evento_nombre?<small className="muted"> · {m.evento_nombre}</small>:null}{m.reparto_id ? <small className="muted"> · reparto</small> : null}{m.origen_tipo ? <small className="muted"> · {m.signo === -1 ? 'Reverso · ' : ''}{origenMovimiento(m).nombre}</small> : null}</td><td><TenantChip id={m.tenant_id || undefined} name={m.tenant_name} /></td><td>{m.cuenta_id ? cuentas.data?.cuentas?.find(c=>c.id===m.cuenta_id)?.nombre || 'Cuenta vinculada' : 'Pendiente de asignar'}</td><td className="fin-note">{m.nota || '—'}</td><td><Dinero value={importeFirmado(m)} moneda={m.moneda} /> <small>{m.moneda}</small></td></tr>)}
     </tbody></table>{!rows.length ? <p className="empty">Sin movimientos con estos filtros. Registra el primero para empezar el libro.</p> : null}</div>}
     {query.hasNextPage ? <div className="pager"><button className="btn alt" disabled={query.isFetchingNextPage} onClick={() => void query.fetchNextPage()}>Cargar más</button></div> : null}
     {editing ? <MovimientoModal initial={editing === 'new' ? null : editing} tenants={tenants.data?.tenants || []} cuentas={cuentas.data?.cuentas || []} cuentasError={cuentas.error} onClose={() => setEditing(null)} /> : null}
   </>;
+}
+function Traspasos() {
+  const query=useFinTraspasos(), cuentas=useFinCuentas(), reverso=useFinTraspasoReverso(), toast=useToast();
+  const [open,setOpen]=useState(false), [error,setError]=useState<unknown>(null);
+  async function anular(id:string, fecha:string) {
+    if (!await confirmar({titulo:'¿Anular este traspaso?',cuerpo:'Se añadirá un reverso de efecto contrario. El registro original se conservará para auditoría.',accion:'Anular traspaso',peligro:true})) return;
+    setError(null);
+    try { await reverso.mutateAsync({id,operacionId:crypto.randomUUID(),fecha:hoy(),nota:`Anulación del traspaso del ${fecha}`}); toast('Traspaso anulado sin alterar el resultado'); }
+    catch(e){setError(e);}
+  }
+  const anulados=new Set(query.data?.traspasos.filter(t=>t.reverso_de).map(t=>t.reverso_de) || []);
+  return <>
+    <div className="fin-toolbar"><div><h2>Traspasos internos</h2><p className="muted">Mueven dinero entre banco y caja física sin crear ingresos ni gastos.</p></div><button className="btn" type="button" disabled={(cuentas.data?.cuentas.length||0)<2} onClick={()=>setOpen(true)}>Nuevo traspaso</button></div>
+    <ErrorFin error={query.error||cuentas.error||error}/>
+    {cuentas.data&&(cuentas.data.cuentas.length<2)?<p className="fin-warning">Necesitas al menos dos cuentas de la misma moneda. Puedes crear «Caja física» desde <Link to="/credito?vista=destino">Fondos del proyecto</Link>.</p>:null}
+    {query.isPending?<p role="status">Cargando traspasos…</p>:<div className="fin-table fin-transfers"><table><thead><tr><th>Fecha</th><th>Origen</th><th>Destino</th><th>Nota</th><th>Importe</th><th>Estado</th></tr></thead><tbody>{query.data?.traspasos.map(t=><tr key={t.id}><td data-label="Fecha">{t.fecha}</td><td data-label="Origen">{t.cuenta_origen_nombre}</td><td data-label="Destino">{t.cuenta_destino_nombre}</td><td data-label="Nota" className="fin-note">{t.nota||'—'}</td><td data-label="Importe"><Dinero value={t.importe*t.signo} moneda={t.moneda}/></td><td data-label="Estado">{t.signo===-1?<span className="pill">Reverso</span>:anulados.has(t.id)?<span className="pill">Anulado</span>:<button className="btn alt btnsm" disabled={reverso.isPending} onClick={()=>void anular(t.id,t.fecha)}>Anular</button>}</td></tr>)}</tbody></table>{query.data&&!query.data.traspasos.length?<p className="empty">Todavía no hay traspasos. Registra aquí los movimientos entre Santander, caja física u otras cuentas.</p>:null}</div>}
+    {open?<TraspasoModal cuentas={cuentas.data?.cuentas||[]} onClose={()=>setOpen(false)}/>:null}
+  </>;
+}
+function TraspasoModal({cuentas,onClose}:{cuentas:FinCuenta[];onClose:()=>void}) {
+  const mutation=useFinMutacion<FinTraspasoInput>('traspasos'), toast=useToast();
+  const operacionId=useRef(crypto.randomUUID());
+  const [origen,setOrigen]=useState(cuentas[0]?.id||''), [destino,setDestino]=useState(''), [importe,setImporte]=useState(''), [fecha,setFecha]=useState(hoy()), [nota,setNota]=useState(''), [error,setError]=useState<unknown>(null);
+  const cuentaOrigen=cuentas.find(q=>q.id===origen), destinos=cuentas.filter(q=>q.id!==origen&&q.moneda===cuentaOrigen?.moneda);
+  const destinoDisponible=destinos.some(q=>q.id===destino), primerDestino=destinos[0]?.id||'';
+  useEffect(()=>{if(!destinoDisponible) setDestino(primerDestino);},[destinoDisponible,primerDestino]);
+  async function guardar(e:React.FormEvent){
+    e.preventDefault();setError(null);
+    const valor=cuentaOrigen?finImporte(importe,cuentaOrigen.moneda):null;
+    if(!valor){setError(new Error('importe_invalido'));return;}
+    try{await mutation.mutateAsync({method:'POST',body:{id:operacionId.current,fecha,importe:valor,cuenta_origen_id:origen,cuenta_destino_id:destino,nota}});toast('Traspaso registrado · impacto en resultado: 0');onClose();}catch(e){setError(e);}
+  }
+  return <Modal title="Nuevo traspaso interno" close={onClose} busy={mutation.isPending}><form onSubmit={e=>void guardar(e)}><div className="fin-form">
+    <label>Fecha<input type="date" min="2025-01-01" max={hoy()} required value={fecha} onChange={e=>setFecha(e.target.value)}/></label>
+    <label>Desde<select required value={origen} onChange={e=>setOrigen(e.target.value)}>{cuentas.map(q=><option key={q.id} value={q.id}>{q.nombre} · {q.moneda}</option>)}</select></label>
+    <label>Hacia<select required value={destino} onChange={e=>setDestino(e.target.value)}>{destinos.map(q=><option key={q.id} value={q.id}>{q.nombre}</option>)}</select></label>
+    <label>Importe ({cuentaOrigen?.moneda||'—'})<input inputMode="decimal" required value={importe} onChange={e=>setImporte(e.target.value)}/></label>
+    <label className="fin-full">Nota<textarea rows={2} maxLength={2000} value={nota} onChange={e=>setNota(e.target.value)}/></label>
+  </div><p className="fin-reconciliation-status done"><strong>Impacto en resultado: 0</strong><span>Solo cambia dónde está el dinero. No se registrará como ingreso ni como gasto.</span></p><ErrorFin error={error}/><button className="btn" disabled={mutation.isPending||!destino}>Guardar traspaso</button></form></Modal>;
 }
 function Modal({ title, children, close, busy = false }: { title: string; children: ReactNode; close: () => void | Promise<void>; busy?: boolean }) {
   const ref = useRef<HTMLDialogElement>(null);
@@ -167,13 +224,17 @@ function Modal({ title, children, close, busy = false }: { title: string; childr
   return <dialog ref={ref} className="fin-modal" aria-label={title} onCancel={(e) => { e.preventDefault(); if (!busy) void close(); }}><div className="modal-h"><strong>{title}</strong><button className="btn alt" type="button" disabled={busy} onClick={() => void close()}>Cerrar</button></div><div className="modal-b">{children}</div></dialog>;
 }
 function MovimientoModal({ initial, tenants, cuentas, cuentasError, onClose }: { initial: FinMovimiento | null; tenants: TenantRow[]; cuentas:FinCuenta[]; cuentasError:unknown; onClose: () => void }) {
-  const catalogo = useFinConceptos(), mutation = useFinMutacion<Partial<FinMovimientoInput>>('movimientos'), toast = useToast();
+  const catalogo = useFinConceptos(), socios=useFinSocios(), mutation = useFinMutacion<Partial<FinMovimientoInput>>('movimientos'), toast = useToast();
   const [tipo, setTipo] = useState<FinTipo>(initial?.tipo || 'ingreso');
   const [concepto, setConcepto] = useState(String(initial?.concepto_id || ''));
   const [fecha, setFecha] = useState(initial?.fecha || hoy()), [moneda, setMoneda] = useState<FinMoneda>(initial?.moneda || 'EUR');
   const [importe, setImporte] = useState(initial ? String(initial.importe / (initial.moneda === 'EUR' ? 100 : 1)) : '');
   const [nota, setNota] = useState(initial?.nota || ''), [tenant, setTenant] = useState(initial?.tenant_id || '');
   const [cuenta,setCuenta]=useState(initial?.cuenta_id || '');
+  const [requiereConciliacion,setRequiereConciliacion]=useState(Boolean(initial?.requiere_conciliacion));
+  const [conciliacionSocio,setConciliacionSocio]=useState(initial?.conciliacion_socio || '');
+  const [conciliada,setConciliada]=useState(Boolean(initial?.conciliada));
+  const [conciliacionFecha,setConciliacionFecha]=useState(initial?.conciliacion_fecha || hoy());
   const [error, setError] = useState<unknown>(null);
   const opciones = (catalogo.data?.conceptos[tipo] || []).filter(c=>!c.clave?.startsWith('g_'));
   const conceptoId = Number(concepto || opciones[0]?.id || 0);
@@ -184,9 +245,13 @@ function MovimientoModal({ initial, tenants, cuentas, cuentasError, onClose }: {
     moneda: initial?.moneda || 'EUR' as FinMoneda,
     importe: initial ? String(initial.importe / (initial.moneda === 'EUR' ? 100 : 1)) : '',
     nota: initial?.nota || '', tenant: initial?.tenant_id || '', cuenta:initial?.cuenta_id || '',
+    requiereConciliacion:Boolean(initial?.requiere_conciliacion),conciliacionSocio:initial?.conciliacion_socio||'',
+    conciliada:Boolean(initial?.conciliada),conciliacionFecha:initial?.conciliacion_fecha||hoy(),
   };
   const camposCambiados = Boolean((concepto && concepto !== original.concepto) || fecha !== original.fecha
-    || moneda !== original.moneda || importe !== original.importe || nota !== original.nota || tenant !== original.tenant || cuenta !== original.cuenta);
+    || moneda !== original.moneda || importe !== original.importe || nota !== original.nota || tenant !== original.tenant || cuenta !== original.cuenta
+    || requiereConciliacion!==original.requiereConciliacion || conciliacionSocio!==original.conciliacionSocio
+    || conciliada!==original.conciliada || conciliacionFecha!==original.conciliacionFecha);
   // En un alta vacía se puede explorar Ingreso/Gasto/Egreso sin avisos. En edición,
   // cambiar el tipo sí es una modificación pendiente y debe protegerse al salir.
   const sucio = camposCambiados || Boolean(initial && tipo !== original.tipo);
@@ -205,14 +270,20 @@ function MovimientoModal({ initial, tenants, cuentas, cuentasError, onClose }: {
     if (sucio) {
       setFecha(original.fecha); setMoneda(original.moneda); setImporte(original.importe);
       setNota(original.nota); setTenant(next === 'egreso' ? '' : original.tenant); setCuenta(original.cuenta);
+      setRequiereConciliacion(next==='gasto'&&original.requiereConciliacion);setConciliacionSocio(original.conciliacionSocio);
+      setConciliada(next==='gasto'&&original.conciliada);setConciliacionFecha(original.conciliacionFecha);
     } else if (next === 'egreso') setTenant('');
+    if(next!=='gasto'){setRequiereConciliacion(false);setConciliacionSocio('');setConciliada(false);}
   }
   async function cerrar() { if (await descartar('cerrar')) onClose(); }
   async function guardar(e: React.FormEvent) {
     e.preventDefault(); setError(null);
     if (!entero) { setError(new Error('importe_invalido')); return; }
     try {
-      await mutation.mutateAsync({ method: initial ? 'PATCH' : 'POST', id: initial?.id, body: { tipo, ...(initial ? {} : { moneda }), fecha, concepto_id: conceptoId, importe: entero, nota, tenant_id: tipo === 'egreso' ? null : tenant || null, cuenta_id:cuenta || null } });
+      await mutation.mutateAsync({ method: initial ? 'PATCH' : 'POST', id: initial?.id, body: { tipo, ...(initial ? {} : { moneda }), fecha, concepto_id: conceptoId, importe: entero, nota, tenant_id: tipo === 'egreso' ? null : tenant || null,
+        cuenta_id:requiereConciliacion&&!conciliada?null:cuenta||null, requiere_conciliacion:requiereConciliacion,
+        conciliacion_socio:requiereConciliacion?conciliacionSocio||null:null,conciliada:requiereConciliacion&&conciliada,
+        conciliacion_fecha:requiereConciliacion&&conciliada?conciliacionFecha:null } });
       toast('Movimiento guardado'); onClose();
     } catch (e) { setError(e); }
   }
@@ -228,11 +299,19 @@ function MovimientoModal({ initial, tenants, cuentas, cuentasError, onClose }: {
         <label>Moneda<select disabled={Boolean(initial)} value={moneda} onChange={(e) => { setMoneda(e.target.value as FinMoneda); setImporte(''); setCuenta(''); }}>{MONEDAS.map((m) => <option key={m}>{m}</option>)}</select></label>
         <label>Importe ({moneda})<input required inputMode="decimal" placeholder={moneda === 'EUR' ? '0,00' : '0'} value={importe} onChange={(e) => setImporte(e.target.value)} /><small>{moneda === 'EUR' ? 'Euros, hasta dos decimales' : 'Pesos enteros, sin decimales'}</small></label>
         {tipo !== 'egreso' ? <label>Cliente (opcional)<select value={tenant} disabled={Boolean(initial)} onChange={(e) => setTenant(e.target.value)}><option value="">Sin cliente</option>{tenants.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}</select></label> : null}
-        <label>Cuenta del proyecto (opcional)<select value={cuenta} disabled={mutation.isPending} onChange={e=>setCuenta(e.target.value)}><option value="">Pendiente de asignar</option>{cuenta&&!cuentas.some(c=>c.id===cuenta)?<option value={cuenta}>Cuenta vinculada (pendiente de cargar)</option>:null}{cuentas.filter(c=>c.moneda===moneda).map(c=><option key={c.id} value={c.id}>{c.nombre}</option>)}</select><small>Selecciona dónde entró o salió el dinero. Un histórico sin cuenta conserva esa condición.</small></label>
+        <label>Cuenta del proyecto {requiereConciliacion&&conciliada?'que hizo el reembolso':'(opcional)'}<select value={cuenta} disabled={mutation.isPending||(requiereConciliacion&&!conciliada)} required={requiereConciliacion&&conciliada} onChange={e=>setCuenta(e.target.value)}><option value="">{requiereConciliacion&&!conciliada?'Se asignará al conciliar':'Pendiente de asignar'}</option>{cuenta&&!cuentas.some(c=>c.id===cuenta)?<option value={cuenta}>Cuenta vinculada (pendiente de cargar)</option>:null}{cuentas.filter(c=>c.moneda===moneda).map(c=><option key={c.id} value={c.id}>{c.nombre}</option>)}</select><small>{requiereConciliacion?'La cuenta se asigna al mismo gasto cuando se devuelve el dinero; no se crea otro movimiento.':'Selecciona dónde entró o salió el dinero. Un histórico sin cuenta conserva esa condición.'}</small></label>
         <label className="fin-full">Nota<textarea maxLength={2000} rows={3} value={nota} onChange={(e) => setNota(e.target.value)} /></label>
       </div>
+      {tipo==='gasto'?<fieldset className="fin-reconciliation"><legend>Conciliación del gasto</legend>
+        <label><input type="checkbox" checked={requiereConciliacion} onChange={e=>{setRequiereConciliacion(e.target.checked);if(!e.target.checked){setConciliacionSocio('');setConciliada(false);}}}/> ¿Este gasto lo adelantó una persona y necesita conciliación?</label>
+        {requiereConciliacion?<><label>¿A quién se le debe o devolvió?<select value={conciliacionSocio} required onChange={e=>setConciliacionSocio(e.target.value)}><option value="">Seleccionar socio</option>{socios.data?.socios.filter(s=>s.activo||s.email===conciliacionSocio).map(s=><option key={s.email} value={s.email}>{s.nombre}</option>)}</select></label>
+          <label><input type="checkbox" checked={conciliada} onChange={e=>{setConciliada(e.target.checked);if(!e.target.checked)setCuenta('');}}/> El dinero ya fue devuelto desde una cuenta del proyecto</label>
+          {conciliada?<label>Fecha de la devolución<input type="date" min={fecha} max={hoy()} required value={conciliacionFecha} onChange={e=>setConciliacionFecha(e.target.value)}/></label>:null}
+          <p className={`fin-reconciliation-status ${conciliada?'done':'pending'}`}><strong>{conciliada?'Conciliación realizada':'Conciliación pendiente'}</strong><span>{conciliada?'El gasto conserva un único impacto. Falta adjuntar el comprobante si aún no aparece debajo.':'El gasto está registrado; todavía no se ha asignado una salida de la cuenta común.'}</span></p></>:null}
+      </fieldset>:null}
       {initial ? <p className="muted">Registrado por {initial.created_by} · {initial.created_at.slice(0, 10)}</p> : null}
-      <ErrorFin error={error || catalogo.error || cuentasError} /><div className="fin-actions"><button className="btn" disabled={mutation.isPending || !catalogo.data || !conceptoId}>Guardar movimiento</button>{initial ? <button className="btn alt" type="button" disabled={mutation.isPending} onClick={() => void borrar()}>Borrar movimiento</button> : null}</div>
+      <ErrorFin error={error || catalogo.error || socios.error || cuentasError} /><div className="fin-actions"><button className="btn" disabled={mutation.isPending || !catalogo.data || !conceptoId || (requiereConciliacion&&!conciliacionSocio) || (conciliada&&!cuenta)}>Guardar movimiento</button>{initial ? <button className="btn alt" type="button" disabled={mutation.isPending} onClick={() => void borrar()}>Borrar movimiento</button> : null}</div>
+      {initial&&requiereConciliacion?<Documentos tipo="movimiento" objetoId={initial.id}/>:null}
     </form>}
   </Modal>;
 }

@@ -154,7 +154,10 @@ gestion.patch(`${BASE}/cuentas/:id`, async (c) => {
   if (n.conciliada && !n.fecha_saldo) fail('fecha_saldo_requerida');
   if (n.entidad_id !== old.entidad_id) await entidadExiste(env, n.entidad_id);
   if (n.moneda !== old.moneda) {
-    const uso = await env.DB.prepare(`SELECT (SELECT COUNT(*) FROM fin_movimientos WHERE cuenta_id=?) + (SELECT COUNT(*) FROM g_prestamos WHERE cuenta_id=?) + (SELECT COUNT(*) FROM g_pagos WHERE cuenta_id=?) AS n`).bind(old.id, old.id, old.id).first();
+    const uso = await env.DB.prepare(`SELECT (SELECT COUNT(*) FROM fin_movimientos WHERE cuenta_id=?)
+      + (SELECT COUNT(*) FROM g_prestamos WHERE cuenta_id=?) + (SELECT COUNT(*) FROM g_pagos WHERE cuenta_id=?)
+      + (SELECT COUNT(*) FROM fin_traspasos WHERE cuenta_origen_id=? OR cuenta_destino_id=?) AS n`)
+      .bind(old.id, old.id, old.id, old.id, old.id).first();
     if (uso.n) throw new HttpError(409, 'cuenta_en_uso');
   }
   await actualizar(env, 'g_cuentas', old.id, version, 'nombre=?, entidad_id=?, moneda=?, saldo_inicial=?, fecha_saldo=?, conciliada=?',
@@ -614,7 +617,14 @@ gestion.get(`${BASE}/resumen`, async (c) => {
   const moneda = enumValor(url.searchParams.get('moneda') || 'EUR', MONEDAS, 'moneda_invalida');
   const [cuentas, movimientos, prestamos, pagosPrestamo, compras, adelantos, reembolsos, nombres] = await env.DB.batch([
     env.DB.prepare('SELECT * FROM g_cuentas WHERE moneda=? ORDER BY nombre COLLATE NOCASE, id').bind(moneda),
-    env.DB.prepare("SELECT cuenta_id, SUM(CASE WHEN tipo='ingreso' THEN importe*signo ELSE -importe*signo END) AS neto FROM fin_movimientos WHERE cuenta_id IS NOT NULL AND moneda=? GROUP BY cuenta_id").bind(moneda),
+    env.DB.prepare(`SELECT q.id AS cuenta_id,
+      COALESCE((SELECT SUM(CASE WHEN m.tipo='ingreso' THEN m.importe*m.signo ELSE -m.importe*m.signo END)
+        FROM fin_movimientos m WHERE m.cuenta_id=q.id AND (q.fecha_saldo IS NULL OR
+          (CASE WHEN m.requiere_conciliacion=1 AND m.conciliada=1 THEN m.conciliacion_fecha ELSE m.fecha END)>q.fecha_saldo)),0)
+      + COALESCE((SELECT SUM(CASE WHEN t.cuenta_destino_id=q.id THEN t.importe*t.signo ELSE -t.importe*t.signo END)
+        FROM fin_traspasos t WHERE (t.cuenta_origen_id=q.id OR t.cuenta_destino_id=q.id)
+          AND (q.fecha_saldo IS NULL OR t.fecha>q.fecha_saldo)),0) AS neto
+      FROM g_cuentas q WHERE q.moneda=?`).bind(moneda),
     env.DB.prepare('SELECT p.* FROM g_prestamos p JOIN g_cuentas c ON c.id=p.cuenta_id WHERE c.moneda=? ORDER BY p.created_at, p.id').bind(moneda),
     env.DB.prepare("SELECT g.* FROM g_pagos g JOIN g_prestamos p ON p.id=g.objeto_id JOIN g_cuentas c ON c.id=p.cuenta_id WHERE g.objeto_tipo='prestamo' AND c.moneda=?").bind(moneda),
     env.DB.prepare(`${SELECT_COMPRA} WHERE c.moneda=?`).bind(moneda),

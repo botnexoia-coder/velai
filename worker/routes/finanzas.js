@@ -1,6 +1,7 @@
 // Contabilidad interna: la guarda vive en CADA handler, además de clienteGate.
 import { Hono } from 'hono';
-import { uuidOpcional, errorEscrituraGestion, SELECT_COMPRA, EVENTO_MOVIMIENTO_SQL } from '../gestion-financiera.js';
+import { uuid, uuidOpcional, errorEscrituraGestion, SELECT_COMPRA, EVENTO_MOVIMIENTO_SQL,
+  auditoria, huella, idempotente } from '../gestion-financiera.js';
 import { esSocio, partesAdmin } from '../middleware.js';
 import { HttpError, json, NO_STORE, readJson, csvCell, PANEL_EMAIL_RE } from '../app.js';
 
@@ -33,6 +34,10 @@ function writeError(e) {
   if (e.message.includes('fin_beneficiario_inactivo')) fail('beneficiario_desconocido');
   // Partida creada por Administración (0050): inmutable también por debajo del panel.
   if (e.message.includes('fin_movimiento_gestion')) throw new HttpError(409, 'movimiento_de_gestion');
+  if (e.message.includes('fin_conciliacion_invalida')) fail('conciliacion_invalida');
+  if (e.message.includes('fin_traspaso_inmutable')) throw new HttpError(409, 'traspaso_inmutable');
+  if (e.message.includes('fin_traspaso_invalido')) fail('traspaso_invalido');
+  if (/UNIQUE constraint failed: fin_traspasos\.reverso_de/.test(e.message)) throw new HttpError(409, 'traspaso_ya_revertido');
   errorEscrituraGestion(e);
 }
 function socioEmail(value) {
@@ -142,6 +147,37 @@ const SOCIOS_RESUMEN = `SELECT moneda,
   SUM(CASE WHEN clase='pago' AND pagador='socio' THEN importe ELSE 0 END) AS adelantado,
   SUM(CASE WHEN clase='reembolso' THEN importe ELSE 0 END) AS reembolsado
   FROM g_pagos WHERE objeto_tipo='compra' AND estado='activo' GROUP BY moneda`;
+// Ubicación contable del dinero. No sustituye una conciliación bancaria: separa
+// las cuentas registradas de las partidas cuyo origen/destino aún no se asignó.
+// Un reembolso a socio aparece como salida de la cuenta, pero nunca como otro gasto.
+const TESORERIA_CUENTAS = `SELECT q.id,q.nombre,q.moneda,q.conciliada,q.saldo_inicial,q.fecha_saldo,
+  COALESCE((SELECT SUM(CASE WHEN m.tipo='ingreso' THEN m.importe*m.signo ELSE -m.importe*m.signo END)
+    FROM fin_movimientos m WHERE m.cuenta_id=q.id AND (q.fecha_saldo IS NULL OR
+      (CASE WHEN m.requiere_conciliacion=1 AND m.conciliada=1 THEN m.conciliacion_fecha ELSE m.fecha END)>q.fecha_saldo)),0)
+  + COALESCE((SELECT SUM(CASE WHEN t.cuenta_destino_id=q.id THEN t.importe*t.signo ELSE -t.importe*t.signo END)
+    FROM fin_traspasos t WHERE (t.cuenta_origen_id=q.id OR t.cuenta_destino_id=q.id)
+      AND (q.fecha_saldo IS NULL OR t.fecha>q.fecha_saldo)),0) AS movimientos
+  FROM g_cuentas q ORDER BY q.nombre COLLATE NOCASE,q.id`;
+const TESORERIA_SIN_CUENTA = `SELECT moneda,
+  COALESCE(SUM(CASE WHEN requiere_conciliacion=1 AND conciliada=0 THEN 0 WHEN tipo='ingreso' THEN importe*signo ELSE -importe*signo END),0) AS saldo,
+  SUM(CASE WHEN requiere_conciliacion=1 AND conciliada=0 THEN importe*signo ELSE 0 END) AS pendiente_socios,
+  SUM(CASE WHEN requiere_conciliacion=1 AND conciliada=0 THEN 1 ELSE 0 END) AS conciliaciones_pendientes,
+  SUM(CASE WHEN requiere_conciliacion=1 AND conciliada=0 THEN 0 ELSE 1 END) AS movimientos
+  FROM fin_movimientos WHERE cuenta_id IS NULL GROUP BY moneda`;
+function tesoreriaPorMoneda(cuentasRows, sinCuentaRows) {
+  return Object.fromEntries(MONEDAS.map((moneda) => {
+    const items = cuentasRows.filter((q) => q.moneda === moneda).map((q) => ({
+      id: q.id, nombre: q.nombre, conciliada: Boolean(q.conciliada), saldo_inicial: q.saldo_inicial, fecha_saldo: q.fecha_saldo,
+      movimientos: q.movimientos || 0, saldo: q.saldo_inicial + (q.movimientos || 0),
+    }));
+    const pendiente = sinCuentaRows.find((r) => r.moneda === moneda) || {};
+    const sin_cuenta = pendiente.saldo || 0, pendiente_socios = pendiente.pendiente_socios || 0;
+    const saldo_ubicado = items.reduce((sum, q) => sum + q.saldo, 0) + sin_cuenta;
+    return [moneda, { cuentas: items, sin_cuenta, movimientos_sin_cuenta: pendiente.movimientos || 0,
+      pendiente_socios, conciliaciones_pendientes: pendiente.conciliaciones_pendientes || 0,
+      saldo_ubicado, saldo_neto: saldo_ubicado - pendiente_socios }];
+  }));
+}
 function obligacionesPorMoneda(prestamos, compras, socios) {
   return Object.fromEntries(MONEDAS.map((moneda) => {
     const p = prestamos.find((r) => r.moneda === moneda) || {}, c = compras.find((r) => r.moneda === moneda) || {}, s = socios.find((r) => r.moneda === moneda) || {};
@@ -182,12 +218,28 @@ async function validateMovimiento(env, b, previous) {
     if (cuenta.moneda !== moneda) fail('moneda_distinta');
     entidad_id = cuenta.entidad_id;
   }
-  return { tipo, moneda, importe, fecha: dia, concepto_id, nota: nota(b.nota), tenant_id, cuenta_id, entidad_id, evento_id };
+  const requiere_conciliacion = b.requiere_conciliacion === true || b.requiere_conciliacion === 1 ? 1 : 0;
+  const conciliada = b.conciliada === true || b.conciliada === 1 ? 1 : 0;
+  let conciliacion_socio = null, conciliacion_fecha = null;
+  if (requiere_conciliacion) {
+    if (tipo !== 'gasto' || b.origen_tipo) fail('conciliacion_solo_gasto_manual');
+    conciliacion_socio = socioEmail(b.conciliacion_socio);
+    if (!await env.DB.prepare('SELECT email FROM fin_socios WHERE lower(email)=?').bind(conciliacion_socio).first()) fail('beneficiario_desconocido');
+    if (conciliada) {
+      if (!cuenta_id) fail('conciliacion_cuenta_requerida');
+      conciliacion_fecha = fecha(b.conciliacion_fecha);
+      if (conciliacion_fecha < dia) fail('conciliacion_fecha_anterior');
+    } else if (cuenta_id) fail('conciliacion_pendiente_con_cuenta');
+  } else if (conciliada || b.conciliacion_socio || b.conciliacion_fecha) fail('conciliacion_invalida');
+  return { tipo, moneda, importe, fecha: dia, concepto_id, nota: nota(b.nota), tenant_id, cuenta_id, entidad_id, evento_id,
+    requiere_conciliacion, conciliacion_socio, conciliada, conciliacion_fecha };
 }
 function insertMovimiento(env, m, actor, now, repartoId = null, beneficiario = null) {
   return env.DB.prepare(`INSERT INTO fin_movimientos
-    (id,tipo,concepto_id,fecha,moneda,importe,nota,tenant_id,beneficiario,reparto_id,created_by,created_at,cuenta_id,entidad_id,evento_id)
-    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).bind(m.id, m.tipo, m.concepto_id, m.fecha, m.moneda, m.importe, m.nota, m.tenant_id, beneficiario, repartoId, actor, now, m.cuenta_id ?? null, m.entidad_id ?? null, m.evento_id ?? null);
+    (id,tipo,concepto_id,fecha,moneda,importe,nota,tenant_id,beneficiario,reparto_id,created_by,created_at,cuenta_id,entidad_id,evento_id,
+     requiere_conciliacion,conciliacion_socio,conciliada,conciliacion_fecha,conciliada_por)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).bind(m.id, m.tipo, m.concepto_id, m.fecha, m.moneda, m.importe, m.nota, m.tenant_id, beneficiario, repartoId, actor, now, m.cuenta_id ?? null, m.entidad_id ?? null, m.evento_id ?? null,
+      m.requiere_conciliacion ?? 0, m.conciliacion_socio ?? null, m.conciliada ?? 0, m.conciliacion_fecha ?? null, m.conciliada ? actor : null);
 }
 const logBorrado = (id, actor) => console.log(JSON.stringify({ level: 'warn', code: 'fin_borrado', id, actor }));
 
@@ -195,7 +247,7 @@ finanzas.get('/api/admin/finanzas/socios', async (c) => {
   const { env, scope, url } = partesAdmin(c);
   if (!esSocio(env, scope)) throw new HttpError(403, 'not_authorized');
   const socios = (await env.DB.prepare(`SELECT s.email,s.nombre,s.activo,
-    EXISTS(SELECT 1 FROM fin_movimientos m WHERE m.beneficiario=s.email) AS tiene_repartos
+    EXISTS(SELECT 1 FROM fin_movimientos m WHERE m.beneficiario=s.email OR m.conciliacion_socio=s.email) AS tiene_repartos
     FROM fin_socios s ${url.searchParams.get('todos') === '1' ? '' : 'WHERE s.activo=1'}
     ORDER BY s.activo DESC,s.nombre COLLATE NOCASE,s.email`).all()).results;
   return json({ socios }, 200, NO_STORE);
@@ -226,6 +278,7 @@ finanzas.patch('/api/admin/finanzas/socios/:email', async (c) => {
     await env.DB.batch([
       env.DB.prepare('UPDATE fin_socios SET email=?,nombre=?,activo=? WHERE email=?').bind(email, name, activo, old.email),
       env.DB.prepare('UPDATE fin_movimientos SET beneficiario=? WHERE beneficiario=?').bind(email, old.email),
+      env.DB.prepare('UPDATE fin_movimientos SET conciliacion_socio=? WHERE conciliacion_socio=?').bind(email, old.email),
     ]);
   } catch (e) { writeError(e); }
   if (email !== old.email || name !== old.nombre || activo !== old.activo) {
@@ -240,11 +293,76 @@ finanzas.delete('/api/admin/finanzas/socios/:email', async (c) => {
   const old = await socioByEmail(env, c.req.param('email'));
   const result = await env.DB.batch([
     env.DB.prepare('UPDATE fin_socios SET activo=0 WHERE email=?').bind(old.email),
-    env.DB.prepare('DELETE FROM fin_socios WHERE email=? AND NOT EXISTS (SELECT 1 FROM fin_movimientos WHERE beneficiario=?)').bind(old.email, old.email),
+    env.DB.prepare('DELETE FROM fin_socios WHERE email=? AND NOT EXISTS (SELECT 1 FROM fin_movimientos WHERE beneficiario=? OR conciliacion_socio=?)').bind(old.email, old.email, old.email),
     env.DB.prepare('SELECT email FROM fin_socios WHERE email=?').bind(old.email),
   ]);
   console.log(JSON.stringify({ level: 'warn', code: 'fin_socio_baja', email: old.email, actor }));
   return json({ ok: true, desactivado: result[2].results.length > 0 }, 200, NO_STORE);
+});
+
+// ── Traspasos internos ───────────────────────────────────────────────────────
+// Cambian la ubicación del dinero entre dos cuentas del proyecto. No crean un
+// ingreso ni un gasto y por eso no se escriben en fin_movimientos.
+const traspasoItem = (r) => ({ id: r.id, fecha: r.fecha, moneda: r.moneda, importe: r.importe,
+  cuenta_origen_id: r.cuenta_origen_id, cuenta_origen_nombre: r.cuenta_origen_nombre,
+  cuenta_destino_id: r.cuenta_destino_id, cuenta_destino_nombre: r.cuenta_destino_nombre,
+  nota: r.nota, signo: r.signo, reverso_de: r.reverso_de, created_by: r.created_by, created_at: r.created_at });
+const SELECT_TRASPASO = `SELECT t.*,o.nombre AS cuenta_origen_nombre,d.nombre AS cuenta_destino_nombre
+  FROM fin_traspasos t JOIN g_cuentas o ON o.id=t.cuenta_origen_id JOIN g_cuentas d ON d.id=t.cuenta_destino_id`;
+async function validarTraspaso(env, b) {
+  if (Object.keys(b).some((k) => !['id','fecha','importe','cuenta_origen_id','cuenta_destino_id','nota'].includes(k))) fail('campo_no_editable');
+  const origen = await env.DB.prepare('SELECT id,nombre,moneda FROM g_cuentas WHERE id=?').bind(b.cuenta_origen_id).first();
+  const destino = await env.DB.prepare('SELECT id,nombre,moneda FROM g_cuentas WHERE id=?').bind(b.cuenta_destino_id).first();
+  if (!origen || !destino) fail('cuenta_desconocida');
+  if (origen.id === destino.id) fail('traspaso_misma_cuenta');
+  if (origen.moneda !== destino.moneda) fail('moneda_distinta');
+  return { id: uuid(b.id), fecha: fecha(b.fecha), moneda: origen.moneda, importe: positivo(b.importe),
+    cuenta_origen_id: origen.id, cuenta_destino_id: destino.id, nota: nota(b.nota) };
+}
+finanzas.get('/api/admin/finanzas/traspasos', async (c) => {
+  const { env, scope } = partesAdmin(c);
+  if (!esSocio(env, scope)) throw new HttpError(403, 'not_authorized');
+  const rows = (await env.DB.prepare(`${SELECT_TRASPASO} ORDER BY t.fecha DESC,t.created_at DESC,t.id DESC`).all()).results;
+  return json({ traspasos: rows.map(traspasoItem) }, 200, NO_STORE);
+});
+finanzas.post('/api/admin/finanzas/traspasos', async (c) => {
+  const { env, scope, request, actor } = partesAdmin(c);
+  if (!esSocio(env, scope)) throw new HttpError(403, 'not_authorized');
+  const t = await validarTraspaso(env, await bodyOf(request));
+  const now = new Date().toISOString();
+  let repetida;
+  try {
+    ({ repetida } = await idempotente(env, { id: t.id, ruta: 'finanzas/traspasos', huella: await huella(t), actor, now }, () => [
+      env.DB.prepare(`INSERT INTO fin_traspasos
+        (id,fecha,moneda,importe,cuenta_origen_id,cuenta_destino_id,nota,signo,reverso_de,created_by,created_at)
+        VALUES (?,?,?,?,?,?,?,1,NULL,?,?)`).bind(t.id,t.fecha,t.moneda,t.importe,t.cuenta_origen_id,t.cuenta_destino_id,t.nota,actor,now),
+      auditoria(env, { actor, accion: 'traspaso_alta', objeto_tipo: 'traspaso', objeto_id: t.id,
+        detalle: { fecha:t.fecha,moneda:t.moneda,importe:t.importe,cuenta_origen_id:t.cuenta_origen_id,cuenta_destino_id:t.cuenta_destino_id }, now }),
+    ]));
+  } catch (e) { writeError(e); }
+  return json({ ok: true, id: t.id }, repetida ? 200 : 201, NO_STORE);
+});
+finanzas.post('/api/admin/finanzas/traspasos/:id/reverso', async (c) => {
+  const { env, scope, request, actor } = partesAdmin(c);
+  if (!esSocio(env, scope)) throw new HttpError(403, 'not_authorized');
+  const old = await exists(env, 'fin_traspasos', c.req.param('id'));
+  if (old.signo !== 1) throw new HttpError(409, 'traspaso_inmutable');
+  const b = await bodyOf(request);
+  if (Object.keys(b).some((k) => !['id','fecha','nota'].includes(k))) fail('campo_no_editable');
+  const dia = fecha(b.fecha), id = uuid(b.id), notaReverso = nota(b.nota), now = new Date().toISOString();
+  if (dia < old.fecha) fail('fecha_anterior');
+  const reverso = { id, fecha:dia, traspaso_id:old.id, nota:notaReverso };
+  let repetida;
+  try {
+    ({ repetida } = await idempotente(env, { id, ruta: `finanzas/traspasos/${old.id}/reverso`, huella: await huella(reverso), actor, now }, () => [
+      env.DB.prepare(`INSERT INTO fin_traspasos
+        (id,fecha,moneda,importe,cuenta_origen_id,cuenta_destino_id,nota,signo,reverso_de,created_by,created_at)
+        VALUES (?,?,?,?,?,?,?,-1,?,?,?)`).bind(id,dia,old.moneda,old.importe,old.cuenta_origen_id,old.cuenta_destino_id,notaReverso,old.id,actor,now),
+      auditoria(env, { actor, accion: 'traspaso_reverso', objeto_tipo: 'traspaso', objeto_id: id,
+        detalle: { traspaso_id:old.id,fecha:dia }, now }),
+    ]));
+  } catch (e) { writeError(e); }
+  return json({ ok: true, id }, repetida ? 200 : 201, NO_STORE);
 });
 
 finanzas.get('/api/admin/finanzas/conceptos', async (c) => {
@@ -316,7 +434,7 @@ finanzas.post('/api/admin/finanzas/movimientos', async (c) => {
   return json({ ok: true, id }, 201, NO_STORE);
 });
 finanzas.patch('/api/admin/finanzas/movimientos/:id', async (c) => {
-  const { env, scope, request } = partesAdmin(c);
+  const { env, scope, request, actor } = partesAdmin(c);
   if (!esSocio(env, scope)) throw new HttpError(403, 'not_authorized');
   const old = await exists(env, 'fin_movimientos', c.req.param('id'));
   if (old.reparto_id) throw new HttpError(409, 'linea_de_reparto');
@@ -324,12 +442,12 @@ finanzas.patch('/api/admin/finanzas/movimientos/:id', async (c) => {
   // corrigen desde su operación, nunca a mano; el trigger de 0050 lo garantiza.
   if (old.origen_tipo) throw new HttpError(409, 'movimiento_de_gestion');
   const b = await bodyOf(request);
-  if (Object.keys(b).some((k) => !['tipo', 'importe', 'fecha', 'concepto_id', 'nota', 'tenant_id', 'cuenta_id', 'evento_id'].includes(k))) fail('campo_no_editable');
+  if (Object.keys(b).some((k) => !['tipo', 'importe', 'fecha', 'concepto_id', 'nota', 'tenant_id', 'cuenta_id', 'evento_id','requiere_conciliacion','conciliacion_socio','conciliada','conciliacion_fecha'].includes(k))) fail('campo_no_editable');
   const m = await validateMovimiento(env, { ...old, ...b }, old);
   let result;
   try {
-    result = await env.DB.prepare('UPDATE fin_movimientos SET tipo=?, importe=?, fecha=?, concepto_id=?, nota=?, tenant_id=?, cuenta_id=?, entidad_id=?, evento_id=? WHERE id=?')
-      .bind(m.tipo, m.importe, m.fecha, m.concepto_id, m.nota, m.tenant_id, m.cuenta_id, m.entidad_id, m.evento_id, old.id).run();
+    result = await env.DB.prepare('UPDATE fin_movimientos SET tipo=?, importe=?, fecha=?, concepto_id=?, nota=?, tenant_id=?, cuenta_id=?, entidad_id=?, evento_id=?, requiere_conciliacion=?, conciliacion_socio=?, conciliada=?, conciliacion_fecha=?, conciliada_por=? WHERE id=?')
+      .bind(m.tipo, m.importe, m.fecha, m.concepto_id, m.nota, m.tenant_id, m.cuenta_id, m.entidad_id, m.evento_id, m.requiere_conciliacion, m.conciliacion_socio, m.conciliada, m.conciliacion_fecha, m.conciliada ? actor : null, old.id).run();
   } catch (e) { writeError(e); }
   if (!result.meta.changes) throw new HttpError(404, 'not_found');
   return json({ ok: true }, 200, NO_STORE);
@@ -348,17 +466,19 @@ finanzas.get('/api/admin/finanzas/resumen', async (c) => {
   const { env, scope, url } = partesAdmin(c);
   if (!esSocio(env, scope)) throw new HttpError(403, 'not_authorized');
   const f = filters(url);
-  const [p, a, desglose, repartido, prestamos, compras, socios] = await env.DB.batch([
+  const [p, a, desglose, repartido, prestamos, compras, socios, cuentasTesoreria, sinCuenta] = await env.DB.batch([
     env.DB.prepare(`${TOTALS} WHERE ${f.sql} GROUP BY moneda`).bind(...f.args),
     env.DB.prepare(`${TOTALS} GROUP BY moneda`),
     env.DB.prepare(`SELECT m.concepto_id,c.nombre,m.tipo,m.moneda,m.naturaleza,SUM(m.importe*m.signo) AS importe FROM fin_movimientos m
       JOIN fin_conceptos c ON c.id=m.concepto_id WHERE ${f.sql} GROUP BY m.concepto_id,m.moneda,m.naturaleza ORDER BY m.tipo,c.position,c.id`).bind(...f.args),
     env.DB.prepare(REPARTIDO),
     env.DB.prepare(PRESTAMOS_RESUMEN), env.DB.prepare(COMPRAS_RESUMEN), env.DB.prepare(SOCIOS_RESUMEN),
+    env.DB.prepare(TESORERIA_CUENTAS), env.DB.prepare(TESORERIA_SIN_CUENTA),
   ]);
   return json({ monedas: cuentas(p.results, a.results), financiacion: financiacion(p.results), conceptos: desglose.results, repartido: repartido.results,
     desglose: detalleLibro(p.results), acumulado: detalleLibro(a.results, true),
     obligaciones: obligacionesPorMoneda(prestamos.results, compras.results, socios.results),
+    tesoreria: tesoreriaPorMoneda(cuentasTesoreria.results, sinCuenta.results),
     alcance: { periodo: 'filtrado', acumulado: 'global', obligaciones: 'global' } }, 200, NO_STORE);
 });
 finanzas.get('/api/admin/finanzas/repartos', async (c) => {

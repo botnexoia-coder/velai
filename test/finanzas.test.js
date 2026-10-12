@@ -100,6 +100,72 @@ test('validación de tipo, concepto, importe, moneda y fechas reales', async (t)
   await assert.rejects(mov('ingreso', 'EUR', 1, '2025-02-10', { beneficiario: SOCIO.email }), error(400, 'usar_repartos'));
 });
 
+test('conciliar un gasto personal reasigna el mismo movimiento sin duplicar gasto ni caja', async (t) => {
+  const { api, DB, conceptos } = await fixture(t);
+  const cuentaId = crypto.randomUUID();
+  await api('gestion/cuentas', 'POST', { id: cuentaId, nombre: 'Cuenta común', moneda: 'EUR' });
+  const creado = await api('finanzas/movimientos', 'POST', { tipo: 'gasto', moneda: 'EUR', importe: 3000, fecha: '2026-10-05', concepto_id: conceptos.gasto[0].id,
+    nota: 'Servicio pagado por Juan', requiere_conciliacion: true, conciliacion_socio: 'dos@velai.test', conciliada: false });
+  let resumen = await api('finanzas/resumen');
+  assert.equal(resumen.monedas.EUR.gastos, 3000); assert.equal(resumen.monedas.EUR.caja, -3000);
+  assert.equal(resumen.tesoreria.EUR.sin_cuenta, 0);
+  assert.equal(resumen.tesoreria.EUR.pendiente_socios, 3000);
+  assert.equal(resumen.tesoreria.EUR.saldo_ubicado, 0); assert.equal(resumen.tesoreria.EUR.saldo_neto, -3000);
+  const antes = await DB.prepare('SELECT COUNT(*) AS n FROM fin_movimientos').first();
+  await api(`finanzas/movimientos/${creado.id}`, 'PATCH', { cuenta_id: cuentaId, conciliada: true, conciliacion_fecha: '2026-10-12' });
+  const fila = await DB.prepare('SELECT * FROM fin_movimientos WHERE id=?').bind(creado.id).first();
+  assert.deepEqual([fila.requiere_conciliacion, fila.conciliacion_socio, fila.conciliada, fila.conciliacion_fecha, fila.cuenta_id], [1, 'dos@velai.test', 1, '2026-10-12', cuentaId]);
+  assert.equal((await DB.prepare('SELECT COUNT(*) AS n FROM fin_movimientos').first()).n, antes.n);
+  resumen = await api('finanzas/resumen');
+  assert.equal(resumen.monedas.EUR.gastos, 3000); assert.equal(resumen.monedas.EUR.caja, -3000);
+  assert.equal(resumen.tesoreria.EUR.sin_cuenta, 0); assert.equal(resumen.tesoreria.EUR.pendiente_socios, 0);
+  assert.equal(resumen.tesoreria.EUR.cuentas[0].saldo, -3000); assert.equal(resumen.tesoreria.EUR.saldo_neto, -3000);
+  await assert.rejects(api(`finanzas/movimientos/${creado.id}`, 'PATCH', { conciliada: false, cuenta_id: cuentaId }), error(400, 'conciliacion_pendiente_con_cuenta'));
+});
+
+test('traspasos mueven fondos entre cuentas con efecto neto cero y reverso auditable', async (t) => {
+  const { api, mov, DB } = await fixture(t);
+  const origen = crypto.randomUUID(), destino = crypto.randomUUID();
+  await api('gestion/cuentas', 'POST', { id: origen, nombre: 'Santander', moneda: 'EUR' });
+  await api('gestion/cuentas', 'POST', { id: destino, nombre: 'Caja física', moneda: 'EUR' });
+  await mov('ingreso', 'EUR', 10000, '2026-10-01', { cuenta_id: origen });
+  const traspasoId=crypto.randomUUID(), traspasoBody={ id:traspasoId, fecha: '2026-10-10', importe: 3000, cuenta_origen_id: origen, cuenta_destino_id: destino, nota: 'Retirada para caja' };
+  const creado = await api('finanzas/traspasos', 'POST', traspasoBody);
+  await api('finanzas/traspasos', 'POST', traspasoBody); // respuesta perdida: mismo UUID no mueve dos veces
+  let resumen = await api('finanzas/resumen');
+  assert.equal(resumen.monedas.EUR.caja, 10000);
+  assert.deepEqual(Object.fromEntries(resumen.tesoreria.EUR.cuentas.map((q) => [q.nombre,q.saldo])), { 'Caja física': 3000, Santander: 7000 });
+  assert.equal((await api('gestion/resumen?moneda=EUR')).totales.saldo, 10000);
+  assert.equal((await api('finanzas/traspasos')).traspasos.length, 1);
+  await assert.rejects(api('finanzas/traspasos', 'POST', { id:crypto.randomUUID(), fecha: '2026-10-10', importe: 1, cuenta_origen_id: origen, cuenta_destino_id: origen }), error(400, 'traspaso_misma_cuenta'));
+  const reversoBody={ id:crypto.randomUUID(), fecha: '2026-10-12', nota: 'Corrección' };
+  await api(`finanzas/traspasos/${creado.id}/reverso`, 'POST', reversoBody);
+  await api(`finanzas/traspasos/${creado.id}/reverso`, 'POST', reversoBody); // mismo reverso, mismo resultado
+  resumen = await api('finanzas/resumen');
+  assert.deepEqual(Object.fromEntries(resumen.tesoreria.EUR.cuentas.map((q) => [q.nombre,q.saldo])), { 'Caja física': 0, Santander: 10000 });
+  assert.equal(resumen.monedas.EUR.caja, 10000);
+  assert.equal((await DB.prepare("SELECT COUNT(*) AS n FROM g_auditoria WHERE objeto_tipo='traspaso'").first()).n,2);
+  await assert.rejects(api(`finanzas/traspasos/${creado.id}/reverso`, 'POST', { id:crypto.randomUUID(), fecha: '2026-10-12' }), error(409, 'traspaso_ya_revertido'));
+  await assert.rejects(DB.prepare('UPDATE fin_traspasos SET importe=1 WHERE id=?').bind(creado.id).run(), /fin_traspaso_inmutable/);
+});
+
+test('un saldo fechado suma solo movimientos y traspasos posteriores al corte', async (t) => {
+  const { api, mov, conceptos } = await fixture(t);
+  const cuenta = crypto.randomUUID(), caja = crypto.randomUUID();
+  await api('gestion/cuentas', 'POST', { id: cuenta, nombre: 'Banco conciliado', moneda: 'EUR', saldo_inicial: 5000, fecha_saldo: '2026-10-05', conciliada: 1 });
+  await api('gestion/cuentas', 'POST', { id: caja, nombre: 'Caja', moneda: 'EUR' });
+  await mov('ingreso', 'EUR', 9000, '2026-10-05', { cuenta_id: cuenta });
+  await mov('ingreso', 'EUR', 2000, '2026-10-06', { cuenta_id: cuenta });
+  const personal=await api('finanzas/movimientos','POST',{tipo:'gasto',moneda:'EUR',importe:300,fecha:'2026-10-04',concepto_id:conceptos.gasto[0].id,requiere_conciliacion:true,conciliacion_socio:'dos@velai.test'});
+  await api(`finanzas/movimientos/${personal.id}`,'PATCH',{cuenta_id:cuenta,conciliada:true,conciliacion_fecha:'2026-10-06'});
+  await api('finanzas/traspasos', 'POST', { id:crypto.randomUUID(), fecha: '2026-10-07', importe: 500, cuenta_origen_id: cuenta, cuenta_destino_id: caja });
+  const fin = await api('finanzas/resumen');
+  assert.deepEqual(Object.fromEntries(fin.tesoreria.EUR.cuentas.map((q) => [q.nombre,q.saldo])), { 'Banco conciliado': 6200, Caja: 500 });
+  const gestion = await api('gestion/resumen?moneda=EUR');
+  assert.equal(gestion.cuentas.find((q) => q.id === cuenta).saldo, 6200);
+  assert.equal(gestion.cuentas.find((q) => q.id === caja).saldo, 500);
+});
+
 test('catálogo: duplicados, renombrar, ordenar, desactivar y proteger el histórico', async (t) => {
   const { api, mov, conceptos } = await fixture(t);
   const id = conceptos.ingreso[0].id;
@@ -337,6 +403,18 @@ test('migración 0038 sobre el libro desplegado conserva nombres, pagos y benefi
   assert.equal((await DB.prepare("SELECT activo FROM fin_socios WHERE email='botnexo.ia@gmail.com'").first()).activo, 1);
 });
 
+test('migración 0054 conserva documentos existentes y añade conciliaciones y traspasos', async (t) => {
+  const DB=await sqliteD1({through:'0053'});t.after(()=>DB.close());
+  const doc=crypto.randomUUID(), objeto=crypto.randomUUID();
+  await DB.prepare(`INSERT INTO g_documentos (id,tipo,objeto_id,clase,nombre,mime,ext,bytes,sha256,key,version,autor,created_at)
+    VALUES (?,'compra',?,'factura','original.pdf','application/pdf','pdf',10,'hash-unico','privado/key',2,'auditor','2026-10-01T00:00:00Z')`).bind(doc,objeto).run();
+  await DB.exec(await readFile(new URL('../migrations/0054_conciliacion_movimientos.sql',import.meta.url),'utf8'));
+  assert.deepEqual(await DB.prepare('SELECT id,tipo,objeto_id,version FROM g_documentos WHERE id=?').bind(doc).first(),{id:doc,tipo:'compra',objeto_id:objeto,version:2});
+  assert.ok(await DB.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='fin_traspasos'").first());
+  const columnas=(await DB.prepare('PRAGMA table_info(fin_movimientos)').all()).results.map(c=>c.name);
+  assert.ok(columnas.includes('requiere_conciliacion'));assert.ok(columnas.includes('conciliacion_socio'));
+});
+
 test('desglose separa operación, financiación y compras; naturaleza filtra libro/CSV sin cambiar acumulado global', async (t) => {
   const { api, call, mov, reparto } = await fixture(t);
   const uuid = () => crypto.randomUUID();
@@ -355,6 +433,8 @@ test('desglose separa operación, financiación y compras; naturaleza filtra lib
   assert.deepEqual(r.desglose.EUR, { ingresos_operativos: 100000, gastos_operativos: 20000, gastos_financieros: 10100,
     resultado_operativo: 80000, resultado_tras_financieros: 69900, compras_pagadas: 400000, reembolsos_socios: 0, repartos: 2000, otros_egresos: 1000 });
   assert.equal(r.monedas.EUR.beneficio, 69900); assert.equal(r.acumulado.EUR.caja, 616900);
+  assert.deepEqual(r.tesoreria.EUR, { cuentas: [{ id: cuenta.id, nombre: 'Cuenta ficticia', conciliada: false, saldo_inicial: 0, fecha_saldo: null, movimientos: 539900, saldo: 539900 }],
+    sin_cuenta: 77000, movimientos_sin_cuenta: 4, pendiente_socios: 0, conciliaciones_pendientes: 0, saldo_ubicado: 616900, saldo_neto: 616900 });
   assert.equal(r.acumulado.EUR.financiacion_entradas, 1000000); assert.equal(r.acumulado.EUR.financiacion_salidas, 50000);
   assert.deepEqual(r.alcance, { periodo: 'filtrado', acumulado: 'global', obligaciones: 'global' });
   assert.equal(r.desglose.COP.resultado_operativo, 0);

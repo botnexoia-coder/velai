@@ -817,6 +817,9 @@ export function useFinMovimientos(filters: FinFilters, enabled = true) {
 export function useFinRepartos(enabled = true) {
   return useQuery({ queryKey: ['finanzas', 'repartos'], queryFn: () => api<import('../api/types').FinRepartos>('/api/admin/finanzas/repartos'), enabled });
 }
+export function useFinTraspasos(enabled = true) {
+  return useQuery({ queryKey: ['finanzas', 'traspasos'], queryFn: () => api<import('../api/types').FinTraspasos>('/api/admin/finanzas/traspasos'), enabled });
+}
 export function useFinCuentas(enabled = true) {
   return useQuery({ queryKey: ['gestion', 'catalogos'], queryFn: () => api<import('../api/types').FinCuentas>('/api/admin/gestion/catalogos'), enabled });
 }
@@ -824,7 +827,7 @@ export function useFinSocios() {
   return useQuery({ queryKey: ['finanzas', 'socios'], queryFn: () => api<import('../api/types').FinSocios>('/api/admin/finanzas/socios?todos=1') });
 }
 // Invalidar el dominio completo: una corrección también cambia caja, desglose y reparto.
-export function useFinMutacion<T>(recurso: 'movimientos' | 'conceptos' | 'repartos' | 'socios') {
+export function useFinMutacion<T>(recurso: 'movimientos' | 'conceptos' | 'repartos' | 'socios' | 'traspasos') {
   const client = useQueryClient();
   return useMutation({
     mutationFn: ({ method, id, body }: { method: 'POST' | 'PATCH' | 'DELETE'; id?: string | number; body?: T }) => {
@@ -832,6 +835,13 @@ export function useFinMutacion<T>(recurso: 'movimientos' | 'conceptos' | 'repart
       type Result = { ok: true; id?: string | number; aviso?: 'caja_negativa'; desactivado?: boolean };
       return method === 'DELETE' ? apiDelete<Result>(path) : method === 'PATCH' ? apiPatch<Result>(path, body) : apiPost<Result>(path, body);
     },
+    onSuccess: async () => { await Promise.all([client.invalidateQueries({ queryKey: ['finanzas'] }), client.invalidateQueries({ queryKey: ['gestion'] })]); },
+  });
+}
+export function useFinTraspasoReverso() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, operacionId, fecha, nota }: { id:string;operacionId:string;fecha:string;nota?:string }) => apiPost<{ok:true;id:string}>(`/api/admin/finanzas/traspasos/${encodeURIComponent(id)}/reverso`, { id:operacionId, fecha, nota: nota || '' }),
     onSuccess: async () => { await Promise.all([client.invalidateQueries({ queryKey: ['finanzas'] }), client.invalidateQueries({ queryKey: ['gestion'] })]); },
   });
 }

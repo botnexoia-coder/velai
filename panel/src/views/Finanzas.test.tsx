@@ -18,6 +18,9 @@ const conceptos: FinConceptos = { conceptos: {
 const resumen: FinResumen = { monedas: {
   EUR: { ingresos: 150000, gastos: 20000, beneficio: 130000, egresos: 30000, caja: 100000, sin_repartir: 100000 },
   COP: { ingresos: 150000, gastos: 200000, beneficio: -50000, egresos: 0, caja: -50000, sin_repartir: -50000 },
+}, tesoreria: {
+  EUR:{cuentas:[{id:'cuenta-eur',nombre:'Cuenta común EUR',conciliada:false,saldo_inicial:0,fecha_saldo:null,movimientos:96900,saldo:96900}],sin_cuenta:3100,movimientos_sin_cuenta:2,pendiente_socios:0,conciliaciones_pendientes:0,saldo_ubicado:100000,saldo_neto:100000},
+  COP:{cuentas:[],sin_cuenta:-50000,movimientos_sin_cuenta:2,pendiente_socios:0,conciliaciones_pendientes:0,saldo_ubicado:-50000,saldo_neto:-50000},
 }, conceptos: [], repartido: [] };
 function mount({ socio = true, role = 'velai', path = '/finanzas', movimientos = [] as FinMovimiento[], cuentas = [ {id:'cuenta-eur',nombre:'Cuenta común EUR',moneda:'EUR',entidad_id:null}, {id:'cuenta-cop',nombre:'Cuenta COP',moneda:'COP',entidad_id:null} ] as FinCuenta[], extraConceptos = [] as FinConceptos['conceptos']['ingreso'] } = {}) {
   const calls: { path: string; method: string; body?: Record<string, unknown> }[] = [];
@@ -31,8 +34,10 @@ function mount({ socio = true, role = 'velai', path = '/finanzas', movimientos =
       '/api/admin/finanzas/resumen': resumen,
       '/api/admin/finanzas/conceptos': {...conceptos,conceptos:{...conceptos.conceptos,ingreso:[...conceptos.conceptos.ingreso,...extraConceptos]}},
       '/api/admin/gestion/catalogos': {cuentas},
+      '/api/admin/gestion/documentos': {items:[],storage_ready:true},
       '/api/admin/finanzas/movimientos': { movimientos, nextCursor: null },
       '/api/admin/finanzas/repartos': { socios: [{ email: 'uno@velai.test', nombre: 'Uno' }], repartido: [], repartos: [] },
+      '/api/admin/finanzas/traspasos': { traspasos: [] },
       '/api/admin/finanzas/socios': { socios: [
         { email: 'uno+fin@velai.test', nombre: 'Uno', activo: 1, tiene_repartos: 1 },
         { email: 'dos@velai.test', nombre: 'Dos', activo: 0, tiene_repartos: 1 },
@@ -52,14 +57,17 @@ it.each([{ socio: false, role: 'velai' }, { socio: true, role: 'cliente' }])('oc
   expect(screen.queryByRole('navigation', { name: 'Administración' })).not.toBeInTheDocument();
   expect(calls.some((c) => c.path.includes('/finanzas/'))).toBe(false);
 });
-it('el socio tiene bloque Administración y tarjetas separadas con caja acumulada', async () => {
+it('el socio tiene bloque Administración y separa saldo del libro, cuentas y movimientos sin asignar', async () => {
   mount();
   expect(await screen.findByRole('tab', { name: 'Finanzas' })).toBeInTheDocument();
   expect(within(screen.getByRole('navigation', { name: 'Administración' })).getByRole('tab', { name: 'Finanzas' })).toBeInTheDocument();
   const eur = await screen.findByRole('region', { name: 'Resumen EUR' }), cop = screen.getByRole('region', { name: 'Resumen COP' });
   await waitFor(() => expect(eur).toHaveTextContent('€ 1.500,00'));
   expect(cop).toHaveTextContent('$ 150.000'); expect(cop).toHaveTextContent('−$ 50.000');
-  expect(eur).toHaveTextContent('Caja (acumulado)'); expect(cop.querySelector('.fin-negative')).toBeTruthy();
+  expect(eur).toHaveTextContent('Saldo total del libro');
+  expect(eur).toHaveTextContent('Cuenta común EUR');
+  expect(eur).toHaveTextContent('Movimientos sin cuenta asignada');
+  expect(cop.querySelector('.fin-negative')).toBeTruthy();
 });
 it('el tipo cambia el desplegable, oculta cliente en egresos y guarda EUR en céntimos exactos', async () => {
   const { user, calls } = mount();
@@ -77,6 +85,35 @@ it('el tipo cambia el desplegable, oculta cliente en egresos y guarda EUR en cé
   await user.click(modal.getByRole('button', { name: 'Guardar movimiento' }));
   await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
   expect(calls.find((c) => c.method === 'POST')?.body).toMatchObject({ tipo: 'egreso', concepto_id: 3, moneda: 'EUR', importe: 29, tenant_id: null });
+});
+
+it('marca y concilia un gasto personal sobre el mismo movimiento', async () => {
+  const gasto:FinMovimiento={id:'gasto-juan',tipo:'gasto',concepto_id:2,concepto_nombre:'Cloudflare',fecha:'2026-10-05',moneda:'EUR',importe:3000,nota:'Se le deben a Juan',tenant_id:null,tenant_name:null,beneficiario:null,reparto_id:null,created_by:'uno@velai.test',created_at:'2026-10-05T10:00:00Z',cuenta_id:null,requiere_conciliacion:0,conciliada:0};
+  const {user,calls}=mount({movimientos:[gasto]});
+  await user.click(await screen.findByRole('button',{name:'Cloudflare'}));
+  const modal=within(screen.getByRole('dialog',{name:'Detalle del movimiento'}));
+  await user.click(modal.getByLabelText(/necesita conciliación/));
+  await user.selectOptions(modal.getByLabelText(/A quién se le debe/),'uno+fin@velai.test');
+  expect(modal.getByText('Conciliación pendiente')).toBeInTheDocument();
+  await user.click(modal.getByLabelText(/dinero ya fue devuelto/));
+  await user.selectOptions(modal.getByLabelText(/Cuenta del proyecto que hizo el reembolso/),'cuenta-eur');
+  await user.click(modal.getByRole('button',{name:'Guardar movimiento'}));
+  await waitFor(()=>expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+  expect(calls.find(c=>c.method==='PATCH')?.body).toMatchObject({requiere_conciliacion:true,conciliacion_socio:'uno+fin@velai.test',conciliada:true,cuenta_id:'cuenta-eur'});
+  expect(calls.filter(c=>c.method==='PATCH')).toHaveLength(1);
+});
+it('un traspaso mueve dinero entre cuentas sin presentarlo como ingreso o gasto', async()=>{
+  const {user,calls}=mount({path:'/finanzas?tab=traspasos',cuentas:[{id:'cuenta-eur',nombre:'Santander',moneda:'EUR',entidad_id:null},{id:'caja-eur',nombre:'Caja física',moneda:'EUR',entidad_id:null}]});
+  await user.click(await screen.findByRole('button',{name:'Nuevo traspaso'}));
+  const modal=within(screen.getByRole('dialog',{name:'Nuevo traspaso interno'}));
+  await user.selectOptions(modal.getByLabelText('Desde'),'cuenta-eur');
+  await user.type(modal.getByLabelText(/Importe \(EUR\)/),'30');
+  expect(modal.getByText('Impacto en resultado: 0')).toBeInTheDocument();
+  await user.click(modal.getByRole('button',{name:'Guardar traspaso'}));
+  await waitFor(()=>expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+  const body=calls.find(c=>c.method==='POST'&&c.path.endsWith('/traspasos'))?.body as Record<string,unknown>;
+  expect(body).toMatchObject({importe:3000,cuenta_origen_id:'cuenta-eur',cuenta_destino_id:'caja-eur'});
+  expect(body.id).toMatch(/^[0-9a-f-]{36}$/i);
 });
 it('el reparto avisa en vivo de caja negativa, permite guardar y conserva aviso del servidor', async () => {
   const { user, calls } = mount({ path: '/finanzas?tab=repartos' });

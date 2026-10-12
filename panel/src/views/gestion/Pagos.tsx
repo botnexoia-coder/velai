@@ -60,6 +60,9 @@ function HistorialPagos({ tipo, objetoId }: Props) {
   const selected = rows.find((p) => p.id === action?.pagoId);
   const accounts = cat.data?.cuentas.filter((c) => c.moneda === selected?.moneda) ?? [];
   const rest = selected ? Math.max(0, selected.importe - reembolsado(selected, rows)) : 0;
+  const activos = rows.filter((p) => p.estado === 'activo');
+  const anticipadoSocios = activos.filter((p) => p.clase === 'pago' && p.pagador === 'socio').reduce((s, p) => s + p.importe, 0);
+  const devueltoSocios = activos.filter((p) => p.clase === 'reembolso').reduce((s, p) => s + p.importe, 0);
 
   async function reverse(data: FormData, id: string) {
     if (!selected || (selected.clase !== 'pago' && !(tipo === 'compra' && selected.clase === 'reembolso'))) throw new Error('pago_invalido');
@@ -85,6 +88,11 @@ function HistorialPagos({ tipo, objetoId }: Props) {
 
   return <Card title="Historial de pagos">
     <ErrorBox error={query.error || cat.error || (malformed ? new Error('historial_no_disponible') : null)}/>
+    {tipo === 'compra' && anticipadoSocios > 0 ? <section className="g-payment-reconciliation" aria-label="Conciliación del gasto y el reembolso">
+      <h3>Un gasto, dos evidencias</h3>
+      <ol><li><strong>Compra o servicio</strong><span>La factura del proveedor demuestra el gasto y se contabiliza una sola vez.</span></li><li><strong>Adelanto personal</strong><span>Un socio pagó <Money value={anticipadoSocios} moneda={rows.find(p=>p.pagador==='socio')?.moneda||'EUR'}/>. Nace una deuda del proyecto, no otro gasto.</span></li><li><strong>Reembolso</strong><span>El justificante bancario acredita la devolución de <Money value={devueltoSocios} moneda={rows.find(p=>p.pagador==='socio')?.moneda||'EUR'}/>. Impacto adicional en el resultado: <strong>0</strong>.</span></li></ol>
+      <p>Pendiente de devolver al socio: <Money value={Math.max(0,anticipadoSocios-devueltoSocios)} moneda={rows.find(p=>p.pagador==='socio')?.moneda||'EUR'}/>.</p>
+    </section> : null}
     {query.isPending ? <p role="status">Cargando pagos…</p> : query.error || malformed ? <button type="button" className="btn alt" onClick={() => void query.refetch()}>Reintentar historial</button> : rows.length ?
       <div className="g-table"><table><caption className="g-sr-only">Pagos, devoluciones de anticipos y reversos {tipo === 'compra' ? 'de la compra' : 'del préstamo'}</caption>
         <thead><tr><th scope="col">Fecha y movimiento</th><th scope="col">Origen del dinero</th><th scope="col">Importe</th><th scope="col">Estado</th><th scope="col">Registrado por</th><th scope="col">Acciones</th></tr></thead>
@@ -112,7 +120,7 @@ function HistorialPagos({ tipo, objetoId }: Props) {
           </tr>;
         })}</tbody>
       </table></div> : <p className="g-empty">Todavía no hay pagos registrados. Las previsiones no aparecen como pagadas.</p>}
-    {tipo === 'compra' ? <Notice>El comprador y quien aporta el dinero pueden ser personas distintas. Reembolsar un adelanto devuelve dinero al socio y no registra otra compra.</Notice> : <Notice>El historial muestra pagos registrados. Una cuota prevista o reservada no equivale a un pago confirmado.</Notice>}
+    {tipo === 'compra' ? <Notice>La factura del proveedor y el comprobante del reembolso pertenecen al mismo gasto. Reembolsar un adelanto solo cancela la deuda con el socio: no registra otra compra ni vuelve a reducir el resultado.</Notice> : <Notice>El historial muestra pagos registrados. Una cuota prevista o reservada no equivale a un pago confirmado.</Notice>}
     {action && selected ? action.tipo === 'revertir' ? <FormModal key={`revertir-${selected.id}`} title={selected.clase === 'reembolso' ? 'Revertir devolución registrada' : 'Revertir pago registrado'} close={() => setAction(null)} label="Registrar reverso" fields={[
       { name: 'fecha', label: 'Fecha del reverso', type: 'date', value: hoy(), min: selected.fecha, max: hoy(), required: true },
       { name: 'motivo', label: 'Motivo del reverso', type: 'textarea', required: true, help: 'Explica la corrección en 5 a 500 caracteres.' },

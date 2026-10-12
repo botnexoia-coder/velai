@@ -115,6 +115,44 @@ test('móvil, tema oscuro y acceso cerrado a un administrador no socio', async (
   expect(calls).toEqual([]);
 });
 
+test('traspaso interno real: banco a caja, resultado cero, reverso y vista móvil', async ({ page, fin }) => {
+  const post = async (path:string, body:unknown) => {
+    const response=await fin.request(new Request(`https://panel.test/api/admin/${path}`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}));
+    expect(response.ok, await response.text()).toBe(true);
+  };
+  const banco=crypto.randomUUID(), caja=crypto.randomUUID();
+  await post('gestion/cuentas',{id:banco,nombre:'Santander',moneda:'EUR'});
+  await post('gestion/cuentas',{id:caja,nombre:'Caja física',moneda:'EUR'});
+  await page.goto('/finanzas?tab=traspasos');
+  await page.getByRole('button',{name:'Nuevo traspaso'}).click();
+  let dialog=page.getByRole('dialog',{name:'Nuevo traspaso interno'});
+  await dialog.getByLabel('Desde').selectOption(banco);
+  await dialog.getByLabel('Hacia').selectOption(caja);
+  await dialog.getByLabel('Importe (EUR)').fill('61');
+  await expect(dialog).toContainText('Impacto en resultado: 0');
+  await dialog.getByRole('button',{name:'Guardar traspaso'}).click();
+  await expect(dialog).toHaveCount(0);
+  await expect(page.getByRole('cell',{name:'Caja física'})).toBeVisible();
+  expect((await fin.DB.prepare('SELECT COUNT(*) AS n FROM fin_traspasos WHERE signo=1').first())?.n).toBe(1);
+  expect((await fin.DB.prepare('SELECT COUNT(*) AS n FROM fin_movimientos').first())?.n).toBe(0);
+  await page.screenshot({path:test.info().outputPath('finanzas-traspasos-desktop.png'),fullPage:true});
+  await page.getByRole('button',{name:'Anular'}).click();
+  dialog=page.getByRole('dialog',{name:'¿Anular este traspaso?'});
+  await dialog.getByRole('button',{name:'Anular traspaso'}).click();
+  await expect(page.getByText('Anulado',{exact:true})).toBeVisible();
+  expect((await fin.DB.prepare('SELECT COUNT(*) AS n FROM fin_traspasos WHERE signo=-1').first())?.n).toBe(1);
+  await page.setViewportSize({width:390,height:844});
+  expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
+  const celdas=page.locator('.fin-transfers tbody tr').first().locator('td');
+  await expect(celdas).toHaveCount(6);
+  for(let i=0;i<6;i++){
+    await expect(celdas.nth(i)).toBeVisible();
+    const box=await celdas.nth(i).boundingBox();
+    expect(box&&box.x+box.width<=390).toBe(true);
+  }
+  await page.screenshot({path:test.info().outputPath('finanzas-traspasos-mobile.png'),fullPage:true});
+});
+
 test('tablet: permite corregir el tipo desde Detalle del movimiento', async ({ page, fin }) => {
   await page.setViewportSize({ width: 820, height: 1180 });
   await page.goto('/finanzas');

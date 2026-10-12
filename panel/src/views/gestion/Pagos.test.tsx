@@ -82,7 +82,16 @@ it('devuelve parcialmente el anticipo pendiente, conserva céntimos y filtra cue
   expect(writes[0]?.path).toBe('/api/admin/gestion/compras/purchase-one/reembolsos');
   expect(writes[0]?.body).toMatchObject({ pago_id: 'payment-one', cuenta_id: 'eur-account', importe: 5029 });
   expect(calls.some((c) => c.method === 'POST' && /finanzas\/movimientos|\/compras$|\/pagos$/.test(c.path))).toBe(false);
-  expect(await screen.findByText(/24,71/)).toBeInTheDocument();
+  expect((await screen.findAllByText(/24,71/)).length).toBeGreaterThanOrEqual(1);
+});
+
+it('presenta el adelanto y su devolución como una sola conciliación con impacto adicional cero', async () => {
+  mount({ pagos: [payment(), payment({ id: 'refund-old', clase: 'reembolso', pago_id: 'payment-one', importe: 10000, pagador: 'cuenta', socio: null, cuenta_id: 'eur-account' })] });
+  const flow = await screen.findByRole('region', { name: 'Conciliación del gasto y el reembolso' });
+  expect(flow).toHaveTextContent('Un gasto, dos evidencias');
+  expect(flow).toHaveTextContent('Impacto adicional en el resultado: 0');
+  expect(flow).toHaveTextContent('Pendiente de devolver al socio: € 0,00');
+  expect(screen.getByText(/pertenecen al mismo gasto/)).toBeInTheDocument();
 });
 
 it('no permite devolver por encima del adelanto y no revierte pagos con reembolsos activos', async () => {

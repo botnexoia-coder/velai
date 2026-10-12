@@ -980,6 +980,8 @@ export interface FinMovimiento {
   /** Optional para cachés del libro anterior a la migración 0050. */
   naturaleza?: FinNaturaleza; signo?: 1 | -1; origen_tipo?: FinOrigen | null; origen_id?: string | null;
   cuenta_id?: string | null; entidad_id?: string | null; evento_id?: string | null; evento_nombre?: string | null;
+  requiere_conciliacion?: 0 | 1; conciliacion_socio?: string | null; conciliada?: 0 | 1;
+  conciliacion_fecha?: string | null; conciliada_por?: string | null;
 }
 export interface FinMovimientos { movimientos: FinMovimiento[]; nextCursor: string | null }
 export interface FinTotales { ingresos: number; gastos: number; beneficio: number; egresos: number; caja: number; sin_repartir: number }
@@ -1000,6 +1002,11 @@ export interface FinResumen {
   desglose?:Record<FinMoneda,FinDesglose>;
   acumulado?:Record<FinMoneda,FinDesglose & {caja:number;financiacion_entradas:number;financiacion_salidas:number}>;
   obligaciones?:Record<FinMoneda,FinObligaciones>;
+  tesoreria?:Record<FinMoneda,{
+    cuentas:{id:string;nombre:string;conciliada:boolean;saldo_inicial:number;fecha_saldo:string|null;movimientos:number;saldo:number}[];
+    sin_cuenta:number;movimientos_sin_cuenta:number;pendiente_socios:number;conciliaciones_pendientes:number;
+    saldo_ubicado:number;saldo_neto:number;
+  }>;
   alcance?:{periodo:string;acumulado:string;obligaciones:string};
   financiacion?: Record<FinMoneda,{entradas:number;salidas:number;neto:number}>;
   conceptos: { concepto_id: number; nombre: string; tipo: FinTipo; moneda: FinMoneda; importe: number; naturaleza?:FinNaturaleza }[];
@@ -1014,9 +1021,17 @@ export interface FinReparto {
   created_by: string; created_at: string; lineas: (FinMovimiento & { nombre: string })[];
 }
 export interface FinRepartos { socios: FinSocio[]; repartido: FinRepartido[]; repartos: FinReparto[] }
+export interface FinTraspaso {
+  id:string;fecha:string;moneda:FinMoneda;importe:number;
+  cuenta_origen_id:string;cuenta_origen_nombre:string;cuenta_destino_id:string;cuenta_destino_nombre:string;
+  nota:string|null;signo:1|-1;reverso_de:string|null;created_by:string;created_at:string;
+}
+export interface FinTraspasos { traspasos:FinTraspaso[] }
+export interface FinTraspasoInput { id:string;fecha:string;importe:number;cuenta_origen_id:string;cuenta_destino_id:string;nota:string }
 export interface FinMovimientoInput {
   tipo: FinTipo; concepto_id: number; fecha: string; moneda: FinMoneda; importe: number;
   nota: string; tenant_id: string | null; cuenta_id?: string | null; evento_id?: string | null; evento_nombre?: string | null;
+  requiere_conciliacion?: boolean; conciliacion_socio?: string | null; conciliada?: boolean; conciliacion_fecha?: string | null;
 }
 export interface FinRepartoInput {
   fecha: string; moneda: FinMoneda; nota: string; lineas: { beneficiario: string; importe: number }[];

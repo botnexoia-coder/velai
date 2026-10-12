@@ -9,7 +9,7 @@ export const MONEDAS = ['EUR', 'COP'];
 export const TIPOS_ENTIDAD = ['autonomo', 'sociedad', 'promotores'];
 export const ESTADOS_ENTIDAD = ['pendiente', 'activa'];
 export const ESTADOS_COMPRA = ['prevista', 'comprometida', 'comprada', 'cancelada'];
-export const TIPOS_DOCUMENTO = ['prestamo', 'compra', 'factura'];
+export const TIPOS_DOCUMENTO = ['prestamo', 'compra', 'factura', 'movimiento'];
 export const PAGADORES = ['cuenta', 'socio'];
 // Solo EUR en los préstamos iniciales (contrato): la cuenta del préstamo debe ser EUR.
 export const MONEDAS_PRESTAMO = ['EUR'];
@@ -235,6 +235,7 @@ export async function tablaExiste(env, nombre) {
 export async function objetoExiste(env, tipo, id) {
   if (tipo === 'prestamo') return Boolean(await env.DB.prepare('SELECT id FROM g_prestamos WHERE id=?').bind(id).first());
   if (tipo === 'compra') return Boolean(await env.DB.prepare('SELECT id FROM g_compras WHERE id=?').bind(id).first());
+  if (tipo === 'movimiento') return Boolean(await env.DB.prepare('SELECT id FROM fin_movimientos WHERE id=?').bind(id).first());
   if (tipo === 'factura') {
     if (!await tablaExiste(env, 'g_facturas')) return false;
     return Boolean(await env.DB.prepare('SELECT id FROM g_facturas WHERE id=?').bind(id).first());
