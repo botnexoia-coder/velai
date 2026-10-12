@@ -148,11 +148,14 @@ conversaciones.get('/api/admin/inbox', async (c) => {
       if (!(await canAttend(env, scope, head.tenant_id))) { win.open = false; win.reason = 'velai_no_atiende_clientes'; }
       // Marcar leído SOLO si hay algo nuevo: en un polling cada 15 s, un UPDATE
       // incondicional serían 1.900 escrituras al día por panel abierto para nada.
-      if (!head.last_read_at || head.last_read_at < head.last_at) {
+      if (!env.MOBILE_PREVIEW_READ_ONLY && (!head.last_read_at || head.last_read_at < head.last_at)) {
         await env.DB.prepare('UPDATE conversations SET last_read_at=? WHERE id=?').bind(new Date().toISOString(), head.id).run();
       }
       // El token cifrado del bot y el interno del tenant no salen del worker.
       delete head.demo; if (scope.role !== 'velai') { delete head.tenant_name; delete head.tenant_id; }
+      if (env.MOBILE_PREVIEW_READ_ONLY) {
+        win.open = false; win.canTakeover = false; win.reason = 'mobile_preview_read_only';
+      }
       thread = { conversation: head, messages, window: win };
     }
   }

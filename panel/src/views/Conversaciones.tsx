@@ -1,3 +1,4 @@
+import { adminReadHref } from '../mobilePreview';
 import { messageAttachments, mediaHref } from '../lib/media';
 // Bandeja de conversaciones a pantalla completa: lista a la izquierda, hilo y cajón a
 // la derecha, contra /api/admin/inbox (UNA llamada con lista + hilo, sondeada por
@@ -118,7 +119,7 @@ export function Conversaciones() {
           aria-label="Exportar CSV"
           data-tip="Descarga lo que estás viendo AHORA, con los filtros aplicados"
           onClick={() => {
-            window.location.href = `/api/admin/conversations/export.csv${convQs(filters)}`;
+            window.location.href = adminReadHref(`/api/admin/conversations/export.csv${convQs(filters)}`);
           }}
         >
           <IcoDownload />

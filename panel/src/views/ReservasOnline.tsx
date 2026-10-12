@@ -10,6 +10,7 @@
 // (worker/middleware.js) y el handler exige que el tenant sea el suyo, así que esta
 // pantalla es la misma para Velai y para cada cliente en su propio panel.
 import { useState } from 'react';
+import { MOBILE_PREVIEW } from '../mobilePreview';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
 import { useToast } from '../components/Toasts';
@@ -121,7 +122,7 @@ export function ReservasOnline({ tenantId, dominios, isCliente = false }: { tena
                 <span className="u">{chosenUrl.replace(/^https:\/\//, '')}</span>
                 <button className="btn alt btnsm" type="button" onClick={() => void copy(chosenUrl)}><Ico d={ICO.copiar} s={14} /> Copiar</button>
                 <button className="btn alt btnsm" type="button" onClick={() => setQr(true)}><Ico d={ICO.qr} s={14} /> QR</button>
-                <a className="btn alt btnsm" href={chosenUrl} target="_blank" rel="noopener noreferrer"><Ico d={ICO.abrir} s={14} /> Abrir</a>
+                {!MOBILE_PREVIEW ? <a className="btn alt btnsm" href={chosenUrl} target="_blank" rel="noopener noreferrer"><Ico d={ICO.abrir} s={14} /> Abrir</a> : <span className="muted">Prueba de consulta · reservas públicas desactivadas</span>}
               </div>
               <p className="muted mt6">La página usa el logo y los colores de la ficha del negocio, y lleva el distintivo «Tecnología Velai».</p>
             </>
@@ -251,10 +252,10 @@ export function ReservasOnline({ tenantId, dominios, isCliente = false }: { tena
           </div>
           {dominios === 0 ? <p className="mt6"><span className="flag">Su web no está autorizada todavía: el calendario integrado no cargará hasta añadir el dominio en la ficha del negocio.</span></p> : null}
           <div className="actions actions0 mt12">
-            <button className="btn alt" type="button" disabled={!activa} onClick={() => setPreview(!preview)}>{preview ? 'Cerrar vista previa' : 'Vista previa'}</button>
+            <button className="btn alt" type="button" disabled={!activa || MOBILE_PREVIEW} onClick={() => setPreview(!preview)}>{preview ? 'Cerrar vista previa' : 'Vista previa'}</button>
             {!activa ? <span className="muted">Enciende la página para verla.</span> : null}
           </div>
-          {preview && activa ? <iframe title="Vista previa de reservas" src={chosenUrl} referrerPolicy="no-referrer" style={{ width: '100%', height: 760, border: 0, borderRadius: 12, marginTop: 12 }} /> : null}
+          {preview && activa && !MOBILE_PREVIEW ? <iframe title="Vista previa de reservas" src={chosenUrl} referrerPolicy="no-referrer" style={{ width: '100%', height: 760, border: 0, borderRadius: 12, marginTop: 12 }} /> : null}
         </div>
       ) : null}
 

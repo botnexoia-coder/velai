@@ -1,3 +1,4 @@
+import { adminReadHref } from '../mobilePreview';
 // Leads: la bandeja de trabajo. Filtros arriba (la fuente sale de los DATOS, vía
 // /api/admin/stats — source es texto libre y una lista fija dejaría sin filtrar
 // cualquier landing nueva), tabla paginada por cursor y detalle en modal.
@@ -47,7 +48,7 @@ export function Leads() {
           className="btn alt"
           type="button"
           onClick={() => {
-            window.location.href = `/api/admin/leads/export.csv${leadQs(applied)}`;
+            window.location.href = adminReadHref(`/api/admin/leads/export.csv${leadQs(applied)}`);
           }}
         >
           Exportar CSV

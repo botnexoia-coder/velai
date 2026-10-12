@@ -6,6 +6,8 @@ import { App } from './App';
 import { createQueryClient } from './api/queryClient';
 import { ToastProvider } from './components/Toasts';
 import './styles/panel.css';
+import { MOBILE_PREVIEW } from './mobilePreview';
+import './styles/mobile-preview.css';
 
 const queryClient = createQueryClient();
 
@@ -16,7 +18,7 @@ createRoot(rootEl).render(
   <StrictMode>
     <QueryClientProvider client={queryClient}>
       <ToastProvider>
-        <BrowserRouter>
+        <BrowserRouter basename={MOBILE_PREVIEW ? '/prueba-movil' : undefined}>
           <App />
         </BrowserRouter>
       </ToastProvider>

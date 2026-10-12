@@ -6,12 +6,13 @@
 //
 // El rol decide la interfaz, pero la DEFENSA es del worker: cada endpoint valida el
 // scope por su cuenta.
-import { useEffect, useState, useSyncExternalStore } from 'react';
+import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { NavLink, Outlet, useLocation } from 'react-router';
 import { isSessionExpired, subscribeSession } from '../api/session';
 import { useMe } from '../hooks/queries';
 import { useAvisos } from '../hooks/avisos';
 import { useToast } from '../components/Toasts';
+import { MOBILE_PREVIEW } from '../mobilePreview';
 import {
   IcoBell,
   IcoBriefcase,
@@ -50,6 +51,9 @@ function Tab({ to, label, icon }: { to: string; label: string; icon: React.React
 }
 
 export function Shell() {
+  const [mobileMenu, setMobileMenu] = useState(false);
+  const moreButton = useRef<HTMLButtonElement>(null);
+  const closeMobileMenu = () => { setMobileMenu(false); moreButton.current?.focus(); };
   const { data: me } = useMe();
   const [dark, setDark] = useState(readDark);
   const location = useLocation();
@@ -57,6 +61,14 @@ export function Shell() {
   const isCliente = me?.role === 'cliente';
   const toast = useToast();
   const avisos = useAvisos(toast);
+  useEffect(() => {
+    if (document.getElementById('panel-navigation')?.contains(document.activeElement)) moreButton.current?.focus();
+    setMobileMenu(false);
+  }, [location.pathname]);
+  useEffect(() => {
+    document.body.classList.toggle('mobile-preview', MOBILE_PREVIEW);
+    return () => document.body.classList.remove('mobile-preview');
+  }, []);
 
   // Tema de las VISTAS: claro por defecto, body.dark las devuelve al oscuro. La barra
   // lateral no cambia nunca.
@@ -90,7 +102,13 @@ export function Shell() {
   return (
     <>
       <SessionExpired />
-      <aside className="side">
+      {MOBILE_PREVIEW ? <header className="mobile-preview-header">
+        <div><strong>Velai</strong><span>Admin · prueba móvil</span></div>
+        <span className="mobile-preview-badge">Solo lectura</span>
+        <button type="button" onClick={() => toast('iPhone: Compartir → Añadir a pantalla de inicio. Android: menú del navegador → Instalar app o Añadir a pantalla de inicio. Necesitas conexión para consultar los datos.')}>Añadir al móvil</button>
+      </header> : null}
+      <aside className={`side${MOBILE_PREVIEW && mobileMenu ? ' mobile-menu-open' : ''}`} id="panel-navigation" onKeyDown={e => { if (MOBILE_PREVIEW && e.key === 'Escape') closeMobileMenu(); }}>
+        {MOBILE_PREVIEW ? <button type="button" className="mobile-menu-close" onClick={closeMobileMenu}>Cerrar menú</button> : null}
         <div className={`brand${haslogo ? ' haslogo' : ''}`}>
           <i />
           <span className="bname">Velai</span> <small>{isCliente && me?.tenantName ? me.tenantName : 'Panel'}</small>
@@ -176,8 +194,15 @@ export function Shell() {
         </div>
       </aside>
       <main>
+        {MOBILE_PREVIEW ? <p className="mobile-preview-notice">Datos reales. Esta prueba no envía mensajes ni guarda cambios.</p> : null}
         <Outlet />
       </main>
+      {MOBILE_PREVIEW ? <nav className="mobile-preview-nav" aria-label="Navegación móvil">
+        <NavLink to="/" end><IcoDashboard /><span>Inicio</span></NavLink>
+        <NavLink to="/conversaciones"><IcoChat /><span>Conversaciones</span></NavLink>
+        <NavLink to="/clientes"><IcoBriefcase /><span>Clientes</span></NavLink>
+        <button type="button" ref={moreButton} aria-expanded={mobileMenu} aria-controls="panel-navigation" onClick={() => setMobileMenu(v => !v)}><IcoSliders /><span>Más</span></button>
+      </nav> : null}
       <div className="foot">
         Panel de <b>Velai</b> · {new Date().getFullYear()} · Todos los derechos reservados
         {/* La versión resuelve el «¿estoy viendo el panel nuevo o el viejo?» de un vistazo:

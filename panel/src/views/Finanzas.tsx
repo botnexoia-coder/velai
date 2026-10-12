@@ -1,3 +1,4 @@
+import { adminReadHref } from '../mobilePreview';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { Link, Navigate, useSearchParams } from 'react-router';
 import { qs } from '../api/client';
@@ -104,7 +105,7 @@ function Movimientos({ dates }: { dates: FinFilters }) {
         <label>Moneda<select value={f.moneda || ''} onChange={(e) => setF({ ...f, moneda: e.target.value })}><option value="">EUR y COP</option>{MONEDAS.map((m) => <option key={m}>{m}</option>)}</select></label>
         <label>Concepto<select value={f.concepto || ''} onChange={(e) => setF({ ...f, concepto: e.target.value })}><option value="">Todos los conceptos</option>{TIPOS.filter((t) => !f.tipo || t === f.tipo).flatMap((t) => conceptos.data?.conceptos[t] || []).map((c) => <option key={c.id} value={c.id}>{c.nombre}{c.activo ? '' : ' (inactivo)'}</option>)}</select></label>
         <label>Cliente<select value={f.tenant || ''} onChange={(e) => setF({ ...f, tenant: e.target.value })}><option value="">Todos los clientes</option>{tenants.data?.tenants.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}</select></label></div>
-      <div className="fin-actions"><a className="btn alt" href={`/api/admin/finanzas/export.csv${qs(filters)}`} download>Exportar CSV</a><button className="btn" type="button" onClick={() => setEditing('new')}>Registrar movimiento</button></div>
+      <div className="fin-actions"><a className="btn alt" href={adminReadHref(`/api/admin/finanzas/export.csv${qs(filters)}`)} download>Exportar CSV</a><button className="btn" type="button" onClick={() => setEditing('new')}>Registrar movimiento</button></div>
     </div>
     <ErrorFin error={query.error || conceptos.error || tenants.error || cuentas.error} />
     {query.isPending ? <p role="status">Cargando movimientos…</p> : <div className="fin-table"><table><thead><tr><th>Fecha</th><th>Tipo</th><th>Concepto</th><th>Cliente</th><th>Cuenta</th><th>Nota</th><th>Importe</th></tr></thead><tbody>

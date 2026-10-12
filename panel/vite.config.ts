@@ -24,13 +24,23 @@ function commitCorto(): string {
   catch { return 'dev'; }
 }
 
-export default defineConfig({
+export default defineConfig(({ mode }) => ({
+  base: mode === 'mobile-preview' ? '/prueba-movil/' : '/',
   define: {
     __PANEL_VERSION__: JSON.stringify(version),
     __PANEL_COMMIT__: JSON.stringify(commitCorto()),
     __PANEL_FECHA__: JSON.stringify(new Date().toISOString().slice(0, 10)),
   },
-  plugins: [react()],
+  plugins: [react(), {
+    name: 'mobile-preview-metadata',
+    transformIndexHtml(html) {
+      if (mode !== 'mobile-preview') return html;
+      return html.replace('<title>Panel · Velai</title>', '<title>Velai · Admin móvil</title>')
+        .replace('width=device-width,initial-scale=1', 'width=device-width,initial-scale=1,viewport-fit=cover')
+        .replace('</head>', '<meta name="theme-color" content="#0D0A10" /><meta name="apple-mobile-web-app-capable" content="yes" /><link rel="manifest" href="/prueba-movil/manifest.webmanifest" /><link rel="apple-touch-icon" href="/prueba-movil/icon.png" /></head>');
+    },
+  }],
+  publicDir: mode === 'mobile-preview' ? false : 'public',
   server: {
     proxy: {
       // Toda la API del panel y los medios (logos) viven en el worker.
@@ -40,7 +50,8 @@ export default defineConfig({
     },
   },
   build: {
-    outDir: 'dist',
+    outDir: mode === 'mobile-preview' ? 'dist/prueba-movil' : 'dist',
+    emptyOutDir: mode !== 'mobile-preview',
     sourcemap: false,
   },
   test: {
@@ -51,4 +62,4 @@ export default defineConfig({
     // Los smoke de navegador los descubre Playwright; Vitest no debe importar su DSL.
     exclude: ['e2e/**', 'node_modules/**', 'dist/**'],
   },
-});
+}));

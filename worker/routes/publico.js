@@ -31,13 +31,16 @@ function panelV2Activo(env, url) {
 // Separado de la identidad a propósito: así se puede probar la mecánica de servir
 // (fallback de SPA, cabeceras, caché) sin fabricar un JWT de Access en los tests.
 async function panelV2Assets(request, env, url) {
+  const mobile = url.pathname === '/prueba-movil' || url.pathname.startsWith('/prueba-movil/');
   let res = await env.ASSETS.fetch(request);
   // SPA con react-router: cualquier ruta de vista (/leads, /conversaciones…) es index.html.
-  if (res.status === 404) res = await env.ASSETS.fetch(new Request(new URL('/index.html', url), request));
+  if (res.status === 404 || (mobile && url.pathname === '/prueba-movil')) {
+    res = await env.ASSETS.fetch(new Request(new URL(mobile ? '/prueba-movil/index.html' : '/index.html', url), request));
+  }
   const out = new Response(res.body, res);
   // CSP SIN nonce ni inline: el v2 son ficheros externos del mismo origen y React aplica
   // estilos por CSSOM. Más estricta que la del v1, no menos.
-  out.headers.set('Content-Security-Policy', PANEL_V2_CSP + (bookingOrigin(env) ? `; frame-src ${bookingOrigin(env)}` : ''));
+  out.headers.set('Content-Security-Policy', PANEL_V2_CSP + (mobile ? "; manifest-src 'self'; frame-src 'none'" : (bookingOrigin(env) ? `; frame-src ${bookingOrigin(env)}` : '')));
   out.headers.set('X-Robots-Tag', 'noindex, nofollow');
   out.headers.set('X-Frame-Options', 'DENY');
   out.headers.set('Referrer-Policy', 'no-referrer');

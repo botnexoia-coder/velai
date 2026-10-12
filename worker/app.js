@@ -2,6 +2,7 @@ import { PLANES, MODULOS, modulosDe, canalesOcupados } from './planes.js';
 import { assertPlanChannelLimit, assertTenantModulo, tieneModulo } from './tenant-planes.js';
 import { Hono } from 'hono';
 import { ADMIN_HEADERS, ADMIN_HTML } from './admin-page.js';
+import { previewTarget, readOnlyEnv } from './mobile-preview.js';
 import {
   adminOrigin, adminHost, adminCorsGuard, adminIdentity, envAdmins, resolveScope,
   recordAuthFailure, scopeClause, assertOwnTenant, clienteAllowed,
@@ -4728,6 +4729,11 @@ adminApp.onError((error) => { throw error; });
 // de worker/routes/. Los tests lo invocan directo con el scope ya resuelto — misma
 // firma y semántica que el monolito que sustituye.
 async function adminRouter(request, env, ctx, path, url, config, scope) {
+  const mobileTarget = previewTarget(path, request.method, scope);
+  if (mobileTarget) {
+    path = mobileTarget;
+    env = readOnlyEnv(env);
+  }
   // El destino se construye con el `path` del contrato (los tests a veces pasan una
   // `url` que no coincide) y con el search de `url`, que es de donde los handlers
   // leen los query params.

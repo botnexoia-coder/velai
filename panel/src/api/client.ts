@@ -3,6 +3,7 @@
 // Cloudflare Access y el worker valida el JWT en cada petición.
 import { busyStart, busyEnd } from './activity';
 import { markSessionExpired } from './session';
+import { MOBILE_PREVIEW, adminReadHref } from '../mobilePreview';
 
 export class ApiError extends Error {
   /** Código de error del worker (p. ej. 'stale_tenant'); se traduce con TERRS/WIN_WHY. */
@@ -31,6 +32,12 @@ export interface ApiOptions {
  * es el punto único que alimenta la barra de actividad (salvo con quiet).
  */
 export async function api<T>(path: string, init?: RequestInit, options?: ApiOptions): Promise<T> {
+  if (MOBILE_PREVIEW) {
+    if ((init?.method ?? 'GET').toUpperCase() !== 'GET' || !path.startsWith('/api/admin/')) {
+      throw new ApiError('mobile_preview_read_only', 405);
+    }
+    path = adminReadHref(path);
+  }
   const quiet = options?.quiet === true;
   if (!quiet) busyStart();
   try {

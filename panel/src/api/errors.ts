@@ -4,6 +4,8 @@
 // enseña tal cual, que es mejor que esconderlo.
 
 export const TERRS: Record<string, string> = {
+  mobile_preview_read_only: 'Esta prueba es solo lectura. Los cambios y envíos están desactivados.',
+  mobile_preview_unavailable: 'Esta herramienta está desactivada en la prueba de solo lectura. Usa el panel habitual para tareas operativas.',
   booking_falta_origin: 'El dominio de reservas no está configurado en el worker (BOOKING_ORIGIN).',
   booking_falta_secret: 'Falta el secreto APP_SECRET en el worker: sin él no se pueden firmar los enlaces de gestión.',
   booking_falta_secret_corto: 'El secreto APP_SECRET del worker tiene menos de 32 caracteres: vuelve a ponerlo más largo.',
@@ -147,3 +149,4 @@ export function traducir(code: unknown): string {
   const key = code instanceof Error ? code.message : String(code ?? '');
   return WIN_WHY[key] ?? TERRS[key] ?? key;
 }
+// La prueba móvil conserva los datos reales, pero ninguna escritura.
