@@ -37,7 +37,14 @@ it('CSV usa fetch con contexto y descarga texto, sin intentar JSON',async()=>{
  const create=vi.fn((_blob:Blob)=> 'blob:csv');Object.defineProperty(URL,'createObjectURL',{configurable:true,value:create});Object.defineProperty(URL,'revokeObjectURL',{configurable:true,value:vi.fn()});
  const clicked:HTMLAnchorElement[]=[];vi.spyOn(HTMLAnchorElement.prototype,'click').mockImplementation(function(this:HTMLAnchorElement){clicked.push(this);});
  await apiDownload('/api/admin/leads/export.csv?status=new','leads.csv');
- expect(json).not.toHaveBeenCalled();expect(create).toHaveBeenCalledTimes(1);expect(create.mock.calls[0]?.[0]).toBeInstanceOf(Blob);
+ expect(json).not.toHaveBeenCalled();expect(create).toHaveBeenCalledTimes(1);
+ const file=create.mock.calls[0]![0];
+ expect(file.type).toBe('text/csv;charset=utf-8');
+ // Response puede producir un Blob de Node o del DOM según el runtime.
+ const text=typeof file.text==='function'?await file.text():await new Promise<string>((resolve,reject)=>{
+  const reader=new FileReader();reader.onload=()=>resolve(String(reader.result));reader.onerror=()=>reject(reader.error);reader.readAsText(file);
+ });
+ expect(text).toBe('nombre,fecha\nPersona,2026-10-12');
  expect(clicked[0]?.download).toBe('leads.csv');expect(clicked[0]?.href).toBe('blob:csv');
  expect(new Headers(fetcher.mock.calls[0]?.[1].headers).get('X-Velai-Workspace')).toBe('dialogos');expect(fetcher.mock.calls[0]?.[1].redirect).toBe('manual');
 });
