@@ -35,6 +35,8 @@ routes = [
 directory = "panel/dist"
 binding = "ASSETS"
 run_worker_first = true
+# El worker sirve los index de ambas SPA; evita redirecciones de index.html a su ruta.
+html_handling = "none"
 
 [vars]
 # BASE de la allowlist (los orígenes de Velai). Desde la migración 0008 los dominios de
@@ -251,6 +253,8 @@ CF_ADMIN_GROUP_ID = ""
 directory = "panel/dist"
 binding = "ASSETS"
 run_worker_first = true
+# El worker sirve los index de ambas SPA; evita redirecciones de index.html a su ruta.
+html_handling = "none"
 
 [[env.staging.kv_namespaces]]
 binding = "KV"

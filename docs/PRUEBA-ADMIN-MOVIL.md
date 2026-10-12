@@ -21,3 +21,12 @@ scope propios para distinguirla de la entrada normal.
 QA local: backend 395 pruebas, panel 244 pruebas, tipos y 37 E2E (incluye móvil
 390×844 sin desbordamiento y con todas las peticiones por API de lectura).
 Revisión independiente de allowlist, descargas, reservas y conservación de permisos.
+
+## Rutas de HTML
+
+Los assets de producción y staging usan `html_handling = "none"`. El Worker
+resuelve cada SPA a su propio index tras validar Access. La normalización de
+barra final junto a la redirección automática de index.html provocaba un307
+a la propia ruta móvil; también enviaba enlaces profundos del admin a la raíz.
+Se reprodujo con el binding real de Assets en Wrangler local y se verificó que
+las rutas raíz y profundas devuelven200 y el HTML de la SPA correspondiente.
