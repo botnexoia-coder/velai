@@ -2,8 +2,9 @@
 // número del día en círculo (hoy relleno), citas como chips y el detalle del día en
 // modal. El cliente abre SU calendario; Velai abre el del tenant velai con selector
 // para saltar al de cualquier cliente.
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { ReservasOnline } from './ReservasOnline';
+import { EditorialCalendar } from './EditorialCalendar';
 import { confirmar } from '../components/Confirmar';
 import { useNavigate, useSearchParams } from 'react-router';
 import { traducir } from '../api/errors';
@@ -35,6 +36,7 @@ export function Calendario() {
   // Desde la lista de Clientes se llega con ?t=<id> (el «Abrir» de la columna Calendario).
   const [params] = useSearchParams();
   const [selected, setSelected] = useState<string | null>(() => params.get('t'));
+  const [section, setSection] = useState<'citas' | 'editorial'>('citas');
 
   // Al volver del OAuth el callback redirige con #calendar=ok:<tenantId>: se reabre SU
   // calendario (velai, el del tenant conectado; el cliente siempre el suyo).
@@ -62,13 +64,20 @@ export function Calendario() {
     ? me?.tenantId ?? null
     : selected ?? (tenants ? (tenants.tenants.find((t) => t.slug === 'velai') ?? tenants.tenants[0])?.id ?? null : null);
   const tenantName = isCliente ? me?.tenantName : tenants?.tenants.find((t) => t.id === tenantId)?.name;
+  const tenantSlug = tenants?.tenants.find(t => t.id === tenantId)?.slug;
+  const lastCalendarTenant = useRef<string | null>(null);
+  useEffect(() => {
+    if (!tenantId || (isVelai && !tenantSlug) || lastCalendarTenant.current === tenantId) return;
+    lastCalendarTenant.current = tenantId;
+    setSection(tenantSlug === 'dialogos' ? 'editorial' : 'citas');
+  }, [tenantId, tenantSlug, isVelai]);
 
   return (
     <div>
       <div className="vhead">
         <div>
           <h1>Calendario{tenantName ? ` — ${tenantName}` : ''}</h1>
-          <p>Citas agendadas por Vai en el Google Calendar del negocio</p>
+          <p>Citas del negocio y planificación del equipo</p>
         </div>
         {isVelai ? (
           <div className="actions actions0">
@@ -88,7 +97,13 @@ export function Calendario() {
           </div>
         ) : null}
       </div>
-      {tenantId ? <CalendarBody tenantId={tenantId} isCliente={isCliente === true} /> : null}
+      <div className="chtabs mb12" role="group" aria-label="Tipo de calendario">
+        <button type="button" className={`chtab${section === 'citas' ? ' is-on' : ''}`} aria-pressed={section === 'citas'} onClick={() => setSection('citas')}>Citas</button>
+        <button type="button" className={`chtab${section === 'editorial' ? ' is-on' : ''}`} aria-pressed={section === 'editorial'} onClick={() => setSection('editorial')}>Planificación</button>
+      </div>
+      {tenantId ? section === 'editorial'
+        ? <EditorialCalendar key={tenantId} tenantId={tenantId} canEdit={isVelai === true} />
+        : <CalendarBody tenantId={tenantId} isCliente={isCliente === true} /> : null}
     </div>
   );
 }

@@ -952,3 +952,13 @@ a:focus-visible{outline:2px solid var(--orange);outline-offset:3px}
   .tenant-modal .ttabs{flex-wrap:nowrap;overflow-x:auto}
   .tenant-modal .ttab{flex:none}
 }
+
+.fin-block-title{font-size:14px;margin:22px 0 12px;padding-top:16px;border-top:1px solid var(--border)}
+.fin-block-title small{font-weight:400;color:var(--muted);font-size:11px}
+.fin-result{margin-top:16px;padding:12px;background:var(--bg3);border-radius:var(--r-sm)}
+.fin-result>span,.fin-result>small{display:block;color:var(--muted);font-size:12px}
+.fin-result strong{display:block;font-size:22px;margin:4px 0}
+.fin-obligaciones{margin-top:18px;border-top:1px solid var(--border);padding-top:14px}
+.fin-obligaciones summary{cursor:pointer;font-size:13px;font-weight:600;margin-bottom:14px}
+.fin-shared-filters .fin-filters{flex-wrap:wrap}
+@media(max-width:600px){.fin-currencies{grid-template-columns:1fr}.fin-metrics{grid-template-columns:1fr 1fr}.fin-overview .fin-currency{padding:18px}.fin-caja strong{font-size:28px}}

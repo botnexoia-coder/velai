@@ -4,6 +4,14 @@
 // enseña tal cual, que es mejor que esconderlo.
 
 export const TERRS: Record<string, string> = {
+  titulo_invalido: 'Escribe un título de hasta 160 caracteres.',
+  detalle_invalido: 'Los detalles deben tener como máximo 4.000 caracteres.',
+  fecha_invalida: 'Selecciona una fecha válida.',
+  periodo_invalido: 'La fecha inicial debe ser anterior o igual a la final.',
+  naturaleza_invalido: 'Selecciona una clasificación válida.',
+  version_requerida: 'Actualiza el registro antes de guardar.',
+  version_conflicto: 'Este registro cambió. Actualiza la consulta y revisa los cambios.',
+
   mobile_preview_read_only: 'Esta prueba es solo lectura. Los cambios y envíos están desactivados.',
   mobile_preview_unavailable: 'Esta herramienta está desactivada en la prueba de solo lectura. Usa el panel habitual para tareas operativas.',
   booking_falta_origin: 'El dominio de reservas no está configurado en el worker (BOOKING_ORIGIN).',

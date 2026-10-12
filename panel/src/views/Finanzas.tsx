@@ -12,6 +12,7 @@ import { finDinero, finImporte } from '../lib/format';
 
 const TIPOS: FinTipo[] = ['ingreso', 'gasto', 'egreso'];
 const MONEDAS: FinMoneda[] = ['EUR', 'COP'];
+const NATURALEZAS: Record<FinNaturaleza,string> = {operativo:'Operación del negocio',financiacion:'Préstamos y capital',financiero:'Costes del crédito',compra:'Pagos de compras',reembolso_socio:'Reembolsos a socios'};
 const LABEL: Record<FinTipo, string> = { ingreso: 'Ingreso', gasto: 'Gasto', egreso: 'Egreso' };
 const ERRORS: Record<string, string> = {
   concepto_duplicado: 'Ya existe un concepto con ese nombre en este tipo.',
@@ -66,46 +67,90 @@ function FinanzasSocio() {
   const [p, setP] = useState('mes');
   const [custom, setCustom] = useState<FinFilters>(periodo('mes'));
   const dates = p === 'personalizado' ? custom : periodo(p);
-  const resumen = useFinResumen(dates, tab === 'movimientos');
+  const [f, setF] = useState<FinFilters>({});
+  const filters = { ...dates, ...f };
+  const resumen = useFinResumen(filters, tab === 'movimientos');
   return <div className="finanzas">
-    <div className="vhead"><div><h1>Finanzas</h1><p>El libro de Velai: ingresos, gastos, caja y repartos del equipo.</p></div></div>
+    <div className="vhead"><div><h1>Finanzas</h1><p>Operación, financiación y compras: cada importe en su lugar.</p></div></div>
     <nav className="fin-tabs" aria-label="Secciones de Finanzas">
       {['movimientos', 'repartos', 'conceptos', 'socios'].map((t) => <button type="button" key={t} className={`btn ${tab === t ? '' : 'alt'}`} aria-pressed={tab === t} onClick={() => setParams((prev) => { const next = new URLSearchParams(prev); next.set('tab', t); return next; })}>{t[0]!.toUpperCase() + t.slice(1)}</button>)}
     </nav>
     {tab === 'movimientos' ? <>
+      <FiltrosFin f={f} setF={setF} />
       <div className="fin-overview">
         <div className="fin-period"><label>Periodo<select value={p} onChange={(e) => setP(e.target.value)}><option value="mes">Mes actual</option><option value="trimestre">Trimestre actual</option><option value="año">Año actual</option><option value="todo">Todo</option><option value="personalizado">Elegir fechas</option></select></label>
           {p === 'personalizado' ? <><label>Desde<input type="date" value={custom.desde || ''} onChange={(e) => setCustom({ ...custom, desde: e.target.value })} /></label><label>Hasta<input type="date" value={custom.hasta || ''} onChange={(e) => setCustom({ ...custom, hasta: e.target.value })} /></label></> : null}
-          <p className="muted">Ingresos del negocio − gastos = resultado del libro.<br />Los préstamos y la devolución de capital se muestran como financiación.</p>
+          <p className="muted">El resultado usa el periodo y los filtros seleccionados.<br />La caja y las obligaciones muestran todo el histórico.</p>
         </div>
         <div className="fin-currencies">
-          {MONEDAS.map((moneda) => <section className="fin-currency" aria-label={`Resumen ${moneda}`} key={moneda}><h2>{moneda} <small>{moneda === 'EUR' ? 'Euros' : 'Pesos colombianos'}</small></h2>
-            <div className="fin-metrics">{(['ingresos', 'gastos', 'beneficio', 'egresos'] as const).map((key) => <div key={key}><span>{key[0]!.toUpperCase() + key.slice(1)}</span><strong>{resumen.data ? <Dinero value={resumen.data.monedas[moneda][key]} moneda={moneda} /> : '—'}</strong></div>)}</div>
-            {resumen.data?.financiacion?.[moneda] ? <div className="fin-metrics" aria-label={`Financiación ${moneda}`}><div><span>Préstamos recibidos</span><strong><Dinero value={resumen.data.financiacion[moneda].entradas} moneda={moneda} /></strong></div><div><span>Capital devuelto</span><strong><Dinero value={resumen.data.financiacion[moneda].salidas} moneda={moneda} /></strong></div></div> : null}
-            <div className="fin-caja"><span>Caja <small>(acumulado)</small></span><strong>{resumen.data ? <Dinero value={resumen.data.monedas[moneda].caja} moneda={moneda} /> : '—'}</strong><small>Saldo del libro · antes de reservas y compromisos</small></div>
-          </section>)}
+          {MONEDAS.filter(moneda => !f.moneda || f.moneda === moneda).map((moneda) => <ResumenMoneda key={moneda} moneda={moneda} resumen={resumen.data} />)}
         </div>
       </div>
       <ErrorFin error={resumen.error} />
-      <p className="muted">La caja incluye los movimientos sin cuenta asignada del histórico. Consulta <Link to="/credito?vista=destino">Fondos del proyecto</Link> para ver cuentas, reservas y compromisos.</p>
-      <Movimientos dates={dates} />
-      {resumen.data ? <details className="fin-breakdown"><summary>Desglose por concepto · periodo seleccionado</summary><div className="fin-table"><table><thead><tr><th>Concepto</th><th>Tipo</th><th>Moneda</th><th>Importe</th></tr></thead><tbody>{resumen.data.conceptos.map((r) => <tr key={`${r.concepto_id}-${r.moneda}-${r.naturaleza||'operativo'}`}><td>{r.nombre}</td><td><TipoPill tipo={r.tipo} naturaleza={r.naturaleza} /></td><td>{r.moneda}</td><td><Dinero value={r.importe} moneda={r.moneda} /></td></tr>)}</tbody></table></div>{!resumen.data.conceptos.length ? <p className="empty">No hay movimientos en este periodo.</p> : null}</details> : null}
+      <p className="muted">Un gasto pagado con crédito sigue siendo gasto; el préstamo financia la caja. El resultado del libro no incluye compras, amortizaciones ni operaciones todavía sin registrar. Consulta <Link to="/credito?vista=destino">Fondos del proyecto</Link> para ver cuentas, reservas y compromisos.</p>
+      <Movimientos filters={filters} />
+      {resumen.data ? <details className="fin-breakdown"><summary>Desglose por concepto · periodo y filtros seleccionados</summary><div className="fin-table"><table><thead><tr><th>Concepto</th><th>Tipo</th><th>Moneda</th><th>Importe</th></tr></thead><tbody>{resumen.data.conceptos.map((r) => <tr key={`${r.concepto_id}-${r.moneda}-${r.naturaleza||'operativo'}`}><td>{r.nombre}</td><td><TipoPill tipo={r.tipo} naturaleza={r.naturaleza} /></td><td>{r.moneda}</td><td><Dinero value={r.importe} moneda={r.moneda} /></td></tr>)}</tbody></table></div>{!resumen.data.conceptos.length ? <p className="empty">No hay movimientos en este periodo.</p> : null}</details> : null}
     </> : tab === 'repartos' ? <Repartos /> : tab === 'socios' ? <Socios /> : <Conceptos />}
   </div>;
 }
-function Movimientos({ dates }: { dates: FinFilters }) {
-  const [f, setF] = useState<FinFilters>({});
-  const filters = { ...dates, ...f };
+function FiltrosFin({ f, setF }: {f:FinFilters;setF:(next:FinFilters)=>void}) {
+  const conceptos=useFinConceptos(true), tenants=useTenants(true);
+  return <><div className="fin-toolbar fin-shared-filters"><div className="fin-filters">
+    <label>Tipo<select value={f.tipo || ''} onChange={e=>setF({...f,tipo:e.target.value,concepto:''})}><option value="">Todos los tipos</option>{TIPOS.map(t=><option key={t} value={t}>{LABEL[t]}</option>)}</select></label>
+    <label>Moneda<select value={f.moneda || ''} onChange={e=>setF({...f,moneda:e.target.value})}><option value="">EUR y COP</option>{MONEDAS.map(m=><option key={m}>{m}</option>)}</select></label>
+    <label>Clasificación<select value={f.naturaleza || ''} onChange={e=>setF({...f,naturaleza:e.target.value})}><option value="">Todas las operaciones</option>{Object.entries(NATURALEZAS).map(([key,label])=><option key={key} value={key}>{label}</option>)}</select></label>
+    <label>Concepto<select value={f.concepto || ''} onChange={e=>setF({...f,concepto:e.target.value})}><option value="">Todos los conceptos</option>{TIPOS.filter(t=>!f.tipo||t===f.tipo).flatMap(t=>conceptos.data?.conceptos[t]||[]).map(c=><option key={c.id} value={c.id}>{c.nombre}{c.activo?'':' (inactivo)'}</option>)}</select></label>
+    <label>Cliente<select value={f.tenant || ''} onChange={e=>setF({...f,tenant:e.target.value})}><option value="">Todos los clientes</option>{tenants.data?.tenants.map(t=><option key={t.id} value={t.id}>{t.name}</option>)}</select></label>
+    {Object.values(f).some(Boolean)?<button className="btn alt" type="button" onClick={()=>setF({})}>Limpiar filtros</button>:null}
+  </div></div><ErrorFin error={conceptos.error||tenants.error}/></>;
+}
+function MetricaFin({label,value,moneda}:{label:string;value:number|undefined;moneda:FinMoneda}) {
+  return <div><span>{label}</span><strong>{value===undefined?'—':<Dinero value={value} moneda={moneda}/>}</strong></div>;
+}
+function ResumenMoneda({moneda,resumen}:{moneda:FinMoneda;resumen:FinResumen|undefined}) {
+  const d=resumen?.desglose?.[moneda], a=resumen?.acumulado?.[moneda], o=resumen?.obligaciones?.[moneda], legacy=resumen?.monedas[moneda];
+  return <section className="fin-currency" aria-label={`Resumen ${moneda}`}>
+    <h2>{moneda} <small>{moneda==='EUR'?'Euros':'Pesos colombianos'}</small></h2>
+    <h3 className="fin-block-title">Operación <small>· periodo y filtros</small></h3>
+    <div className="fin-metrics">
+      <MetricaFin label="Cobros del negocio" value={d?.ingresos_operativos??legacy?.ingresos} moneda={moneda}/>
+      <MetricaFin label="Gastos operativos" value={d?.gastos_operativos??legacy?.gastos} moneda={moneda}/>
+      <MetricaFin label="Resultado operativo" value={d?.resultado_operativo??legacy?.beneficio} moneda={moneda}/>
+      <MetricaFin label="Costes del crédito" value={d?.gastos_financieros} moneda={moneda}/>
+    </div>
+    {d?<div className="fin-result"><span>Resultado tras costes financieros</span><strong><Dinero value={d.resultado_tras_financieros} moneda={moneda}/></strong><small>Resultado registrado; el préstamo recibido no es una venta.</small></div>:null}
+    <h3 className="fin-block-title">Caja y financiación <small>· todo el histórico</small></h3>
+    <div className="fin-metrics">
+      <MetricaFin label="Préstamos recibidos" value={a?.financiacion_entradas??resumen?.financiacion?.[moneda]?.entradas} moneda={moneda}/>
+      <MetricaFin label="Capital devuelto" value={a?.financiacion_salidas??resumen?.financiacion?.[moneda]?.salidas} moneda={moneda}/>
+      <MetricaFin label="Pagos de compras desde cuentas" value={a?.compras_pagadas} moneda={moneda}/>
+      <MetricaFin label="Reembolsos a socios" value={a?.reembolsos_socios} moneda={moneda}/>
+      <MetricaFin label="Repartos al equipo" value={a?.repartos} moneda={moneda}/>
+      <MetricaFin label="Otros egresos" value={a?.otros_egresos} moneda={moneda}/>
+    </div>
+    <div className="fin-caja"><span>Caja <small>(acumulado)</small></span><strong>{legacy?<Dinero value={legacy.caja} moneda={moneda}/>:'—'}</strong><small>Saldo de movimientos registrados, sin filtros. No es saldo bancario conciliado ni beneficio repartible.</small></div>
+    {o?<>
+      {o.prestamos_sin_abono.cantidad>0?<p className="fin-warning">Hay {o.prestamos_sin_abono.cantidad} préstamo(s) por <Dinero value={o.prestamos_sin_abono.principal} moneda={moneda}/> sin abono registrado. La caja está incompleta. <Link to="/credito">Revisar crédito</Link></p>:null}
+      <details className="fin-obligaciones"><summary>Compras y obligaciones · todo el histórico</summary>
+        <div className="fin-metrics">
+          <MetricaFin label="Compras realizadas" value={o.compras.adquirido} moneda={moneda}/>
+          <MetricaFin label="Pagado a proveedores" value={o.compras.pagado_proveedores} moneda={moneda}/>
+          <MetricaFin label="Pendiente a proveedores" value={o.compras.pendiente_proveedores} moneda={moneda}/>
+          <MetricaFin label="Pendiente de reembolsar a socios" value={o.socios.pendiente} moneda={moneda}/>
+          <MetricaFin label="Capital pendiente de devolver" value={o.prestamos_desembolsados.principal_pendiente} moneda={moneda}/>
+        </div><p className="muted">Pagar al proveedor y reembolsar al socio son dos pasos de una misma compra. No se suman como dos gastos.</p><Link to="/compras">Revisar compras</Link>
+      </details>
+    </>:null}
+  </section>;
+}
+function Movimientos({ filters }: { filters: FinFilters }) {
   const query = useFinMovimientos(filters), conceptos = useFinConceptos(true), tenants = useTenants(true), cuentas = useFinCuentas();
   const [editing, setEditing] = useState<FinMovimiento | 'new' | null>(null);
   const rows = query.data?.pages.flatMap((p) => p.movimientos) || [];
   return <>
     <div className="fin-toolbar">
-      <div className="fin-filters"><label>Tipo<select value={f.tipo || ''} onChange={(e) => setF({ ...f, tipo: e.target.value, concepto: '' })}><option value="">Todos los tipos</option>{TIPOS.map((t) => <option key={t} value={t}>{LABEL[t]}</option>)}</select></label>
-        <label>Moneda<select value={f.moneda || ''} onChange={(e) => setF({ ...f, moneda: e.target.value })}><option value="">EUR y COP</option>{MONEDAS.map((m) => <option key={m}>{m}</option>)}</select></label>
-        <label>Concepto<select value={f.concepto || ''} onChange={(e) => setF({ ...f, concepto: e.target.value })}><option value="">Todos los conceptos</option>{TIPOS.filter((t) => !f.tipo || t === f.tipo).flatMap((t) => conceptos.data?.conceptos[t] || []).map((c) => <option key={c.id} value={c.id}>{c.nombre}{c.activo ? '' : ' (inactivo)'}</option>)}</select></label>
-        <label>Cliente<select value={f.tenant || ''} onChange={(e) => setF({ ...f, tenant: e.target.value })}><option value="">Todos los clientes</option>{tenants.data?.tenants.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}</select></label></div>
-      <div className="fin-actions"><a className="btn alt" href={adminReadHref(`/api/admin/finanzas/export.csv${qs(filters)}`)} download>Exportar CSV</a><button className="btn" type="button" onClick={() => setEditing('new')}>Registrar movimiento</button></div>
+
+      <div className="fin-actions"><a className="btn alt" href={adminReadHref(`/api/admin/finanzas/export.csv${qs({ ...filters })}`)} download>Exportar CSV</a><button className="btn" type="button" onClick={() => setEditing('new')}>Registrar movimiento</button></div>
     </div>
     <ErrorFin error={query.error || conceptos.error || tenants.error || cuentas.error} />
     {query.isPending ? <p role="status">Cargando movimientos…</p> : <div className="fin-table"><table><thead><tr><th>Fecha</th><th>Tipo</th><th>Concepto</th><th>Cliente</th><th>Cuenta</th><th>Nota</th><th>Importe</th></tr></thead><tbody>

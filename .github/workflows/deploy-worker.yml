@@ -158,15 +158,15 @@ jobs:
           github-token: ${{ github.token }}
           run-id: ${{ needs.gate.outputs.ci_run_id }}
       - if: steps.fresh_start.outputs.fresh == 'true'
-        run: npx wrangler@4 deploy --dry-run --outdir /tmp/dist && node scripts/check-bundle.mjs /tmp/dist/vai-worker.js
+        run: npx --yes wrangler@4.149.0 deploy --dry-run --outdir /tmp/dist && node scripts/check-bundle.mjs /tmp/dist/vai-worker.js
 
       # ── ENSAYO EN STAGING ─────────────────────────────────────────────────────────────────────
       - name: staging · migraciones
         if: steps.fresh_start.outputs.fresh == 'true'
-        run: npx wrangler@4 d1 migrations apply vai-leads-staging --remote --env staging
+        run: npx --yes wrangler@4.149.0 d1 migrations apply vai-leads-staging --remote --env staging
       - name: staging · deploy
         if: steps.fresh_start.outputs.fresh == 'true'
-        run: npx wrangler@4 deploy --env staging
+        run: npx --yes wrangler@4.149.0 deploy --env staging
       - name: staging · humo
         if: steps.fresh_start.outputs.fresh == 'true'
         run: |
@@ -190,10 +190,10 @@ jobs:
           DEPLOY_CURRENT_SHA="$(git rev-parse FETCH_HEAD)" node scripts/deploy-scope.mjs freshness
       - name: producción · migraciones
         if: steps.fresh_production.outputs.fresh == 'true'
-        run: npx wrangler@4 d1 migrations apply vai-leads --remote
+        run: npx --yes wrangler@4.149.0 d1 migrations apply vai-leads --remote
       - name: producción · deploy
         if: steps.fresh_production.outputs.fresh == 'true'
-        run: npx wrangler@4 deploy
+        run: npx --yes wrangler@4.149.0 deploy
       - name: producción · humo
         if: steps.fresh_production.outputs.fresh == 'true'
         run: |

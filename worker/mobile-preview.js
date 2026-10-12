@@ -6,7 +6,7 @@ const UUID = '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}';
 const READ_ROUTES = [
   /^(me|stats|events|tenants|plantillas|planes|escalations|inbox|alerts|availability|appointments|solicitudes|channels|admins|permisos|ai-usage|ai-balance)$/,
   new RegExp(`^(leads|conversations)(/(export\\.csv|${UUID}))?$`, 'i'),
-  new RegExp(`^tenants/${UUID}(/(versions|users|plan|channels|whatsapp|telegram|calendar|booking|services|booking/qr-logo|media|provision))?$`, 'i'),
+  new RegExp(`^tenants/${UUID}(/(versions|users|plan|channels|whatsapp|telegram|calendar|editorial|booking|services|booking/qr-logo|media|provision))?$`, 'i'),
   /^finanzas\/(socios|conceptos|movimientos|resumen|repartos|export\.csv)$/,
   /^gestion\/(catalogos|entidades|cuentas|prestamos|compras|resumen|documentos|facturas|fiscal\/resumen|fiscal\/export\.csv|cierres)$/,
   new RegExp(`^gestion/(prestamos/${UUID}(/resumen)?|compras/${UUID}(/pagos)?|documentos/${UUID}/archivo|facturas/${UUID})$`, 'i'),

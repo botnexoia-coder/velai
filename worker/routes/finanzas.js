@@ -1,12 +1,13 @@
 // Contabilidad interna: la guarda vive en CADA handler, además de clienteGate.
 import { Hono } from 'hono';
-import { uuidOpcional, errorEscrituraGestion } from '../gestion-financiera.js';
+import { uuidOpcional, errorEscrituraGestion, SELECT_COMPRA } from '../gestion-financiera.js';
 import { esSocio, partesAdmin } from '../middleware.js';
 import { HttpError, json, NO_STORE, readJson, csvCell, PANEL_EMAIL_RE } from '../app.js';
 
 export const finanzas = new Hono();
 const TIPOS = ['ingreso', 'gasto', 'egreso'];
 const MONEDAS = ['EUR', 'COP'];
+const NATURALEZAS = ['operativo', 'financiacion', 'financiero', 'reembolso_socio', 'compra'];
 const fail = (code) => { throw new HttpError(400, code); };
 const enumValue = (value, values, code) => values.includes(value) ? value : fail(code);
 const positivo = (n) => Number.isSafeInteger(n) && n > 0 ? n : fail('importe_invalido');
@@ -55,7 +56,7 @@ function filters(url) {
     }
   }
   if (p.get('desde') && p.get('hasta') && p.get('desde') > p.get('hasta')) fail('periodo_invalido');
-  for (const [key, column, values] of [['tipo', 'tipo', TIPOS], ['moneda', 'moneda', MONEDAS], ['concepto', 'concepto_id'], ['tenant', 'tenant_id']]) {
+  for (const [key, column, values] of [['tipo', 'tipo', TIPOS], ['moneda', 'moneda', MONEDAS], ['naturaleza', 'naturaleza', NATURALEZAS], ['concepto', 'concepto_id'], ['tenant', 'tenant_id']]) {
     const value = p.get(key);
     if (!value) continue;
     if (values) enumValue(value, values, `${key}_invalido`);
@@ -75,7 +76,13 @@ const TOTALS = `SELECT moneda, SUM(CASE WHEN tipo='ingreso' AND naturaleza<>'fin
   SUM(CASE WHEN naturaleza='compra' THEN importe*signo ELSE 0 END) AS compras,
   SUM(CASE WHEN tipo='egreso' AND naturaleza<>'financiacion' THEN importe*signo ELSE 0 END) AS egresos,
   SUM(CASE WHEN tipo='ingreso' AND naturaleza='financiacion' THEN importe*signo ELSE 0 END) AS fin_entradas,
-  SUM(CASE WHEN tipo='egreso' AND naturaleza='financiacion' THEN importe*signo ELSE 0 END) AS fin_salidas FROM fin_movimientos m`;
+  SUM(CASE WHEN tipo='egreso' AND naturaleza='financiacion' THEN importe*signo ELSE 0 END) AS fin_salidas,
+  SUM(CASE WHEN tipo='ingreso' AND naturaleza='operativo' THEN importe*signo ELSE 0 END) AS ingresos_operativos,
+  SUM(CASE WHEN tipo='gasto' AND naturaleza='operativo' THEN importe*signo ELSE 0 END) AS gastos_operativos,
+  SUM(CASE WHEN tipo='gasto' AND naturaleza='financiero' THEN importe*signo ELSE 0 END) AS gastos_financieros,
+  SUM(CASE WHEN naturaleza='reembolso_socio' THEN importe*signo ELSE 0 END) AS reembolsos_socios,
+  SUM(CASE WHEN reparto_id IS NOT NULL THEN importe*signo ELSE 0 END) AS repartos,
+  SUM(CASE WHEN tipo='egreso' AND naturaleza NOT IN ('financiacion','reembolso_socio') AND reparto_id IS NULL THEN importe*signo ELSE 0 END) AS otros_egresos FROM fin_movimientos m`;
 const REPARTIDO = `SELECT m.beneficiario AS email, COALESCE(s.nombre,m.beneficiario) AS nombre, m.moneda, SUM(m.importe) AS importe
   FROM fin_movimientos m LEFT JOIN fin_socios s ON lower(s.email)=m.beneficiario
   WHERE m.beneficiario IS NOT NULL GROUP BY m.beneficiario, m.moneda ORDER BY nombre`;
@@ -97,6 +104,46 @@ const financiacion = (periodo) => Object.fromEntries(MONEDAS.map((moneda) => {
   const p = periodo.find((r) => r.moneda === moneda) || VACIO;
   return [moneda, { entradas: p.fin_entradas, salidas: p.fin_salidas, neto: p.fin_entradas - p.fin_salidas }];
 }));
+// Desglose del libro, sin atribuir naturaleza a partir de notas, cuentas o préstamos.
+function detalleLibro(rows, global = false) {
+  return Object.fromEntries(MONEDAS.map((moneda) => {
+    const r = rows.find((x) => x.moneda === moneda) || {};
+    const ingresos_operativos = r.ingresos_operativos || 0, gastos_operativos = r.gastos_operativos || 0, gastos_financieros = r.gastos_financieros || 0;
+    const detalle = { ingresos_operativos, gastos_operativos, gastos_financieros,
+      resultado_operativo: ingresos_operativos - gastos_operativos,
+      resultado_tras_financieros: ingresos_operativos - gastos_operativos - gastos_financieros,
+      compras_pagadas: r.compras || 0, reembolsos_socios: r.reembolsos_socios || 0, repartos: r.repartos || 0, otros_egresos: r.otros_egresos || 0 };
+    if (global) Object.assign(detalle, { caja: cuentas([], rows)[moneda].caja,
+      financiacion_entradas: r.fin_entradas || 0, financiacion_salidas: r.fin_salidas || 0 });
+    return [moneda, detalle];
+  }));
+}
+// Obligaciones acumuladas: pagos activos, sin sumar reversos ni volver a sumar
+// reembolsos a lo pagado al proveedor. Compras previstas/canceladas no son adquiridas.
+const PRESTAMOS_RESUMEN = `SELECT c.moneda,
+  SUM(CASE WHEN COALESCE(p.desembolsado,0)=0 THEN 1 ELSE 0 END) AS sin_abono_cantidad,
+  SUM(CASE WHEN COALESCE(p.desembolsado,0)=0 THEN p.principal ELSE 0 END) AS sin_abono_principal,
+  SUM(CASE WHEN COALESCE(p.desembolsado,0)>0 THEN 1 ELSE 0 END) AS desembolsados_cantidad,
+  SUM(CASE WHEN COALESCE(p.desembolsado,0)>0 THEN p.principal - COALESCE((SELECT SUM(g.capital) FROM g_pagos g WHERE g.objeto_tipo='prestamo' AND g.objeto_id=p.id AND g.clase='pago' AND g.estado='activo'),0) ELSE 0 END) AS principal_pendiente
+  FROM g_prestamos p JOIN g_cuentas c ON c.id=p.cuenta_id GROUP BY c.moneda`;
+const COMPRAS_RESUMEN = `SELECT moneda,
+  SUM(CASE WHEN estado='comprada' THEN real ELSE 0 END) AS adquirido,
+  SUM(pagado) AS pagado_proveedores,
+  SUM(CASE WHEN estado IN ('comprometida','comprada') THEN MAX(0,COALESCE(real,estimado)-pagado) ELSE 0 END) AS pendiente_proveedores
+  FROM (${SELECT_COMPRA}) GROUP BY moneda`;
+const SOCIOS_RESUMEN = `SELECT moneda,
+  SUM(CASE WHEN clase='pago' AND pagador='socio' THEN importe ELSE 0 END) AS adelantado,
+  SUM(CASE WHEN clase='reembolso' THEN importe ELSE 0 END) AS reembolsado
+  FROM g_pagos WHERE objeto_tipo='compra' AND estado='activo' GROUP BY moneda`;
+function obligacionesPorMoneda(prestamos, compras, socios) {
+  return Object.fromEntries(MONEDAS.map((moneda) => {
+    const p = prestamos.find((r) => r.moneda === moneda) || {}, c = compras.find((r) => r.moneda === moneda) || {}, s = socios.find((r) => r.moneda === moneda) || {};
+    return [moneda, { prestamos_sin_abono: { cantidad: p.sin_abono_cantidad || 0, principal: p.sin_abono_principal || 0 },
+      prestamos_desembolsados: { cantidad: p.desembolsados_cantidad || 0, principal_pendiente: p.principal_pendiente || 0 },
+      compras: { adquirido: c.adquirido || 0, pagado_proveedores: c.pagado_proveedores || 0, pendiente_proveedores: c.pendiente_proveedores || 0 },
+      socios: { adelantado: s.adelantado || 0, reembolsado: s.reembolsado || 0, pendiente: (s.adelantado || 0) - (s.reembolsado || 0) } }];
+  }));
+}
 async function validateMovimiento(env, b, previous) {
   const tipo = enumValue(b.tipo, TIPOS, 'tipo_invalido');
   const moneda = enumValue(b.moneda, MONEDAS, 'moneda_invalida');
@@ -285,14 +332,18 @@ finanzas.get('/api/admin/finanzas/resumen', async (c) => {
   const { env, scope, url } = partesAdmin(c);
   if (!esSocio(env, scope)) throw new HttpError(403, 'not_authorized');
   const f = filters(url);
-  const [p, a, desglose, repartido] = await env.DB.batch([
+  const [p, a, desglose, repartido, prestamos, compras, socios] = await env.DB.batch([
     env.DB.prepare(`${TOTALS} WHERE ${f.sql} GROUP BY moneda`).bind(...f.args),
     env.DB.prepare(`${TOTALS} GROUP BY moneda`),
     env.DB.prepare(`SELECT m.concepto_id,c.nombre,m.tipo,m.moneda,m.naturaleza,SUM(m.importe*m.signo) AS importe FROM fin_movimientos m
       JOIN fin_conceptos c ON c.id=m.concepto_id WHERE ${f.sql} GROUP BY m.concepto_id,m.moneda,m.naturaleza ORDER BY m.tipo,c.position,c.id`).bind(...f.args),
     env.DB.prepare(REPARTIDO),
+    env.DB.prepare(PRESTAMOS_RESUMEN), env.DB.prepare(COMPRAS_RESUMEN), env.DB.prepare(SOCIOS_RESUMEN),
   ]);
-  return json({ monedas: cuentas(p.results, a.results), financiacion: financiacion(p.results), conceptos: desglose.results, repartido: repartido.results }, 200, NO_STORE);
+  return json({ monedas: cuentas(p.results, a.results), financiacion: financiacion(p.results), conceptos: desglose.results, repartido: repartido.results,
+    desglose: detalleLibro(p.results), acumulado: detalleLibro(a.results, true),
+    obligaciones: obligacionesPorMoneda(prestamos.results, compras.results, socios.results),
+    alcance: { periodo: 'filtrado', acumulado: 'global', obligaciones: 'global' } }, 200, NO_STORE);
 });
 finanzas.get('/api/admin/finanzas/repartos', async (c) => {
   const { env, scope } = partesAdmin(c);

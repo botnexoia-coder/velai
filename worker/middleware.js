@@ -176,6 +176,7 @@ export function clienteAllowed(path, method) {
   if (path === '/api/admin/leads' && method === 'GET') return true;
   if (path === '/api/admin/leads/export.csv' && method === 'GET') return true;
   if (path === '/api/admin/appointments' && method === 'GET') return true;
+  if (/^\/api\/admin\/tenants\/[0-9a-f-]+\/editorial$/i.test(path) && method === 'GET') return true;
   if (path === '/api/admin/events' && method === 'GET') return true;
   if (/^\/api\/admin\/events\/reservations\/[0-9a-f-]+$/i.test(path) && method === 'PATCH') return true;
   // Sus plantillas, en su espacio (solo lectura): el handler devuelve SOLO su fila
@@ -325,6 +326,7 @@ export function partesAdmin(c) {
 // Mismo perímetro en producción y en el barrido adversario. Ajeno sigue siendo 404.
 export const RUTA_MODULO = [
   [/^\/api\/admin\/appointments(?:\/|$)/, 'calendario'],
+  [/^\/api\/admin\/tenants\/[^/]+\/editorial(?:\/|$)/, 'calendario'],
   [/^\/api\/admin\/tenants\/[^/]+\/calendar(?:\/|$)/, 'calendario'],
   [/^\/api\/admin\/tenants\/[^/]+\/plantillas(?:\/|$)/, 'calendario'],
   [/^\/api\/admin\/tenants\/[^/]+\/(?:booking|services|reminders)(?:\/|$)/, 'citas'],

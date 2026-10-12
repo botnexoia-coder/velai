@@ -111,10 +111,16 @@ it('filtra por cliente y exporta exactamente los mismos filtros', async () => {
   await user.selectOptions(screen.getByLabelText('Moneda'), 'COP');
   await user.selectOptions(screen.getByLabelText('Concepto'), '2');
   await user.selectOptions(screen.getByLabelText('Cliente'), 't1');
+  await user.selectOptions(screen.getByLabelText('Clasificación'), 'operativo');
   await waitFor(() => expect(calls.some((c) => c.path.includes('/movimientos?') && c.path.includes('tenant=t1'))).toBe(true));
   const href = screen.getByRole('link', { name: 'Exportar CSV' }).getAttribute('href')!;
   const p = new URL(href, 'https://panel.test').searchParams;
-  expect(Object.fromEntries(p)).toMatchObject({ tipo: 'gasto', moneda: 'COP', concepto: '2', tenant: 't1' });
+  expect(Object.fromEntries(p)).toMatchObject({ tipo: 'gasto', moneda: 'COP', concepto: '2', tenant: 't1', naturaleza: 'operativo' });
+  await waitFor(()=>expect(calls.some(c=>c.path.includes('/resumen?')&&c.path.includes('tenant=t1')&&c.path.includes('naturaleza=operativo'))).toBe(true));
+  expect(screen.queryByRole('region',{name:'Resumen EUR'})).not.toBeInTheDocument();
+  expect(screen.getByRole('region',{name:'Resumen COP'})).toHaveTextContent('todo el histórico');
+  await user.click(screen.getByRole('button',{name:'Limpiar filtros'}));
+  expect(await screen.findByRole('region',{name:'Resumen EUR'})).toBeInTheDocument();
 });
 it('el catálogo permite añadir, renombrar y desactivar desde su pestaña', async () => {
   const { user, calls } = mount({ path: '/finanzas?tab=conceptos' });

@@ -23,6 +23,7 @@ import { gestion as rutasGestion } from './routes/gestion.js';
 import { fiscal as rutasFiscal } from './routes/fiscal.js';
 import { conexiones as rutasConexiones } from './routes/conexiones.js';
 import { calendario as rutasCalendario } from './routes/calendario.js';
+import { editorial as rutasEditorial } from './routes/editorial.js';
 import { solicitudes as rutasSolicitudes } from './routes/solicitudes.js';
 import { eventos as rutasEventos } from './routes/eventos.js';
 import { encryptSecret, decryptSecret } from './crypto.js';
@@ -4711,6 +4712,7 @@ function buildAdminApp() {
   admin.route('/', rutasConexiones);
   admin.route('/', rutasBiblioteca);
   admin.route('/', rutasCalendario);
+  admin.route('/', rutasEditorial);
   admin.route('/', rutasSolicitudes);
   admin.route('/', rutasEventos);
   admin.route('/', rutasTenants);

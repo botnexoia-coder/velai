@@ -799,7 +799,7 @@ export function useWebhookCheck() {
 
 // ── Finanzas (solo socios) ────────────────────────────────────────────────
 export interface FinFilters {
-  desde?: string; hasta?: string; tipo?: string; moneda?: string; concepto?: string; tenant?: string;
+  desde?: string; hasta?: string; tipo?: string; moneda?: string; concepto?: string; tenant?: string; naturaleza?: string;
 }
 export function useFinResumen(filters: FinFilters, enabled = true) {
   return useQuery({ queryKey: ['finanzas', 'resumen', filters], queryFn: () => api<import('../api/types').FinResumen>(`/api/admin/finanzas/resumen${qs({ ...filters })}`), enabled });

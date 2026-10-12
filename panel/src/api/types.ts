@@ -981,8 +981,23 @@ export interface FinMovimiento {
 export interface FinMovimientos { movimientos: FinMovimiento[]; nextCursor: string | null }
 export interface FinTotales { ingresos: number; gastos: number; beneficio: number; egresos: number; caja: number; sin_repartir: number }
 export interface FinRepartido { email: string; nombre: string; moneda: FinMoneda; importe: number }
+export interface FinDesglose {
+  ingresos_operativos:number; gastos_operativos:number; gastos_financieros:number;
+  resultado_operativo:number; resultado_tras_financieros:number;
+  compras_pagadas:number; reembolsos_socios:number; repartos:number; otros_egresos:number;
+}
+export interface FinObligaciones {
+  prestamos_sin_abono:{cantidad:number;principal:number};
+  prestamos_desembolsados:{cantidad:number;principal_pendiente:number};
+  compras:{adquirido:number;pagado_proveedores:number;pendiente_proveedores:number};
+  socios:{adelantado:number;reembolsado:number;pendiente:number};
+}
 export interface FinResumen {
   monedas: Record<FinMoneda, FinTotales>;
+  desglose?:Record<FinMoneda,FinDesglose>;
+  acumulado?:Record<FinMoneda,FinDesglose & {caja:number;financiacion_entradas:number;financiacion_salidas:number}>;
+  obligaciones?:Record<FinMoneda,FinObligaciones>;
+  alcance?:{periodo:string;acumulado:string;obligaciones:string};
   financiacion?: Record<FinMoneda,{entradas:number;salidas:number;neto:number}>;
   conceptos: { concepto_id: number; nombre: string; tipo: FinTipo; moneda: FinMoneda; importe: number; naturaleza?:FinNaturaleza }[];
   repartido: FinRepartido[];

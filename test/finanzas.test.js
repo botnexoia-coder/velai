@@ -336,3 +336,72 @@ test('migración 0038 sobre el libro desplegado conserva nombres, pagos y benefi
   assert.equal((await DB.prepare("SELECT activo FROM fin_socios WHERE email='historico@velai.test'").first()).activo, 1);
   assert.equal((await DB.prepare("SELECT activo FROM fin_socios WHERE email='botnexo.ia@gmail.com'").first()).activo, 1);
 });
+
+test('desglose separa operación, financiación y compras; naturaleza filtra libro/CSV sin cambiar acumulado global', async (t) => {
+  const { api, call, mov, reparto } = await fixture(t);
+  const uuid = () => crypto.randomUUID();
+  const cuenta = (await api('gestion/cuentas', 'POST', { id: uuid(), nombre: 'Cuenta ficticia', moneda: 'EUR' })).item;
+  const loan = (await api('gestion/prestamos', 'POST', { id: uuid(), cuenta_id: cuenta.id, nombre: 'Crédito ficticio', principal: 1000000, cuota: 100000, meses: 10, tin_bp: 0, tae_bp: 0 })).item;
+  await mov('ingreso', 'EUR', 100000, '2026-01-02');
+  await mov('gasto', 'EUR', 20000, '2026-01-02', { nota: 'Histórico sin clasificar: no inferir inversión' });
+  await mov('egreso', 'EUR', 1000, '2026-01-02');
+  await reparto([{ beneficiario: SOCIO.email, importe: 2000 }], { fecha: '2026-01-02' });
+  await api(`gestion/prestamos/${loan.id}/desembolso`, 'POST', { id: uuid(), fecha: '2026-01-02', importe: 990000, apertura: 10000 });
+  const quota = uuid();
+  await api(`gestion/prestamos/${loan.id}/pagos`, 'POST', { id: quota, numero: 1, fecha: '2026-02-02', importe: 50100, capital: 50000, interes: 0, comision: 100 });
+  const compra = (await api('gestion/compras', 'POST', { id: uuid(), concepto: 'Equipo ficticio', negocio: 'coches', moneda: 'EUR', estimado: 400000, estado: 'comprometida' })).item;
+  await api(`gestion/compras/${compra.id}/pagos`, 'POST', { id: uuid(), fecha: '2026-02-02', importe: 400000, pagador: 'cuenta', cuenta_id: cuenta.id });
+  const r = await api('finanzas/resumen');
+  assert.deepEqual(r.desglose.EUR, { ingresos_operativos: 100000, gastos_operativos: 20000, gastos_financieros: 10100,
+    resultado_operativo: 80000, resultado_tras_financieros: 69900, compras_pagadas: 400000, reembolsos_socios: 0, repartos: 2000, otros_egresos: 1000 });
+  assert.equal(r.monedas.EUR.beneficio, 69900); assert.equal(r.acumulado.EUR.caja, 616900);
+  assert.equal(r.acumulado.EUR.financiacion_entradas, 1000000); assert.equal(r.acumulado.EUR.financiacion_salidas, 50000);
+  assert.deepEqual(r.alcance, { periodo: 'filtrado', acumulado: 'global', obligaciones: 'global' });
+  assert.equal(r.desglose.COP.resultado_operativo, 0);
+  const filtered = await api('finanzas/resumen?desde=2026-02-01&naturaleza=financiero');
+  assert.equal(filtered.desglose.EUR.gastos_financieros, 100); assert.equal(filtered.desglose.EUR.ingresos_operativos, 0);
+  assert.deepEqual(filtered.acumulado, r.acumulado); assert.deepEqual(filtered.obligaciones, r.obligaciones);
+  const list = await api('finanzas/movimientos?naturaleza=compra');
+  assert.equal(list.movimientos.length, 1); assert.equal(list.movimientos[0].naturaleza, 'compra');
+  const csv = await (await call('finanzas/export.csv?naturaleza=compra')).text();
+  assert.equal(csv.split('\r\n').length, 2); assert.match(csv, /"4000\.00"/);
+  for (const path of ['resumen', 'movimientos', 'export.csv']) await assert.rejects(call(`finanzas/${path}?naturaleza=inventada`), error(400, 'naturaleza_invalido'));
+  await api(`gestion/prestamos/${loan.id}/pagos/${quota}/revertir`, 'POST', { id: uuid(), fecha: '2026-02-03', motivo: 'Corrección ficticia' });
+  const reversed = await api('finanzas/resumen');
+  assert.equal(reversed.desglose.EUR.gastos_financieros, 10000); assert.equal(reversed.acumulado.EUR.financiacion_salidas, 0);
+  assert.equal(reversed.obligaciones.EUR.prestamos_desembolsados.principal_pendiente, 1000000);
+});
+
+test('obligaciones globales distinguen préstamos sin abono, adquisiciones y pagos a proveedores/anticipos sin duplicar reembolsos', async (t) => {
+  const { api } = await fixture(t), uuid = () => crypto.randomUUID();
+  const cuenta = (await api('gestion/cuentas', 'POST', { id: uuid(), nombre: 'Cuenta ficticia', moneda: 'EUR' })).item;
+  await api('gestion/prestamos', 'POST', { id: uuid(), cuenta_id: cuenta.id, nombre: 'Sin fecha confirmada', principal: 300000, cuota: 30000, meses: 10, tin_bp: 0, tae_bp: 0 });
+  const compra = async (moneda, estado, estimado) => (await api('gestion/compras', 'POST', { id: uuid(), concepto: 'Compra ficticia', negocio: 'velai', moneda, estado, estimado })).item;
+  const c = await compra('EUR', 'comprometida', 90000);
+  await compra('EUR', 'prevista', 70000);
+  const cancelada = await compra('EUR', 'comprometida', 80000);
+  await api(`gestion/compras/${cancelada.id}`, 'PATCH', { version: cancelada.version, estado: 'cancelada' });
+  const anticipo = uuid();
+  await api(`gestion/compras/${c.id}/pagos`, 'POST', { id: anticipo, fecha: '2026-03-01', importe: 30000, pagador: 'socio', socio: SOCIO.email });
+  const pagada = await api(`gestion/compras/${c.id}`);
+  await api(`gestion/compras/${c.id}/comprar`, 'POST', { version: pagada.item.version, real: 80000, fecha: '2026-03-01' });
+  const refund = uuid();
+  await api(`gestion/compras/${c.id}/reembolsos`, 'POST', { id: refund, pago_id: anticipo, cuenta_id: cuenta.id, fecha: '2026-03-02', importe: 10000 });
+  const cop = await compra('COP', 'comprometida', 150000);
+  await api(`gestion/compras/${cop.id}/pagos`, 'POST', { id: uuid(), fecha: '2026-03-01', importe: 50000, pagador: 'socio', socio: SOCIO.email });
+  const r = await api('finanzas/resumen?desde=2026-04-01&moneda=COP');
+  assert.deepEqual(r.obligaciones.EUR, { prestamos_sin_abono: { cantidad: 1, principal: 300000 }, prestamos_desembolsados: { cantidad: 0, principal_pendiente: 0 },
+    compras: { adquirido: 80000, pagado_proveedores: 30000, pendiente_proveedores: 50000 }, socios: { adelantado: 30000, reembolsado: 10000, pendiente: 20000 } });
+  assert.deepEqual(r.obligaciones.COP.compras, { adquirido: 0, pagado_proveedores: 50000, pendiente_proveedores: 100000 });
+  assert.equal(r.obligaciones.COP.socios.pendiente, 50000); assert.equal(r.acumulado.EUR.caja, -10000);
+  assert.equal(r.desglose.EUR.reembolsos_socios, 0); assert.equal(r.acumulado.EUR.reembolsos_socios, 10000);
+  await api(`gestion/compras/${c.id}/pagos/${refund}/revertir`, 'POST', { id: uuid(), fecha: '2026-03-03', motivo: 'Corrección ficticia de devolución' });
+  const reversed = await api('finanzas/resumen');
+  assert.equal(reversed.obligaciones.EUR.socios.reembolsado, 0); assert.equal(reversed.obligaciones.EUR.socios.pendiente, 30000);
+  assert.equal(reversed.acumulado.EUR.caja, 0); assert.equal(reversed.acumulado.EUR.reembolsos_socios, 0);
+  assert.deepEqual(reversed.obligaciones.EUR.compras, r.obligaciones.EUR.compras);
+  await api(`gestion/compras/${c.id}/pagos/${anticipo}/revertir`, 'POST', { id: uuid(), fecha: '2026-03-04', motivo: 'Corrección ficticia de anticipo' });
+  const final = await api('finanzas/resumen');
+  assert.deepEqual(final.obligaciones.EUR.socios, { adelantado: 0, reembolsado: 0, pendiente: 0 });
+  assert.deepEqual(final.obligaciones.EUR.compras, { adquirido: 80000, pagado_proveedores: 0, pendiente_proveedores: 80000 });
+});

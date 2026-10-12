@@ -387,3 +387,11 @@ La web identifica por ahora únicamente el nombre comercial Velai. **No activar 
   fallback silencioso al chat de Velai devolviendo ok:true está cerrado por test.
 - El username del bot se descubre con `getMe` (caché KV `tg:botuser`, 1 día): si se cambia
   el bot (nuevo `TELEGRAM_TOKEN`), borrar esa clave o esperar el TTL, y re-registrar el webhook.
+
+### CLI de despliegue (12/10/2026)
+
+CD fija Wrangler 4.149.0 para usar la misma versión en el ensayo, migraciones y
+producción. La resolución abierta `wrangler@4` reutilizó 4.86.0 en el runner,
+que falló al leer una respuesta de deployments con HTTP 200; el primer intento
+también recibió un 504 en la API. Se mantienen todas las puertas CI, staging y
+smoke. Un fallo del proveedor no confirma que producción esté actualizada.
