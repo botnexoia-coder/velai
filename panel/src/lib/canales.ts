@@ -11,6 +11,7 @@ export const CHST: Record<GlobalChannelState, { cls: string; label: string }> = 
   live: { cls: 'ok', label: 'Enrutado' },
   inactive: { cls: 'off', label: 'cliente inactivo' },
   from_mismatch: { cls: '', label: 'responde con otro número' },
+  disabled: { cls: 'off', label: 'red apagada' },
   orphan: { cls: 'bad', label: 'Cliente inexistente' },
 };
 
@@ -92,6 +93,7 @@ const CXST: Record<string, [string, string]> = {
   preparing: ['wait', 'Lo estamos dejando listo'],
   unrouted: ['bad', 'Sin enrutar'],
   from_mismatch: ['wait', 'Responde con otro número'],
+  disabled: ['', 'Apagado'],
   paused: ['', 'En pausa'],
   inactive: ['', 'Cliente inactivo'],
   off: ['', 'Sin conectar'],

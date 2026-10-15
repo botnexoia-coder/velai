@@ -13,9 +13,15 @@
 | 1 | Te asigna su página de Facebook como socio (o te hace admin) | C |
 | 2 | Conectas la página en Twilio → Messenger (hasta **25 páginas** por cuenta/subcuenta) | V |
 | 3 | Webhook al worker (`https://vai-worker.botnexo-ia.workers.dev` — los webhooks servidor-a-servidor siguen ahí; `api.hirevai.com` es para el navegador) | V |
-| 4 | Alta en el panel: `channel_address = messenger:<pageId>`, equipo, plantilla, contexto | V |
-| 5 | Si lleva web: snippet en su página (ver "Ruta solo web"), su dominio en `web_origins` de su ficha (CORS al instante, sin deploy) y «Sincronizar Turnstile» | V |
-| 6 | Prueba end-to-end | V |
+| 4 | Alta en el panel: equipo, plantilla, contexto. El primario es web o WhatsApp (no hay clientes solo-red) | V |
+| 5 | **Plan y módulos → Messenger**: si su plan no lo incluye (Esencial), actívalo ahí como red adicional — no ocupa plaza. Profesional y Empresa lo traen; si alguien lo apagó, «Usar lo que incluye el plan» | V |
+| 6 | Identidad y canal → «ID de la página» → Conectar (el panel pone el prefijo `messenger:`) | V |
+| 7 | Si lleva web: snippet en su página (ver "Ruta solo web"), su dominio en `web_origins` de su ficha (CORS al instante, sin deploy) y «Sincronizar Turnstile» | V |
+| 8 | Prueba end-to-end | V |
+
+> Apagar Messenger en «Plan y módulos» (o bajar a Esencial sin excepción) **no desconecta
+> la página**: el bot deja de atenderla —200 con TwiML vacío y log `channel_disabled`— y
+> vuelve a atender en cuanto se re-enciende, sin reconectar nada.
 
 > ⚠️ Primera prueba real de Messenger: verificar que el canal acepta la respuesta TwiML.
 > Si no, cambiar a envío por API con `MessagingServiceSid`. Comprobar ANTES de prometer

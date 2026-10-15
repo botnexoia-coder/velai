@@ -1145,7 +1145,7 @@ function cxTiles(channels){const by={};for(const c of channels||[])if(c&&c.kind)
    +'<span class="cxtm"><span class="cxtn">'+esc(par[1])+'</span><span class="cxta">'+esc(dir)+'</span>'
    +'<span class="cxts '+st[0]+'"><i></i>'+esc(st[1])+'</span></span></div>'}).join('')}
 const CHSTATE={live:['on','<span class="flag ok">atendido</span>'],inactive:['','<span class="flag">cliente inactivo</span>'],
- unrouted:['bad','<span class="flag off">sin enrutar</span>'],off:['','<span class="muted">sin conectar</span>']};
+ unrouted:['bad','<span class="flag off">sin enrutar</span>'],disabled:['','<span class="flag off">apagado</span>'],off:['','<span class="muted">sin conectar</span>']};
 function renderChannels(list){$('#tChannels').innerHTML=(list||[]).map(c=>{const st=CHSTATE[c.state]||CHSTATE.off;
  const addr=c.address?esc(String(c.address).replace(/^whatsapp:/,'')):'—';
  return '<div class="chrow"><i class="'+st[0]+'"></i><span class="chk">'+esc(CHK[c.kind]||c.kind)+'</span><span class="chaddr">'+addr+'</span>'+st[1]+'</div>'}).join('')

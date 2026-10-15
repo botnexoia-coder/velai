@@ -8,10 +8,17 @@
 export type Plan = 'esencial' | 'profesional' | 'empresa';
 export type Modulo = 'calendario' | 'citas' | 'eventos';
 export interface ModuloExcepcion { modulo: Modulo; estado: 'on' | 'off'; otorgado_por?: string; otorgado_en?: string }
-export interface PlanInfo { id: Plan; nombre: string; canales: number | null; kinds: string[]; modulos: Modulo[] }
+/** Redes sociales que se encienden/apagan por cliente. Instagram existe en el modelo pero el panel no lo ofrece aún. */
+export type Red = 'messenger' | 'instagram';
+export interface RedExcepcion { kind: Red; estado: 'on' | 'off'; otorgado_por?: string; otorgado_en?: string }
+/** Estado de una red en el plan guardado: lo que trae el plan, la excepción, el resultado y si hay página conectada. */
+export interface RedEstado { kind: Red; incluido: boolean; estado: 'on' | 'off' | null; efectivo: boolean; conectado: boolean }
+export interface PlanInfo { id: Plan; nombre: string; canales: number | null; kinds: string[]; modulos: Modulo[]; redes?: Red[] }
 export interface TenantPlanResponse {
   plan: Plan; revision: string; updated_at: string; modulos: Modulo[];
   excepciones: ModuloExcepcion[]; canales: string[]; limite: number | null; catalogo: PlanInfo[];
+  /** Ausentes en workers anteriores a redes-plan: el panel los trata como vacíos. */
+  excepciones_redes?: RedExcepcion[]; redes?: RedEstado[];
 }
 
 export type Role = 'velai' | 'cliente';
@@ -474,7 +481,7 @@ export interface TenantDetail {
  * crudo; para el cliente, channelsForScope lo colapsa a su vocabulario (on/paused/
  * preparing/off) — dos vocabularios a propósito: el cliente nunca lee un diagnóstico.
  */
-export type TenantChannelState = 'live' | 'inactive' | 'unrouted' | 'from_mismatch' | 'off' | 'on' | 'paused' | 'preparing';
+export type TenantChannelState = 'live' | 'inactive' | 'unrouted' | 'from_mismatch' | 'disabled' | 'off' | 'on' | 'paused' | 'preparing';
 export interface TenantChannel {
   kind: 'web' | 'whatsapp' | 'telegram' | 'messenger';
   address: string | null;
@@ -676,7 +683,7 @@ export interface LogoUploadResponse {
 }
 
 // ── Canales (vista global, solo velai) ───────────────────────────────────────
-export type GlobalChannelState = 'live' | 'inactive' | 'from_mismatch' | 'orphan';
+export type GlobalChannelState = 'live' | 'inactive' | 'from_mismatch' | 'disabled' | 'orphan';
 export interface GlobalChannel {
   address: string;
   kind: string;
