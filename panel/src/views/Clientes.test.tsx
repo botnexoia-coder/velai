@@ -295,6 +295,70 @@ describe('vista Clientes', () => {
   });
 });
 
+describe('redes en «Plan y módulos»', () => {
+  async function abrirPlan(planOverride?: Record<string, unknown>) {
+    const utils = renderClientes((url, init) => {
+      if (planOverride && !init?.method && url.endsWith(`/api/admin/tenants/${detailTenant.id}/plan`)) {
+        return new Response(JSON.stringify({ ...tenantPlan, ...planOverride }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      }
+      return null;
+    });
+    const user = userEvent.setup();
+    await user.click(await screen.findByText('Barbería López'));
+    const dialog = await screen.findByRole('dialog', { hidden: true });
+    await waitFor(() => expect(within(dialog).getByLabelText('Nombre')).toHaveValue('Barbería López'));
+    await user.click(within(dialog).getByRole('button', { name: 'Plan y módulos' }));
+    return { ...utils, user, dialog };
+  }
+
+  it('Messenger tiene interruptor con su origen; Instagram sale como «Próximamente» sin control', async () => {
+    const { user, dialog } = await abrirPlan();
+    const messenger = await within(dialog).findByLabelText('Habilitar Messenger');
+    const tarjeta = within(messenger.closest('.card') as HTMLElement);
+    expect(messenger).toBeChecked();
+    expect(tarjeta.getByText('Incluido en el plan')).toBeInTheDocument();
+    expect(within(dialog).getByText('Instagram · Próximamente')).toBeInTheDocument();
+    expect(within(dialog).queryByLabelText('Habilitar Instagram')).toBeNull();
+    await user.click(messenger);
+    expect(messenger).not.toBeChecked();
+    expect(tarjeta.getByText('Excepción: revocado')).toBeInTheDocument();
+    // Sin página conectada no hay nada que cortar: no avisa.
+    expect(within(dialog).queryByRole('alert')).toBeNull();
+    await user.click(tarjeta.getByRole('button', { name: 'Usar lo que incluye el plan' }));
+    expect(messenger).toBeChecked();
+    // En Esencial la red no viene incluida: concederla es una red adicional.
+    await user.selectOptions(within(dialog).getByLabelText('Plan de la cuenta'), 'esencial');
+    expect(messenger).not.toBeChecked();
+    expect(tarjeta.getByText('Red adicional')).toBeInTheDocument();
+    await user.click(messenger);
+    expect(tarjeta.getByText('Excepción: concedido')).toBeInTheDocument();
+  });
+
+  it('apagar Messenger con la página conectada pide confirmación antes de guardar', async () => {
+    const confirm = vi.fn((_mensaje?: string) => false);
+    vi.stubGlobal('confirm', confirm);
+    const { user, dialog, calls } = await abrirPlan({
+      redes: [{ kind: 'messenger', incluido: true, estado: null, efectivo: true, conectado: true }, { kind: 'instagram', incluido: true, estado: null, efectivo: true, conectado: false }],
+    });
+    // Bajar a Esencial también la apaga: avisa igual que el interruptor.
+    await user.selectOptions(await within(dialog).findByLabelText('Plan de la cuenta'), 'esencial');
+    expect(within(dialog).getByRole('alert')).toHaveTextContent('dejará de atender por Messenger');
+    await user.click(within(dialog).getByRole('button', { name: 'Guardar' }));
+    await waitFor(() => expect(confirm).toHaveBeenCalledTimes(1));
+    expect(String(confirm.mock.calls[0]?.[0])).toContain('dejará de atender por Messenger');
+    expect(calls.some((c) => c.init?.method === 'PATCH')).toBe(false);
+    confirm.mockReturnValue(true);
+    await user.click(within(dialog).getByRole('button', { name: 'Guardar' }));
+    await waitFor(() => {
+      const patch = calls.find((c) => c.init?.method === 'PATCH' && c.url.endsWith(`/api/admin/tenants/${detailTenant.id}`));
+      expect(patch).toBeTruthy();
+      const body = JSON.parse(String(patch?.init?.body)) as Record<string, unknown>;
+      expect(body['plan']).toBe('esencial');
+      expect(body['excepciones_redes']).toEqual([]);
+    });
+  });
+});
+
 
 describe('lanzador en Marca del widget', () => {
   it('la pestaña Marca enseña retrato, acento y tarjeta', async () => {

@@ -3,6 +3,7 @@
 // el modelo, aprovisionamiento de Twilio y usuarios del cliente. Migrado tal cual del
 // adminRouter monolítico — misma conducta, mismos códigos.
 import { catalogoPlanes, validarPlan, tenantPlan, assertPlanChannelLimit, planStatements } from '../tenant-planes.js';
+import { REDES, kindPermitido } from '../planes.js';
 import { invalidateAvailability } from '../agenda.js';
 import { Hono } from 'hono';
 import { partesAdmin, envAdmins } from '../middleware.js';
@@ -157,7 +158,7 @@ tenants.post('/api/admin/tenants', async (c) => {
   const fields = validateTenant(body, { partial: false });
   if (fields.followup_enabled && !fields.followup_message) throw new HttpError(400, 'invalid_followup_message');
   const planConfig = validarPlan(body);
-  await assertPlanChannelLimit(env, null, planConfig.plan, fields);
+  await assertPlanChannelLimit(env, null, planConfig.plan, fields, null, planConfig.excepciones_redes);
   const revision = crypto.randomUUID();
   assertNotActivePending(fields.channel_address, fields.active ?? 1);
   const now = new Date().toISOString();
@@ -302,7 +303,7 @@ const grupoTenant = async (c) => {
     const followupEnabled = fields.followup_enabled ?? previous.followup_enabled;
     const followupMessage = fields.followup_message !== undefined ? fields.followup_message : previous.followup_message;
     if (followupEnabled && !followupMessage) throw new HttpError(400, 'invalid_followup_message');
-    const planBefore = body.plan !== undefined || body.excepciones !== undefined ? await tenantPlan(env, tenantId) : null;
+    const planBefore = body.plan !== undefined || body.excepciones !== undefined || body.excepciones_redes !== undefined ? await tenantPlan(env, tenantId) : null;
     if (planBefore && body.expected_revision !== planBefore.revision) throw new HttpError(409, 'stale_tenant');
     const planConfig = planBefore ? validarPlan(body, planBefore) : null;
     const revision = crypto.randomUUID();
@@ -324,7 +325,7 @@ const grupoTenant = async (c) => {
     const channelChanged = fields.channel_address !== undefined && fields.channel_address !== previous.channel_address;
     if (channelChanged) await assertChannelFree(env, fields.channel_address, tenantId);
     if (fields.channel_address !== undefined || fields.web_origins !== undefined || planConfig) {
-      await assertPlanChannelLimit(env, tenantId, planConfig?.plan ?? previous.plan ?? 'profesional', fields, previous);
+      await assertPlanChannelLimit(env, tenantId, planConfig?.plan ?? previous.plan ?? 'profesional', fields, previous, planConfig?.excepciones_redes ?? null);
     }
     const now = new Date().toISOString();
     if (fields.followup_enabled !== undefined) {
@@ -424,8 +425,8 @@ tenants.patch('/api/admin/tenants/:id/plan', async (c) => {
   const before = await tenantPlan(env, id);
   if (body.expected_revision !== before.revision) throw new HttpError(409, 'stale_tenant');
   const config = validarPlan(body, before);
-  await assertPlanChannelLimit(env, id, config.plan);
-  const previous = await env.DB.prepare('SELECT id,slug,channel_address FROM tenants WHERE id=?').bind(id).first();
+  const previous = await env.DB.prepare('SELECT id,slug,channel_address,web_origins FROM tenants WHERE id=?').bind(id).first();
+  await assertPlanChannelLimit(env, id, config.plan, {}, previous, config.excepciones_redes);
   const revision = crypto.randomUUID(); const now = new Date().toISOString();
   const result = await env.DB.batch([
     env.DB.prepare('UPDATE tenants SET plan=?,plan_revision=?,updated_at=? WHERE id=? AND plan_revision=? AND updated_at=?')
@@ -440,5 +441,7 @@ tenants.patch('/api/admin/tenants/:id/plan', async (c) => {
 
 tenants.get('/api/admin/planes', (c) => {
   if (c.get('scope').role !== 'velai') throw new HttpError(403, 'not_authorized');
-  return json({ plan: 'esencial', revision: '', updated_at: '', modulos: [], excepciones: [], canales: [], limite: 1, catalogo: catalogoPlanes() }, 200, NO_STORE);
+  return json({ plan: 'esencial', revision: '', updated_at: '', modulos: [], excepciones: [], canales: [], limite: 1,
+    excepciones_redes: [], redes: REDES.map((kind) => ({ kind, incluido: kindPermitido('esencial', kind), estado: null, efectivo: kindPermitido('esencial', kind), conectado: false })),
+    catalogo: catalogoPlanes() }, 200, NO_STORE);
 });

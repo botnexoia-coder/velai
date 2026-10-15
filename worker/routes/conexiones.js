@@ -104,9 +104,12 @@ conexiones.post('/api/admin/tenants/:id/logo', async (c) => {
 // importa: qué direcciones atiende el worker, y para quién.
 conexiones.get('/api/admin/channels', async (c) => {
   const { env } = partesAdmin(c);
+  // plan + red_estado: una red apagada en «Plan y módulos» conserva su fila y sale aquí
+  // como `disabled`, no como enrutada — el webhook ya no la atiende.
   const rows = (await env.DB.prepare(`SELECT c.address, c.kind, c.created_at, c.tenant_id,
-           t.slug, t.name, t.active, t.twilio_from, t.sender_status
+           t.slug, t.name, t.active, t.twilio_from, t.sender_status, t.plan, r.estado AS red_estado
     FROM tenant_channels c LEFT JOIN tenants t ON t.id = c.tenant_id
+    LEFT JOIN tenant_redes r ON r.tenant_id = c.tenant_id AND r.kind = c.kind
     ORDER BY t.name IS NULL DESC, t.name ASC, c.kind ASC`).all()).results || [];
   // El diagnóstico se calcula AQUÍ, no en el navegador: es la MISMA pregunta que se
   // hace tenantByAddress en cada mensaje entrante (¿resuelve un tenant activo?), así
@@ -115,10 +118,10 @@ conexiones.get('/api/admin/channels', async (c) => {
   // (UTC sin marca) y syncPrimaryChannel escribe ISO con Z. Sin normalizar, el panel
   // pinta las viejas como hora local y se van 2 h.
   const isoish = (v) => (/^\d{4}-\d\d-\d\d \d\d:\d\d:\d\d$/.test(String(v || '')) ? `${String(v).replace(' ', 'T')}Z` : v);
-  const channels = rows.map((r) => ({
+  const channels = rows.map(({ plan, red_estado, ...r }) => ({
     ...r,
     created_at: isoish(r.created_at),
-    state: routingChannelState(r),
+    state: routingChannelState({ ...r, plan, red_estado }),
   }));
   // El caso gogestion al revés: sender de WhatsApp vivo en Twilio y NINGUNA fila que
   // lo enrute. El webhook responde 404 unknown_tenant y el bot calla, en verde.

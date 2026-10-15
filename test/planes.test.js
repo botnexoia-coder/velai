@@ -2,8 +2,9 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { sqliteD1 } from './helpers/sqlite-d1.js';
-import { testing } from '../worker/app.js';
-import { PLANES, MODULOS, modulosDe, canalesOcupados } from '../worker/planes.js';
+import { testing, handleTwilio } from '../worker/app.js';
+import { bibliotecaFixture, MEDIA_TENANT } from './helpers/biblioteca-fixture.js';
+import { PLANES, MODULOS, modulosDe, redesDe, canalesOcupados } from '../worker/planes.js';
 import { tenantPlan, validarPlan, planStatements } from '../worker/tenant-planes.js';
 import { encryptSecret } from '../worker/crypto.js';
 
@@ -67,6 +68,8 @@ test('migración: SQL y JS deducen igual y conservan derechos e histórico', asy
   await env.DB.exec("INSERT INTO tenant_calendars(tenant_id,provider,refresh_token_enc,connected_by,connected_at,updated_at,booking_enabled) VALUES ('migration-1','google','secret','test','now','now',1)");
   await env.DB.exec("INSERT INTO tenant_events(id,tenant_id,slug,name,status,created_at,updated_at) VALUES ('event','migration-0','event','Evento','active','now','now')");
   await env.DB.exec(await readFile(new URL('../migrations/0043_planes.sql', import.meta.url), 'utf8'));
+  // tenantPlan lee también las redes (0055); esa migración solo depende de tenants y tenant_channels.
+  await env.DB.exec(await readFile(new URL('../migrations/0055_tenant_redes.sql', import.meta.url), 'utf8'));
   for (const [i, [channel_address, web_origins, kinds]] of cases.entries()) {
     const info = await tenantPlan(env, `migration-${i}`);
     assert.equal(info.plan, canalesOcupados({ channel_address, web_origins }, kinds.map((kind) => ({ kind }))).length > 1 ? 'profesional' : 'esencial');
@@ -379,4 +382,139 @@ test('canales secundarios: Messenger es del plan Pro, reemplaza en vez de duplic
   const audit = await env.DB.prepare("SELECT note FROM tenant_versions WHERE tenant_id=? AND note LIKE 'canal messenger%' ORDER BY id DESC").bind(ID).all();
   assert.ok(audit.results.some((r) => r.note.includes('retirado')) && audit.results.some((r) => r.note.includes('conectado')), 'conectar y retirar quedan en el historial');
   await assert.rejects(call(env, `${path}/messenger`, null, admin, 'DELETE'), (e) => e.code === 'not_found');
+});
+
+// ── Redes por cliente: encender/apagar desde «Plan y módulos» (REDES-PLAN.md) ──
+const redes = (plan, excepciones_redes, expected_revision = '') => ({ plan, excepciones_redes, expected_revision });
+const red = async (env, kind = 'messenger', id = ID) => (await tenantPlan(env, id)).redes.find((r) => r.kind === kind);
+const canalesFicha = async (env) => (await (await call(env, tenantPath)).json()).channels;
+
+test('redesDe: el plan decide por defecto y la excepción on/off manda; validarPlan las valida aparte', () => {
+  assert.deepEqual(redesDe('esencial'), []);
+  assert.deepEqual(redesDe('profesional'), ['messenger', 'instagram']);
+  assert.deepEqual(redesDe('esencial', [{ kind: 'messenger', estado: 'on' }]), ['messenger']);
+  assert.deepEqual(redesDe('empresa', [{ kind: 'messenger', estado: 'off' }]), ['instagram']);
+  // Web y WhatsApp no son redes: una excepción sobre ellos no cambia nada.
+  assert.deepEqual(redesDe('esencial', [{ kind: 'whatsapp', estado: 'on' }, { kind: 'web', estado: 'off' }]), []);
+  for (const plan of ['__proto__', 'constructor', 'desconocido']) assert.deepEqual(redesDe(plan, [{ kind: 'messenger', estado: 'on' }]), []);
+  assert.deepEqual(validarPlan(redes('esencial', [{ kind: 'messenger', estado: 'on' }])).redes, ['messenger']);
+  for (const malas of [[{ kind: 'whatsapp', estado: 'on' }], [{ kind: 'messenger', estado: 'si' }], [{ kind: 'messenger', estado: 'on' }, { kind: 'messenger', estado: 'off' }], 'messenger']) {
+    assert.throws(() => validarPlan(redes('esencial', malas)), (e) => e.code === 'invalid_redes');
+  }
+  // Un guardado sin el campo (panel antiguo) conserva las excepciones que ya había.
+  assert.deepEqual(validarPlan({ plan: 'esencial' }, { plan: 'esencial', excepciones: [], excepciones_redes: [{ kind: 'messenger', estado: 'on' }] }).redes, ['messenger']);
+});
+
+test('Esencial + Messenger concedido: lo conecta sin consumir plaza y queda auditado', async (t) => {
+  const env = await fixture(t); await insert(env);
+  await env.DB.prepare("INSERT INTO tenant_channels VALUES (?,?,'whatsapp','now')").bind('whatsapp:+34600000001', ID).run();
+  assert.deepEqual(await red(env), { kind: 'messenger', incluido: false, estado: null, efectivo: false, conectado: false });
+  await call(env, planPath, redes('esencial', [{ kind: 'messenger', estado: 'on' }]));
+  assert.deepEqual(await red(env), { kind: 'messenger', incluido: false, estado: 'on', efectivo: true, conectado: false });
+  assert.equal((await call(env, `${tenantPath}/channels`, { kind: 'messenger', address: '999888777666555' }, admin, 'POST')).status, 201);
+  const info = await tenantPlan(env, ID);
+  assert.deepEqual(info.canales, ['whatsapp', 'messenger']);
+  assert.equal(info.limite, 1);
+  // Dos canales ocupados con un cupo de 1 y el plan se vuelve a guardar sin 409: la red
+  // concedida es un add-on, como Telegram. La web sí seguiría chocando con el cupo.
+  assert.equal((await call(env, planPath, redes('esencial', [{ kind: 'messenger', estado: 'on' }], info.revision))).status, 200);
+  await assert.rejects(call(env, tenantPath, { web_origins: ['https://test.invalid'], expected_updated_at: (await tenantPlan(env, ID)).updated_at }), (e) => e.code === 'plan_channel_limit');
+  // Una red concedida nunca es el PRIMARIO: no hay clientes solo-red.
+  await assert.rejects(call(env, tenantPath, { channel_address: 'messenger:999888777666555', expected_updated_at: (await tenantPlan(env, ID)).updated_at }), (e) => e.code === 'plan_channel_kind');
+  const audit = await env.DB.prepare("SELECT note FROM tenant_versions WHERE tenant_id=? AND field='plan' ORDER BY id").bind(ID).all();
+  assert.deepEqual(JSON.parse(audit.results[0].note).excepciones_redes, [{ kind: 'messenger', estado: 'on' }]);
+  // Catálogo: qué redes trae cada plan, para que el panel distinga «incluido» de «adicional».
+  assert.deepEqual(Object.fromEntries(info.catalogo.map((p) => [p.id, p.redes])), { esencial: [], profesional: ['messenger', 'instagram'], empresa: ['messenger', 'instagram'] });
+});
+
+test('Profesional con Messenger revocado: conectarlo da 409 plan_channel_kind', async (t) => {
+  const env = await fixture(t); await insert(env, { plan: 'profesional' });
+  await call(env, planPath, redes('profesional', [{ kind: 'messenger', estado: 'off' }]));
+  assert.deepEqual(await red(env), { kind: 'messenger', incluido: true, estado: 'off', efectivo: false, conectado: false });
+  await assert.rejects(call(env, `${tenantPath}/channels`, { kind: 'messenger', address: '999888777666555' }, admin, 'POST'), (e) => e.status === 409 && e.code === 'plan_channel_kind');
+  assert.equal((await env.DB.prepare('SELECT COUNT(*) AS n FROM tenant_channels WHERE tenant_id=?').bind(ID).first()).n, 0);
+  // «Usar lo que incluye el plan» = quitar la excepción: vuelve a poder conectarse.
+  await call(env, planPath, redes('profesional', [], (await tenantPlan(env, ID)).revision));
+  assert.equal((await call(env, `${tenantPath}/channels`, { kind: 'messenger', address: '999888777666555' }, admin, 'POST')).status, 201);
+});
+
+test('bajar a Esencial con Messenger conectado no da 409: la red queda apagada y la fila se conserva', async (t) => {
+  const env = await fixture(t); await insert(env, { plan: 'profesional' });
+  await call(env, `${tenantPath}/channels`, { kind: 'messenger', address: '999888777666555' }, admin, 'POST');
+  assert.equal((await canalesFicha(env)).find((c) => c.kind === 'messenger').state, 'live');
+  assert.equal((await call(env, planPath, redes('esencial', [], (await tenantPlan(env, ID)).revision))).status, 200);
+  assert.equal((await tenantPlan(env, ID)).plan, 'esencial');
+  assert.deepEqual(await red(env), { kind: 'messenger', incluido: false, estado: null, efectivo: false, conectado: true });
+  assert.equal((await env.DB.prepare("SELECT address FROM tenant_channels WHERE tenant_id=? AND kind='messenger'").bind(ID).first()).address, 'messenger:999888777666555');
+  assert.equal((await canalesFicha(env)).find((c) => c.kind === 'messenger').state, 'disabled');
+  // El cliente lo ve en pausa, no un diagnóstico; la vista global de Canales lo marca igual.
+  assert.equal(testing.channelsForScope({ role: 'cliente' }, await canalesFicha(env)).find((c) => c.kind === 'messenger').state, 'paused');
+  const vista = await (await call(env, '/api/admin/channels')).json();
+  assert.equal(vista.channels.find((c) => c.address === 'messenger:999888777666555').state, 'disabled');
+  // Concederla como excepción la re-enciende sin reconectar la página.
+  await call(env, planPath, redes('esencial', [{ kind: 'messenger', estado: 'on' }], (await tenantPlan(env, ID)).revision));
+  assert.equal((await canalesFicha(env)).find((c) => c.kind === 'messenger').state, 'live');
+  // Por el PATCH de la ficha (el que usa el panel) va igual: mismo CAS y misma auditoría.
+  const info = await tenantPlan(env, ID);
+  await call(env, tenantPath, { ...redes('esencial', [], info.revision), expected_updated_at: info.updated_at });
+  assert.equal((await red(env)).efectivo, false);
+});
+
+test('rol cliente: 403 al tocar las redes, ni por el plan ni por la ficha', async (t) => {
+  const env = await fixture(t); await insert(env);
+  const cliente = { role: 'cliente', tenantId: ID, email: 'cliente@test.invalid', modulos: [] };
+  const body = redes('esencial', [{ kind: 'messenger', estado: 'on' }]);
+  await assert.rejects(call(env, planPath, body, cliente), (e) => e.status === 403);
+  await assert.rejects(call(env, tenantPath, { ...body, expected_updated_at: '2026-09-21' }, cliente), (e) => e.status === 403);
+  assert.equal((await env.DB.prepare('SELECT COUNT(*) AS n FROM tenant_redes').first()).n, 0);
+});
+
+test('apagar Messenger conserva la fila y el webhook responde TwiML vacío sin IA ni lead', async (t) => {
+  const f = await bibliotecaFixture(); t.after(() => f.close());
+  await f.DB.prepare("INSERT INTO tenant_channels(address,tenant_id,kind,created_at) VALUES ('messenger:99999999999',?,'messenger','now')").bind(MEDIA_TENANT).run();
+  const path = `/api/admin/tenants/${MEDIA_TENANT}/plan`;
+  // Llenar la caché del tenant ANTES de apagar: el guardado del plan debe invalidarla.
+  t.mock.method(globalThis, 'fetch', async () => Response.json({ stop_reason: 'end_turn', content: [{ type: 'text', text: 'Hola' }], usage: {} }));
+  assert.match(await (await messengerWebhook(f)).text(), /<Message>Hola<\/Message>/);
+  await f.drain();
+  const antes = (await f.DB.prepare('SELECT COUNT(*) AS n FROM conv_messages').first()).n;
+  await call(f.env, path, redes('profesional', [{ kind: 'messenger', estado: 'off' }]));
+  assert.equal((await f.DB.prepare("SELECT COUNT(*) AS n FROM tenant_channels WHERE address='messenger:99999999999'").first()).n, 1, 'apagar no borra la fila');
+  t.mock.method(globalThis, 'fetch', async () => assert.fail('una red apagada no llama a la IA'));
+  const logs = []; t.mock.method(console, 'log', (line) => logs.push(String(line)));
+  const res = await messengerWebhook(f);
+  assert.equal(res.status, 200);
+  assert.equal(await res.text(), '<?xml version="1.0" encoding="UTF-8"?><Response></Response>');
+  await f.drain();
+  assert.equal((await f.DB.prepare('SELECT COUNT(*) AS n FROM conv_messages').first()).n, antes, 'no guarda conversación');
+  assert.equal((await f.DB.prepare('SELECT COUNT(*) AS n FROM leads WHERE tenant_id=?').bind(MEDIA_TENANT).first()).n, 0, 'no crea lead');
+  assert.ok(logs.some((l) => l.includes('"code":"channel_disabled"') && l.includes('"kind":"messenger"')), 'deja un log estructurado');
+  // WhatsApp, que no es una red, sigue igual de atendido.
+  t.mock.method(globalThis, 'fetch', async () => Response.json({ stop_reason: 'end_turn', content: [{ type: 'text', text: 'Hola' }], usage: {} }));
+  assert.match(await (await messengerWebhook(f, 'whatsapp')).text(), /<Message>Hola<\/Message>/);
+});
+
+async function messengerWebhook(f, channel = 'messenger') {
+  const url = 'https://api.hirevai.com/';
+  const params = new URLSearchParams({ AccountSid: f.env.TWILIO_ACCOUNT_SID, From: channel === 'whatsapp' ? 'whatsapp:+34600000001' : 'messenger:12345678901',
+    To: channel === 'whatsapp' ? 'whatsapp:+34910000001' : 'messenger:99999999999', MessageSid: 'SM' + crypto.randomUUID().replaceAll('-', ''), Body: '¿Abrís mañana?' });
+  const data = url + [...params.keys()].sort().map((key) => key + params.get(key)).join('');
+  const key = await crypto.subtle.importKey('raw', new TextEncoder().encode(f.env.TWILIO_AUTH_TOKEN), { name: 'HMAC', hash: 'SHA-1' }, false, ['sign']);
+  const signature = Buffer.from(await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(data))).toString('base64');
+  return handleTwilio(new Request(url, { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'X-Twilio-Signature': signature }, body: params }), f.env, f.ctx, f.config);
+}
+
+test('migración 0055: neutral — conserva la red a quien ya la usaba fuera de su plan', async (t) => {
+  const env = await fixture(t, { through: '0054' });
+  const ids = ['00000000-0000-4000-8000-0000000000a1', '00000000-0000-4000-8000-0000000000a2', '00000000-0000-4000-8000-0000000000a3', '00000000-0000-4000-8000-0000000000a4'];
+  await insert(env, { id: ids[0], address: 'whatsapp:+34600000011' });                   // Esencial con Messenger secundario
+  await insert(env, { id: ids[1], address: 'messenger:111111' });                        // Esencial heredado con Messenger primario
+  await insert(env, { id: ids[2], address: 'whatsapp:+34600000012', plan: 'profesional' }); // Pro: lo trae el plan, sin fila
+  await insert(env, { id: ids[3], address: 'web:sin-redes' });                           // Esencial sin redes
+  await env.DB.prepare("INSERT INTO tenant_channels VALUES ('messenger:222222',?,'messenger','now')").bind(ids[0]).run();
+  await env.DB.prepare("INSERT INTO tenant_channels VALUES ('messenger:333333',?,'messenger','now')").bind(ids[2]).run();
+  await env.DB.exec(await readFile(new URL('../migrations/0055_tenant_redes.sql', import.meta.url), 'utf8'));
+  const filas = (await env.DB.prepare('SELECT tenant_id,kind,estado FROM tenant_redes ORDER BY tenant_id').all()).results;
+  assert.deepEqual(filas, [{ tenant_id: ids[0], kind: 'messenger', estado: 'on' }, { tenant_id: ids[1], kind: 'messenger', estado: 'on' }]);
+  for (const [id, efectivo] of [[ids[0], true], [ids[1], true], [ids[2], true], [ids[3], false]]) assert.equal((await red(env, 'messenger', id)).efectivo, efectivo);
 });

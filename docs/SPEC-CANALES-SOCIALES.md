@@ -112,6 +112,41 @@ mantiene el gancho sin prometer entrega. Messenger sí se nombra, que ahora sí 
 
 ---
 
+## 6. Redes por cliente (2026-10-15, rama `redes-plan`)
+
+El §1 dejaba las redes como derecho **solo del plan**. Ahora se encienden y apagan **por
+cliente** desde «Plan y módulos», con el mismo patrón que los módulos. Informe completo en
+`REDES-PLAN.md` (raíz de la rama).
+
+- **Qué es una red**: `REDES = ['messenger', 'instagram']` (`worker/planes.js`). Web y
+  WhatsApp no lo son: siguen gobernados por plan + cupo, y el primario siempre es uno de
+  los dos. Instagram existe en el modelo pero el panel lo pinta como «Instagram ·
+  Próximamente», sin control, hasta que exista el canal (SPEC-INSTAGRAM.md).
+- **Derecho efectivo** = `redesDe(plan, excepciones)`: el plan pone el valor por defecto
+  (Profesional/Empresa traen las redes, Esencial no) y la excepción `on`/`off` del cliente
+  manda. Persistido en `tenant_redes` (migración `0055`), guardado en la misma transacción
+  y con el mismo CAS (`plan_revision`) que los módulos, auditado en `tenant_versions`
+  (`field='plan'`, con `excepciones_redes` en el JSON).
+- **API**: `GET /api/admin/tenants/:id/plan` devuelve además
+  `redes: [{ kind, incluido, estado, efectivo, conectado }]` y `excepciones_redes`; el
+  catálogo expone `redes` por plan. El guardado (`PATCH …/plan` o el `PATCH` de la ficha)
+  acepta `excepciones_redes: [{ kind, estado }]` en su propio campo (`invalid_redes` si
+  no valida); ausente = se conservan las que había. Solo rol Velai.
+- **Conceder** Messenger a un Esencial es un add-on: no ocupa plaza (como Telegram). Una
+  red concedida nunca puede ser el primario.
+- **Conectar** (`POST /channels`) exige la red encendida: si no, `409 plan_channel_kind`
+  («Messenger no está activado para este cliente. Actívalo en «Plan y módulos».»).
+- **Apagar** —o bajar a Esencial— con la página conectada está permitido y **no borra** la
+  fila de `tenant_channels`. El webhook responde 200 con TwiML vacío, sin IA ni lead, y
+  registra `channel_disabled`. La ficha y la vista de Canales marcan el canal `disabled`
+  («apagado»); el cliente lo ve «En pausa». El panel pide confirmación antes de guardar.
+  Bajar a Esencial con Messenger conectado ya no da 409.
+- Excepción que se conserva: si una red es el **primario** (solo el heredado
+  `velai-messenger`, Empresa), apagarla o bajar de plan sigue dando `409
+  plan_channel_kind`, porque dejaría al cliente sin canal.
+
+---
+
 ## Verificación
 
 - **Unitarios**: `kinds` por plan; un Esencial recibe `plan_channel_kind` al intentar

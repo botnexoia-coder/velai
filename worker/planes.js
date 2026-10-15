@@ -13,9 +13,26 @@ export const PLANES = {
   profesional: { nombre: 'Profesional', canales: Infinity, kinds: CANALES, modulos: ['calendario'] },
   empresa: { nombre: 'Empresa', canales: Infinity, kinds: CANALES, modulos: ['calendario'] },
 };
+// Las REDES sociales son los canales que se encienden y apagan por cliente desde «Plan y
+// módulos» (tabla tenant_redes, migración 0055). Web y WhatsApp no lo son: el primario
+// sigue siendo uno de los dos y los gobierna solo el cupo del plan.
+export const REDES = CANALES.filter((k) => k !== 'web' && k !== 'whatsapp');
 export const esPlan = (plan) => typeof plan === 'string' && Object.prototype.hasOwnProperty.call(PLANES, plan);
 export function kindPermitido(plan, kind) {
   return esPlan(plan) && PLANES[plan].kinds.includes(kind);
+}
+
+// Mismo patrón que modulosDe: el plan pone el valor por defecto y la excepción `on`/`off`
+// del cliente manda. Conceder una red a un Esencial es un add-on (no ocupa plaza).
+export function redesDe(plan, excepciones = []) {
+  if (!esPlan(plan)) return [];
+  const activas = new Set(PLANES[plan].kinds.filter((k) => REDES.includes(k)));
+  for (const { kind, estado } of excepciones) {
+    if (!REDES.includes(kind)) continue;
+    if (estado === 'on') activas.add(kind);
+    if (estado === 'off') activas.delete(kind);
+  }
+  return REDES.filter((k) => activas.has(k));
 }
 
 export function modulosDe(plan, excepciones = []) {

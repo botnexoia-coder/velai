@@ -210,9 +210,14 @@ export function mockFetch(routes: Record<string, unknown>): typeof fetch {
 
 export const tenantPlan = {
   plan: 'profesional', revision: '', updated_at: '', modulos: ['calendario'], excepciones: [], canales: ['web'], limite: null,
+  excepciones_redes: [],
+  redes: [
+    { kind: 'messenger', incluido: true, estado: null, efectivo: true, conectado: false },
+    { kind: 'instagram', incluido: true, estado: null, efectivo: true, conectado: false },
+  ],
   catalogo: [
-    { id: 'esencial', nombre: 'Esencial', canales: 1, modulos: [] },
-    { id: 'profesional', nombre: 'Profesional', canales: null, modulos: ['calendario'] },
-    { id: 'empresa', nombre: 'Empresa', canales: null, modulos: ['calendario'] },
+    { id: 'esencial', nombre: 'Esencial', canales: 1, kinds: ['web', 'whatsapp'], modulos: [], redes: [] },
+    { id: 'profesional', nombre: 'Profesional', canales: null, kinds: ['web', 'whatsapp', 'messenger', 'instagram'], modulos: ['calendario'], redes: ['messenger', 'instagram'] },
+    { id: 'empresa', nombre: 'Empresa', canales: null, kinds: ['web', 'whatsapp', 'messenger', 'instagram'], modulos: ['calendario'], redes: ['messenger', 'instagram'] },
   ],
 };

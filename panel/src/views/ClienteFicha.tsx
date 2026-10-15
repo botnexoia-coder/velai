@@ -32,7 +32,7 @@ import {
   useLogoUpload,
   type TenantSaveBody,
 } from '../hooks/queries';
-import type { Plan, Modulo, ModuloExcepcion, TenantChannel, TenantDetail, TenantDetailResponse } from '../api/types';
+import type { Plan, Modulo, ModuloExcepcion, Red, RedExcepcion, TenantChannel, TenantDetail, TenantDetailResponse, TenantPlanResponse } from '../api/types';
 
 // Los campos de texto de la ficha (mismo mapa TF que el v1). channel_address NO está
 // aquí a propósito: dejó de ser un campo que se teclea — el alta lo deriva del slug en
@@ -125,8 +125,26 @@ const CHSTATE: Record<string, { dot: string; flag: ReactNode }> = {
   live: { dot: 'on', flag: <span className="flag ok">atendido</span> },
   inactive: { dot: '', flag: <span className="flag">cliente inactivo</span> },
   unrouted: { dot: 'bad', flag: <span className="flag off">sin enrutar</span> },
+  disabled: { dot: '', flag: <span className="flag off">apagado</span> },
   off: { dot: '', flag: <span className="muted">sin conectar</span> },
 };
+
+// Redes por cliente (REDES-PLAN.md): mismo patrón que los módulos — el plan decide por
+// defecto y la excepción on/off manda. Solo Messenger tiene control: Instagram sale como
+// «Próximamente» porque el panel no ofrece lo que el webhook aún no atiende.
+const RED_NOMBRE: Record<Red, string> = { messenger: 'Messenger', instagram: 'Instagram' };
+function redIncluida(planInfo: TenantPlanResponse, plan: Plan, kind: Red): boolean {
+  const p = planInfo.catalogo.find((c) => c.id === plan);
+  return Boolean(p && (p.redes ?? p.kinds).includes(kind));
+}
+function redEncendida(planInfo: TenantPlanResponse, plan: Plan, excepciones: RedExcepcion[], kind: Red): boolean {
+  const excepcion = excepciones.find((r) => r.kind === kind);
+  return excepcion ? excepcion.estado === 'on' : redIncluida(planInfo, plan, kind);
+}
+/** Redes con página conectada que hoy atienden y que, con lo editado, dejarían de hacerlo. */
+function redesQueSeApagan(planInfo: TenantPlanResponse, plan: Plan, excepciones: RedExcepcion[]): Red[] {
+  return (planInfo.redes ?? []).filter((r) => r.conectado && r.efectivo && !redEncendida(planInfo, plan, excepciones, r.kind)).map((r) => r.kind);
+}
 
 export function ClienteFicha({ id, onClose }: { id: string | null; onClose: () => void }) {
   const dialogRef = useRef<HTMLDialogElement>(null);
@@ -139,10 +157,12 @@ export function ClienteFicha({ id, onClose }: { id: string | null; onClose: () =
   const { data: planInfo, error: planError } = useTenantPlan(tenantId);
   const [plan, setPlan] = useState<Plan>('esencial');
   const [excepciones, setExcepciones] = useState<ModuloExcepcion[]>([]);
+  const [excepcionesRedes, setExcepcionesRedes] = useState<RedExcepcion[]>([]);
   const planRevision = useRef<string | null>(null);
   useEffect(() => {
     if (planInfo && planRevision.current !== `${tenantId}:${planInfo.revision}`) {
       setPlan(planInfo.plan); setExcepciones(planInfo.excepciones);
+      setExcepcionesRedes((planInfo.excepciones_redes ?? []).map(({ kind, estado }) => ({ kind, estado })));
       planRevision.current = `${tenantId}:${planInfo.revision}`;
     }
   }, [planInfo, tenantId]);
@@ -198,7 +218,15 @@ export function ClienteFicha({ id, onClose }: { id: string | null; onClose: () =
     body['note'] = note;
     if (!editing || dirty.has('plan')) {
       if (!planInfo) { toast('No se ha podido cargar el plan. Inténtalo de nuevo.', false); return false; }
-      body.plan = plan; body.excepciones = excepciones; body.expected_revision = planInfo.revision;
+      body.plan = plan; body.excepciones = excepciones; body.excepciones_redes = excepcionesRedes; body.expected_revision = planInfo.revision;
+      // Apagar (o bajar de plan) con la página conectada deja de atender por ahí: se
+      // confirma antes, como cualquier acción que corta un canal vivo.
+      const apagadas = redesQueSeApagan(planInfo, plan, excepcionesRedes).map((k) => RED_NOMBRE[k]);
+      if (apagadas.length && !(await confirmar({
+        titulo: `¿Apagar ${apagadas.join(' y ')}?`,
+        cuerpo: `Este cliente tiene ${apagadas.join(' y ')} conectado: al guardar dejará de atender por ${apagadas.join(' y ')}. La página sigue conectada y vuelve a atender en cuanto se reactive aquí, sin reconectarla.`,
+        accion: 'Guardar y apagar', peligro: true,
+      }))) return false;
     }
     if (token) body.twilio_auth_token = token; // write-only: solo si se escribe
     if (editing) body.expected_updated_at = editing.updated_at;
@@ -331,6 +359,36 @@ export function ClienteFicha({ id, onClose }: { id: string | null; onClose: () =
                   </Card>;
                 })}
               </div>
+              <div className="grid mt12" aria-label="Redes sociales">
+                {(['messenger'] as Red[]).map((kind) => {
+                  const nombre = RED_NOMBRE[kind];
+                  const incluido = redIncluida(planInfo, plan, kind);
+                  const excepcion = excepcionesRedes.find((r) => r.kind === kind);
+                  const enabled = redEncendida(planInfo, plan, excepcionesRedes, kind);
+                  const guardada = planInfo.redes?.find((r) => r.kind === kind);
+                  return <Card key={kind} label={nombre}>
+                    <label className="plan-toggle"><input type="checkbox" aria-label={`Habilitar ${nombre}`} checked={enabled} onChange={(e) => {
+                      const on = e.target.checked;
+                      setExcepcionesRedes((rows) => [...rows.filter((r) => r.kind !== kind), { kind, estado: on ? 'on' : 'off' }]);
+                      markDirty('plan');
+                    }} /> {enabled ? 'Habilitado' : 'Deshabilitado'}</label>
+                    <p className="muted">{excepcion ? `Excepción: ${enabled ? 'concedido' : 'revocado'}` : incluido ? 'Incluido en el plan' : 'Red adicional'}</p>
+                    {excepcion ? <button className="btn alt btnsm" type="button" onClick={() => {
+                      setExcepcionesRedes((rows) => rows.filter((r) => r.kind !== kind)); markDirty('plan');
+                    }}>Usar lo que incluye el plan</button> : null}
+                    {guardada?.conectado && guardada.efectivo && !enabled
+                      ? <p role="alert" className="field-err">Tiene la página conectada: al guardar dejará de atender por {nombre}. La conexión se conserva.</p>
+                      : null}
+                    <small className="muted">
+                      {guardada?.conectado ? 'Página conectada en «Identidad y canal».' : 'La página se conecta en «Identidad y canal».'}
+                      {enabled && !incluido ? ' No ocupa plaza del plan.' : ''}
+                    </small>
+                  </Card>;
+                })}
+                <Card label="Instagram · Próximamente">
+                  <small className="muted">Aún no está integrado: se podrá activar aquí cuando el canal exista.</small>
+                </Card>
+              </div>
             </>}
           </section>
         ) : null}
@@ -348,7 +406,7 @@ export function ClienteFicha({ id, onClose }: { id: string | null; onClose: () =
               <div className="card cardwide">
                 <b>Canales del cliente</b>
                 <Channels channels={detail?.channels ?? null} isNew={!editing} />
-                {editing ? <ConectarRed tenantId={editing.id} plan={plan} canales={detail?.channels ?? null} /> : null}
+                {editing ? <ConectarRed tenantId={editing.id} activa={planInfo?.redes?.find((r) => r.kind === 'messenger')?.efectivo ?? planInfo?.plan !== 'esencial'} canales={detail?.channels ?? null} /> : null}
                 <small className="muted">
                   Se leen del enrutado real: la web funciona desde el primer día por el slug y WhatsApp llega con su
                   aprovisionamiento. {err('channel_address')}
@@ -483,17 +541,18 @@ function Card({ label, children }: { label: string; children: ReactNode }) {
 // Conectar una red al cliente. Solo Velai y solo sobre una ficha ya creada: enlazar una
 // página en Twilio no es autoservicio. El primario no se toca — esto escribe una fila de
 // enrutado, y la respuesta ya sale por el canal de llegada (el TwiML es síncrono).
-function ConectarRed({ tenantId, plan, canales }: { tenantId: string; plan: Plan; canales: TenantChannel[] | null }) {
+// `activa` sale del plan GUARDADO (redes[].efectivo), no de lo que se esté editando en
+// «Plan y módulos»: el worker decide con lo guardado, y el panel no promete otra cosa.
+function ConectarRed({ tenantId, activa, canales }: { tenantId: string; activa: boolean; canales: TenantChannel[] | null }) {
   const toast = useToast();
   const add = useTenantChannelAdd();
   const del = useTenantChannelDelete();
   const [pagina, setPagina] = useState('');
-  const permitido = plan !== 'esencial';
   const puesto = (canales ?? []).find((c) => c.kind === 'messenger' && c.address);
-  if (!permitido) {
+  if (!activa && !puesto) {
     return (
       <p className="muted mt8">
-        Messenger va en el plan Profesional. Cámbialo en «Plan y módulos» y aquí podrás conectar su página.
+        Messenger no está activado para este cliente. Actívalo en «Plan y módulos» y aquí podrás conectar su página.
       </p>
     );
   }
@@ -502,6 +561,7 @@ function ConectarRed({ tenantId, plan, canales }: { tenantId: string; plan: Plan
       <div className="chrow mt8">
         <span className="chk">messenger</span>
         <span className="chaddr">{String(puesto.address).replace(/^messenger:/, '')}</span>
+        {!activa ? <span className="muted">apagado en «Plan y módulos»: no atiende</span> : null}
         <button
           className="btn alt" type="button" disabled={del.isPending}
           onClick={() => {

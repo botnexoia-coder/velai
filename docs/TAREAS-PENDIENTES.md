@@ -25,6 +25,9 @@ encendido — entre ellas `tufisiooficial`, que es Esencial y mantiene Calendari
 sigue en 200 para cuentas Esencial y Profesional, el preflight de `/chat` en 204, el panel
 anónimo en 302 a Access y la página pública de reservas de dialogos en 200.
 
+> **Nota (2026-10-15):** el reparto de arriba es el de la migración y queda como histórico.
+> **zoe ya no es Esencial**: pasó a **profesional** el 2026-09-21 14:21.
+
 - [ ] **Repasar los planes contra lo contratado** desde Clientes → Plan y módulos. La
       migración dedujo por canales, no por factura: quien tenga un solo canal quedó en
       Esencial aunque pague Profesional. Es reversible con dos clics y nadie pierde

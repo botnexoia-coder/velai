@@ -1,5 +1,5 @@
-import { PLANES, MODULOS, modulosDe, canalesOcupados } from './planes.js';
-import { assertPlanChannelLimit, assertTenantModulo, tieneModulo } from './tenant-planes.js';
+import { PLANES, MODULOS, REDES, modulosDe, redesDe, canalesOcupados } from './planes.js';
+import { assertPlanChannelLimit, assertTenantModulo, tieneModulo, redActiva } from './tenant-planes.js';
 import { Hono } from 'hono';
 import { ADMIN_HEADERS, ADMIN_HTML } from './admin-page.js';
 import { previewTarget, readOnlyEnv } from './mobile-preview.js';
@@ -912,7 +912,7 @@ export async function tenantTokenColumn(env, tenantId, body) {
 // WhatsApp no está enrutado eso es trabajo pendiente NUESTRO, no un problema que él pueda
 // accionar — se le dice que lo estamos dejando listo, no «404 unknown_tenant». Velai, en
 // la misma vista, sigue viendo el estado crudo: ahí el diagnóstico sí sirve.
-const CLIENT_STATE = { live: 'on', inactive: 'paused', unrouted: 'preparing', from_mismatch: 'preparing', off: 'off' };
+const CLIENT_STATE = { live: 'on', inactive: 'paused', unrouted: 'preparing', from_mismatch: 'preparing', disabled: 'paused', off: 'off' };
 export function channelsForScope(scope, channels) {
   if (scope.role === 'velai') return channels;
   return channels.map((c) => ({ ...c, state: CLIENT_STATE[c.state] || 'off' }));
@@ -929,6 +929,11 @@ const LEGACY_CHANNEL_ALIASES = { velai: ['velai-messenger'] };
 export function routingChannelState(row) {
   if (!row.slug) return 'orphan';
   if (!row.active) return 'inactive';
+  // Red apagada en «Plan y módulos»: la fila se conserva (re-encender no obliga a
+  // reconectar la página) pero el webhook no la atiende. Sin plan en la fila (consultas o
+  // mocks antiguos) = Profesional, el mismo valor por defecto que el resto del worker.
+  if (REDES.includes(row.kind)
+    && !redesDe(row.plan ?? 'profesional', row.red_estado ? [{ kind: row.kind, estado: row.red_estado }] : []).includes(row.kind)) return 'disabled';
   if (row.kind === 'whatsapp' && row.twilio_from && row.twilio_from !== row.address) return 'from_mismatch';
   return 'live';
 }
@@ -939,8 +944,9 @@ export async function tenantChannelSummary(env, tenant) {
   const aliases = Object.hasOwn(LEGACY_CHANNEL_ALIASES, tenant.slug) ? LEGACY_CHANNEL_ALIASES[tenant.slug] : [];
   const aliasSql = aliases.length ? ` OR (t.slug IN (${aliases.map(() => '?').join(',')}) AND c.kind='messenger')` : '';
   const rawRows = (await env.DB.prepare(`SELECT c.address, c.kind, c.tenant_id,
-           t.slug, t.name, t.active, t.twilio_from
+           t.slug, t.name, t.active, t.twilio_from, t.plan, r.estado AS red_estado
     FROM tenant_channels c JOIN tenants t ON t.id = c.tenant_id
+    LEFT JOIN tenant_redes r ON r.tenant_id = c.tenant_id AND r.kind = c.kind
     WHERE c.tenant_id=?${aliasSql}`).bind(tenant.id, ...aliases).all()).results || [];
   return summarizeTenantChannels(tenant, rawRows);
 }
@@ -950,8 +956,9 @@ export async function tenantChannelSummary(env, tenant) {
 export async function tenantChannelSummaries(env, tenants) {
   if (!tenants.length) return [];
   const rows = (await env.DB.prepare(`SELECT c.address, c.kind, c.tenant_id,
-           t.slug, t.name, t.active, t.twilio_from
-    FROM tenant_channels c JOIN tenants t ON t.id = c.tenant_id`).all()).results || [];
+           t.slug, t.name, t.active, t.twilio_from, t.plan, r.estado AS red_estado
+    FROM tenant_channels c JOIN tenants t ON t.id = c.tenant_id
+    LEFT JOIN tenant_redes r ON r.tenant_id = c.tenant_id AND r.kind = c.kind`).all()).results || [];
   const byTenant = new Map();
   const messengerBySlug = new Map();
   for (const row of rows) {
@@ -3264,6 +3271,14 @@ export async function handleTwilio(request, env, ctx, config) {
   }
   if (!await validTwilioSignature(authToken, request.url, object, request.headers.get('X-Twilio-Signature') || '')) {
     throw new HttpError(403, 'invalid_twilio_signature');
+  }
+  // Red APAGADA en «Plan y módulos» (REDES-PLAN.md): la página sigue conectada pero no se
+  // atiende. 200 con TwiML vacío —un error haría que Twilio reintentara— sin IA, sin
+  // conversación y sin lead. Tras la firma: una petición sin firmar no sondea qué está apagado.
+  const red = REDES.find((k) => to.startsWith(`${k}:`));
+  if (red && !await redActiva(env, tenant, red)) {
+    console.log(JSON.stringify({ level: 'info', code: 'channel_disabled', tenant: tenant.slug, kind: red }));
+    return new Response(EMPTY_TWIML, { headers: { 'Content-Type': 'text/xml; charset=utf-8' } });
   }
   // Twilio reintenta el webhook si la respuesta tarda o falla: sin dedupe, el mismo
   // mensaje se procesaba (y se pagaba al modelo) DOS veces. La clave se escribe ANTES
