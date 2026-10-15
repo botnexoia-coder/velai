@@ -44,7 +44,7 @@ export function nayaConversationFacts(messages) {
   // A reminder to type the exact phrase is not a new summary. Recover the
   // immediately preceding summary only across generic confirmations, never across
   // a changed name, party size or other new customer instruction.
-  if (/responde\s+(?:exactamente\s+)?confirmo reserva/i.test(plain(text(messages[beforeIndex])))
+  if (/respond(?:e|as)\s+(?:exactamente\s+)?confirmo reserva/i.test(plain(text(messages[beforeIndex])))
       && !/(?:^|\n)\s*[-•]?\s*Nombre\s*:/i.test(plain(text(messages[beforeIndex])))) {
     for (let i = beforeIndex - 1; i >= Math.max(0, beforeIndex - 6); i--) {
       if (messages[i].role === 'user' && !/^(?:confirmo|si|vale|ok)[.!\s]*$/i.test(plain(text(messages[i])))) break;
