@@ -41,12 +41,12 @@
 import { readFile, readdir } from 'node:fs/promises';
 import { clienteAllowed } from '../worker/middleware.js';
 
-const DIRECTAS = ['leads', 'conversations', 'conv_daily', 'appointments', 'agent_presence',
+const DIRECTAS = ['event_code_attributions', 'leads', 'conversations', 'conv_daily', 'appointments', 'agent_presence',
   'ai_usage', 'tenant_channels', 'tenant_calendars', 'tenant_reports', 'tenant_versions',
   'tenant_users', 'tenant_modulos', 'tenant_redes', 'tenants', 'settings', 'tenant_templates', 'tenant_solicitudes', 'tenant_services', 'calendar_exceptions', 'booking_claims', 'tenant_media', 'tenant_media_uploads'];
 const HIJAS = ['conv_messages', 'lead_notes', 'lead_events', 'lead_notifications', 'appointment_reminders'];
 // Interpolaciones que SON el filtro de tenant (scopeClause y sus dos variantes locales).
-const CLAUSULAS = ['sc.sql', 'scc.sql', 'leadW', "tenant_id = ?", 'tenant_id=?'];
+const CLAUSULAS = ['sc.sql', 'scc.sql', 'codeScope.sql', 'leadW', "tenant_id = ?", 'tenant_id=?'];
 const PUERTAS = ['assertOwnTenant(', 'canAttend(', 'scope-ok:'];
 // Cuarto patrón, y el más fuerte de todos: el id NO viene de la petición, viene del scope.
 // O se ata scope.tenantId directamente, o se acepta un ?tenant= solo tras comprobar que

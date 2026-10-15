@@ -4,10 +4,96 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { createWorker, handleLead, processConversationFollowups, testing } from '../worker/app.js';
 import { esSocio } from '../worker/middleware.js';
+import { NAYA_TENANT_ID, normalizeEventCode, nayaConversationFacts } from '../worker/event-codes.js';
 import { encryptSecret, decryptSecret } from '../worker/crypto.js';
 import { deploymentDecision, deploymentScope, deploymentScopeForPush } from '../scripts/deploy-scope.mjs';
 
 const TEST_KEK = btoa(String.fromCharCode(...new Uint8Array(32).map((_, i) => i + 1)));
+
+test('event codes: only customer answers attribute codes, with legacy alias and unknown pending', () => {
+  assert.equal(normalizeEventCode(' ca ver ni cola '), 'CAVERNICOLA');
+  assert.equal(normalizeEventCode('Caverna'), 'CAVERNICOLA');
+  const question = { role: 'assistant', content: '¿Tienes algún código de invitación? CAVERNICOLA, DIDIER o JAMES.' };
+  assert.equal(nayaConversationFacts([question]).attribution, null);
+  assert.deepEqual(nayaConversationFacts([question, { role: 'user', content: 'Caverna' }]).attribution, { original: 'Caverna', code: 'CAVERNICOLA' });
+  assert.deepEqual(nayaConversationFacts([question, { role: 'user', content: 'Rebujito' }]).attribution, { original: 'Rebujito', code: 'REBUJITO' });
+  assert.equal(nayaConversationFacts([question, { role: 'user', content: 'No tengo caverna' }]).attribution.code, 'SIN CÓDIGO');
+  assert.equal(nayaConversationFacts([{ role: 'assistant', content: '¿Cómo te llamas?' }, { role: 'user', content: 'Ana Ruiz' }]).attribution, null);
+  const summary = { role: 'assistant', content: '- **Nombre:** Ana Ruiz\n- **Asistentes:** 2 personas\n- **Total:** 35 €\n¿Está todo correcto? Responde **CONFIRMO RESERVA**' };
+  const reminder = { role: 'assistant', content: 'Para registrarte responde exactamente **CONFIRMO RESERVA**' };
+  assert.equal(nayaConversationFacts([summary, { role: 'user', content: 'Confirmo' }, reminder, { role: 'user', content: 'Confirmo reserva' }]).booking?.attendees, 2);
+  assert.equal(nayaConversationFacts([summary, { role: 'user', content: 'Mejor somos 6' }, reminder, { role: 'user', content: 'Confirmo reserva' }]).booking, null);
+});
+
+test('event codes: durable booking despite completed lead capture; deduplicates contacts and preserves human review', async (t) => {
+  const DB = await sqliteD1(); t.after(() => DB.close());
+  const now = new Date().toISOString();
+  await DB.prepare(`INSERT INTO tenants (id,slug,name,channel_address,system_prompt,active,created_at,updated_at)
+    VALUES (?,'colegiale-sevilla','NAYA','web:codes-test','test',1,?,?)`).bind(NAYA_TENANT_ID, now, now).run();
+  await DB.prepare("INSERT INTO tenant_modulos VALUES (?,'eventos','on','test',?)").bind(NAYA_TENANT_ID, now).run();
+  const event = crypto.randomUUID();
+  await DB.prepare(`INSERT INTO tenant_events (id,tenant_id,slug,name,status,created_at,updated_at)
+    VALUES (?,?,'fiesta-codes','Fiesta','active',?,?)`).bind(event, NAYA_TENANT_ID, now, now).run();
+  const conv = { id: crypto.randomUUID(), tenant: NAYA_TENANT_ID, channel: 'whatsapp', externalId: 'whatsapp:+34600000901', isNew: true, msgs: 0 };
+  const summary = '**Nombre:** Ana Ruiz\n**Asistentes:** 4 personas\n**Precio:** 15 € × 4 = 60 € en total\n**Código de invitación:** CAVERNA\n¿Está todo correcto? Responde **CONFIRMO RESERVA**';
+  assert.equal(await testing.convAppend({ DB }, conv, [
+    { role: 'assistant', content: '¿Tienes algún código de invitación?' }, { role: 'user', content: 'Caverna' }, { role: 'assistant', content: summary },
+  ]), true);
+  assert.equal((await DB.prepare('SELECT COUNT(*) n FROM event_reservations').first()).n, 0);
+  assert.equal(await testing.convAppend({ DB }, conv, [{ role: 'user', content: 'Confirmo reserva' }, { role: 'assistant', content: 'Inscripción registrada.' }]), true);
+  const reservation = await DB.prepare('SELECT * FROM event_reservations').first();
+  assert.equal(reservation.name, 'Ana Ruiz');
+  assert.equal(reservation.individual_tickets, 4);
+  assert.equal(reservation.quoted_total_cents, 6000);
+  assert.equal(reservation.payment_status, 'pending');
+  assert.equal(reservation.status, 'pending');
+  assert.equal(reservation.lead_id, null, 'booking must not require a lead/AI extraction');
+  let code = await DB.prepare('SELECT * FROM event_code_attributions').first();
+  assert.equal(code.code, 'CAVERNICOLA'); assert.equal(code.attendees, 4); assert.equal(code.reservation_id, reservation.id);
+  const lastMessage = await DB.prepare('SELECT MAX(id) AS id FROM conv_messages').first();
+  assert.equal(conv.lastId, lastMessage.id, 'chat cursor must be a message id, not the attribution insert id');
+  await testing.convAppend({ DB }, conv, [{ role: 'user', content: 'mi código es Rebujito' }, { role: 'assistant', content: 'Guardado para revisar.' }]);
+  code = await DB.prepare('SELECT * FROM event_code_attributions').first();
+  assert.equal(code.validation_status, 'pending'); assert.equal(code.original_code, 'Rebujito');
+  await DB.prepare("UPDATE event_code_attributions SET validation_status='approved',reviewed_by='team@example.com'").run();
+  const next = { ...conv, id: crypto.randomUUID(), isNew: true, msgs: 0 };
+  await testing.convAppend({ DB }, next, [{ role: 'user', content: 'Mi código es REBUJITO' }, { role: 'assistant', content: 'Recibido.' }]);
+  assert.equal((await DB.prepare('SELECT COUNT(*) n FROM event_code_attributions').first()).n, 1, 'same phone/new session does not add another contact');
+  code = await DB.prepare('SELECT * FROM event_code_attributions').first();
+  assert.equal(code.validation_status, 'approved'); assert.equal(code.reviewed_by, 'team@example.com');
+  assert.equal(code.attendees, 4);
+  await testing.convAppend({ DB }, next, [{ role: 'user', content: 'Mi código es Otro' }]);
+  code = await DB.prepare('SELECT * FROM event_code_attributions').first();
+  assert.equal(code.validation_status, 'pending'); assert.equal(code.reviewed_by, null);
+  const scope = { role: 'cliente', tenantId: NAYA_TENANT_ID, email: 'naya@example.com', modulos: ['eventos'] };
+  const route = async (path, method = 'GET', body) => {
+    const url = new URL(path, 'https://admin.hirevai.com');
+    const req = new Request(url, { method, ...(body ? { headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) } : {}) });
+    return testing.adminRouter(req, { DB, ADMIN_ORIGIN: url.origin }, { waitUntil() {} }, url.pathname, url, {}, scope);
+  };
+  let listing = await (await route('/api/admin/events')).json();
+  assert.equal(listing.code_counts[0].contacts, 1);
+  assert.equal(listing.code_counts[0].registrations, 1);
+  assert.equal(listing.code_counts[0].attendees, 4);
+  assert.equal(listing.codes[0].tenant_id, undefined, 'client envelope strips tenant ownership');
+  const approved = await route(`/api/admin/events/codes/${code.id}`, 'PATCH', { validation_status: 'approved' });
+  assert.equal(approved.status, 200);
+  assert.equal((await DB.prepare('SELECT reviewed_by FROM event_code_attributions').first()).reviewed_by, scope.email);
+  const otherScope = { ...scope, tenantId: crypto.randomUUID() };
+  const foreignUrl = new URL(`/api/admin/events/codes/${code.id}`, 'https://admin.hirevai.com');
+  await assert.rejects(() => testing.adminRouter(new Request(foreignUrl, { method: 'PATCH', headers: { 'content-type': 'application/json' }, body: '{"validation_status":"rejected"}' }), { DB }, { waitUntil() {} }, foreignUrl.pathname, foreignUrl, {}, otherScope), (error) => error.status === 404);
+  await DB.prepare("UPDATE event_reservations SET status='cancelled'").run();
+  listing = await (await route('/api/admin/events')).json();
+  assert.equal(listing.code_counts[0].contacts, 1);
+  assert.equal(listing.code_counts[0].registrations, 0);
+  assert.equal(listing.code_counts[0].attendees, 0);
+  const notConfirmed = nayaConversationFacts([{ role: 'assistant', content: summary }, { role: 'user', content: 'Sí' }]);
+  assert.equal(notConfirmed.booking, null, 'generic yes is not the requested exact confirmation');
+  const before = (await DB.prepare('SELECT COUNT(*) n FROM conv_messages').first()).n;
+  await DB.exec('DROP TABLE event_code_attributions');
+  assert.equal(await testing.convAppend({ DB }, next, [{ role: 'user', content: 'Mi código es Otro' }]), false);
+  assert.equal((await DB.prepare('SELECT COUNT(*) n FROM conv_messages').first()).n, before, 'failed attribution rolls back the full chat batch');
+});
 
 test('el alcance de CD omite documentación y la frescura termina limpia sin autorizar otro SHA', () => {
   assert.deepEqual(deploymentScope(['README.md', 'docs/arquitectura.png', 'docs/OPERATIONS.md', 'panel/INTEGRACION.md']), {

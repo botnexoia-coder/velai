@@ -1,6 +1,7 @@
 import { PLANES, MODULOS, REDES, modulosDe, redesDe, canalesOcupados } from './planes.js';
 import { assertPlanChannelLimit, assertTenantModulo, tieneModulo, redActiva } from './tenant-planes.js';
 import { Hono } from 'hono';
+import { nayaEventStatements } from './event-codes.js';
 import { ADMIN_HEADERS, ADMIN_HTML } from './admin-page.js';
 import { previewTarget, readOnlyEnv } from './mobile-preview.js';
 import {
@@ -2785,7 +2786,9 @@ export async function handleChat(request, env, cors, ctx, config) {
   // El centinela de handoff jamás llega al usuario, tampoco en el canal web.
   const wantsHuman = WANTS_HUMAN.test(reply);
   reply = reply.replace(WANTS_HUMAN, '').trim() || 'De acuerdo, aviso al equipo para que te contacten.';
-  await convAppend(env, conv, [{ role: 'user', content: message }, attachmentTurn(reply, bookingMeta.attachment)]);
+  if (!await convAppend(env, conv, [{ role: 'user', content: message }, attachmentTurn(reply, bookingMeta.attachment)])) {
+    throw new HttpError(503, 'conversation_message_not_saved');
+  }
   if (bookingMeta.attachment) await noteMediaSent(env, tenant, bookingMeta.attachment);
   // Se cede el turno DESPUÉS de guardar, para que el panel abra el hilo con el último
   // mensaje ya dentro. assumeAvailable: la disponibilidad ya se resolvió arriba y no hace
@@ -2909,13 +2912,14 @@ export async function convAppend(env, conv, turns) {
     : env.DB.prepare('UPDATE conversations SET msgs=msgs+?, unanswered=unanswered+?, last_at=?, expires_at=?, inbox_address=COALESCE(inbox_address,?), last_inbound_at=COALESCE(?,last_inbound_at) WHERE id=?')
       .bind(list.length, unanswered, now, expires, conv.inbox || null, inbound, conv.id);
   try {
+    const eventWrites = await nayaEventStatements(env, conv, list);
     const out = await env.DB.batch([head, ...list.map((t) => env.DB
       .prepare(conv.clientMessageId
         ? 'INSERT INTO conv_messages (conversation_id,role,agent_email,text,created_at,attachments_json,client_message_id) VALUES (?,?,?,?,?,?,?)'
         : 'INSERT INTO conv_messages (conversation_id,role,agent_email,text,created_at,attachments_json) VALUES (?,?,?,?,?,?)')
       .bind(conv.id, t.role, t.agentEmail || null, t.content, now, t.attachments?.length ? JSON.stringify(t.attachments) : null,
-        ...(conv.clientMessageId ? [t.role === 'user' ? conv.clientMessageId : null] : [])))]);
-    const last = out && out[out.length - 1];
+        ...(conv.clientMessageId ? [t.role === 'user' ? conv.clientMessageId : null] : []))), ...eventWrites]);
+    const last = out && out[list.length];
     if (last && last.meta && last.meta.last_row_id) conv.lastId = last.meta.last_row_id;
     else {
       // Respaldo: el cursor del widget depende de esto. Sin un lastId real, /chat mandaría 0
@@ -3192,7 +3196,9 @@ async function settleTwilioReply(config, env, ctx, tenant, from, message, conv, 
   const turns = [{ role: 'user', content: message }];
   if (reply || attachment) turns.push(attachmentTurn(reply, attachment));
   const trail = [...conv.messages, ...turns].slice(-CONV_WINDOW);
-  await convAppend(env, conv, turns);
+  if (!await convAppend(env, conv, turns)) {
+    return 'No he podido guardar este turno. Por favor, vuelve a escribirlo; tu inscripción no se ha registrado en este intento.';
+  }
   // Messenger usa un PSID de hasta 25 dígitos, no un E.164: pasarlo por
   // normalizePhone lo descartaba a partir de 16 y hacía inalcanzable su captura.
   const contactId = from.startsWith('messenger:')

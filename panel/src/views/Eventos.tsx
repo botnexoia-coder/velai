@@ -2,7 +2,7 @@ import { EventFinance } from './EventFinance';
 import { useMemo, useState } from 'react';
 import { traducir } from '../api/errors';
 import type { EventPaymentStatus, EventReservationStatus } from '../api/types';
-import { useEventReservationStatus, useEvents, useMe } from '../hooks/queries';
+import { useEventCodeValidation, useEventReservationStatus, useEvents, useMe } from '../hooks/queries';
 import { fmt } from '../lib/format';
 import { useToast } from '../components/Toasts';
 
@@ -21,6 +21,7 @@ export function Eventos() {
   const canFinance = me.data?.role === 'velai' && me.data?.socio === true;
   const [view,setView] = useState('reservas');
   const update = useEventReservationStatus();
+  const reviewCode = useEventCodeValidation();
   const toast = useToast();
   const [selected, setSelected] = useState('');
   const events = query.data?.events ?? [];
@@ -46,6 +47,9 @@ export function Eventos() {
   const pending = reservations.filter((r) => r.status === 'pending').length;
   const confirmed = reservations.filter((r) => r.status === 'confirmed').length;
   const accepted = consents.filter((c) => c.status === 'accepted').length;
+  const codeCounts = (query.data?.code_counts ?? []).filter((c) => c.event_id === eventId);
+  const codes = (query.data?.codes ?? []).filter((c) => c.event_id === eventId);
+  const codeStatus = { recognized: 'Reconocido', pending: 'Pendiente de validar', approved: 'Validado por el equipo', rejected: 'Rechazado' };
 
   function change(id: string, status: EventReservationStatus) {
     update.mutate({ id, status }, {
@@ -110,6 +114,16 @@ export function Eventos() {
           </tbody>
         </table>
       </div>
+      <div className="eventsection"><h2>Códigos de invitación</h2><p>Un contacto por evento, aunque repita el código o vuelva a escribir. Las inscripciones y asistentes corresponden a resúmenes confirmados por el cliente y excluyen reservas canceladas; no equivalen a pagos. Los códigos desconocidos no aplican beneficios.</p></div>
+      <div className="table"><table><thead><tr><th>Código</th><th>Validación</th><th>Contactos</th><th>Inscripciones</th><th>Asistentes</th></tr></thead><tbody>
+        {codeCounts.map((c) => <tr key={`${c.code}-${c.validation_status}`}><td><b>{c.code}</b></td><td>{codeStatus[c.validation_status]}</td><td>{c.contacts}</td><td>{c.registrations}</td><td>{c.attendees}</td></tr>)}
+        {!codeCounts.length ? <tr><td colSpan={5} className="empty">Aún no se han registrado códigos para este evento.</td></tr> : null}
+      </tbody></table></div>
+      {codes.length ? <div className="table"><table><thead><tr><th>Persona</th><th>Código recibido</th><th>Código actual</th><th>Revisión del equipo</th><th>Conversación</th></tr></thead><tbody>
+        {codes.map((c) => <tr key={c.id}><td>{c.name || 'Sin inscripción todavía'}</td><td>{c.original_code}</td><td>{c.code}</td><td>{c.validation_status === 'recognized' ? codeStatus.recognized : <span className="sel"><select aria-label={`Validación de ${c.original_code} · ${c.name || 'contacto'}`} value={c.validation_status} disabled={reviewCode.isPending} onChange={(e) => reviewCode.mutate({ id: c.id, validation_status: e.target.value as 'pending' | 'approved' | 'rejected' }, { onError: (error) => toast(`No se pudo validar: ${traducir(error)}`, false) })}>
+          <option value="pending">Pendiente de validar</option><option value="approved">Validado por el equipo</option><option value="rejected">Rechazado</option>
+        </select></span>}</td><td>{c.conversation_id ? <a href={`/conversaciones?conversation=${encodeURIComponent(c.conversation_id)}`}>Ver conversación</a> : '—'}</td></tr>)}
+      </tbody></table></div> : null}
       <div className="eventsection"><h2>Permiso para futuros eventos</h2><p>Estado vigente por contacto. La evidencia completa queda registrada en D1.</p></div>
       <div className="table"><table className="tnarrow"><thead><tr><th>Fecha</th><th>Contacto</th><th>Canal</th><th>Estado</th></tr></thead><tbody>
         {consents.map((c) => <tr key={c.id}><td>{fmt(c.created_at)}</td><td className="tel">{c.contact}</td><td>{c.channel}</td><td><span className={`flag ${c.status === 'accepted' ? 'ok' : c.status === 'withdrawn' ? 'bad' : 'off'}`}>{c.status === 'accepted' ? 'Aceptó' : c.status === 'withdrawn' ? 'Baja' : 'No aceptó'}</span></td></tr>)}

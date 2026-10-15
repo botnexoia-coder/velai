@@ -100,6 +100,20 @@ export interface EventsResponse {
   events: TenantEvent[];
   reservations: EventReservation[];
   consents: ContactConsent[];
+  codes?: EventCodeAttribution[];
+  code_counts?: EventCodeCount[];
+}
+
+export type EventCodeValidation = 'recognized' | 'pending' | 'approved' | 'rejected';
+export interface EventCodeAttribution {
+  id: string; tenant_id?: string; event_id: string; conversation_id: string | null;
+  original_code: string; code: string; validation_status: EventCodeValidation;
+  attendees: number | null; name: string | null; reservation_status: EventReservationStatus | null;
+  reviewed_by: string | null; reviewed_at: string | null;
+}
+export interface EventCodeCount {
+  tenant_id?: string; event_id: string; code: string; validation_status: EventCodeValidation;
+  contacts: number; registrations: number; attendees: number;
 }
 
 export type LeadStatus = 'new' | 'contacted' | 'qualified' | 'won' | 'lost' | 'spam';

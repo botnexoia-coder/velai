@@ -115,6 +115,15 @@ export function useEventReservationStatus() {
   });
 }
 
+export function useEventCodeValidation() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, validation_status }: { id: string; validation_status: 'approved' | 'rejected' | 'pending' }) =>
+      apiPatch<OkResponse>(`/api/admin/events/codes/${id}`, { validation_status }),
+    onSuccess: () => void client.invalidateQueries({ queryKey: ['events'] }),
+  });
+}
+
 // ── Dashboard: IA ────────────────────────────────────────────────────────────
 export function useAiUsage(days: number, enabled: boolean) {
   return useQuery({

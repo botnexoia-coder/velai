@@ -177,6 +177,7 @@ const CASOS = [
   { key: '/api/admin/appointments', m: 'GET', path: () => '/api/admin/appointments' },
   { key: '/api/admin/events', m: 'GET', path: () => '/api/admin/events' },
   { key: 'events\\/reservations\\/', m: 'PATCH', path: () => '/api/admin/events/reservations/00000000-0000-4000-8000-0000000000a3', body: { status: 'confirmed' } },
+  { key: 'events\\/codes\\/', m: 'PATCH', path: () => '/api/admin/events/codes/00000000-0000-4000-8000-0000000000a4', body: { validation_status: 'approved' } },
   { key: '/api/admin/plantillas', m: 'GET', path: () => '/api/admin/plantillas' },
   { key: 'plantillas\\/', m: 'POST', path: (t) => `/api/admin/tenants/${t}/plantillas/confirmacion_reserva`, body: { texto: 'Hola {{nombre}}, tu cita es el {{fecha}} a las {{hora}}. Gestiónala aquí: {{enlace}} Gracias.' } },
   { key: '/api/admin/solicitudes', m: ['GET', 'POST'], path: () => '/api/admin/solicitudes', body: { tipo: 'plantilla_recordatorio', antelacion: 12 } },
@@ -329,6 +330,7 @@ test('módulos: todas las rutas contratadas cierran antes de consultar D1', asyn
   const paths = [
     ['/api/admin/appointments', 'GET'], ['/api/admin/events', 'GET'],
     [`/api/admin/events/reservations/${leadIdA}`, 'PATCH'],
+    [`/api/admin/events/codes/${leadIdA}`, 'PATCH'],
     [`/api/admin/tenants/${A}/calendar`, 'GET'], [`/api/admin/tenants/${A}/calendar`, 'PATCH'],
     [`/api/admin/tenants/${A}/calendar`, 'DELETE'], [`/api/admin/tenants/${A}/calendar/connect`, 'POST'],
     [`/api/admin/tenants/${A}/booking`, 'GET'], [`/api/admin/tenants/${A}/booking`, 'PATCH'],

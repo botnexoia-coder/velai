@@ -40,6 +40,13 @@ it('Velai ve Eventos y la selección activa no mezcla datos de otros clientes', 
         { id: 1, tenant_id: naya, contact: '+34600000001', purpose: 'future_events', status: 'accepted', channel: 'whatsapp', evidence: 'sí', created_at: '2026-09-19T10:00:00.000Z' },
         { id: 2, tenant_id: otro, contact: '+34600000002', purpose: 'future_events', status: 'accepted', channel: 'whatsapp', evidence: 'sí', created_at: '2026-09-19T10:00:00.000Z' },
       ],
+      code_counts: [
+        { event_id: '70000000-0000-4000-8000-000000000001', code: 'CAVERNICOLA', validation_status: 'recognized', contacts: 3, registrations: 2, attendees: 5 },
+        { event_id: '70000000-0000-4000-8000-000000000002', code: 'CODIGO-AJENO', validation_status: 'pending', contacts: 7, registrations: 0, attendees: 0 },
+      ],
+      codes: [
+        { id: '90000000-0000-4000-8000-000000000001', event_id: '70000000-0000-4000-8000-000000000001', code: 'REBUJITO', original_code: 'Rebujito', validation_status: 'pending', name: 'Contacto por validar', conversation_id: '50000000-0000-4000-8000-000000000001' },
+      ],
     },
   })));
 
@@ -58,4 +65,8 @@ it('Velai ve Eventos y la selección activa no mezcla datos de otros clientes', 
   expect(screen.getByRole('link', { name: 'Abrir conversación' })).toHaveAttribute('href', '/conversaciones?conversation=50000000-0000-4000-8000-000000000001');
   expect(screen.queryByText('Evento ajeno')).toBeNull();
   expect(screen.queryByText('+34600000002')).toBeNull();
+  expect(screen.getByRole('heading', { name: 'Códigos de invitación' })).toBeInTheDocument();
+  expect(screen.getByText('CAVERNICOLA')).toBeInTheDocument();
+  expect(screen.getByRole('combobox', { name: 'Validación de Rebujito · Contacto por validar' })).toHaveValue('pending');
+  expect(screen.queryByText('CODIGO-AJENO')).toBeNull();
 });

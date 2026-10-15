@@ -180,6 +180,7 @@ export function clienteAllowed(path, method) {
   if (/^\/api\/admin\/tenants\/[0-9a-f-]+\/editorial\/[0-9a-f-]+$/i.test(path) && ['PATCH', 'DELETE'].includes(method)) return true;
   if (path === '/api/admin/events' && method === 'GET') return true;
   if (/^\/api\/admin\/events\/reservations\/[0-9a-f-]+$/i.test(path) && method === 'PATCH') return true;
+  if (/^\/api\/admin\/events\/codes\/[0-9a-f-]+$/i.test(path) && method === 'PATCH') return true;
   // Sus plantillas, en su espacio (solo lectura): el handler devuelve SOLO su fila
   // (el id sale del scope) y sin sids. La gestión sigue siendo solo de Velai.
   if (path === '/api/admin/plantillas' && method === 'GET') return true;
