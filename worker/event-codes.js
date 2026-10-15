@@ -21,10 +21,10 @@ function answerCode(value, previous) {
   const simple = plain(raw);
   const explicit = simple.match(/\b(?:mi\s+)?codigo(?:\s+de\s+invitacion)?\s*(?:es\s+|:\s*|=\s*)([^\n.!?]{1,80})/i);
   if (explicit && !/^(?:no|ninguno|no tengo)\b/i.test(simple)) return explicit[1].trim();
-  if (/^(?:caverna|cavernicola|didier|james)$/i.test(simple.replace(/\s/g, ''))) return raw;
   const asked = /(?:tienes|tienen|tengas|algun|cual|indica)[\s\S]{0,90}codigo|codigo\s+(?:de\s+invitacion\s*)?:/i.test(plain(previous));
   if (!asked || /[?¿]/.test(simple)) return null;
-  if (/^(?:no|ninguno|ningun codigo|sin codigo|no tengo(?: codigo)?)(?:[,.!\s]|$)/i.test(simple)) return 'SIN CÓDIGO';
+  if (/^(?:no|ninguno|ningun codigo|sin codigo|no tengo(?: codigo)?|ni idea)(?:[,.!\s]|$)/i.test(simple)) return 'SIN CÓDIGO';
+  if (/^(?:caverna|cavernicola|didier|james)$/i.test(simple.replace(/\s/g, ''))) return raw;
   if (/^(?:si|claro|confirmo|confirmar|correcto|todo correcto|vale|ok|okay|perfecto|gracias|hola|baja|somos|quiero|estoy|ya|pero|mi nombre)\b/i.test(simple)) return null;
   // A free-form explanation is not a code. Preserve it in the conversation; ask
   // for the actual code rather than attributing a whole sentence to a promoter.

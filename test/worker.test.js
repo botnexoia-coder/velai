@@ -19,6 +19,7 @@ test('event codes: only customer answers attribute codes, with legacy alias and 
   assert.deepEqual(nayaConversationFacts([question, { role: 'user', content: 'Rebujito' }]).attribution, { original: 'Rebujito', code: 'REBUJITO' });
   assert.equal(nayaConversationFacts([question, { role: 'user', content: 'No tengo caverna' }]).attribution.code, 'SIN CÓDIGO');
   assert.equal(nayaConversationFacts([{ role: 'assistant', content: '¿Cómo te llamas?' }, { role: 'user', content: 'Ana Ruiz' }]).attribution, null);
+  assert.equal(nayaConversationFacts([{ role: 'assistant', content: '¿Cómo te llamas?' }, { role: 'user', content: 'James' }]).attribution, null, 'a matching name is not evidence of a code');
   const summary = { role: 'assistant', content: '- **Nombre:** Ana Ruiz\n- **Asistentes:** 2 personas\n- **Total:** 35 €\n¿Está todo correcto? Responde **CONFIRMO RESERVA**' };
   const reminder = { role: 'assistant', content: 'Para registrarte necesito que respondas exactamente **CONFIRMO RESERVA**' };
   assert.equal(nayaConversationFacts([summary, { role: 'user', content: 'Confirmo' }, reminder, { role: 'user', content: 'Confirmo reserva' }]).booking?.attendees, 2);
