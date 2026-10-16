@@ -22,3 +22,10 @@ it('un nombre libre antiguo se informa pero no se ofrece como opción del select
  const data=new FormData(screen.getByRole('form',{name:'Compra'}) as HTMLFormElement);
  expect(data.get('comprador')).toBe('');
 });
+
+it('un fallo o espera del catálogo no borra el comprador al guardar otros datos',()=>{
+ render(<form aria-label="Compra sin catálogo"><BuyerField value="Sebas"/></form>);
+ expect(screen.getByRole('combobox',{name:'Quién compra'})).toBeDisabled();
+ const data=new FormData(screen.getByRole('form',{name:'Compra sin catálogo'}) as HTMLFormElement);
+ expect(data.get('comprador')).toBe('Sebas');
+});
