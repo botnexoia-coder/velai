@@ -24,7 +24,7 @@ function mount({ socio=true, bought=false, retry=false, entities=false, extended
   }
   const data:Record<string,unknown>={
    '/api/admin/me':{role:'velai',socio,tenantId:null},
-   '/api/admin/gestion/catalogos':{entidades:[],cuentas:[{id:'cuenta',nombre:'Cuenta común',moneda:'EUR',saldo_inicial:0,version:1}],socios:[{email:'uno@velai.test',nombre:'Persona Uno'}],eventos:[{id:'evento-naya',name:'Fiesta · QA',tenant_name:'NAYA'}]},
+   '/api/admin/gestion/catalogos':{entidades:[],cuentas:[{id:'cuenta',nombre:'Cuenta común',moneda:'EUR',saldo_inicial:0,version:1}],socios:[{email:'uno@velai.test',nombre:'Persona Uno'},{email:'dos@velai.test',nombre:'Persona Dos'}],eventos:[{id:'evento-naya',name:'Fiesta · QA',tenant_name:'NAYA'}]},
    '/api/admin/gestion/prestamos':{items:[]},
    '/api/admin/gestion/compras':{items:[...(extended?[{id:'idea',concepto:'Idea de grabación',negocio:'dialogos',moneda:'EUR',estimado:25000,real:null,estado:'prevista',version:2,pagado:12500,pendiente:12500,documentos_count:0,hecho:0,evento_id:null,plan_pagos:[{fecha:'2026-10-14',importe:12500},{fecha:'2026-10-15',importe:12500}]},{id:'evento',concepto:'Artista evento',negocio:'dialogos',moneda:'EUR',estimado:10000,real:null,estado:'prevista',version:1,pagado:0,pendiente:10000,documentos_count:0,hecho:1,evento_id:'evento-naya'}]:[]),{id:'compra',concepto:'Equipo de ejemplo',negocio:'dialogos',moneda:'EUR',estimado:estimate,real:bought?79675:null,estado:bought?'comprada':'comprometida',comprador:'Persona Uno',proveedor:null,categoria:'Equipo',version:1,pagado:paid,pendiente:(bought?79675:estimate)-paid,documentos_count:0}]},
    '/api/admin/gestion/documentos':{items:[]},
@@ -212,4 +212,19 @@ it.each([0,1000])('una compra confirmada no ofrece atajo para editar importe rea
  await waitFor(()=>expect(calls.some(c=>c.method==='PATCH')).toBe(true));
  const body=calls.find(c=>c.method==='PATCH')?.body;expect(body).not.toHaveProperty('estimado');expect(body).not.toHaveProperty('real');expect(body).not.toHaveProperty('pagado');
  expect(calls.some(c=>c.method==='POST')).toBe(false);
+});
+
+it('editar compra permite seleccionar dos compradores sin duplicar compra ni registrar pago',async()=>{
+ const {calls,user}=mount({bought:true});
+ await user.click(await screen.findByRole('button',{name:'Equipo de ejemplo'}));
+ await user.click(screen.getByRole('button',{name:'Editar datos'}));
+ const dialog=within(screen.getByRole('dialog',{name:'Editar datos de la compra'}));
+ expect(dialog.getByRole('combobox',{name:'Quién compra'})).toHaveValue('Persona Uno');
+ await user.click(dialog.getByRole('button',{name:'Añadir otra persona'}));
+ await user.selectOptions(dialog.getByRole('combobox',{name:'Otra persona (2)'}),'Persona Dos');
+ expect(within(dialog.getByRole('combobox',{name:'Otra persona (2)'})).queryByRole('option',{name:'Persona Uno'})).not.toBeInTheDocument();
+ await user.click(dialog.getByRole('button',{name:'Guardar'}));
+ await waitFor(()=>expect(calls.some(c=>c.method==='PATCH')).toBe(true));
+ expect(calls.find(c=>c.method==='PATCH')?.body).toMatchObject({comprador:'Persona Dos y Persona Uno',version:1});
+ expect(calls.filter(c=>c.method!=='GET')).toHaveLength(1);
 });

@@ -81,3 +81,31 @@ test('presupuesto móvil de lectura mantiene contexto y no desborda',async({page
  expect(seen.every(c=>c.method==='GET'&&c.path.startsWith('/api/admin/mobile-preview/'))).toBe(true);
  await mkdir('/tmp/velai-event-finance-qa',{recursive:true});await page.screenshot({path:'/tmp/velai-event-finance-qa/event-budget-mobile.png',fullPage:true});
 });
+
+test('compras móviles: dos compradores y un solo importe',async({page,fixture,seen})=>{
+ const id=crypto.randomUUID();
+ const create=await fixture.request(new Request('https://panel.test/api/admin/gestion/compras',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id,concepto:'Compra conjunta QA',negocio:'dialogos',moneda:'EUR',estimado:1000,estado:'comprometida',comprador:'Ana'})}));expect(create.status).toBe(201);
+ const buy=await fixture.request(new Request(`https://panel.test/api/admin/gestion/compras/${id}/comprar`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({version:1,real:1000,comprador:'Ana',proveedor:'Proveedor QA'})}));expect(buy.status).toBe(200);
+ await page.setViewportSize({width:390,height:844});await page.goto('/compras');
+ await expect(page.getByRole('combobox',{name:'Estado',exact:true})).toHaveValue('activas');
+ await page.getByRole('button',{name:'Compra conjunta QA',exact:true}).click();
+ await page.getByRole('button',{name:'Editar datos',exact:true}).click();
+ const form=page.getByRole('dialog',{name:'Editar datos de la compra'});
+ await expect(form.getByRole('combobox',{name:'Quién compra',exact:true})).toHaveValue('Ana');
+ await form.getByRole('button',{name:'Añadir otra persona'}).click();
+ await form.getByRole('combobox',{name:'Otra persona (2)'}).selectOption('Luis');
+ await page.screenshot({path:test.info().outputPath('compradores-mobile.png'),fullPage:true});
+ await form.getByRole('button',{name:'Guardar',exact:true}).click();await expect(form).toHaveCount(0);
+ await expect(page.getByRole('dialog',{name:'Compra conjunta QA'})).toContainText('Ana y Luis');
+ await page.getByRole('dialog',{name:'Compra conjunta QA'}).getByRole('button',{name:'Cerrar',exact:true}).click();
+ await page.reload();await expect(page.locator('.g-chart')).toContainText('Ana y Luis');
+ await expect(page.locator('.g-chart-row')).toHaveCount(1);
+ await expect(page.getByText('compras realizadas',{exact:true}).locator('..')).toContainText('€ 10,00');
+ await page.getByRole('combobox',{name:'Comprado por',exact:true}).selectOption('Luis');
+ await expect(page.getByRole('button',{name:'Compra conjunta QA',exact:true})).toBeVisible();
+ expect((await fixture.DB.prepare('SELECT comprador FROM g_compras WHERE id=?').bind(id).first())?.comprador).toBe('Ana y Luis');
+ expect((await fixture.DB.prepare('SELECT count(*) n FROM g_pagos').first())?.n).toBe(0);
+ expect(seen.filter(r=>r.method==='PATCH')).toHaveLength(1);
+ await expect(page.locator('body')).toHaveJSProperty('scrollWidth',390);
+ await page.screenshot({path:test.info().outputPath('compras-mobile.png'),fullPage:true});
+});
