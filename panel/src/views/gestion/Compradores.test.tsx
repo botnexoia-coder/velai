@@ -10,13 +10,15 @@ it('unifica alias y orden de compras conjuntas, sin repetir a una persona',()=>{
  expect(buyerNames('Sebas y Sebastián Valderrama')).toEqual(['Sebastián Valderrama']);
  expect(buyerLabel(null)).toBe('Comprador pendiente');
 });
-it('conserva nombres antiguos y permite retirar un segundo comprador sin perder el principal',async()=>{
+it('un nombre libre antiguo se informa pero no se ofrece como opción del selector',async()=>{
  const user=userEvent.setup();
- render(<form aria-label="Compra"><BuyerField value="Persona anterior y Sebas"/></form>);
- expect(screen.getByRole('combobox',{name:'Quién compra'})).toHaveValue('Persona anterior');
+ render(<form aria-label="Compra"><BuyerField value="Persona anterior y Sebas" cat={{socios:[{nombre:'Sebastián Valderrama',email:'sebas@qa.test'}],entidades:[],cuentas:[],negocios:[]}}/></form>);
+ const first=screen.getByRole('combobox',{name:'Quién compra'});
+ expect(first).toHaveValue('');
+ expect(within(first).queryByRole('option',{name:'Persona anterior'})).not.toBeInTheDocument();
+ expect(screen.getByText(/El nombre anterior no está en el catálogo/)).toBeInTheDocument();
  expect(screen.getByRole('combobox',{name:'Otra persona (2)'})).toHaveValue('Sebastián Valderrama');
  await user.click(screen.getByRole('button',{name:'Quitar persona 2'}));
  const data=new FormData(screen.getByRole('form',{name:'Compra'}) as HTMLFormElement);
- expect(data.get('comprador')).toBe('Persona anterior');
- expect(within(screen.getByRole('combobox')).getByRole('option',{name:'Persona anterior'})).toBeInTheDocument();
+ expect(data.get('comprador')).toBe('');
 });

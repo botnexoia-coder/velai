@@ -27,6 +27,7 @@ function mount({ socio=true, bought=false, retry=false, entities=false, extended
    '/api/admin/gestion/catalogos':{entidades:[],cuentas:[{id:'cuenta',nombre:'Cuenta común',moneda:'EUR',saldo_inicial:0,version:1}],socios:[{email:'uno@velai.test',nombre:'Persona Uno'},{email:'dos@velai.test',nombre:'Persona Dos'}],eventos:[{id:'evento-naya',name:'Fiesta · QA',tenant_name:'NAYA'}]},
    '/api/admin/gestion/prestamos':{items:[]},
    '/api/admin/gestion/compras':{items:[...(extended?[{id:'idea',concepto:'Idea de grabación',negocio:'dialogos',moneda:'EUR',estimado:25000,real:null,estado:'prevista',version:2,pagado:12500,pendiente:12500,documentos_count:0,hecho:0,evento_id:null,plan_pagos:[{fecha:'2026-10-14',importe:12500},{fecha:'2026-10-15',importe:12500}]},{id:'evento',concepto:'Artista evento',negocio:'dialogos',moneda:'EUR',estimado:10000,real:null,estado:'prevista',version:1,pagado:0,pendiente:10000,documentos_count:0,hecho:1,evento_id:'evento-naya'}]:[]),{id:'compra',concepto:'Equipo de ejemplo',negocio:'dialogos',moneda:'EUR',estimado:estimate,real:bought?79675:null,estado:bought?'comprada':'comprometida',comprador:'Persona Uno',proveedor:null,categoria:'Equipo',version:1,pagado:paid,pendiente:(bought?79675:estimate)-paid,documentos_count:0}]},
+   '/api/admin/gestion/terceros':{items:[{id:'empresa-qa',nombre:'Proveedor ficticio'}]},
    '/api/admin/gestion/documentos':{items:[]},
    '/api/admin/gestion/compras/compra/pagos':{items:[]},
   };
@@ -50,7 +51,7 @@ it('confirmar compra registra el importe real sin inventar un pago',async()=>{
  const dialog=within(screen.getByRole('dialog',{name:'Confirmar compra realizada'}));
  await user.clear(dialog.getByLabelText('Importe real (EUR)'));
  await user.type(dialog.getByLabelText('Importe real (EUR)'),'796,75');
- await user.type(dialog.getByLabelText('Proveedor'),'Proveedor ficticio');
+ await user.selectOptions(dialog.getByRole('combobox',{name:'Proveedor'}),'Proveedor ficticio');
  await user.click(dialog.getByRole('button',{name:'Confirmar compra'}));
  await waitFor(()=>expect(screen.queryByRole('dialog',{name:'Confirmar compra realizada'})).not.toBeInTheDocument());
  expect(calls.find(c=>c.method==='POST')?.body).toMatchObject({version:1,real:79675,fecha:null,comprador:'Persona Uno'});

@@ -22,6 +22,7 @@ const query = (entidad = E1, moneda = 'EUR') => `entidad_id=${entidad}&moneda=${
 async function fixture(t) {
   const DB = await sqliteD1(); t.after(() => DB.close());
   await DB.exec('PRAGMA foreign_keys=ON');
+  await DB.prepare("INSERT INTO g_terceros(id,nombre,created_by,created_at) VALUES ('cliente-qa',?,'qa','2026-10-16'),('csv-qa',?,'qa','2026-10-16')").bind('Cliente ficticio','=HYPERLINK("x")').run();
   // Estos campos siguen la migración real0050; ningún dato personal de producción.
   for (const [id, nombre, tipo, estado, nif, direccion] of [
     [E1, 'Sociedad Uno', 'sociedad', 'activa', 'FICTICIO-UNO', 'Dirección uno'],

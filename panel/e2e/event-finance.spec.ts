@@ -109,3 +109,23 @@ test('compras móviles: dos compradores y un solo importe',async({page,fixture,s
  await expect(page.locator('body')).toHaveJSProperty('scrollWidth',390);
  await page.screenshot({path:test.info().outputPath('compras-mobile.png'),fullPage:true});
 });
+
+test('empresa del catálogo: alta explícita dentro de compra, selector y reutilización sin pago',async({page,fixture,seen})=>{
+ await page.setViewportSize({width:390,height:844});await page.goto('/compras');
+ await page.getByRole('button',{name:'Actuación fiesta A',exact:true}).click();
+ await page.getByRole('button',{name:'Se compró',exact:true}).click();
+ const form=page.getByRole('dialog',{name:'Confirmar compra realizada'});
+ await expect(form.getByRole('textbox',{name:'Proveedor',exact:true})).toHaveCount(0);
+ await form.getByRole('combobox',{name:'Quién compró',exact:true}).selectOption('Ana');
+ await form.getByRole('button',{name:'Añadir empresa al catálogo'}).click();
+ const company=page.getByRole('dialog',{name:'Añadir empresa al catálogo'});
+ await company.getByRole('textbox',{name:'Nombre de la empresa'}).fill('Empresa seleccionada QA');
+ await company.getByRole('button',{name:'Guardar',exact:true}).click();await expect(company).toHaveCount(0);
+ await expect(form.getByRole('combobox',{name:'Proveedor',exact:true})).toHaveValue('Empresa seleccionada QA');
+ await page.screenshot({path:test.info().outputPath('proveedor-mobile.png'),fullPage:true});
+ await form.getByRole('button',{name:'Confirmar compra',exact:true}).click();await expect(form).toHaveCount(0);
+ expect((await fixture.DB.prepare("SELECT COUNT(*) n FROM g_terceros WHERE nombre='Empresa seleccionada QA'").first())?.n).toBe(1);
+ expect((await fixture.DB.prepare("SELECT proveedor FROM g_compras WHERE concepto='Actuación fiesta A'").first())?.proveedor).toBe('Empresa seleccionada QA');
+ expect((await fixture.DB.prepare('SELECT count(*) n FROM g_pagos').first())?.n).toBe(0);
+ expect(seen.filter(c=>c.method==='POST'&&c.path.endsWith('/terceros'))).toHaveLength(1);
+});

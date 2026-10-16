@@ -32,6 +32,7 @@ async function fixture(t, options = {}) {
   const DB = await sqliteD1(options); t.after(() => DB.close());
   await DB.exec('PRAGMA foreign_keys=ON;');
   await DB.exec("DELETE FROM fin_socios; INSERT INTO fin_socios (email,nombre) VALUES ('uno@velai.test','Uno'),('dos@velai.test','Dos');");
+  if(await DB.prepare("SELECT name FROM sqlite_master WHERE name='g_terceros'").first()) await DB.exec("INSERT INTO g_terceros(id,nombre,created_by,created_at) VALUES ('qa-p1','Proveedor ejemplo','qa','2026-10-16'),('qa-p2','Proveedor corregido','qa','2026-10-16'),('qa-p3','Amazon','qa','2026-10-16'),('qa-p4','Proveedor QA','qa','2026-10-16');");
   const objects = new Map();
   const env = { DB, SOCIOS_EMAILS: 'uno@velai.test', FINANCE_DOCS: {
     async put(key, bytes, options) { objects.set(key, { bytes: new Uint8Array(bytes), contentType: options.httpMetadata.contentType }); },
@@ -735,7 +736,7 @@ test('respuesta D1 perdida después de confirmar conserva el adjunto adoptado y 
 test('compra real sin fecha conserva importe y permite completar fecha después sin inventar pago', async (t) => {
   const { api, compra, cuenta, DB, contar } = await fixture(t);
   const c = (await compra({ estimado: 79675 })).item;
-  const comprada = (await api(`gestion/compras/${c.id}/comprar`, 'POST', { version: c.version, real: 79675, fecha: null, comprador: 'Juan', proveedor: 'Amazon' })).item;
+  const comprada = (await api(`gestion/compras/${c.id}/comprar`, 'POST', { version: c.version, real: 79675, fecha: null, comprador: 'Uno', proveedor: 'Amazon' })).item;
   assert.equal(comprada.estado, 'comprada'); assert.equal(comprada.real, 79675); assert.equal(comprada.fecha_compra, null);
   assert.equal(comprada.documentos_count, 0); assert.equal(comprada.pendiente, 79675);
   assert.equal(await contar('fin_movimientos'), 0);
@@ -955,4 +956,43 @@ test('gasto manual de evento sin cuenta conserva coste pero no atribuye adelanto
   const assigned = (await api(path)).monedas.EUR;
   assert.equal(assigned.proyectado, 7000); assert.equal(assigned.realizado, 7000); assert.equal(assigned.gastos_sin_cuenta, 0);
   assert.equal(assigned.desembolsado_fondo_comun, 7000); assert.equal(assigned.inversion_pendiente, 7000);
+});
+
+
+test('compradores solo de catálogo: rechaza texto libre en alta, edición y confirmación; conjunta no crea pagos', async(t)=>{
+ const {call,api,compra,DB,contar}=await fixture(t);
+ await assert.rejects(()=>compra({comprador:'Nombre inventado'}),error(400,'comprador_desconocido'));
+ assert.equal(await contar('g_compras'),0);
+ const c=(await compra({comprador:'Dos y Uno y Dos'})).item;
+ assert.equal(c.comprador,'Dos y Uno');
+ await assert.rejects(()=>call(`gestion/compras/${c.id}`,'PATCH',{version:c.version,comprador:'Otro nombre'}),error(400,'comprador_desconocido'));
+ await assert.rejects(()=>call(`gestion/compras/${c.id}/comprar`,'POST',{version:c.version,real:50000,comprador:'Uno y Otro nombre'}),error(400,'comprador_desconocido'));
+ assert.equal((await DB.prepare('SELECT version FROM g_compras WHERE id=?').bind(c.id).first()).version,c.version);
+ const bought=(await api(`gestion/compras/${c.id}/comprar`,'POST',{version:c.version,real:50000,comprador:'Uno y Dos',proveedor:'Proveedor QA'})).item;
+ assert.equal(bought.comprador,'Dos y Uno');
+ assert.equal(await contar('g_compras'),1);assert.equal(await contar('g_pagos'),0);assert.equal(await contar('fin_movimientos'),0);
+});
+test('alias heredados solo se aceptan si resuelven a una persona activa del catálogo',async(t)=>{
+ const {compra,DB,call}=await fixture(t);
+ await DB.exec("UPDATE fin_socios SET nombre='Sebastián Valderrama' WHERE email='uno@velai.test'; UPDATE fin_socios SET nombre='Estiven Rojas' WHERE email='dos@velai.test';");
+ const c=(await compra({comprador:'Sebas y Estiven'})).item;
+ assert.equal(c.comprador,'Estiven Rojas y Sebastián Valderrama');
+ await DB.exec("UPDATE fin_socios SET activo=0 WHERE email='dos@velai.test'");
+ await assert.rejects(()=>call(`gestion/compras/${c.id}`,'PATCH',{version:c.version,comprador:'Estiven'}),error(400,'comprador_desconocido'));
+});
+
+
+test('catálogo de empresas: alta repetida sin duplicados y proveedores fuera de lista rechazados',async(t)=>{
+ const {api,compra,call,contar}=await fixture(t);
+ const before=await contar('g_terceros'),audits=await contar('g_auditoria');
+ const id=nuevo(),one=await api('gestion/terceros','POST',{id,nombre:'Nueva empresa QA'});
+ const same=await api('gestion/terceros','POST',{id:nuevo(),nombre:'NUEVA EMPRESA QA'});
+ const retry=await api('gestion/terceros','POST',{id,nombre:'Nueva empresa QA'});
+ assert.equal(one.item.id,same.item.id);assert.equal(retry.item.id,one.item.id);
+ assert.equal(await contar('g_terceros'),before+1);assert.equal(await contar('g_auditoria'),audits+1);
+ await assert.rejects(()=>compra({proveedor:'Empresa sin registrar'}),error(400,'empresa_desconocida'));
+ const c=(await compra({proveedor:'nueva empresa qa',comprador:'Uno'})).item;
+ assert.equal(c.proveedor,'Nueva empresa QA');
+ await assert.rejects(()=>call(`gestion/compras/${c.id}`,'PATCH',{version:c.version,proveedor:'Otra inventada'}),error(400,'empresa_desconocida'));
+ await assert.rejects(()=>call(`gestion/compras/${c.id}/comprar`,'POST',{version:c.version,real:50000,proveedor:'Otra inventada'}),error(400,'empresa_desconocida'));
 });

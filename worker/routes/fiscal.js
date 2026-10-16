@@ -1,5 +1,6 @@
 // Registro interno: no emite documentos fiscales ni transmite a Hacienda.
 import { Hono } from 'hono';
+import { empresaDeCatalogo } from '../catalogos-financieros.js';
 import { esSocio, partesAdmin } from '../middleware.js';
 import { HttpError, json, NO_STORE, readJson } from '../app.js';
 import { fail, choice, textField, uuid, integer, versionOf, day, canonical, digest, FIELDS, MONEDAS,
@@ -34,6 +35,7 @@ async function invoice(db, id) {
 }
 async function linkedRecords(db, item) {
   await entity(db, item.entidad_id);
+  await empresaDeCatalogo(db,item.contraparte_nombre);
   if (item.compra_id) {
     const purchase = await db.prepare('SELECT entidad_id,moneda FROM g_compras WHERE id=?').bind(item.compra_id).first();
     if (!purchase || item.tipo !== 'recibida' || purchase.entidad_id !== item.entidad_id || purchase.moneda !== item.moneda) fail('compra_incompatible');

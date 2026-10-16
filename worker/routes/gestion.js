@@ -3,6 +3,7 @@
 // guarda esSocio vive en CADA handler antes de tocar D1 o R2, además de clienteGate.
 // Contrato: GET listas {items:[...]}; POST/PATCH {item:{...}}; errores HttpError.
 import { Hono } from 'hono';
+import { empresaDeCatalogo } from '../catalogos-financieros.js';
 import { esSocio, partesAdmin } from '../middleware.js';
 import { HttpError, json, NO_STORE, readJson } from '../app.js';
 import {
@@ -70,6 +71,26 @@ gestion.get(`${BASE}/catalogos`, async (c) => {
     env.DB.prepare('SELECT e.id,e.tenant_id,e.name,e.starts_at,e.status,t.name AS tenant_name FROM tenant_events e JOIN tenants t ON t.id=e.tenant_id ORDER BY e.starts_at DESC,e.name'),
   ]);
   return json({ entidades: entidades.results.map(entidadItem), cuentas: cuentas.results.map(cuentaItem), socios: socios.results, negocios: NEGOCIOS, eventos: eventos.results }, 200, NO_STORE);
+});
+
+// Empresas externas: alta explícita, sin duplicar una empresa por mayúsculas.
+gestion.get(`${BASE}/terceros`, async(c)=>{
+ const {env}=abrir(c);
+ return json({items:(await env.DB.prepare('SELECT id,nombre FROM g_terceros ORDER BY nombre COLLATE NOCASE,id').all()).results},200,NO_STORE);
+});
+gestion.post(`${BASE}/terceros`, async(c)=>{
+ const {env,request,actor,now}=abrir(c),b=await bodyOf(request);
+ soloCampos(b,['id','nombre']);
+ const id=uuid(b.id),nombre=texto(b.nombre,160,'nombre_invalido');
+ const previous=await env.DB.prepare('SELECT id,nombre FROM g_terceros WHERE id=?').bind(id).first();
+ if(previous&&previous.nombre.toLocaleLowerCase('es')!==nombre.toLocaleLowerCase('es')) throw new HttpError(409,'idempotencia_conflicto');
+ if(previous) return json({item:previous},200,NO_STORE);
+ const results=await env.DB.batch([
+  env.DB.prepare('INSERT INTO g_terceros(id,nombre,created_by,created_at) VALUES(?,?,?,?) ON CONFLICT(nombre) DO NOTHING').bind(id,nombre,actor,now),
+  auditoria(env,{actor,accion:'empresa_alta',objeto_tipo:'tercero',objeto_id:id,detalle:{nombre},now,si:{sql:'SELECT 1 WHERE changes()>0',args:[]}}),
+ ]);
+ const item=await env.DB.prepare('SELECT id,nombre FROM g_terceros WHERE nombre=? COLLATE NOCASE').bind(nombre).first();
+ return json({item},results[0].meta.changes?201:200,NO_STORE);
 });
 
 // ── Entidades ────────────────────────────────────────────────────────────────
@@ -383,6 +404,22 @@ const campoCompra = {
   fecha_prevista: (v) => fechaOpcional(v, fechaCivil, 'fecha_prevista_invalida'), categoria: (v) => v == null ? 'otros' : texto(v, 60, 'categoria_invalida'),
   nota: (v) => texto(v, 2000, 'nota_invalida', { opcional: true }),
 };
+// El catálogo es la autoridad también en API: un cliente antiguo no puede
+// introducir un nombre libre que vuelva a fragmentar los importes por comprador.
+async function compradorDeCatalogo(env, value) {
+  if (!value) return null;
+  const key = (s) => s.normalize('NFD').replace(/\p{Diacritic}/gu, '').trim().toLowerCase();
+  const socios = (await env.DB.prepare("SELECT nombre FROM fin_socios WHERE activo=1 AND nombre NOT LIKE '%@%'").all()).results;
+  const nombres = new Map(socios.map((s) => [key(s.nombre), s.nombre]));
+  const aliases = { sebas: 'sebastian valderrama', estiven: 'estiven rojas', juan: 'juan esteban garcia' };
+  const seleccion = value.split(/\s+y\s+|\s*;\s*/).map((s) => {
+    const k = key(s);
+    const nombre = nombres.get(k) || nombres.get(aliases[k]);
+    if (!nombre) fail('comprador_desconocido');
+    return nombre;
+  });
+  return [...new Set(seleccion)].sort((a, b) => a.localeCompare(b, 'es')).join(' y ');
+}
 gestion.post(`${BASE}/compras`, async (c) => {
   const { env, request, actor, now } = abrir(c);
   const b = await bodyOf(request);
@@ -390,6 +427,8 @@ gestion.post(`${BASE}/compras`, async (c) => {
   const q = { id: uuid(b.id), moneda: enumValor(b.moneda, MONEDAS, 'moneda_invalida'), estimado: importeNoNegativo(b.estimado, 'estimado_invalido'),
     estado: b.estado == null ? 'prevista' : enumValor(b.estado, ['prevista', 'comprometida'], 'estado_invalido'),
     ...Object.fromEntries(Object.entries(campoCompra).map(([k, fn]) => [k, fn(b[k])])) };
+  q.comprador = await compradorDeCatalogo(env, q.comprador);
+  q.proveedor = await empresaDeCatalogo(env.DB,q.proveedor);
   q.plan_pagos = planPagos(b.plan_pagos);
   validarPlanImporte(q.plan_pagos, q.estimado);
   const huellaCompra = await huella(q);
@@ -431,6 +470,8 @@ gestion.patch(`${BASE}/compras/:id`, async (c) => {
     moneda: b.moneda === undefined ? old.moneda : enumValor(b.moneda, MONEDAS, 'moneda_invalida'),
     estimado: b.estimado === undefined ? old.estimado : importeNoNegativo(b.estimado, 'estimado_invalido'),
     ...Object.fromEntries(Object.entries(campoCompra).map(([k, fn]) => [k, b[k] === undefined ? old[k] : fn(b[k])])) };
+  if (b.comprador !== undefined) n.comprador = await compradorDeCatalogo(env, n.comprador);
+  if (b.proveedor !== undefined) n.proveedor = await empresaDeCatalogo(env.DB,n.proveedor);
   n.plan_pagos = b.plan_pagos === undefined ? JSON.parse(old.plan_pagos) : planPagos(b.plan_pagos);
   validarPlanImporte(n.plan_pagos, old.real ?? n.estimado);
   n.hecho_fecha = n.hecho ? (old.hecho ? old.hecho_fecha : now) : null;
@@ -457,6 +498,8 @@ gestion.post(`${BASE}/compras/:id/comprar`, async (c) => {
   if (version !== old.version) throw new HttpError(409, 'version_conflicto');
   const n = { real: importeNoNegativo(b.real, 'real_invalido'), fecha: fechaOpcional(b.fecha, fechaReal),
     comprador: b.comprador === undefined ? old.comprador : campoCompra.comprador(b.comprador), proveedor: b.proveedor === undefined ? old.proveedor : campoCompra.proveedor(b.proveedor) };
+  n.comprador = await compradorDeCatalogo(env, n.comprador);
+  n.proveedor = await empresaDeCatalogo(env.DB,n.proveedor);
   if (!['prevista', 'comprometida'].includes(old.estado)) throw new HttpError(409, old.estado === 'comprada' ? 'compra_cerrada' : 'compra_cancelada');
   validarPlanImporte(JSON.parse(old.plan_pagos), n.real);
   if (n.real < old.pagado) fail('real_inferior_a_pagado');

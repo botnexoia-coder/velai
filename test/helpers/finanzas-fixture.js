@@ -6,6 +6,7 @@ export async function finanzasFixture() {
   await DB.exec('PRAGMA foreign_keys=ON;');
   const env = { DB, SOCIOS_EMAILS: 'uno@velai.test,dos@velai.test' };
   await DB.exec("DELETE FROM fin_socios; INSERT INTO fin_socios (email,nombre) VALUES ('uno@velai.test','Ana'),('dos@velai.test','Luis');");
+  await DB.exec("INSERT INTO g_terceros(id,nombre,created_by,created_at) VALUES ('qa-proveedor','Proveedor QA','qa','2026-10-16');");
   const scope = { role: 'velai', tenantId: null, email: 'uno@velai.test' };
   const pending = [];
   return {
