@@ -2378,6 +2378,20 @@ export function confirmationTemplateVariables(env, tenant, appt, texto = null) {
   return JSON.stringify(variablesPara(templateKind('confirmacion_reserva'), texto, valores));
 }
 
+// CONTRATO con retomar_conversacion. `nombre` es el del lead de la conversación: el
+// nombre de perfil de WhatsApp no se guarda en ninguna parte (no hay columna). Sin
+// nombre, «de nuevo» y no el «Hola» de las citas: con el texto por defecto («Hola
+// {{nombre}}, …») saldría «Hola Hola,»; así queda «Hola de nuevo, te escribimos…».
+export function reengageValues(tenant, leadName) {
+  return {
+    nombre: templateVar(leadName, 'de nuevo'),
+    negocio: templateVar(tenant.brand_name || tenant.name, 'el negocio'),
+  };
+}
+export function reengageTemplateVariables(tenant, leadName, texto = null) {
+  return JSON.stringify(variablesPara(templateKind('retomar_conversacion'), texto, reengageValues(tenant, leadName)));
+}
+
 // Estado de UNA plantilla del catálogo para este tenant (tenant_templates, 0030).
 // try/catch por si la tabla aún no existe (deploy antes de migrar): sin fila no hay
 // plantilla, y el resto del sistema lo trata como no configurado — nunca revienta.
@@ -3249,6 +3263,26 @@ export async function sendTwilioText(env, tenant, fromAddress, toAddress, body, 
   return response.ok ? { ok: true } : { error: `twilio_${response.status}` };
 }
 
+// Plantilla aprobada hacia una conversación existente (retomar con la ventana cerrada).
+// Mismo molde que sendTwilioText —credenciales de la subcuenta, From = el número por el
+// que escribió el cliente— pero con ContentSid + ContentVariables en vez de Body.
+export async function sendTwilioTemplate(env, tenant, fromAddress, toAddress, contentSid, variables) {
+  const sub = tenant && tenant.twilio_subaccount_sid;
+  const sid = sub || env.TWILIO_ACCOUNT_SID;
+  const token = sub ? await twilioAuthTokenFor(env, tenant) : env.TWILIO_AUTH_TOKEN;
+  if (!sid || !token) return { skipped: true, error: 'not_configured' };
+  let response;
+  try {
+    response = await fetch(`https://api.twilio.com/2010-04-01/Accounts/${sid}/Messages.json`, {
+      method: 'POST',
+      headers: { Authorization: `Basic ${btoa(`${sid}:${token}`)}`, 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({ From: fromAddress, To: toAddress, ContentSid: contentSid, ContentVariables: variables }),
+      signal: AbortSignal.timeout(8000),
+    });
+  } catch (_) { return { error: 'twilio_unreachable' }; }
+  return response.ok ? { ok: true } : { error: `twilio_${response.status}` };
+}
+
 export function twiml(text, mediaUrls = []) {
   const content = mediaUrls.length ? `<Body>${escapeHtml(waBody(text))}</Body>${mediaUrls.map((url) => `<Media>${escapeHtml(url)}</Media>`).join('')}` : escapeHtml(waBody(text));
   return new Response(`<?xml version="1.0" encoding="UTF-8"?><Response><Message>${content}</Message></Response>`, { headers: { 'Content-Type': 'text/xml; charset=utf-8' } });
@@ -3322,6 +3356,8 @@ export async function handleTwilio(request, env, ctx, config) {
   // Botón del recordatorio de cita (SPEC-CONFIRMACIONES F1): camino determinista
   // ANTES de Vai — ni modelo ni estado de conversación deciden aquí. Solo con el
   // formato exacto conf:/canc: + UUID; cualquier otro ButtonPayload sigue como texto.
+  // Así entran los botones de retomar_conversacion (ret:si/ret:no): como un mensaje
+  // normal del cliente (Body = el texto del botón) que abre su ventana de 24 h.
   const buttonMatch = /^(conf|canc):([0-9a-f-]{36})$/i.exec(clean(params.get('ButtonPayload'), 60));
   if (buttonMatch && UUID_RE.test(buttonMatch[2])) {
     return handleReminderButton(env, ctx, tenant, from, to, buttonMatch[1].toLowerCase(), buttonMatch[2], message);

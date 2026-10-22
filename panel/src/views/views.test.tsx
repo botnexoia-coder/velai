@@ -22,6 +22,8 @@ import {
 import { Leads } from './Leads';
 import { Conversaciones } from './Conversaciones';
 import { Dashboard } from './Dashboard';
+import { fmtHora } from '../lib/format';
+import type { InboxThread, ReplyWindow } from '../api/types';
 
 function providers(children: ReactNode, initialEntry = '/') {
   return (
@@ -288,6 +290,76 @@ describe('vista Conversaciones', () => {
     expect(await screen.findByText(`Control tomado ✓ — ${nombre} queda en pausa hasta que se lo devuelvas`)).toBeInTheDocument();
     expect(posts).toEqual([`/api/admin/conversations/${inboxConThread.thread!.conversation.id}/takeover`]);
     expect(document.body.textContent).not.toContain('NAYA');
+  });
+
+  // Ventana de Meta cerrada: el botón de la plantilla «Retomar conversación».
+  function waThread(window: InboxThread['window'], extra: Partial<InboxThread> = {}) {
+    return {
+      ...inboxConThread,
+      thread: {
+        ...inboxConThread.thread!,
+        conversation: { ...inboxConThread.thread!.conversation, channel: 'whatsapp' as const, external_id: 'whatsapp:+34600111222', state: 'bot', agent_email: null },
+        window,
+        ...extra,
+      },
+    };
+  }
+  function inboxFetch(thread: () => unknown, posts: string[] = []) {
+    return vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      const path = url.split('?')[0] ?? url;
+      const ok = (body: unknown) => new Response(JSON.stringify(body), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      if ((init?.method ?? 'GET').toUpperCase() === 'POST') {
+        posts.push(path);
+        return ok({ ok: true, state: 'humano', agent_email: 'ana@velai.ai', sentAt: '2026-08-31T12:05:00.000Z' });
+      }
+      if (path === '/api/admin/inbox') return ok(url.includes('conversation=') ? thread() : inbox);
+      const routes: Record<string, unknown> = baseRoutes;
+      return new Response(JSON.stringify(routes[path] ?? { error: 'not_found' }), { status: path in routes ? 200 : 404, headers: { 'Content-Type': 'application/json' } });
+    });
+  }
+  const cerrada = (reengage: ReplyWindow['reengage']): ReplyWindow => ({ open: false, reason: 'atiende_la_ia', canTakeover: false, takeoverReason: 'window_closed', reengage });
+
+  it('ventana cerrada sin plantilla aprobada: botón apagado con el motivo y enlace a Plantillas', async () => {
+    vi.stubGlobal('fetch', inboxFetch(() => waThread(cerrada({ available: false, reason: 'plantilla_retomar_no_aprobada', lastSentAt: null }))));
+    render(providers(<Conversaciones />));
+    await userEvent.setup().click((await screen.findAllByText('¿Tenéis hueco mañana?'))[0]!);
+    const button = await screen.findByRole('button', { name: 'Enviar plantilla para retomar' });
+    expect(button).toBeDisabled();
+    expect(screen.getByText(/Da de alta la plantilla “Retomar conversación” en Plantillas/)).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Ir a Plantillas' })).toHaveAttribute('href', '/plantillas');
+    // El cajón explica la ventana de Meta, no que atiende Vai.
+    expect(screen.getByText(/ventana de 24 h de WhatsApp se cerró/)).toBeInTheDocument();
+  });
+
+  it('ventana cerrada con plantilla: envía, avisa con el toast y pinta la burbuja y el «esperando respuesta»', async () => {
+    const posts: string[] = [];
+    let enviada = false;
+    const sentAt = '2026-08-31T12:05:00.000Z';
+    vi.stubGlobal('fetch', inboxFetch(() => enviada
+      ? waThread(
+          { open: false, reason: 'window_closed', reengage: { available: false, reason: 'reengage_reciente', lastSentAt: sentAt } },
+          {
+            conversation: { ...inboxConThread.thread!.conversation, channel: 'whatsapp', state: 'humano', agent_email: 'ana@velai.ai' },
+            messages: [...inboxConThread.thread!.messages, { role: 'agent', agent_email: 'ana@velai.ai', text: 'Hola Marta, te escribimos de Barbería López para seguir con tu consulta.', created_at: sentAt }],
+          },
+        )
+      : waThread(cerrada({ available: true, reason: null, lastSentAt: null })), posts));
+    render(providers(<Conversaciones />));
+    const user = userEvent.setup();
+    await user.click((await screen.findAllByText('¿Tenéis hueco mañana?'))[0]!);
+    const button = await screen.findByRole('button', { name: 'Enviar plantilla para retomar' });
+    expect(button).toBeEnabled();
+    expect(button).toHaveAttribute('data-tip', 'Envía la plantilla aprobada “Retomar conversación”. Si responde, se reabren las 24 h.');
+    enviada = true;
+    await user.click(button);
+    expect(await screen.findByText('Plantilla enviada ✓ — cuando responda podrás escribirle')).toBeInTheDocument();
+    expect(posts).toEqual([`/api/admin/conversations/${inboxConThread.thread!.conversation.id}/reengage`]);
+    expect(await screen.findByText('Hola Marta, te escribimos de Barbería López para seguir con tu consulta.')).toBeInTheDocument();
+    expect(screen.getByText(`Plantilla enviada a las ${fmtHora(sentAt)} · esperando respuesta`)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Enviar plantilla para retomar' })).toBeDisabled();
+    // El motivo «ya se envió» no se repite junto al «esperando respuesta».
+    expect(screen.queryByText(/últimas 24 h/)).not.toBeInTheDocument();
   });
 
   it('abre directamente el hilo enlazado desde un aviso de Messenger', async () => {

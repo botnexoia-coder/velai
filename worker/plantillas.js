@@ -17,7 +17,9 @@
 // tenant_templates (migración 0030), genérico por `kind`: el paso de aprovisionamiento
 // (`plantillas/<kind>` en worker/app.js) y el cron que vigila la aprobación
 // (pollTemplateApprovals) trabajan contra esa tabla sin saber nada de recordatorios.
-// La plantilla nº 3 debe ser SOLO una entrada nueva en este objeto.
+// La plantilla nº 3 debe ser SOLO una entrada nueva en este objeto. Cada kind declara
+// además el `modulo` que exige editar su texto (ninguno = todo plan con WhatsApp): la
+// puerta de módulos del middleware y la de la ruta lo leen de aquí, no por kind.
 //
 // La plantilla de LEADS entra en el catálogo con su CUERPO incluido (`aviso_lead`,
 // fuente 'columnas'): el catálogo es LA lista completa de plantillas del sistema y,
@@ -42,11 +44,21 @@ const PAREJAS_RECORDATORIO = [
   { id: 'asistire_no_asistire', confirmar: 'Asistiré', cancelar: 'No asistiré' },
 ];
 
+// Parejas CURADAS de «Retomar conversación», mismo criterio que las del recordatorio.
+// Sus payloads (ret:si/ret:no) NO llevan id ni los parsea nadie: la pulsación entra por
+// el webhook como un mensaje más del cliente, que es justo lo que reabre la ventana.
+const PAREJAS_RETOMAR = [
+  { id: 'si_sigamos_ahora_no', confirmar: 'Sí, sigamos', cancelar: 'Ahora no' },
+  { id: 'continuar_mas_tarde', confirmar: 'Continuar', cancelar: 'Más tarde' },
+];
+
 export const TEMPLATE_CATALOG = {
   confirmacion_reserva: {
     kind: 'confirmacion_reserva', nombre: 'Cita agendada (confirmación)',
     descripcion: 'Avisa al cliente final por WhatsApp en cuanto su cita queda agendada, con el enlace privado para consultarla, cancelarla o cambiarla.',
     fuente: 'registro', categoria: 'UTILITY',
+    // Módulo que exige editar su texto (rol cliente): sin citas no hay nada que avisar.
+    modulo: 'calendario',
     approvalName: (slug) => `confirmacion_reserva_${slug}`.toLowerCase().replace(/[^a-z0-9_]/g, '_'),
     // Variables con nombre que el cliente puede usar; `enlace` es obligatoria: sin él la
     // notificación pierde su razón de ser (gestionar la cita). La llena
@@ -75,6 +87,7 @@ export const TEMPLATE_CATALOG = {
     descripcion: 'Recuerda la cita al cliente final con antelación, con botones para confirmar o cancelar.',
     fuente: 'registro', // estado en tenant_templates; se crea con el POST genérico plantillas/<kind>
     categoria: 'UTILITY', // mensaje iniciado por el negocio: SIEMPRE plantilla aprobada (63016)
+    modulo: 'calendario',
     // Antelación CURADA (1/2/6/8/12/24/48, default 24). Es config del ADDON, no de la
     // plantilla: vive en tenants.reminder_hours y se cambia después sin nueva
     // aprobación — por eso el CUERPO de abajo es NEUTRO respecto al tiempo (nada de
@@ -115,6 +128,47 @@ export const TEMPLATE_CATALOG = {
             actions: [
               { title: textos.confirmar, id: `conf:{{${idVar}}}` },
               { title: textos.cancelar, id: `canc:{{${idVar}}}` },
+            ],
+          },
+        },
+      };
+    },
+  },
+  // Retomar una conversación de WhatsApp con la ventana de 24 h ya cerrada: el equipo la
+  // envía A MANO desde el hilo (POST /conversations/:id/reengage), nunca un cron. Sin
+  // `modulo`: sirve a todo plan con WhatsApp. Categoría UTILITY como intención; Meta
+  // puede reclasificarla como MARKETING (seguimiento sin transacción) y el poll de
+  // aprobación ya sincroniza la categoría REAL, que la vista Plantillas enseña en ámbar.
+  // CONTRATO de variables: las del texto guardado por orden de aparición; las llena
+  // reengageTemplateVariables (worker/app.js) con variablesPara(). Los botones no llevan
+  // variable: sus payloads son fijos (ret:si/ret:no) y el webhook los trata como texto.
+  retomar_conversacion: {
+    kind: 'retomar_conversacion',
+    nombre: 'Retomar conversación',
+    descripcion: 'Permite volver a escribir a un cliente por WhatsApp cuando han pasado más de 24 h desde su último mensaje. Si responde, se reabre la conversación.',
+    fuente: 'registro',
+    categoria: 'UTILITY',
+    botones: PAREJAS_RETOMAR,
+    botonesDefault: 'si_sigamos_ahora_no',
+    approvalName: (slug) => `retomar_conversacion_${slug}`.toLowerCase().replace(/[^a-z0-9_]/g, '_'),
+    texto: {
+      campos: ['nombre', 'negocio'],
+      obligatorias: ['negocio'],
+      defecto: 'Hola {{nombre}}, te escribimos de {{negocio}} para seguir con tu consulta. ¿Te parece bien que continuemos por aquí?',
+    },
+    content: (slug, businessName, pareja = null, texto = null) => {
+      const textos = pareja || PAREJAS_RETOMAR[0];
+      const body = texto || TEMPLATE_CATALOG.retomar_conversacion.texto.defecto;
+      return {
+        friendly_name: `retomar_conversacion_${slug}`.replace(/[^a-z0-9_]/g, '_'),
+        language: 'es',
+        variables: ejemplosPara(body, businessName),
+        types: {
+          'twilio/quick-reply': {
+            body: cuerpoNumerado(body),
+            actions: [
+              { title: textos.confirmar, id: 'ret:si' },
+              { title: textos.cancelar, id: 'ret:no' },
             ],
           },
         },
@@ -272,6 +326,11 @@ export function renderTexto(texto, businessName = 'Clínica Ejemplo') {
   const ej = ejemplosPara(texto, businessName);
   const claves = clavesDe(texto);
   return String(texto || '').replace(TOKEN, (_, k) => String(ej[claves.indexOf(k) + 1] ?? ''));
+}
+// El texto tal y como le llega al cliente final, con los valores REALES del envío: es lo
+// que se guarda en el hilo para que el equipo vea qué se mandó. Texto null = el defecto.
+export function renderConValores(def, texto, valores) {
+  return String(texto || def.texto.defecto).replace(TOKEN, (_, k) => String(valores[k] ?? ''));
 }
 function renderPreview(def) {
   if (typeof def.content !== 'function') return null;

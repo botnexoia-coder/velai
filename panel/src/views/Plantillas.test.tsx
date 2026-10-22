@@ -287,6 +287,74 @@ describe('vista Plantillas del CLIENTE (solo lectura)', () => {
   });
 });
 
+// «Retomar conversación» sale SOLO del catálogo: tarjeta, diálogo de alta con sus botones
+// curados y editor de texto, sin una línea por kind en la vista.
+describe('Plantillas: el kind retomar_conversacion', () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  const RETOMAR = {
+    kind: 'retomar_conversacion',
+    label: 'Retomar conversación',
+    fuente: 'registro' as const,
+    categoria: 'UTILITY',
+    descripcion: 'Permite volver a escribir a un cliente por WhatsApp cuando han pasado más de 24 h desde su último mensaje. Si responde, se reabre la conversación.',
+    config: {
+      preview: 'Hola María, te escribimos de Clínica Ejemplo para seguir con tu consulta. ¿Te parece bien que continuemos por aquí?',
+      botones: [
+        { id: 'si_sigamos_ahora_no', confirmar: 'Sí, sigamos', cancelar: 'Ahora no' },
+        { id: 'continuar_mas_tarde', confirmar: 'Continuar', cancelar: 'Más tarde' },
+      ],
+      botonesDefault: 'si_sigamos_ahora_no',
+      texto: {
+        defecto: 'Hola {{nombre}}, te escribimos de {{negocio}} para seguir con tu consulta. ¿Te parece bien que continuemos por aquí?',
+        max: 1024,
+        campos: [
+          { clave: 'nombre', label: 'Nombre del cliente', obligatoria: false, ejemplo: 'María' },
+          { clave: 'negocio', label: 'Tu negocio', obligatoria: true, ejemplo: 'Clínica Ejemplo' },
+        ],
+      },
+    },
+  };
+  const conRetomar = (tenants: PlantillasResponse['tenants']): PlantillasResponse => ({ kinds: [...RESP.kinds, RETOMAR], tenants });
+
+  function renderCon(me: unknown, resp: PlantillasResponse) {
+    vi.stubGlobal('fetch', mockFetch({ '/api/admin/me': me, '/api/admin/plantillas': resp, '/api/admin/solicitudes': { solicitudes: [] } }));
+    render(
+      <QueryClientProvider client={createQueryClient()}>
+        <ToastProvider>
+          <MemoryRouter>
+            <Plantillas />
+          </MemoryRouter>
+        </ToastProvider>
+      </QueryClientProvider>,
+    );
+  }
+
+  it('Velai: tarjeta con su descripción y «Crear» abre el alta con sus dos parejas y el texto', async () => {
+    const user = userEvent.setup();
+    renderCon(meVelai, conRetomar([{ id: '11111111-1111-4111-8111-111111111111', slug: 'alfa', name: 'Clínica Alfa', active: 1, plantillas: {} }]));
+    expect(await screen.findByText('Retomar conversación')).toBeInTheDocument();
+    expect(screen.getByText(/cuando han pasado más de 24 h desde su último mensaje/)).toBeInTheDocument();
+    const tarjeta = screen.getByText('Retomar conversación').closest('.plk') as HTMLElement;
+    await user.click(within(tarjeta).getByRole('button', { name: 'Crear' }));
+    expect(await screen.findByRole('button', { name: 'Enviar a aprobación' })).toBeInTheDocument();
+    // Sin antelación: eso es del recordatorio, no de esta plantilla.
+    expect(screen.queryByLabelText('Antelación del recordatorio')).toBeNull();
+    expect(screen.getAllByRole('radio').map((r) => (r as HTMLInputElement).value)).toEqual(['si_sigamos_ahora_no', 'continuar_mas_tarde']);
+    expect(screen.getByRole('textbox', { name: 'Texto de Retomar conversación' })).toHaveValue(RETOMAR.config.texto.defecto);
+  });
+
+  it('cliente: la ve «Aún no creada» con la preview y sus botones, y puede personalizarla', async () => {
+    renderCon(meCliente, conRetomar([{ id: meCliente.tenantId!, slug: 'barberia-lopez', name: 'Barbería López', active: 1, hours: 24, plantillas: {} }]));
+    const titulo = await screen.findByText('Retomar conversación');
+    const tarjeta = titulo.closest('.plk') as HTMLElement;
+    expect(within(tarjeta).getByText('Aún no creada')).toBeInTheDocument();
+    expect(within(tarjeta).getByText(/Hola María, te escribimos de Barbería López para seguir con tu consulta/)).toBeInTheDocument();
+    expect([...tarjeta.querySelectorAll('.wapre-btns span')].map((e) => e.textContent)).toEqual(['Sí, sigamos', 'Ahora no']);
+    expect(within(tarjeta).getByRole('button', { name: 'Personalizar y crear' })).toBeInTheDocument();
+  });
+});
+
 describe('categoría real de Twilio y solicitudes en la vista de Velai', () => {
   afterEach(() => vi.unstubAllGlobals());
 

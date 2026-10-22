@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { composerKey, composerState } from './composer';
+import { composerKey, composerState, reengageState } from './composer';
 import type { ConversationHead, ReplyWindow } from '../api/types';
 
 function conv(over: Partial<ConversationHead> = {}): ConversationHead {
@@ -74,6 +74,41 @@ describe('el cajón de respuesta (composerState)', () => {
     const s = composerState(undefined, conv(), 15, NOW);
     expect(s.kind).toBe('closed');
     if (s.kind === 'closed') expect(s.why).toMatch(/ahora mismo/);
+  });
+});
+
+describe('retomar con plantilla (reengageState)', () => {
+  const cerrada = (reengage: ReplyWindow['reengage']): ReplyWindow => ({ open: false, reason: 'window_closed', reengage });
+
+  it('sin el bloque reengage (ventana abierta, web, o quien mira no atiende): no hay botón', () => {
+    expect(reengageState(undefined)).toBeNull();
+    expect(reengageState({ open: false, reason: 'window_closed' })).toBeNull();
+    expect(reengageState({ open: true, reengage: { available: true, reason: null, lastSentAt: null } })).toBeNull();
+  });
+
+  it('disponible: botón activo, sin motivo ni envío previo', () => {
+    expect(reengageState(cerrada({ available: true, reason: null, lastSentAt: null }))).toEqual({
+      available: true, why: null, toPlantillas: false, sentAt: null,
+    });
+  });
+
+  it('sin plantilla aprobada: motivo traducido y enlace a Plantillas', () => {
+    const s = reengageState(cerrada({ available: false, reason: 'plantilla_retomar_no_aprobada', lastSentAt: null }));
+    expect(s).toEqual({ available: false, why: 'Da de alta la plantilla “Retomar conversación” en Plantillas', toPlantillas: true, sentAt: null });
+  });
+
+  it('ya enviada: apagado por 24 h y con la hora del envío para el «esperando respuesta»', () => {
+    const s = reengageState(cerrada({ available: false, reason: 'reengage_reciente', lastSentAt: '2026-08-31T11:40:00.000Z' }));
+    expect(s?.available).toBe(false);
+    expect(s?.why).toMatch(/últimas 24 h/);
+    expect(s?.sentAt).toBe('2026-08-31T11:40:00.000Z');
+    expect(s?.toPlantillas).toBe(false);
+  });
+
+  it('con la IA atendiendo y la ventana REAL cerrada, el cajón explica la ventana, no a Vai', () => {
+    const s = composerState({ open: false, reason: 'atiende_la_ia', reengage: { available: true, reason: null, lastSentAt: null } }, conv(), 15, NOW);
+    expect(s.kind).toBe('closed');
+    if (s.kind === 'closed') expect(s.why).toMatch(/ventana de 24 h de WhatsApp se cerró/);
   });
 });
 

@@ -184,8 +184,8 @@ const resolver = async (c) => {
 solicitudes.post('/api/admin/solicitudes/:id/:accion{aprobar|rechazar}', resolver);
 
 // ── TEXTO de una plantilla de citas (SPEC-NOTIFICACION-CITA) ──────────────────
-// El cliente edita el cuerpo de SUS plantillas confirmacion_reserva y
-// recordatorio_cita desde la vista Plantillas, SIN pasar por una solicitud: la puerta
+// El cliente edita el cuerpo de SUS plantillas con texto editable (las de citas y
+// retomar_conversacion) desde la vista Plantillas, SIN pasar por una solicitud: la puerta
 // que protege el contrato es validarTexto (variables con nombre de una lista cerrada,
 // obligatorias, reglas de Meta) y la que protege el contenido es la propia revisión de
 // Meta. Guardar = plantilla NUEVA en Twilio + revisión de Meta; si ya hay una aprobada,
@@ -208,8 +208,9 @@ solicitudes.post('/api/admin/tenants/:id/plantillas/:kind', async (c) => {
   // `longitud` = la del cuerpo YA numerado ({{1}}…), que es la que cuenta Meta.
   if (body.validar === true) return json({ ok: !v.errores.length, errores: v.errores, preview, longitud: v.cuerpo.length }, 200, NO_STORE);
   if (v.errores.length) throw new HttpError(400, v.errores[0].code, v.errores[0].clave);
-  // Las plantillas de citas son del módulo Calendario: sin él no hay citas que avisar.
-  await assertTenantModulo(env, tenantId, 'calendario');
+  // El módulo lo declara el kind (catálogo): las de citas son de Calendario —sin él no
+  // hay citas que avisar—; retomar_conversacion no exige ninguno.
+  if (def.modulo) await assertTenantModulo(env, tenantId, def.modulo);
   const actual = await tenantTemplate(env, tenantId, def.kind);
   // Una revisión a la vez: cada guardado es una plantilla nueva en Twilio y otra cola en
   // Meta; hasta que se resuelva la anterior no se somete otra.
