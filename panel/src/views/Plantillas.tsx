@@ -66,7 +66,7 @@ function PlantillasCliente({ data, error }: { data: PlantillasResponse | undefin
           ))
         : null}
       <p className="muted mt12">
-        WhatsApp revisa cada plantilla antes de poder enviarse. El texto de las de citas lo puedes cambiar tú. ¿Algo
+        WhatsApp revisa cada plantilla antes de poder enviarse. El texto de las que llevan editor lo puedes cambiar tú. ¿Algo
         más? Escríbenos y lo dejamos listo.
       </p>
     </div>
@@ -293,8 +293,8 @@ function PlantillasVelai({ data, error }: { data: PlantillasResponse | undefined
       {data ? <SolicitudesBlock data={data} /> : null}
       {data ? data.kinds.map((k) => <KindCard key={k.kind} k={k} data={data} clienteId={clienteId} estado={estado} onTodas={() => setEstado('')} />) : null}
       <p className="muted mt12">
-        El cuerpo por defecto de cada plantilla vive en el código (es un contrato con quien la envía); el de las de
-        citas lo puede reescribir cada cliente, con variables con nombre — elige un cliente arriba para editarlo desde
+        El cuerpo por defecto de cada plantilla vive en el código (es un contrato con quien la envía); el de las que
+        llevan editor (citas, retomar conversación) lo puede reescribir cada cliente, con variables con nombre — elige un cliente arriba para editarlo desde
         aquí. Aquí se gestiona su alta y su estado por cliente. El worker revisa la aprobación de Meta cada 5 minutos y avisa por Telegram cuando una
         plantilla pasa a aprobada o rechazada. La categoría junto a cada cliente es la REAL de Twilio («—» mientras no
         se haya leído); en ámbar cuando difiere de la del catálogo — Marketing es más cara y con topes.

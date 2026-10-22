@@ -326,11 +326,29 @@ export interface ReplyWindow {
   takeoverReason?: string | null;
   /** Admin de Velai en un espacio sin atención: puede devolver a Vai aunque no pueda escribir. */
   canRelease?: boolean;
+  /** WhatsApp con la ventana de Meta cerrada y quien mira puede atender: la plantilla
+   *  «Retomar conversación». `reason` dice por qué no se puede enviar ahora (WIN_WHY). */
+  reengage?: ReengageInfo;
   web?: boolean;
   away?: boolean;
   seenAt?: string | null;
   closesAt?: string;
   lastIn?: string;
+}
+
+export interface ReengageInfo {
+  available: boolean;
+  reason: null | 'plantilla_retomar_no_aprobada' | 'reengage_reciente' | 'ya_tomada';
+  /** Último envío de la plantilla desde que se cerró la ventana (ISO), si lo hubo. */
+  lastSentAt: string | null;
+}
+
+/** POST /api/admin/conversations/:id/reengage */
+export interface ReengageResponse {
+  ok: true;
+  state: 'humano';
+  agent_email: string;
+  sentAt: string;
 }
 
 export interface InboxThread {

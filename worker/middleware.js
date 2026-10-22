@@ -17,6 +17,7 @@
 // consulta — el middleware sabe QUIÉN pregunta, pero solo el handler sabe qué
 // SQL construye. Esa mitad la vigila scripts/check-aislamiento.mjs.
 import { MODULOS, modulosDe, esPlan } from './planes.js';
+import { templateKind } from './plantillas.js';
 import { HttpError, clean, rateLimited, sendTelegramText, escapeHtml, decodeBase64Url } from './app.js';
 
 // Sin fallback silencioso: si ADMIN_ORIGIN falta o es inválida, las rutas de admin
@@ -239,6 +240,8 @@ export function clienteAllowed(path, method) {
   if (path === '/api/admin/availability' && ['GET', 'PATCH'].includes(method)) return true;
   if (/^\/api\/admin\/conversations\/[0-9a-f-]+\/(takeover|release)$/i.test(path) && method === 'POST') return true;
   if (/^\/api\/admin\/conversations\/[0-9a-f-]+\/reply$/i.test(path) && method === 'POST') return true;
+  // Retomar con la plantilla aprobada (ventana cerrada): mismas puertas que reply.
+  if (/^\/api\/admin\/conversations\/[0-9a-f-]+\/reengage$/i.test(path) && method === 'POST') return true;
   if (path === '/api/admin/escalations/resume' && method === 'POST') return true;
   if (/^\/api\/admin\/leads\/[0-9a-f-]+$/i.test(path) && (method === 'GET' || method === 'PATCH')) return true;
   if (/^\/api\/admin\/leads\/[0-9a-f-]+\/notes$/i.test(path) && method === 'POST') return true;
@@ -386,14 +389,24 @@ export const RUTA_MODULO = [
   [/^\/api\/admin\/appointments(?:\/|$)/, 'calendario'],
   [/^\/api\/admin\/tenants\/[^/]+\/editorial(?:\/|$)/, 'calendario'],
   [/^\/api\/admin\/tenants\/[^/]+\/calendar(?:\/|$)/, 'calendario'],
-  [/^\/api\/admin\/tenants\/[^/]+\/plantillas(?:\/|$)/, 'calendario'],
+  // El texto de una plantilla exige el módulo que declara SU kind en el catálogo (las de
+  // citas, Calendario; retomar_conversacion, ninguno). Un kind desconocido conserva la
+  // puerta de siempre y el handler responde 404.
+  [/^\/api\/admin\/tenants\/[^/]+\/plantillas(?:\/([^/]*))?(?:\/|$)/, (m) => {
+    const def = templateKind(m[1]);
+    return def ? def.modulo || null : 'calendario';
+  }],
   [/^\/api\/admin\/tenants\/[^/]+\/(?:booking|services|reminders)(?:\/|$)/, 'citas'],
   [/^\/api\/admin\/events(?:\/|$)/, 'eventos'],
 ];
 export async function moduloGate(c, next) {
   const scope = c.get('scope');
   if (scope.role !== 'velai') {
-    const modulo = RUTA_MODULO.find(([ruta]) => ruta.test(c.req.path))?.[1];
+    let modulo = null;
+    for (const [ruta, mod] of RUTA_MODULO) {
+      const m = ruta.exec(c.req.path);
+      if (m) { modulo = typeof mod === 'function' ? mod(m) : mod; break; }
+    }
     if (modulo) {
       const tenantId = /^\/api\/admin\/tenants\/([^/]+)/.exec(c.req.path)?.[1];
       if (tenantId) assertOwnTenant(scope, tenantId);

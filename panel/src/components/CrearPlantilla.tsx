@@ -111,7 +111,7 @@ export function CrearPlantilla({
         {txCfg ? (
           <div className="crp-bloque tx-edit">
             <b>Texto del mensaje</b>
-            <p className="muted mt6">Escríbelo a tu gusto; las variables se llenan con los datos reales de cada cita.</p>
+            <p className="muted mt6">Escríbelo a tu gusto; las variables se llenan con los datos reales de cada envío.</p>
             <TextoConVariables tenantId={tenantId} kind={kind} value={texto} onChange={setTexto} onValido={setTextoOk} />
             {texto !== txCfg.defecto ? (
               <div className="actions actions0">
@@ -134,7 +134,7 @@ export function CrearPlantilla({
                 </div>
               ) : null}
             </div>
-            <p className="muted mt6">Con datos de ejemplo: al enviarse llevará el nombre, la fecha y el motivo reales de cada cita.</p>
+            <p className="muted mt6">Con datos de ejemplo: al enviarse llevará los datos reales de cada envío.</p>
           </div>
         ) : null}
         <div className="actions">

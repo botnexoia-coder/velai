@@ -113,6 +113,10 @@ export const TERRS: Record<string, string> = {
   saltos_excesivos: 'Como mucho una línea en blanco seguida.',
   espacios_excesivos: 'Sin tabuladores ni más de cuatro espacios seguidos.',
   pocas_palabras: 'Demasiadas variables para tan poco texto: WhatsApp lo rechazaría. Escribe algo más.',
+  // Retomar una conversación de WhatsApp con la plantilla aprobada.
+  reengage_canal_no_soportado: 'Solo se puede retomar con plantilla una conversación de WhatsApp.',
+  ventana_abierta: 'La ventana de 24 h sigue abierta: puedes escribirle directamente, sin plantilla.',
+  reengage_envio_fallido: 'WhatsApp no aceptó el envío de la plantilla. Reinténtalo en unos minutos.',
   // Códigos que en el v1 vivían fuera de TERRS pero también llegan al panel:
   not_authorized: 'Tu correo no tiene acceso a este panel.',
   not_found: 'Eso ya no existe (o no es tuyo).',
@@ -137,6 +141,9 @@ export const WIN_WHY: Record<string, string> = {
   velai_no_atiende_clientes: 'Esta conversación es de un cliente y la atiende su equipo, no Velai. La ves para dar soporte, pero no puedes escribir en ella.',
   espacio_sin_atencion: 'Velai no tiene habilitada la atención en este espacio. Actívala en la ficha del cliente → Espacio de Velai.',
   velai_tenant_missing: 'No encuentro el cliente «velai» en la base: sin él no se puede resolver la disponibilidad de Velai.',
+  // Retomar con plantilla (ventana cerrada): por qué el botón está apagado.
+  plantilla_retomar_no_aprobada: 'Da de alta la plantilla “Retomar conversación” en Plantillas',
+  reengage_reciente: 'Ya se envió la plantilla para retomar en las últimas 24 h: espera a que responda.',
 };
 
 // Estados de los avisos por lead (chips de la tabla): el punto de color solo no dice

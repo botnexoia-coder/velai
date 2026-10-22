@@ -206,6 +206,7 @@ const CASOS = [
   { key: '/api/admin/availability', m: ['GET', 'PATCH'], path: () => '/api/admin/availability', body: { available: true } },
   { key: '(takeover|release)', m: 'POST', path: (t) => `/api/admin/conversations/${t === B ? convIdB : convIdA}/takeover` },
   { key: 'conversations\\/[0-9a-f-]+\\/reply$', m: 'POST', path: (t) => `/api/admin/conversations/${t === B ? convIdB : convIdA}/reply`, body: { text: 'hola' } },
+  { key: 'conversations\\/[0-9a-f-]+\\/reengage$', m: 'POST', path: (t) => `/api/admin/conversations/${t === B ? convIdB : convIdA}/reengage` },
   { key: '/api/admin/escalations/resume', m: 'POST', path: () => '/api/admin/escalations/resume', body: { conversationId: convIdB } },
   { key: 'leads\\/[0-9a-f-]+$', m: 'GET', path: (t) => `/api/admin/leads/${t === B ? leadIdB : leadIdA}` },
   { key: 'leads\\/[0-9a-f-]+\\/notes$', m: 'POST', path: (t) => `/api/admin/leads/${t === B ? leadIdB : leadIdA}/notes`, body: { text: 'nota' } },

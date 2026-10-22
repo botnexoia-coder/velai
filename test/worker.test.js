@@ -5964,7 +5964,7 @@ test('GET /plantillas por rol: velai la matriz global con opciones; el cliente S
   const call = (scope) => testing.adminRouter(adminReq(path), env, ctx, path, new URL('https://x' + path), {}, scope);
   const out = await (await call(VELAI)).json();
   // El catálogo es LA lista completa: el registro Y la legacy de columnas.
-  assert.deepEqual(out.kinds.map((k) => `${k.kind}:${k.fuente}`).sort(), ['aviso_lead:columnas', 'confirmacion_reserva:registro', 'recordatorio_cita:registro']);
+  assert.deepEqual(out.kinds.map((k) => `${k.kind}:${k.fuente}`).sort(), ['aviso_lead:columnas', 'confirmacion_reserva:registro', 'recordatorio_cita:registro', 'retomar_conversacion:registro']);
   assert.ok(out.kinds.every((k) => k.label));
   // El orden del SQL (activos primero) se respeta tal cual.
   assert.deepEqual(out.tenants.map((t) => t.slug), ['beta', 'alfa']);

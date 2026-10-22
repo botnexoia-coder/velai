@@ -36,7 +36,10 @@ export function composerState(
         remainingMin: queueRemaining(conv.state_at, queueMin, nowMs),
       };
     }
-    const why = (win?.reason && WIN_WHY[win.reason]) || 'No se puede responder a esta conversación ahora mismo.';
+    // Con `reengage` el motivo que importa es la ventana de Meta, aunque aún atienda la
+    // IA: tomar el control no serviría de nada y la salida es la plantilla.
+    const reason = win?.reengage ? 'window_closed' : win?.reason;
+    const why = (reason && WIN_WHY[reason]) || 'No se puede responder a esta conversación ahora mismo.';
     return { kind: 'closed', why };
   }
   // En WhatsApp lo que importa es cuánto queda de la ventana de Meta; en web, si el
@@ -48,6 +51,29 @@ export function composerState(
     status: win.web
       ? { kind: 'web', away: Boolean(win.away) }
       : { kind: 'whatsapp', hoursLeft: windowHoursLeft(win.closesAt, nowMs) },
+  };
+}
+
+/** El botón «Enviar plantilla para retomar» (WhatsApp con la ventana cerrada). */
+export interface ReengageState {
+  available: boolean;
+  /** Motivo traducido por el que está apagado; null si se puede enviar. */
+  why: string | null;
+  /** Sin plantilla aprobada: el motivo lleva enlace a la vista Plantillas. */
+  toPlantillas: boolean;
+  /** «Plantilla enviada a las HH:MM · esperando respuesta» mientras no conteste. */
+  sentAt: string | null;
+}
+
+export function reengageState(win: ReplyWindow | undefined): ReengageState | null {
+  // Con la ventana abierta no hay nada que retomar, aunque llegara un dato viejo.
+  if (!win || !win.reengage || win.open) return null;
+  const r = win.reengage;
+  return {
+    available: r.available,
+    why: r.available ? null : (r.reason && WIN_WHY[r.reason]) || 'Ahora mismo no se puede enviar la plantilla.',
+    toPlantillas: r.reason === 'plantilla_retomar_no_aprobada',
+    sentAt: r.lastSentAt,
   };
 }
 

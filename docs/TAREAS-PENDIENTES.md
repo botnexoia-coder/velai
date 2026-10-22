@@ -527,3 +527,6 @@ migrando datos y lectores a la vez.
 - Landing de Restaurantes: versión SEO (`/restaurantes/`) + versión de pauta (`/lp/restaurantes/`, noindex).
 - **Conversión de Google Ads cableada** (`funnel.js` v2): los eventos de alta intención (envío de formulario, clic en WhatsApp, diagnóstico y cotizador completados) ya disparan `gtag('event','conversion')` con tu `adsLabel`. Antes el `adsLabel` se leía pero no se usaba → Google Ads no podía medir conversiones. **En cuanto pongas los IDs, la medición de pauta funciona.**
 - Página de Política de Privacidad y Cookies (`/privacidad/`), RGPD + LSSI, enlazada desde el banner de cookies y el footer.
+
+- Crear y aprobar la plantilla `retomar_conversacion` en los clientes con WhatsApp que la necesiten (Plantillas → «Retomar conversación»); revisar si Meta la clasifica como MARKETING.
+- «Devolver a Vai» con la ventana cerrada: una conversación en `humano` sin respuesta tras retomar no tiene botón para devolverla.

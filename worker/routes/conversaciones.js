@@ -13,7 +13,9 @@ import {
   HttpError, json, NO_STORE, clean, readJson, rateLimited, csvCell, convFilters,
   convAppend, replyWindow, canAttend, sendTwilioText, velaiTenantId,
   withinSupportHours, UUID_RE, QUEUE_MAX_MIN, TAKEOVER_GRACE_MIN,
+  tenantTemplate, sendTwilioTemplate, reengageValues, reengageTemplateVariables,
 } from '../app.js';
+import { templateKind, renderConValores } from '../plantillas.js';
 
 export const conversaciones = new Hono();
 
@@ -25,6 +27,29 @@ async function tomadaPorCliente(env, conv) {
   if (!conv.agent_email) return false;
   const row = await env.DB.prepare('SELECT 1 AS x FROM tenant_users WHERE lower(email)=lower(?) AND tenant_id=?').bind(conv.agent_email, conv.tenant_id).first();
   return Boolean(row);
+}
+
+// ── Retomar con plantilla (retomar_conversacion) ─────────────────────────────
+// Meta cobra cada conversación que abre el negocio: un envío por conversación cada 24 h.
+// La marca NO necesita columna nueva: con la ventana cerrada el reply está bloqueado, así
+// que todo mensaje 'agent' posterior al cierre (closesAt) solo puede ser esta plantilla.
+// Es exacto, vive en D1 y cuesta una lectura — el inbox lo pregunta en cada sondeo y una
+// lectura de KV por sondeo sería gastar el recurso más escaso.
+const REENGAGE_COOLDOWN_MS = 24 * 3600000;
+async function ultimoReengage(env, conv, win) {
+  if (!win || !win.closesAt) return null;
+  const row = await env.DB.prepare("SELECT MAX(created_at) AS at FROM conv_messages WHERE conversation_id=? AND role='agent' AND created_at>=?")
+    .bind(conv.id, win.closesAt).first();
+  return (row && row.at) || null;
+}
+// Por qué NO se puede enviar ahora (null = se puede). Los motivos son códigos que el
+// panel traduce; el orden es el del endpoint, para que el botón y el 409/429 coincidan.
+async function motivoReengage(env, conv, who, lastSentAt) {
+  if (conv.state === 'humano' && conv.agent_email && conv.agent_email !== who) return 'ya_tomada';
+  const tpl = await tenantTemplate(env, conv.tenant_id, 'retomar_conversacion');
+  if (!tpl || !tpl.sid || tpl.status !== 'approved') return 'plantilla_retomar_no_aprobada';
+  if (lastSentAt && Date.now() - Date.parse(lastSentAt) < REENGAGE_COOLDOWN_MS) return 'reengage_reciente';
+  return null;
 }
 
 conversaciones.get('/api/admin/escalations', async (c) => {
@@ -106,7 +131,7 @@ conversaciones.get('/api/admin/conversations/export.csv', async (c) => {
 // abiertos son 35.000 peticiones/día, un tercio del plan gratuito de Workers en
 // refrescar una pantalla. Con una cada 15 s y solo con la pestaña visible, ~11.500.
 conversaciones.get('/api/admin/inbox', async (c) => {
-  const { env, url, scope } = partesAdmin(c);
+  const { env, url, scope, actor } = partesAdmin(c);
   const f = convFilters(url);
   const scc = scopeClause(scope, 'c');
   const limit = Math.min(100, Math.max(1, Number(url.searchParams.get('limit')) || 40));
@@ -148,10 +173,22 @@ conversaciones.get('/api/admin/inbox', async (c) => {
       // lleva la IA, pero solo si el canal admite una respuesta AHORA (en WhatsApp, dentro
       // de las 24 h). Exponemos la capacidad por separado: el cajón sigue cerrado hasta
       // tomar el control y nunca quedan dos voces escribiendo a la vez.
+      let prospective = head.state === 'humano' ? win : null;
       if (head.state === 'bot' && await canAttend(env, scope, head.tenant_id)) {
-        const prospective = await replyWindow(env, { ...head, state: 'humano' });
+        prospective = await replyWindow(env, { ...head, state: 'humano' });
         win.canTakeover = prospective.open;
         win.takeoverReason = prospective.open ? null : prospective.reason;
+      }
+      // WhatsApp con la ventana de Meta cerrada (la real, como si ya tuviera el control):
+      // la única salida es la plantilla «Retomar conversación». Se dice si se puede
+      // enviar y por qué no ANTES del clic, con la misma puerta que el endpoint.
+      if (head.channel === 'whatsapp' && await canAttend(env, scope, head.tenant_id)) {
+        if (!prospective) prospective = await replyWindow(env, { ...head, state: 'humano' });
+        if (!prospective.open && prospective.reason === 'window_closed') {
+          const lastSentAt = await ultimoReengage(env, head, prospective);
+          const reason = await motivoReengage(env, head, String(actor).toLowerCase(), lastSentAt);
+          win.reengage = { available: !reason, reason, lastSentAt };
+        }
       }
       // La misma puerta que el endpoint de respuesta, pero ANTES: el cajón se cierra con
       // el motivo escrito en vez de dejar que alguien escriba y se coma un 403.
@@ -170,7 +207,7 @@ conversaciones.get('/api/admin/inbox', async (c) => {
       // El token cifrado del bot y el interno del tenant no salen del worker.
       delete head.demo; if (scope.role !== 'velai') { delete head.tenant_name; delete head.tenant_id; }
       if (env.MOBILE_PREVIEW_READ_ONLY) {
-        win.open = false; win.canTakeover = false; win.reason = 'mobile_preview_read_only';
+        win.open = false; win.canTakeover = false; win.reason = 'mobile_preview_read_only'; delete win.reengage;
       }
       // Nombre público del bot (el mismo del aviso de devolución): el panel lo usa en vez
       // de un nombre fijo. No es secreto; el scope de la consulta ya impide ver el de otro.
@@ -347,6 +384,70 @@ conversaciones.post('/api/admin/conversations/:id/reply', async (c) => {
   }, [{ role: 'agent', content: text, agentEmail: actor }]);
   console.log(JSON.stringify({ level: 'info', code: 'agent_reply', channel: conv.channel, saved, actor_role: scope.role }));
   return json({ ok: true, window: win }, 200, NO_STORE);
+});
+
+// Retomar una conversación de WhatsApp con la ventana de 24 h cerrada: envía la plantilla
+// aprobada «Retomar conversación» del tenant. Si el cliente responde (texto o botón), su
+// mensaje reabre la ventana y el cajón se abre solo. Mismas puertas que reply, y todas
+// ANTES de Twilio: cada envío es una conversación que abre el negocio y Meta la cobra.
+// Solo WhatsApp: Messenger e Instagram tienen otras reglas (message tags), fuera de alcance.
+conversaciones.post('/api/admin/conversations/:id/reengage', async (c) => {
+  const { env, scope, actor } = partesAdmin(c);
+  const id = c.req.param('id');
+  if (!UUID_RE.test(id)) throw new HttpError(404, 'not_found');
+  const scc = scopeClause(scope, 'c');
+  const conv = await env.DB.prepare(`SELECT c.* FROM conversations c WHERE c.id=?${scc.sql}`).bind(id, ...scc.args).first();
+  if (!conv) throw new HttpError(404, 'not_found');   // de otro cliente = 404, nunca 403
+  if (!(await canAttend(env, scope, conv.tenant_id))) throw new HttpError(403, motivoSinAtencion(scope));
+  if (conv.channel !== 'whatsapp') throw new HttpError(400, 'reengage_canal_no_soportado');
+  const who = String(actor).toLowerCase();
+  // La ventana REAL, como si ya tuviera el control: con la de la IA siempre saldría
+  // «atiende_la_ia» y no se sabría si de verdad está cerrada.
+  const win = await replyWindow(env, { ...conv, state: 'humano' });
+  if (win.open) throw new HttpError(409, 'ventana_abierta');
+  if (win.reason !== 'window_closed') throw new HttpError(409, win.reason || 'nada_que_tomar');
+  const lastSentAt = await ultimoReengage(env, conv, win);
+  const motivo = await motivoReengage(env, conv, who, lastSentAt);
+  if (motivo) throw new HttpError(motivo === 'reengage_reciente' ? 429 : 409, motivo);
+  // Cinturón contra el doble clic (dos peticiones a la vez pasan la comprobación de D1
+  // de arriba antes de que ninguna guarde): 1 intento por conversación y minuto.
+  if (await rateLimited(env, conv.id, 'reengage', 1)) throw new HttpError(429, 'reengage_reciente');
+  const tenant = await env.DB.prepare('SELECT * FROM tenants WHERE id=?').bind(conv.tenant_id).first();
+  if (!tenant) throw new HttpError(404, 'not_found');
+  const tpl = await tenantTemplate(env, conv.tenant_id, 'retomar_conversacion');
+  const lead = conv.lead_id
+    ? await env.DB.prepare('SELECT name FROM leads WHERE id=? AND tenant_id=?').bind(conv.lead_id, conv.tenant_id).first()
+    : null;
+  const leadName = lead && lead.name;
+  const now = new Date().toISOString();
+  // Tomar ANTES de enviar, con CAS: si otra persona la toma en el mismo instante, no se
+  // manda nada en su nombre. Si Twilio falla, se deshace con el mismo CAS.
+  const previo = { state: conv.state, agent_email: conv.agent_email || null, state_at: conv.state_at || null };
+  if (conv.state !== 'humano') {
+    const taken = await env.DB.prepare("UPDATE conversations SET state='humano', agent_email=?, state_at=? WHERE id=? AND tenant_id=? AND state=?")
+      .bind(who, now, conv.id, conv.tenant_id, conv.state).run();
+    if (!taken.meta || !taken.meta.changes) throw new HttpError(409, 'ya_tomada');
+  }
+  const sent = await sendTwilioTemplate(env, tenant, conv.inbox_address, conv.external_id, tpl.sid,
+    reengageTemplateVariables(tenant, leadName, tpl.texto));
+  if (!sent.ok) {
+    if (conv.state !== 'humano') {
+      await env.DB.prepare('UPDATE conversations SET state=?, agent_email=?, state_at=? WHERE id=? AND tenant_id=? AND state=\'humano\' AND agent_email=?')
+        .bind(previo.state, previo.agent_email, previo.state_at, conv.id, conv.tenant_id, who).run();
+    }
+    console.log(JSON.stringify({ level: 'error', code: 'reengage_failed', tenant: tenant.slug, error: clean(sent.error || 'skipped', 40) }));
+    throw new HttpError(502, 'reengage_envio_fallido', clean(sent.error || 'skipped', 40));
+  }
+  // El bot se calla igual que tras un reply: la persona que retoma es quien contesta.
+  if (env.KV) { try { await env.KV.put(`pause:${conv.tenant_id}:${conv.external_id}`, '1', { expirationTtl: 4 * 3600 }); } catch (_) {} }
+  // En el hilo queda lo que leyó el cliente, con los valores reales, y quién lo mandó.
+  const texto = renderConValores(templateKind('retomar_conversacion'), tpl.texto, reengageValues(tenant, leadName));
+  const saved = await convAppend(env, {
+    id: conv.id, tenant: conv.tenant_id, channel: conv.channel, externalId: conv.external_id,
+    inbox: conv.inbox_address, demo: conv.demo || '', msgs: conv.msgs, isNew: false,
+  }, [{ role: 'agent', content: texto, agentEmail: actor }]);
+  console.log(JSON.stringify({ level: 'info', code: 'reengage_sent', tenant: tenant.slug, saved, actor_role: scope.role }));
+  return json({ ok: true, state: 'humano', agent_email: who, sentAt: now }, 200, NO_STORE);
 });
 
 conversaciones.get('/api/admin/conversations/:id', async (c) => {

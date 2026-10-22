@@ -44,6 +44,7 @@ import type {
   ProvisionState,
   ReleaseResponse,
   ReplyResponse,
+  ReengageResponse,
   SenderSyncResponse,
   Stats,
   TakeoverResponse,
@@ -315,6 +316,15 @@ export function useReply() {
   return useMutation({
     mutationFn: ({ id, text }: { id: string; text: string }) =>
       apiPost<ReplyResponse>(`/api/admin/conversations/${id}/reply`, { text }),
+    onSettled: () => invalidateInbox(client),
+  });
+}
+
+/** Envía la plantilla «Retomar conversación» (WhatsApp con la ventana de 24 h cerrada). */
+export function useReengage() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => apiPost<ReengageResponse>(`/api/admin/conversations/${id}/reengage`, {}),
     onSettled: () => invalidateInbox(client),
   });
 }

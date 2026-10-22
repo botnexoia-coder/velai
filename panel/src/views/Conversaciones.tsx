@@ -11,17 +11,18 @@ import { messageAttachments, mediaHref } from '../lib/media';
 //    escribieran a mano aquí, un día dirían cosas distintas que el worker);
 //  - presencia del visitante web.
 import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
-import { useSearchParams } from 'react-router';
+import { Link, useSearchParams } from 'react-router';
 import { traducir } from '../api/errors';
 import { ChIcon, CH_LABEL, IcoBack, IcoChat, IcoChevronDown, IcoDownload, IcoSearch, IcoSend, IcoSliders } from '../components/icons';
 import { useToast } from '../components/Toasts';
-import { composerState } from '../lib/composer';
+import { composerState, reengageState } from '../lib/composer';
 import { fmtDia, fmtHora, fmtShort, dayLabel, initials, minutesSince, prevPrefix, tenantColor, whoOf } from '../lib/format';
 import {
   convQs,
   useAvailability,
   useInbox,
   useMe,
+  useReengage,
   useRelease,
   useReply,
   useSetAvailability,
@@ -540,6 +541,8 @@ function Composer({ thread, queueMin, onToast }: { thread: InboxThread; queueMin
   const takeover = useTakeover();
   const release = useRelease();
   const reply = useReply();
+  const reengage = useReengage();
+  const retomar = reengageState(thread.window);
   // El borrador vive en estado de React POR conversación: el repintado del sondeo cada
   // 15 s no puede borrar lo que la persona está escribiendo.
   const [draft, setDraft] = useState('');
@@ -665,6 +668,42 @@ function Composer({ thread, queueMin, onToast }: { thread: InboxThread; queueMin
             </>
           ) : null}
         </div>
+        {/* Ventana de Meta cerrada: la única forma de volver a escribirle es la plantilla
+            aprobada «Retomar conversación». Si responde, se reabren las 24 h y el cajón
+            se abre solo en el siguiente sondeo. */}
+        {retomar ? (
+          <div className="crow">
+            {retomar.sentAt ? (
+              <span className="cwin">Plantilla enviada a las {fmtHora(retomar.sentAt)} · esperando respuesta</span>
+            ) : null}
+            {retomar.why && !(retomar.sentAt && thread.window.reengage?.reason === 'reengage_reciente') ? (
+              <span className="cwin shut">
+                {retomar.why}
+                {retomar.toPlantillas ? (
+                  <>
+                    {' · '}
+                    <Link to="/plantillas">Ir a Plantillas</Link>
+                  </>
+                ) : null}
+              </span>
+            ) : null}
+            <span className="sp" />
+            <button
+              className="btn btnsm"
+              type="button"
+              disabled={!retomar.available || reengage.isPending}
+              data-tip={retomar.available ? 'Envía la plantilla aprobada “Retomar conversación”. Si responde, se reabren las 24 h.' : retomar.why ?? undefined}
+              onClick={() =>
+                reengage.mutate(c.id, {
+                  onSuccess: () => onToast('Plantilla enviada ✓ — cuando responda podrás escribirle'),
+                  onError: (e) => onToast(`NO se envió: ${traducir(e)}`, false),
+                })
+              }
+            >
+              Enviar plantilla para retomar
+            </button>
+          </div>
+        ) : null}
       </div>
     );
   }

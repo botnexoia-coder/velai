@@ -1577,3 +1577,5 @@ Desplegado el 2026-09-29, commit `8cfe0d0`. La 0047 está aplicada en staging y 
 - **Arreglos de paso:**
   - El diálogo «Crear» mandaba siempre `antelacion: 24`, y la confirmación de reserva lo rechazaba con `invalid_antelacion`, así que no se podía crear.
   - Las solicitudes de botones ahora leen los botones vigentes del cliente.
+
+- **Retomar conversación (2026-10-22):** plantilla `retomar_conversacion` en el catálogo (texto editable con `{{nombre}}`/`{{negocio}}`, botones curados `ret:si`/`ret:no`, sin módulo) y `POST /api/admin/conversations/:id/reengage` desde el hilo con la ventana de 24 h cerrada (solo WhatsApp, toma el control si lo llevaba la IA). Límite de 1 envío cada 24 h derivado de D1 (mensajes `agent` posteriores al cierre). El campo `modulo` del catálogo decide la puerta de módulos al editar el texto.
