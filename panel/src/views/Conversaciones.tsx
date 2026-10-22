@@ -609,6 +609,8 @@ function Composer({ thread, queueMin, onToast }: { thread: InboxThread; queueMin
 
   if (state.kind === 'closed') {
     const iaAtendiendo = c.state === 'bot';
+    // El nombre del asistente de ESTE cliente, nunca uno fijo: cada tenant tiene el suyo.
+    const nombre = thread.assistantName || 'el asistente';
     return (
       <div className="composer">
         <div className="cvfield shut">
@@ -628,12 +630,12 @@ function Composer({ thread, queueMin, onToast }: { thread: InboxThread; queueMin
                 disabled={!thread.window.canTakeover || takeover.isPending}
                 data-tip={
                   thread.window.canTakeover
-                    ? 'Pausa a NAYA y abre el cajón para responder desde el panel'
+                    ? `Pausa a ${nombre} y abre el cajón para responder desde el panel`
                     : traducir(new Error(thread.window.takeoverReason || 'nada_que_tomar'))
                 }
                 onClick={() =>
                   takeover.mutate(c.id, {
-                    onSuccess: () => onToast('Control tomado ✓ — NAYA queda pausada hasta que se lo devuelvas'),
+                    onSuccess: () => onToast(`Control tomado ✓ — ${nombre} queda en pausa hasta que se lo devuelvas`),
                     onError: (e) => onToast(`No se pudo: ${traducir(e)}`, false),
                   })
                 }

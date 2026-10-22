@@ -333,6 +333,8 @@ export interface InboxThread {
   conversation: ConversationHead;
   messages: ConvMessage[];
   window: ReplyWindow;
+  /** Nombre público del asistente del tenant (tenants.bot_name); null/ausente → genérico. */
+  assistantName?: string | null;
 }
 
 /** GET /api/admin/inbox — lista + hilo abierto en UNA llamada (es la que se sondea). */

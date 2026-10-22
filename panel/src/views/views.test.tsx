@@ -243,6 +243,53 @@ describe('vista Conversaciones', () => {
     expect(screen.getByText(/se abre cuando la persona pide un asesor/i)).toBeInTheDocument();
   });
 
+  // El nombre del asistente viene del hilo (tenants.bot_name), nunca fijo: con «NAYA»
+  // escrito a mano, cualquier otro cliente leía el nombre del asistente de otro.
+  it.each([
+    { assistantName: 'Lía', nombre: 'Lía' },
+    { assistantName: null, nombre: 'el asistente' },
+  ])('«Responder como humano» nombra al asistente del cliente ($nombre)', async ({ assistantName, nombre }) => {
+    const botThread = {
+      ...inboxConThread,
+      thread: {
+        ...inboxConThread.thread!,
+        conversation: { ...inboxConThread.thread!.conversation, state: 'bot', agent_email: null },
+        window: { open: false, reason: 'atiende_la_ia', canTakeover: true, takeoverReason: null },
+        assistantName,
+      },
+    };
+    const posts: string[] = [];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        const path = url.split('?')[0] ?? url;
+        const ok = (body: unknown) => new Response(JSON.stringify(body), { status: 200, headers: { 'Content-Type': 'application/json' } });
+        if ((init?.method ?? 'GET').toUpperCase() === 'POST') {
+          posts.push(path);
+          return ok({ ok: true, state: 'humano', agent_email: 'ana@velai.ai' });
+        }
+        if (path === '/api/admin/inbox') return ok(url.includes('conversation=') ? botThread : inbox);
+        const routes: Record<string, unknown> = baseRoutes;
+        return new Response(JSON.stringify(routes[path] ?? { error: 'not_found' }), {
+          status: path in routes ? 200 : 404,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }),
+    );
+    render(providers(<Conversaciones />));
+    const user = userEvent.setup();
+    await user.click((await screen.findAllByText('¿Tenéis hueco mañana?'))[0]!);
+
+    const button = await screen.findByRole('button', { name: 'Responder como humano' });
+    expect(button).toBeEnabled();
+    expect(button).toHaveAttribute('data-tip', `Pausa a ${nombre} y abre el cajón para responder desde el panel`);
+    await user.click(button);
+    expect(await screen.findByText(`Control tomado ✓ — ${nombre} queda en pausa hasta que se lo devuelvas`)).toBeInTheDocument();
+    expect(posts).toEqual([`/api/admin/conversations/${inboxConThread.thread!.conversation.id}/takeover`]);
+    expect(document.body.textContent).not.toContain('NAYA');
+  });
+
   it('abre directamente el hilo enlazado desde un aviso de Messenger', async () => {
     vi.stubGlobal(
       'fetch',

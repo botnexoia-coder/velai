@@ -129,7 +129,7 @@ conversaciones.get('/api/admin/inbox', async (c) => {
   let thread = null;
   const wanted = clean(url.searchParams.get('conversation'), 40);
   if (wanted && UUID_RE.test(wanted)) {
-    const head = await env.DB.prepare(`SELECT c.*, t.name AS tenant_name FROM conversations c
+    const head = await env.DB.prepare(`SELECT c.*, t.name AS tenant_name, t.bot_name AS bot_name FROM conversations c
       LEFT JOIN tenants t ON t.id = c.tenant_id WHERE c.id=?${scc.sql}`).bind(wanted, ...scc.args).first();
     if (head) {
       const messages = (await env.DB.prepare('SELECT role, agent_email, text, created_at, attachments_json FROM conv_messages WHERE conversation_id=? ORDER BY id ASC LIMIT 500').bind(head.id).all()).results;
@@ -156,7 +156,11 @@ conversaciones.get('/api/admin/inbox', async (c) => {
       if (env.MOBILE_PREVIEW_READ_ONLY) {
         win.open = false; win.canTakeover = false; win.reason = 'mobile_preview_read_only';
       }
-      thread = { conversation: head, messages, window: win };
+      // Nombre público del bot (el mismo del aviso de devolución): el panel lo usa en vez
+      // de un nombre fijo. No es secreto; el scope de la consulta ya impide ver el de otro.
+      const assistantName = clean(head.bot_name, 40) || null;
+      delete head.bot_name;
+      thread = { conversation: head, messages, window: win, assistantName };
     }
   }
   // queueMin viaja para que el panel pinte la cuenta atrás con el MISMO número que usa el
