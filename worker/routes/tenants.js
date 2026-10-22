@@ -6,7 +6,7 @@ import { catalogoPlanes, validarPlan, tenantPlan, assertPlanChannelLimit, planSt
 import { REDES, kindPermitido } from '../planes.js';
 import { invalidateAvailability } from '../agenda.js';
 import { Hono } from 'hono';
-import { partesAdmin, envAdmins } from '../middleware.js';
+import { partesAdmin, envAdmins, slugsCasa } from '../middleware.js';
 import { templateKind, catalogKinds } from '../plantillas.js';
 import {
   HttpError, json, NO_STORE, clean, readJson, rateLimited, callAnthropic,
@@ -290,6 +290,7 @@ const grupoTenant = async (c) => {
       placeholder, wa_number, theme, web_origins, sender_sid, sender_status, telegram_chat_title,
       ai_monthly_tokens, ai_daily_limit, support_hours, support_tz,
       followup_enabled, followup_delay_minutes, followup_message, followup_enabled_at,
+      espacio_velai, espacio_atender,
       active, created_at, updated_at, twilio_auth_token_enc IS NOT NULL AS has_twilio_token
       FROM tenants WHERE id=?`).bind(tenantId).first();
     if (!tenant) throw new HttpError(404, 'not_found');
@@ -300,6 +301,14 @@ const grupoTenant = async (c) => {
     const previous = await env.DB.prepare('SELECT * FROM tenants WHERE id=?').bind(tenantId).first();
     if (!previous) throw new HttpError(404, 'not_found');
     const fields = validateTenant(body, { partial: true });
+    if (fields.espacio_velai !== undefined || fields.espacio_atender !== undefined) {
+      const espacio = fields.espacio_velai ?? Number(previous.espacio_velai);
+      if ((espacio || fields.espacio_atender) && slugsCasa(env).has(fields.slug ?? previous.slug)) throw new HttpError(400, 'espacio_tenant_casa');
+      if (!espacio && fields.espacio_atender === 1) throw new HttpError(400, 'espacio_atender_sin_espacio');
+      // Sacarlo del selector apaga también la atención: un espacio que no se puede abrir
+      // no puede seguir «atendible» y volver a encenderlo es una decisión aparte.
+      if (!espacio) fields.espacio_atender = 0;
+    }
     const followupEnabled = fields.followup_enabled ?? previous.followup_enabled;
     const followupMessage = fields.followup_message !== undefined ? fields.followup_message : previous.followup_message;
     if (followupEnabled && !followupMessage) throw new HttpError(400, 'invalid_followup_message');
@@ -360,6 +369,13 @@ const grupoTenant = async (c) => {
         clean(body.note, 200) || null, now).run();
     await invalidateTenantCache(env, [previous, fields]);
     if (planConfig) await invalidateAvailability(env, tenantId);
+    // Apagar la atención retira la disponibilidad que Velai marcó dentro del espacio: si
+    // no, el bot seguiría ofreciendo «un asesor» que ya no puede entrar. Los correos del
+    // propio cliente (tenant_users) conservan la suya.
+    if (fields.espacio_atender === 0 && Number(previous.espacio_atender) === 1) {
+      await env.DB.prepare(`DELETE FROM agent_presence WHERE tenant_id=?
+        AND lower(email) NOT IN (SELECT lower(email) FROM tenant_users WHERE tenant_id=?)`).bind(tenantId, tenantId).run();
+    }
     if (changedPrompt) {
       ctx.waitUntil(sendTelegramText(env, `✏️ <b>${escapeHtml(actor)}</b> cambió el contexto de <b>${escapeHtml(previous.name)}</b>`).catch(() => {}));
     }

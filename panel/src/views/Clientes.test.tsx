@@ -8,7 +8,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createQueryClient } from '../api/queryClient';
 import { ToastProvider } from '../components/Toasts';
 import { semaforo } from '../lib/semaforo';
-import { tenants, tenantPlan } from '../test/fixtures';
+import { meVelai, tenants, tenantPlan } from '../test/fixtures';
 import { Clientes } from './Clientes';
 import type { TenantDetail, TenantDetailResponse, TenantRow } from '../api/types';
 
@@ -359,6 +359,75 @@ describe('redes en «Plan y módulos»', () => {
   });
 });
 
+describe('«Espacio de Velai» en la ficha', () => {
+  const json = (body: unknown) => new Response(JSON.stringify(body), { status: 200, headers: { 'Content-Type': 'application/json' } });
+  async function abrirFicha({ role = 'velai', tenant = {} as Partial<TenantDetail> } = {}) {
+    const utils = renderClientes((url, init) => {
+      if (url === '/api/admin/me') return json({ ...meVelai, role });
+      if (!init?.method && url.split('?')[0] === `/api/admin/tenants/${detailTenant.id}`) return json({ ...detail, tenant: { ...detailTenant, ...tenant } });
+      return null;
+    });
+    const user = userEvent.setup();
+    await user.click(await screen.findByText('Barbería López'));
+    const dialog = await screen.findByRole('dialog', { hidden: true });
+    await waitFor(() => expect(within(dialog).getByLabelText('Nombre')).toHaveValue('Barbería López'));
+    return { ...utils, user, dialog };
+  }
+  const patchBody = (calls: { url: string; init?: RequestInit }[]) => {
+    const patch = calls.find((c) => c.init?.method === 'PATCH' && c.url.endsWith(`/api/admin/tenants/${detailTenant.id}`));
+    return patch ? (JSON.parse(String(patch.init?.body)) as Record<string, unknown>) : null;
+  };
+
+  it('dos interruptores con su nota; el de atención queda deshabilitado sin el primero', async () => {
+    const { user, dialog } = await abrirFicha();
+    const seccion = within(await within(dialog).findByRole('group', { name: 'Espacio de Velai' }));
+    const selector = seccion.getByRole('switch', { name: 'Aparece en el selector Espacio' });
+    const atender = seccion.getByRole('switch', { name: 'Velai puede tomar el control de sus conversaciones' });
+    expect(selector).not.toBeChecked();
+    expect(atender).toBeDisabled();
+    expect(seccion.getByText(/Solo empresas propias o con acuerdo firmado/)).toBeInTheDocument();
+    await user.click(selector);
+    expect(atender).toBeEnabled();
+    await user.click(atender);
+    expect(atender).toBeChecked();
+    // Apagar el selector apaga también la atención.
+    await user.click(selector);
+    expect(atender).not.toBeChecked();
+    expect(atender).toBeDisabled();
+  });
+
+  it('guarda los dos campos en el PATCH de la ficha', async () => {
+    const { user, dialog, calls } = await abrirFicha();
+    const seccion = within(await within(dialog).findByRole('group', { name: 'Espacio de Velai' }));
+    await user.click(seccion.getByRole('switch', { name: 'Aparece en el selector Espacio' }));
+    await user.click(seccion.getByRole('switch', { name: 'Velai puede tomar el control de sus conversaciones' }));
+    await user.click(within(dialog).getByRole('button', { name: 'Guardar' }));
+    await waitFor(() => expect(patchBody(calls)).toMatchObject({ espacio_velai: true, espacio_atender: true }));
+  });
+
+  it('carga lo guardado y al apagar el selector manda la atención a false', async () => {
+    const { user, dialog, calls } = await abrirFicha({ tenant: { espacio_velai: 1, espacio_atender: 1 } });
+    const seccion = within(await within(dialog).findByRole('group', { name: 'Espacio de Velai' }));
+    const atender = seccion.getByRole('switch', { name: 'Velai puede tomar el control de sus conversaciones' });
+    await waitFor(() => expect(atender).toBeChecked());
+    await user.click(seccion.getByRole('switch', { name: 'Aparece en el selector Espacio' }));
+    await user.click(within(dialog).getByRole('button', { name: 'Guardar' }));
+    await waitFor(() => expect(patchBody(calls)).toMatchObject({ espacio_velai: false, espacio_atender: false }));
+  });
+
+  it('no aparece para quien no es Velai ni se ofrece en los tenants de la casa', async () => {
+    const { dialog, unmount } = await abrirFicha({ role: 'cliente' });
+    expect(within(dialog).queryByRole('group', { name: 'Espacio de Velai' })).toBeNull();
+    unmount();
+    const casa = await abrirFicha({ tenant: { slug: 'velai' } });
+    const seccion = within(await within(casa.dialog).findByRole('group', { name: 'Espacio de Velai' }));
+    expect(seccion.queryByRole('switch')).toBeNull();
+    expect(seccion.getByText(/ya es Velai/)).toBeInTheDocument();
+    await casa.user.click(within(casa.dialog).getByRole('button', { name: 'Guardar' }));
+    await waitFor(() => expect(patchBody(casa.calls)).toBeTruthy());
+    expect(patchBody(casa.calls)).not.toHaveProperty('espacio_velai');
+  });
+});
 
 describe('lanzador en Marca del widget', () => {
   it('la pestaña Marca enseña retrato, acento y tarjeta', async () => {

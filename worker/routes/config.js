@@ -3,7 +3,7 @@
 // infraestructura, la Configuración de admins raíz (token de Cloudflare, webhook de
 // Telegram) y los admins gestionados. Migrado tal cual del adminRouter monolítico.
 import { Hono } from 'hono';
-import { partesAdmin, envAdmins, envSocios, esSocio, PERMISOS } from '../middleware.js';
+import { partesAdmin, envAdmins, envSocios, esSocio, PERMISOS, espaciosVelai } from '../middleware.js';
 import { verifyCfToken } from '../cloudflare.js';
 import {
   HttpError, json, NO_STORE, clean, readJson, getSetting, setSetting,
@@ -29,8 +29,12 @@ configuracion.get('/api/admin/me', async (c) => {
   const editorialEditable = !env.MOBILE_PREVIEW_READ_ONLY && (scope.role === 'velai' || (scope.role === 'cliente' && tenantSlug === 'dialogos' && scope.modulos?.includes('calendario') === true));
   const workspace = c.get('workspace') || { current:'velai',canSwitch:false };
   if (scope.role === 'cliente' && !workspace.canSwitch) {
-    if (tenantSlug === 'dialogos') workspace.current = 'dialogos';
-    if (tenantSlug === 'colegiale-sevilla') workspace.current = 'naya';
+    if (tenantSlug === 'dialogos' || tenantSlug === 'colegiale-sevilla') workspace.current = tenantSlug;
+  }
+  // Las opciones solo las pide /me: no se paga la consulta en cada petición del panel.
+  // Si fallara, el selector se queda en Velai en vez de tumbar el panel entero.
+  if (workspace.canSwitch) {
+    try { workspace.options = await espaciosVelai(env); } catch (_) { workspace.options = [{ id: 'velai', label: 'Velai · Admin' }]; }
   }
   return json({ workspace, tenantSlug, editorialEditable, role: scope.role, socio: esSocio(env, scope), tenantName, tenantLogo, tenantId: scope.tenantId, plan: scope.plan ?? null, modulos: scope.modulos ?? [] }, 200, NO_STORE);
 });

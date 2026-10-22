@@ -747,6 +747,10 @@ export function validateTenant(body, { partial = false } = {}) {
   }
   if (has('active')) out.active = body.active ? 1 : 0;
   if (has('weekly_report')) out.weekly_report = body.weekly_report ? 1 : 0;
+  // Espacio de Velai (migración 0058). Solo los guarda el PATCH de Velai: el alta tiene
+  // columnas explícitas y el autoservicio del cliente pasa un subconjunto sin ellos.
+  if (has('espacio_velai')) out.espacio_velai = [true, 1, '1'].includes(body.espacio_velai) ? 1 : 0;
+  if (has('espacio_atender')) out.espacio_atender = [true, 1, '1'].includes(body.espacio_atender) ? 1 : 0;
   if (has('followup_enabled')) out.followup_enabled = [true, 1, '1'].includes(body.followup_enabled) ? 1 : 0;
   if (has('followup_delay_minutes')) {
     const raw = String(body.followup_delay_minutes ?? '').trim();
@@ -3033,10 +3037,13 @@ export async function velaiTenantId(env) {
 }
 
 // ¿Puede ESTA persona atender ESTA conversación? Un cliente, las suyas; Velai, solo las de
-// Velai. Devuelve booleano y no lanza: el código de error lo elige el que llama.
+// Velai. Excepción (migración 0058): un admin de Velai DENTRO del espacio de un cliente con
+// espacio_atender=1 —empresa propia o con acuerdo— atiende las de ese cliente y ninguna más.
+// Devuelve booleano y no lanza: el código de error lo elige el que llama.
 export async function canAttend(env, scope, tenantId) {
   if (!tenantId) return false;
-  if (scope.role !== 'velai' && !scope.workspaceAdmin) return scope.tenantId === tenantId;
+  if (scope.workspaceAdmin) return tenantId === scope.tenantId && scope.workspaceAttend === true;
+  if (scope.role !== 'velai') return scope.tenantId === tenantId;
   const mine = await velaiTenantId(env);
   return Boolean(mine) && tenantId === mine;
 }
