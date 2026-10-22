@@ -301,36 +301,59 @@ export async function mwResolveScope(c, next) {
   await next();
 }
 
+// Los tenants de la casa nunca son un «espacio»: ya son Velai, y marcarlos convertiría
+// el selector en un segundo camino hacia lo que el admin ve sin cabecera.
+export function slugsCasa(env) {
+  return new Set(['velai', 'velai-messenger', clean(env.DEFAULT_TENANT_SLUG, 40) || 'velai']);
+}
+// Alias heredado: hasta la migración 0058 el panel guardaba `naya` en sessionStorage.
+const WORKSPACE_ALIAS = { naya: 'colegiale-sevilla' };
+const WORKSPACE_RE = /^[a-z0-9][a-z0-9-]{1,39}$/;
+
+// Opciones del selector Espacio: Velai y los clientes activos con espacio_velai=1
+// (migración 0058), por nombre. El id es el slug real; el panel no tiene lista fija.
+export async function espaciosVelai(env) {
+  const casa = [...slugsCasa(env)];
+  const rows = (await env.DB.prepare(`SELECT slug, name FROM tenants WHERE active=1 AND espacio_velai=1
+    AND slug NOT IN (${casa.map(() => '?').join(',')}) ORDER BY name COLLATE NOCASE, slug`).bind(...casa).all()).results || [];
+  return [{ id: 'velai', label: 'Velai · Admin' }, ...rows.map((r) => ({ id: r.slug, label: r.name || r.slug }))];
+}
+
 // El espacio es una restricción de la identidad administrativa ya verificada.
 // Nunca resuelve otro correo, concede un permiso ni acepta un UUID de otro cliente.
+// Qué clientes son espacio y si Velai atiende dentro lo decide la ficha del cliente
+// (espacio_velai / espacio_atender): un slug ausente, inactivo o sin espacio = 403.
 export async function workspaceGate(c, next) {
   const original = c.get('scope'), choice = c.req.raw.headers.get('X-Velai-Workspace');
-  const admin = original.role === 'velai';
+  const admin = original.role === 'velai', preview = Boolean(c.env.MOBILE_PREVIEW_READ_ONLY);
   if (choice !== null && !admin) throw new HttpError(403, 'not_authorized');
-  if (choice !== null && !['velai','dialogos','naya'].includes(choice)) throw new HttpError(400, 'workspace_invalido');
-  if (choice !== null && c.env.MOBILE_PREVIEW_READ_ONLY) throw new HttpError(400, 'workspace_preview_unavailable');
-  const workspace = { current: choice || 'velai', canSwitch: admin && !c.env.MOBILE_PREVIEW_READ_ONLY, canAttend: !c.env.MOBILE_PREVIEW_READ_ONLY && !['dialogos','naya'].includes(choice) };
-  if (workspace.canSwitch) workspace.options = [{ id:'velai',label:'Velai' },{ id:'dialogos',label:'Diálogos' },{ id:'naya',label:'Naya Eventos' }];
-  c.set('workspace', workspace);
-  if (choice === 'dialogos' || choice === 'naya') {
-    if (c.req.path === '/api/admin/availability' && c.req.method === 'PATCH') throw new HttpError(403, 'velai_no_atiende_clientes');
+  if (choice !== null && choice !== 'velai' && !WORKSPACE_RE.test(choice)) throw new HttpError(400, 'workspace_invalido');
+  if (choice !== null && preview) throw new HttpError(400, 'workspace_preview_unavailable');
+  const slug = choice === null || choice === 'velai' ? null : (WORKSPACE_ALIAS[choice] || choice);
+  const workspace = { current: 'velai', canSwitch: admin && !preview, canAttend: !preview };
+  if (slug) {
+    if (slugsCasa(c.env).has(slug)) throw new HttpError(403, 'workspace_unavailable');
     let tenant, overrides;
     try {
-      const slug = choice === 'naya' ? 'colegiale-sevilla' : 'dialogos';
-      tenant = await c.env.DB.prepare('SELECT id,slug,plan,active FROM tenants WHERE slug=?').bind(slug).first();
-      if (!tenant) throw new HttpError(404, 'workspace_not_found');
-      if (Number(tenant.active) !== 1 || !esPlan(tenant.plan)) throw new HttpError(403, 'workspace_unavailable');
+      tenant = await c.env.DB.prepare('SELECT id,slug,name,plan,active,espacio_velai,espacio_atender FROM tenants WHERE slug=?').bind(slug).first();
+      if (!tenant || Number(tenant.active) !== 1 || Number(tenant.espacio_velai) !== 1 || !esPlan(tenant.plan)) throw new HttpError(403, 'workspace_unavailable');
       overrides = (await c.env.DB.prepare('SELECT modulo,estado FROM tenant_modulos WHERE tenant_id=?').bind(tenant.id).all()).results;
       if (!Array.isArray(overrides)) throw new HttpError(503, 'workspace_unavailable');
     } catch (e) {
       if (e instanceof HttpError) throw e;
       throw new HttpError(503, 'workspace_unavailable');
     }
+    const attend = Number(tenant.espacio_atender) === 1;
+    // La disponibilidad es por persona Y tenant (agent_presence): con atención habilitada
+    // queda acotada sola al tenant del espacio, que pasa a ser el scope.tenantId de abajo.
+    if (!attend && c.req.path === '/api/admin/availability' && c.req.method === 'PATCH') throw new HttpError(403, 'espacio_sin_atencion');
+    Object.assign(workspace, { current: tenant.slug, label: tenant.name || tenant.slug, canAttend: !preview && attend });
     // Actor y limitación de atención originales; no transportar raíz/finanzas al
     // espacio de cliente. Sin header la resolución ordinaria los conserva intactos.
     c.set('scope', { role:'cliente',tenantId:tenant.id,email:original.email,plan:tenant.plan,
-      modulos:modulosDe(tenant.plan,overrides),permisos:[],raiz:false,workspaceAdmin:true });
+      modulos:modulosDe(tenant.plan,overrides),permisos:[],raiz:false,workspaceAdmin:true,workspaceAttend:attend });
   }
+  c.set('workspace', workspace);
   await next();
 }
 

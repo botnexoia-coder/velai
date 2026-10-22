@@ -412,7 +412,7 @@ function Disponibilidad({ open, onToggle, isVelai, canAttend }: { open: boolean;
               <i />
             </button>
           </div>
-          <p>{!canAttend ? 'Este espacio permite consultar conversaciones y editar la planificación. La atención del admin permanece en Velai.' : data ? availNote(data, isVelai) : ''}</p>
+          <p>{!canAttend ? (MOBILE_PREVIEW ? 'La prueba móvil es solo lectura: aquí no se atiende.' : traducir('espacio_sin_atencion')) : data ? availNote(data, isVelai) : ''}</p>
           <p className="pophint">
             {data ? `${data.withinHours ? 'Dentro del horario de atención' : 'Fuera del horario de atención'} · ${data.tz}` : ''}
           </p>
@@ -631,7 +631,7 @@ function Composer({ thread, queueMin, onToast }: { thread: InboxThread; queueMin
                 data-tip={
                   thread.window.canTakeover
                     ? `Pausa a ${nombre} y abre el cajón para responder desde el panel`
-                    : traducir(new Error(thread.window.takeoverReason || 'nada_que_tomar'))
+                    : traducir(new Error(thread.window.takeoverReason || (thread.window.reason === 'espacio_sin_atencion' ? 'espacio_sin_atencion' : 'nada_que_tomar')))
                 }
                 onClick={() =>
                   takeover.mutate(c.id, {
@@ -641,6 +641,26 @@ function Composer({ thread, queueMin, onToast }: { thread: InboxThread; queueMin
                 }
               >
                 Responder como humano
+              </button>
+            </>
+          ) : null}
+          {/* Espacio con la atención apagada: no se escribe, pero lo tomado se puede
+              soltar para que no quede atascado en manos de nadie. */}
+          {thread.window.canRelease ? (
+            <>
+              <span className="sp" />
+              <button
+                className="btn alt btnsm"
+                type="button"
+                disabled={release.isPending}
+                onClick={() =>
+                  release.mutate(c.id, {
+                    onSuccess: () => onToast('Devuelta a Vai ✓ — se le ha avisado de que vuelve a atenderle el asistente'),
+                    onError: (e) => onToast(`No se pudo: ${traducir(e)}`, false),
+                  })
+                }
+              >
+                Devolver a Vai
               </button>
             </>
           ) : null}

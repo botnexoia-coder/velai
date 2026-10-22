@@ -44,6 +44,19 @@ button,input,select,textarea{font:inherit;color:var(--white)}
 button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible,[tabindex]:focus-visible{outline:2px solid var(--orange);outline-offset:2px}
 /* ── Barra lateral (oscura SIEMPRE) ── */
 .side{position:sticky;top:0;height:100vh;height:100dvh;width:230px;flex-shrink:0;display:flex;flex-direction:column;background:var(--side);border-right:1px solid var(--border);padding:24px 14px 16px;z-index:20}
+/* Scroll PROPIO en escritorio: con Finanzas y Sistema la barra mide ~1000 px y en una
+   pantalla de 657 px «Impuestos… Salir» quedaba fuera, sin forma de llegar en
+   Conversaciones (body.wide no hace scroll). Los hijos no encogen —el .sep de 1 px se
+   colapsaría— y el .spacer sigue empujando el pie abajo cuando sí cabe. El #tip es
+   position:fixed, así que el overflow no lo recorta. ≤900 px conserva su fila horizontal. */
+@media(min-width:901px){
+.side{overflow-y:auto;overflow-x:hidden;overscroll-behavior:contain;scrollbar-width:thin;scrollbar-color:rgba(255,248,244,.16) transparent}
+.side>*{flex-shrink:0}
+.side::-webkit-scrollbar{width:6px}
+.side::-webkit-scrollbar-track{background:transparent}
+.side::-webkit-scrollbar-thumb{background:rgba(255,248,244,.16);border-radius:999px}
+.side::-webkit-scrollbar-thumb:hover{background:rgba(255,248,244,.28)}
+}
 .brand{display:flex;align-items:center;gap:9px;font-family:var(--font-d);font-weight:900;font-size:19px;letter-spacing:-.02em;padding:0 10px}
 .brand i{width:9px;height:9px;border-radius:50%;background:var(--orange);box-shadow:0 0 10px rgba(255,107,26,.7)}
 .brand small{font-family:var(--font-b);font-weight:500;font-size:10.5px;letter-spacing:.18em;color:var(--muted);text-transform:uppercase;margin-top:3px}

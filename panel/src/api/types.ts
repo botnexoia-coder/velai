@@ -22,10 +22,12 @@ export interface TenantPlanResponse {
 }
 
 export type Role = 'velai' | 'cliente';
+export interface WorkspaceOption { id: string; label: string }
 
 /** GET /api/admin/me */
 export interface Me {
-  workspace?: { current: 'velai' | 'dialogos' | 'naya'; canSwitch: boolean; canAttend?: boolean };
+  /** current: 'velai' o el slug del cliente; options solo llega con canSwitch (migración 0058). */
+  workspace?: { current: string; canSwitch: boolean; canAttend?: boolean; label?: string; options?: WorkspaceOption[] };
   tenantSlug?: string | null;
   editorialEditable?: boolean;
   role: Role;
@@ -322,6 +324,8 @@ export interface ReplyWindow {
   canTakeover?: boolean;
   /** Motivo por el que no puede tomarlo (p. ej., ventana de Meta cerrada). */
   takeoverReason?: string | null;
+  /** Admin de Velai en un espacio sin atención: puede devolver a Vai aunque no pueda escribir. */
+  canRelease?: boolean;
   web?: boolean;
   away?: boolean;
   seenAt?: string | null;
@@ -485,6 +489,9 @@ export interface TenantDetail {
   followup_delay_minutes: number;
   followup_message: string | null;
   followup_enabled_at: string | null;
+  /** Espacio de Velai (migración 0058). Ausentes en workers anteriores = 0. */
+  espacio_velai?: number;
+  espacio_atender?: number;
   active: number;
   created_at: string;
   updated_at: string;

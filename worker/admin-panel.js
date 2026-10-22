@@ -286,6 +286,7 @@ const WIN_WHY={
  ya_tomada:'Otra persona del equipo tomó el control de esta conversación.',
  nada_que_tomar:'Aquí no hay ningún control que tomar: la está atendiendo Vai.',
  velai_no_atiende_clientes:'Esta conversación es de un cliente y la atiende su equipo, no Velai. La ves para dar soporte, pero no puedes escribir en ella.',
+ espacio_sin_atencion:'Velai no tiene habilitada la atención en este espacio. Actívala en la ficha del cliente → Espacio de Velai.',
  velai_tenant_missing:'No encuentro el cliente «velai» en la base: sin él no se puede resolver la disponibilidad de Velai.'};
 function fmtShort(v){if(!v)return '';const d=new Date(v),now=new Date();
  return (d.toDateString()===now.toDateString())

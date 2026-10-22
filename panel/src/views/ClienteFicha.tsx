@@ -30,9 +30,13 @@ import {
   useUserDelete,
   useVersionRestore,
   useLogoUpload,
+  useMe,
   type TenantSaveBody,
 } from '../hooks/queries';
 import type { Plan, Modulo, ModuloExcepcion, Red, RedExcepcion, TenantChannel, TenantDetail, TenantDetailResponse, TenantPlanResponse } from '../api/types';
+
+// Tenants de la casa: ya son Velai y el worker rechaza marcarlos (espacio_tenant_casa).
+const SLUGS_CASA = ['velai', 'velai-messenger'];
 
 // Los campos de texto de la ficha (mismo mapa TF que el v1). channel_address NO está
 // aquí a propósito: dejó de ser un campo que se teclea — el alta lo deriva del slug en
@@ -171,6 +175,9 @@ export function ClienteFicha({ id, onClose }: { id: string | null; onClose: () =
   const [chipsText, setChipsText] = useState('');
   const [originsText, setOriginsText] = useState('');
   const [active, setActive] = useState(false);
+  const [espacioVelai, setEspacioVelai] = useState(false);
+  const [espacioAtender, setEspacioAtender] = useState(false);
+  const isVelai = useMe().data?.role === 'velai';
   const [token, setToken] = useState('');
   const [note, setNote] = useState('');
   const [fieldErrs, setFieldErrs] = useState<Record<string, string>>({});
@@ -193,6 +200,8 @@ export function ClienteFicha({ id, onClose }: { id: string | null; onClose: () =
     setChipsText(jsonToLines(detail.tenant.chips_json));
     setOriginsText(jsonToLines(detail.tenant.web_origins));
     setActive(Boolean(detail.tenant.active));
+    setEspacioVelai(Number(detail.tenant.espacio_velai) === 1);
+    setEspacioAtender(Number(detail.tenant.espacio_atender) === 1);
     setToken('');
     setEditing({ id: detail.tenant.id, updated_at: detail.tenant.updated_at });
     setDirty(new Set());
@@ -216,6 +225,12 @@ export function ClienteFicha({ id, onClose }: { id: string | null; onClose: () =
     body['web_origins'] = linesFrom(originsText, 6);
     body['active'] = active;
     body['note'] = note;
+    // Espacio de Velai: solo en una ficha ya creada y solo lo guarda Velai. El worker
+    // fuerza espacio_atender=0 si el cliente sale del selector.
+    if (editing && isVelai && !SLUGS_CASA.includes(detail?.tenant.slug ?? '')) {
+      body.espacio_velai = espacioVelai;
+      body.espacio_atender = espacioVelai && espacioAtender;
+    }
     if (!editing || dirty.has('plan')) {
       if (!planInfo) { toast('No se ha podido cargar el plan. Inténtalo de nuevo.', false); return false; }
       body.plan = plan; body.excepciones = excepciones; body.excepciones_redes = excepcionesRedes; body.expected_revision = planInfo.revision;
@@ -460,6 +475,29 @@ export function ClienteFicha({ id, onClose }: { id: string | null; onClose: () =
                   <input type="checkbox" checked={active} onChange={(e) => setActive(e.target.checked)} /> Activo (enruta y atiende)
                 </label>
               </Card>
+              {editing && !wizard && isVelai ? (
+                <div className="card cardwide" aria-label="Espacio de Velai" role="group">
+                  <b>Espacio de Velai</b>
+                  {SLUGS_CASA.includes(detail?.tenant.slug ?? '') ? (
+                    <small className="muted">Este tenant ya es Velai: no puede marcarse como espacio de un cliente.</small>
+                  ) : (
+                    <>
+                      <label className="plan-toggle">
+                        <input type="checkbox" role="switch" aria-label="Aparece en el selector Espacio" checked={espacioVelai} onChange={(e) => {
+                          setEspacioVelai(e.target.checked); markDirty('identidad');
+                          // Fuera del selector no hay espacio en el que atender.
+                          if (!e.target.checked) setEspacioAtender(false);
+                        }} /> Aparece en el selector Espacio
+                      </label>
+                      <label className="plan-toggle">
+                        <input type="checkbox" role="switch" aria-label="Velai puede tomar el control de sus conversaciones" checked={espacioVelai && espacioAtender} disabled={!espacioVelai}
+                          onChange={(e) => { setEspacioAtender(e.target.checked); markDirty('identidad'); }} /> Velai puede tomar el control de sus conversaciones
+                      </label>
+                      <small className="muted">Solo empresas propias o con acuerdo firmado. Al apagarlo, quien esté dentro vuelve a Velai en su siguiente acción; las conversaciones tomadas se pueden devolver a Vai.</small>
+                    </>
+                  )}
+                </div>
+              ) : null}
             </div>
           </section>
         ) : null}

@@ -396,20 +396,50 @@ que falló al leer una respuesta de deployments con HTTP 200; el primer intento
 también recibió un 504 en la API. Se mantienen todas las puertas CI, staging y
 smoke. Un fallo del proveedor no confirma que producción esté actualizada.
 
-### Cambiar entre los espacios Velai, Diálogos y Naya
+### Espacios de Velai (selector «Espacio»)
 
 Los administradores pueden elegir «Espacio de trabajo» en el panel normal para
-consultar Velai, trabajar con la planificación propia de Diálogos o consultar Naya Eventos. La elección
-se recuerda por pestaña en sessionStorage; no se guardan credenciales ni datos
-privados del panel. Cambiar cancela consultas, vacía la caché de la interfaz y
-recarga la página, manteniendo la identidad autenticada y su autoría.
+trabajar dentro de un cliente con sus mismas restricciones. La elección (slug y
+nombre) se recuerda por pestaña en sessionStorage; no se guardan credenciales ni
+datos privados del panel. Cambiar cancela consultas, vacía la caché de la interfaz
+y recarga la página, manteniendo la identidad autenticada y su autoría.
 
-El Worker solo acepta Velai, Diálogos o Naya para una identidad administradora.
-Los espacios propios resuelven los slugs permitidos `dialogos` y `colegiale-sevilla`,
-validan el tenant activo, su plan y módulos y aplican las restricciones del cliente. Los clientes normales no pueden entrar al espacio administrador.
-Los CSV conservan el contexto; un espacio no disponible permite volver a Velai.
-La atención administrativa de conversaciones conserva sus restricciones previas.
-La prueba móvil sigue siendo de lectura y no ofrece el selector.
+**Qué clientes son espacio lo decide la ficha del cliente**, sección «Espacio de
+Velai» (solo rol Velai, migración 0058):
+
+- «Aparece en el selector Espacio» (`tenants.espacio_velai`).
+- «Velai puede tomar el control de sus conversaciones» (`tenants.espacio_atender`),
+  deshabilitado si el primero está apagado. Apagar el primero apaga el segundo.
+
+Solo empresas propias o con acuerdo firmado. Hoy lo son `dialogos` y
+`colegiale-sevilla` (backfill de 0058, ambas con atención). `velai` y
+`velai-messenger` nunca pueden marcarse (400 `espacio_tenant_casa`). Cada cambio
+queda en el Historial de la ficha (`tenant_versions`, campo `config`).
+
+El Worker (`workspaceGate`) acepta en `X-Velai-Workspace` `velai` o el slug de un
+tenant activo con `espacio_velai=1`; `naya` sigue valiendo como alias heredado de
+`colegiale-sevilla`. Un slug mal formado da 400 `workspace_invalido`; uno
+inexistente, inactivo, sin espacio o de la casa, 403 `workspace_unavailable`, y el
+panel ofrece «Volver a Velai» con el nombre del espacio. `/me` devuelve
+`workspace.options` (Velai y los espacios, por nombre) y el panel pinta el selector
+desde ahí. Los clientes normales no pueden mandar la cabecera.
+
+Dentro de un espacio:
+
+- Con `espacio_atender=1`, Velai toma el control (desde la cola y de forma
+  proactiva), responde y devuelve **solo** conversaciones de ese cliente. La burbuja
+  lleva el correo real de la persona de Velai. Su disponibilidad se guarda en
+  `agent_presence` para ese tenant y cuenta como asesor del cliente.
+- Con `espacio_atender=0`, tomar y responder dan 403 `espacio_sin_atencion`, igual
+  que la disponibilidad. **Devolver a Vai** se permite siempre para que nada se
+  quede atascado en `humano`.
+- Al apagar la atención en la ficha se borra la disponibilidad que Velai marcó en
+  ese cliente; la de los usuarios del propio cliente se conserva. Quien esté dentro
+  vuelve a Velai en su siguiente acción si se apaga el espacio.
+
+Sin cabecera, Velai sigue sin atender conversaciones de clientes
+(`velai_no_atiende_clientes`). Los CSV conservan el contexto. La prueba móvil
+sigue siendo de lectura y no ofrece el selector.
 
 La sesión de Cloudflare Access de admin.hirevai.com está configurada en 24 horas,
 sin modificaciones de grupos ni políticas. «Salir» cierra esa sesión y exige

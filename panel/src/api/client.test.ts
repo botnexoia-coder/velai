@@ -6,7 +6,15 @@ const mode=vi.hoisted(()=>({preview:false}));
 vi.mock('../mobilePreview',async importOriginal=>({...await importOriginal<typeof import('../mobilePreview')>(),get MOBILE_PREVIEW(){return mode.preview;}}));
 beforeEach(()=>{sessionStorage.clear();resetSession();mode.preview=false;});
 afterEach(()=>{vi.unstubAllGlobals();vi.restoreAllMocks();sessionStorage.clear();mode.preview=false;resetSession();});
-it.each(['dialogos','naya'] as const)('espacio Velai omite cabecera; %s la aplica y conserva JSON y FormData',async(workspace)=>{
+it('la elección guardada es cualquier slug con forma válida; lo demás vuelve a Velai sin cabecera',async()=>{
+ const fetcher=vi.fn().mockImplementation(()=>Promise.resolve(Response.json({ok:true})));vi.stubGlobal('fetch',fetcher);
+ for(const [stored,header] of [['zoe','zoe'],['colegiale-sevilla','colegiale-sevilla'],['Velai',null],['x',null],['a;b',null],['velai',null]] as const){
+  sessionStorage.setItem(WORKSPACE_KEY,stored);fetcher.mockClear();
+  await api('/api/admin/example');
+  expect(new Headers(fetcher.mock.calls[0]?.[1].headers).get('X-Velai-Workspace')).toBe(header);
+ }
+});
+it.each(['dialogos','naya','colegiale-sevilla','zoe'] as const)('espacio Velai omite cabecera; %s la aplica y conserva JSON y FormData',async(workspace)=>{
  const fetcher=vi.fn().mockImplementation(()=>Promise.resolve(Response.json({ok:true})));vi.stubGlobal('fetch',fetcher);
  await apiPost('/api/admin/example',{value:1});
  expect(new Headers(fetcher.mock.calls[0]?.[1].headers).has('X-Velai-Workspace')).toBe(false);

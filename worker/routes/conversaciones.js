@@ -17,6 +17,16 @@ import {
 
 export const conversaciones = new Hono();
 
+// Por qué no se puede atender: Velai fuera de su tenant, o dentro del espacio de un
+// cliente que no tiene habilitada la atención (ficha → Espacio de Velai, migración 0058).
+const motivoSinAtencion = (scope) => (scope.workspaceAdmin ? 'espacio_sin_atencion' : 'velai_no_atiende_clientes');
+// ¿La tiene tomada una persona del equipo del cliente (tenant_users de ESE tenant)?
+async function tomadaPorCliente(env, conv) {
+  if (!conv.agent_email) return false;
+  const row = await env.DB.prepare('SELECT 1 AS x FROM tenant_users WHERE lower(email)=lower(?) AND tenant_id=?').bind(conv.agent_email, conv.tenant_id).first();
+  return Boolean(row);
+}
+
 conversaciones.get('/api/admin/escalations', async (c) => {
   const { env, scope } = partesAdmin(c);
   if (!env.KV) return json({ escalations: [] }, 200, NO_STORE);
@@ -145,7 +155,13 @@ conversaciones.get('/api/admin/inbox', async (c) => {
       }
       // La misma puerta que el endpoint de respuesta, pero ANTES: el cajón se cierra con
       // el motivo escrito en vez de dejar que alguien escriba y se coma un 403.
-      if (!(await canAttend(env, scope, head.tenant_id))) { win.open = false; win.reason = 'velai_no_atiende_clientes'; }
+      if (!(await canAttend(env, scope, head.tenant_id))) {
+        win.open = false; win.reason = motivoSinAtencion(scope);
+        // Devolver a Vai dentro del espacio sin atención: solo lo que tomó alguien de Velai
+        // (apagar la atención no puede dejarlo atascado). Lo que atiende el equipo del
+        // cliente no se toca: Velai no puede echarle de su propia conversación.
+        if (scope.workspaceAdmin && head.state === 'humano' && !(await tomadaPorCliente(env, head))) win.canRelease = true;
+      }
       // Marcar leído SOLO si hay algo nuevo: en un polling cada 15 s, un UPDATE
       // incondicional serían 1.900 escrituras al día por panel abierto para nada.
       if (!env.MOBILE_PREVIEW_READ_ONLY && (!head.last_read_at || head.last_read_at < head.last_at)) {
@@ -238,7 +254,11 @@ conversaciones.post('/api/admin/conversations/:id/:accion{takeover|release}', as
   if (!conv) throw new HttpError(404, 'not_found');
   // 403 y no 404 a propósito: Velai SÍ ve esta conversación, así que fingir que no existe
   // sería mentirle al panel. Lo que no puede es meterse a atenderla.
-  if (!(await canAttend(env, scope, conv.tenant_id))) throw new HttpError(403, 'velai_no_atiende_clientes');
+  // Devolver sí se permite a un admin de Velai dentro del espacio (la conversación ya es
+  // de ese tenant por el scopeClause de arriba) aunque la atención esté apagada.
+  // Solo si la tiene alguien de Velai: si la tomó el equipo del cliente, es suya.
+  const releaseEnEspacio = accion === 'release' && scope.workspaceAdmin === true && !(await tomadaPorCliente(env, conv));
+  if (!releaseEnEspacio && !(await canAttend(env, scope, conv.tenant_id))) throw new HttpError(403, motivoSinAtencion(scope));
   const now = new Date().toISOString();
   const who = String(actor).toLowerCase();
   if (accion === 'takeover') {
@@ -298,7 +318,7 @@ conversaciones.post('/api/admin/conversations/:id/reply', async (c) => {
   const scc = scopeClause(scope, 'c');
   const conv = await env.DB.prepare(`SELECT c.* FROM conversations c WHERE c.id=?${scc.sql}`).bind(id, ...scc.args).first();
   if (!conv) throw new HttpError(404, 'not_found');   // de otro cliente = 404, nunca 403
-  if (!(await canAttend(env, scope, conv.tenant_id))) throw new HttpError(403, 'velai_no_atiende_clientes');
+  if (!(await canAttend(env, scope, conv.tenant_id))) throw new HttpError(403, motivoSinAtencion(scope));
   const body = await readJson(request, 4000);
   const text = clean(body.text, 1500);
   if (!text) throw new HttpError(400, 'invalid_message');

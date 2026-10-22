@@ -10,7 +10,8 @@ import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { NavLink, Outlet, useLocation } from 'react-router';
 import { useIsMutating, useQueryClient } from '@tanstack/react-query';
 import { confirmar } from '../components/Confirmar';
-import { storeWorkspace, reloadWorkspace, workspaceChoice, type Workspace } from '../workspace';
+import { storeWorkspace, reloadWorkspace, workspaceChoice, workspaceLabel, type Workspace } from '../workspace';
+import type { WorkspaceOption } from '../api/types';
 import './workspace.css';
 import { isSessionExpired, subscribeSession } from '../api/session';
 import { useMe } from '../hooks/queries';
@@ -71,6 +72,14 @@ export function Shell() {
   const toast = useToast();
   const avisos = useAvisos(toast);
   const workspaceUnavailable = !MOBILE_PREVIEW && workspaceChoice() !== 'velai' && meError instanceof Error && ['workspace_unavailable', 'workspace_not_found'].includes(meError.message);
+  // Las opciones las da el worker (clientes con «Espacio de Velai»). Si el actual no
+  // viniera en la lista —un worker antiguo, o el espacio se apagó a medias— se añade para
+  // que el <select> no enseñe otro espacio distinto del que de verdad está abierto.
+  const workspaceOptions: WorkspaceOption[] = (() => {
+    const ws = me?.workspace;
+    const list = ws?.options?.length ? ws.options : [{ id: 'velai', label: 'Velai · Admin' }];
+    return ws && !list.some(o => o.id === ws.current) ? [...list, { id: ws.current, label: ws.label || ws.current }] : list;
+  })();
   useEffect(() => {
     const changed = (event: Event) => {
       if (!(event.target instanceof Element)) return;
@@ -90,7 +99,7 @@ export function Shell() {
       const dirty = Array.from(document.querySelectorAll('form')).some(form => dirtyForms.current.has(form) && form.getClientRects().length > 0);
       if (dirty && !(await confirmar({ titulo: '¿Cambiar de espacio?', cuerpo: 'Los cambios del formulario que no hayas guardado se perderán.', accion: 'Cambiar de espacio', peligro: true }))) return;
       if (queryClient.isMutating()) return;
-      if (!storeWorkspace(workspace)) { toast('No se pudo recordar el espacio. Permite el almacenamiento de esta pestaña y reintenta.', false); return; }
+      if (!storeWorkspace(workspace, workspaceOptions.find(o => o.id === workspace)?.label)) { toast('No se pudo recordar el espacio. Permite el almacenamiento de esta pestaña y reintenta.', false); return; }
       await queryClient.cancelQueries(); queryClient.clear();
       navigating = true; reloadWorkspace(workspace);
     } finally {
@@ -232,9 +241,9 @@ export function Shell() {
         </div>
       </aside>
       <main>
-        {workspaceUnavailable ? <div className="workspace-switch" role="alert"><div><strong>No se pudo abrir {workspaceChoice() === 'naya' ? 'NAYA' : 'Diálogos'}</strong><p>Vuelve a Velai para comprobar el acceso con tu sesión actual.</p></div><button className="btn alt" type="button" disabled={Boolean(mutations) || switching} onClick={() => void switchWorkspace('velai', true)}>Volver a Velai</button></div> : null}
+        {workspaceUnavailable ? <div className="workspace-switch" role="alert"><div><strong>No se pudo abrir {workspaceLabel()}</strong><p>Vuelve a Velai para comprobar el acceso con tu sesión actual.</p></div><button className="btn alt" type="button" disabled={Boolean(mutations) || switching} onClick={() => void switchWorkspace('velai', true)}>Volver a Velai</button></div> : null}
         {!MOBILE_PREVIEW && me?.workspace?.canSwitch ? <div className="workspace-switch">
-          <label>Espacio<select aria-label="Espacio de trabajo" value={me.workspace.current} disabled={Boolean(mutations) || switching} onChange={e => void switchWorkspace(e.target.value as Workspace)}><option value="velai">Velai · Admin</option><option value="dialogos">Diálogos que Enseñan</option><option value="naya">NAYA Eventos</option></select></label>
+          <label>Espacio<select aria-label="Espacio de trabajo" value={me.workspace.current} disabled={Boolean(mutations) || switching} onChange={e => void switchWorkspace(e.target.value)}>{workspaceOptions.map(o => <option key={o.id} value={o.id}>{o.label}</option>)}</select></label>
           <span>La misma sesión · cambia el espacio de trabajo</span>
         </div> : null}
         {MOBILE_PREVIEW ? <p className="mobile-preview-notice">Datos reales. Esta prueba no envía mensajes ni guarda cambios.</p> : null}

@@ -63,10 +63,21 @@ escrito y versionado sin atender a nadie (el panel la marca `prospecto`). Un pro
 puede activarse hasta ponerle su canal real — el panel lo rechaza. Al cerrar el trato:
 canal real + circuito de la Ruta B, marcar Activo y guardar. Sin deploy.
 
+## Espacio de Velai (solo con acuerdo)
+
+Por defecto un cliente **no** aparece en el selector «Espacio» del panel y Velai no
+puede atender sus conversaciones. Solo si es empresa propia o hay un acuerdo firmado:
+ficha → «Identidad y canal» → **Espacio de Velai** → «Aparece en el selector Espacio»
+y, si además Velai va a responder por él, «Velai puede tomar el control de sus
+conversaciones». Guardar. Queda en el Historial. Sin deploy. Detalle en
+`docs/OPERATIONS.md` → «Espacios de Velai».
+
 ## Baja de un cliente
 
 Borrar el sender, retirar el socio en Meta si lo hubiera, **Activo desmarcado** en el panel
 (la fila nunca se borra: los leads apuntan a `tenant_id`), y purgar sus leads según la retención.
+Si tenía «Espacio de Velai», apágalo: un cliente inactivo ya no abre, pero así no
+vuelve a aparecer si se reactiva.
 
 
 ### Plan y módulos (0043, disponible tras el CD)

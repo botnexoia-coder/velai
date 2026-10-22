@@ -55,6 +55,9 @@ export const TERRS: Record<string, string> = {
   invalid_plan: 'Selecciona un plan válido.',
   invalid_modulos: 'Revisa los módulos seleccionados.',
   citas_requires_calendario: 'Citas necesita el módulo Calendario.',
+  espacio_tenant_casa: 'Velai y su canal de Messenger ya son el espacio de Velai: no se pueden marcar como espacio de un cliente.',
+  espacio_atender_sin_espacio: 'Para que Velai pueda tomar el control, el cliente tiene que aparecer antes en el selector Espacio.',
+  workspace_unavailable: 'Ese espacio no está disponible: el cliente no existe, está inactivo o ya no aparece en el selector Espacio.',
   stale_tenant: 'Alguien modificó este cliente mientras editabas. Recarga la ficha y vuelve a aplicar tus cambios.',
   nothing_to_update: 'No hay cambios que guardar.',
   invalid_preview: 'Escribe un mensaje de prueba y un contexto de al menos 50 caracteres.',
@@ -132,6 +135,7 @@ export const WIN_WHY: Record<string, string> = {
   ya_tomada: 'Otra persona del equipo tomó el control de esta conversación.',
   nada_que_tomar: 'Aquí no hay ningún control que tomar: la está atendiendo Vai.',
   velai_no_atiende_clientes: 'Esta conversación es de un cliente y la atiende su equipo, no Velai. La ves para dar soporte, pero no puedes escribir en ella.',
+  espacio_sin_atencion: 'Velai no tiene habilitada la atención en este espacio. Actívala en la ficha del cliente → Espacio de Velai.',
   velai_tenant_missing: 'No encuentro el cliente «velai» en la base: sin él no se puede resolver la disponibilidad de Velai.',
 };
 
