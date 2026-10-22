@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { createWorker, handleLead, processConversationFollowups, testing } from '../worker/app.js';
 import { esSocio } from '../worker/middleware.js';
-import { NAYA_TENANT_ID, normalizeEventCode, nayaConversationFacts } from '../worker/event-codes.js';
+import { NAYA_TENANT_ID, normalizeEventCode, nayaConversationFacts, nayaFollowupPending, nayaSafeBookingReply } from '../worker/event-codes.js';
 import { encryptSecret, decryptSecret } from '../worker/crypto.js';
 import { deploymentDecision, deploymentScope, deploymentScopeForPush } from '../scripts/deploy-scope.mjs';
 
@@ -6980,4 +6980,52 @@ test('lead queue keeps an enumerated entry through temporary null read and drain
   await testing.drainQueuedLeads({DB,KV});
   assert.equal(deletes,1);
   assert.equal((await DB.prepare('SELECT COUNT(*) AS n FROM leads WHERE tenant_request_id=?').bind(requestId).first()).n,1);
+});
+
+
+test('operational Telegram: expired 30-day dedupe never replays a historical lead', async (t) => {
+  let sends = 0;
+  t.mock.method(globalThis, 'fetch', async () => { sends++; return Response.json({ ok: true }); });
+  const env = { TELEGRAM_TOKEN: 'synthetic', TELEGRAM_CHAT_ID: 'ops', KV: { get: async () => null, put: async () => {} } };
+  const tenant = { id: 'synthetic', name: 'Synthetic', telegram_chat_id: null };
+  const lead = { id: 'historical', created_at: new Date(Date.now() - 30 * 86400000).toISOString() };
+  assert.equal((await testing.deliver(env, 'telegram', lead, tenant)).skipped, true);
+  assert.equal(sends, 0);
+  await testing.deliver(env, 'telegram', { ...lead, created_at: new Date().toISOString() }, tenant);
+  assert.equal(sends, 1, 'new operational leads still alert');
+  await testing.deliver(env, 'telegram', lead, { ...tenant, telegram_chat_id: 'client' });
+  assert.equal(sends, 2, 'tenant backlog remains separate from live operational copies');
+});
+
+test('NAYA followup: only a pending booking question, never confirmation, consent, goodbye or collaboration', () => {
+  const user = (text) => ({ role: 'user', text });
+  const bot = (text) => ({ role: 'assistant', text });
+  assert.equal(nayaFollowupPending([user('Quiero reservar para Halloween'), bot('¿Cuántas personas sois?')]), true);
+  assert.equal(nayaFollowupPending([user('Somos 4 personas'), bot('¿Me dices tu nombre completo?')]), true);
+  assert.equal(nayaFollowupPending([user('Quiero reservar'), bot('¿Confirmamos la reserva?'), user('CONFIRMO RESERVA'), bot('¿Quieres avisos de próximos eventos?')]), false);
+  assert.equal(nayaFollowupPending([user('Ofrecemos colaboración'), bot('Gracias, ¿necesitas algo más?')]), false);
+  assert.equal(nayaFollowupPending([user('Quiero reservar'), bot('¡A ti! Nos vemos el 30 de octubre')]), false);
+  assert.equal(nayaFollowupPending([user('Somos 4'), bot('¿Cuántas personas sois?'), user('Gracias')]), false);
+});
+
+test('NAYA: ambiguous confirmation cannot claim a durable booking; valid summary still saves', async (t) => {
+  const DB = await sqliteD1(); t.after(() => DB.close());
+  const now = new Date().toISOString();
+  await DB.prepare(`INSERT INTO tenants(id,slug,name,channel_address,system_prompt,active,followup_enabled,followup_enabled_at,followup_message,created_at,updated_at)
+    VALUES (?,'naya-test','NAYA','web:naya-test','test',1,1,?,'Cierre',?,?)`).bind(NAYA_TENANT_ID, now, now, now).run();
+  await DB.prepare("INSERT INTO tenant_modulos VALUES (?,'eventos','on','test',?)").bind(NAYA_TENANT_ID, now).run();
+  await DB.prepare("INSERT INTO tenant_events(id,tenant_id,slug,name,status,created_at,updated_at) VALUES (?,?,'test','Test','active',?,?)").bind(crypto.randomUUID(), NAYA_TENANT_ID, now, now).run();
+  const conv = { id: crypto.randomUUID(), tenant: NAYA_TENANT_ID, channel: 'whatsapp', externalId: 'whatsapp:+34600000111', inbox: 'whatsapp:+34657724192', isNew: true, msgs: 0 };
+  const summary = '**Nombre:** Ana Ruiz\n**Asistentes:** 4 personas\n**Total:** 60 €\n¿Está todo correcto? Responde CONFIRMO RESERVA';
+  await testing.convAppend({ DB }, conv, [{ role: 'assistant', content: summary }, { role: 'user', content: 'Maria Perez' }, { role: 'assistant', content: '¿Es un nombre diferente para la reserva?' }]);
+  const unsafe = 'Tu inscripción queda registrada';
+  assert.notEqual(await nayaSafeBookingReply({ DB }, conv, 'confirmo reserva', unsafe), unsafe);
+  await testing.convAppend({ DB }, conv, [{ role: 'user', content: 'confirmo reserva' }, { role: 'assistant', content: 'Necesito confirmar los datos.' }]);
+  await DB.prepare("UPDATE conversations SET lead_id='synthetic',last_at=?,last_inbound_at=? WHERE id=?").bind(now, now, conv.id).run();
+  assert.deepEqual(await processConversationFollowups({ DB }, new Date(Date.now() + 181 * 60000).toISOString()), { candidates: 1, sent: 0 }, 'explicit confirmation protects even without a reservation row');
+  await testing.convAppend({ DB }, conv, [{ role: 'assistant', content: summary }]);
+  assert.equal(await nayaSafeBookingReply({ DB }, conv, 'confirmo reserva', unsafe), unsafe);
+  await testing.convAppend({ DB }, conv, [{ role: 'user', content: 'confirmo reserva' }, { role: 'assistant', content: unsafe }]);
+  const saved = await DB.prepare('SELECT name,individual_tickets,quoted_total_cents FROM event_reservations WHERE conversation_id=?').bind(conv.id).first();
+  assert.deepEqual(saved, { name: 'Ana Ruiz', individual_tickets: 4, quoted_total_cents: 6000 });
 });

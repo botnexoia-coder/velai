@@ -113,3 +113,25 @@ export async function nayaEventStatements(env, conv, turns) {
   }
   return statements;
 }
+
+// Conservative commercial followup: a captured lead alone is not a pending booking.
+// Any explicit confirmation protects the conversation even if storage/parsing failed.
+export function nayaFollowupPending(messages) {
+  if (messages.some((m) => m.role === 'user' && /^confirmo reserva[.!\s]*$/i.test(plain(text(m))))) return false;
+  const last = messages.at(-1);
+  if (last?.role !== 'assistant') return false;
+  const reply = plain(text(last));
+  if (!/[?¿]/.test(reply)) return false;
+  if (!messages.some((m) => m.role === 'user' && /(?:reserv|inscrib|inscrip|entradas?|vamos|somos|asistir|iremos|quiero ir)/i.test(plain(text(m))))) return false;
+  return /(?:confirmo reserva|confirmamos|confirmas|reserv|inscrib|inscrip|cuant[oa]s|nombre|apellido|codigo|entradas?|personas|asistentes|modalidad)/i.test(reply);
+}
+
+export async function nayaSafeBookingReply(env, conv, message, reply) {
+  if (conv.tenant !== NAYA_TENANT_ID || conv.demo || !/^confirmo reserva[.!\s]*$/i.test(plain(message))) return reply;
+  const existing = await env.DB.prepare("SELECT id FROM event_reservations WHERE tenant_id=? AND conversation_id=? AND status IN ('pending','confirmed')").bind(conv.tenant, conv.id).first();
+  if (existing) return reply;
+  const rows = conv.isNew ? [] : (await env.DB.prepare(`SELECT role,text FROM
+    (SELECT id,role,text FROM conv_messages WHERE conversation_id=? ORDER BY id DESC LIMIT 200) ORDER BY id ASC`).bind(conv.id).all()).results || [];
+  if (nayaConversationFacts([...rows, { role: 'user', content: message }]).booking) return reply;
+  return 'Antes de registrar la inscripción necesito un resumen actualizado para evitar errores. ¿A nombre completo de quién dejamos la reserva y para cuántas personas?';
+}

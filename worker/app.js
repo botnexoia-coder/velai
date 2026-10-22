@@ -1,7 +1,7 @@
 import { PLANES, MODULOS, REDES, modulosDe, redesDe, canalesOcupados } from './planes.js';
 import { assertPlanChannelLimit, assertTenantModulo, tieneModulo, redActiva } from './tenant-planes.js';
 import { Hono } from 'hono';
-import { nayaEventStatements } from './event-codes.js';
+import { NAYA_TENANT_ID, nayaEventStatements, nayaFollowupPending, nayaSafeBookingReply } from './event-codes.js';
 import { ADMIN_HEADERS, ADMIN_HTML } from './admin-page.js';
 import { previewTarget, readOnlyEnv } from './mobile-preview.js';
 import {
@@ -1522,7 +1522,11 @@ async function deliver(env, channel, lead, tenant) {
     // Velai intenta una copia operativa best effort de cada lead. Solo una respuesta
     // confirmada activa la deduplicación; KV no garantiza exclusión entre concurrencias.
     const chatId = tenant ? tenant.telegram_chat_id : env.TELEGRAM_CHAT_ID;
-    if (env.TELEGRAM_CHAT_ID && String(chatId || '') !== String(env.TELEGRAM_CHAT_ID)) {
+    // Operational copies are live alerts, not a backlog. The tenant ledger can
+    // remain skipped indefinitely; its 30-day KV marker must never replay old leads.
+    const createdAt = lead.created_at ? Date.parse(lead.created_at) : Date.now();
+    const freshOperationalAlert = Number.isFinite(createdAt) && Date.now() - createdAt < 24 * 3600000;
+    if (freshOperationalAlert && env.TELEGRAM_CHAT_ID && String(chatId || '') !== String(env.TELEGRAM_CHAT_ID)) {
       try {
         const dedupeId = lead.id || lead.request_id || '';
         const opsKey = `opsping:${dedupeId}`;
@@ -2783,6 +2787,7 @@ export async function handleChat(request, env, cors, ctx, config) {
       system: isDemoKey(config, conv.demo) ? config.DEMOS[conv.demo] : systemWithHandoff(config, tenant, hayAsesor), messages: history,
     }, { tenant, closing: 'equipo' });
   }
+  reply = await nayaSafeBookingReply(env, conv, message, reply);
   // El centinela de handoff jamás llega al usuario, tampoco en el canal web.
   const wantsHuman = WANTS_HUMAN.test(reply);
   reply = reply.replace(WANTS_HUMAN, '').trim() || 'De acuerdo, aviso al equipo para que te contacten.';
@@ -3185,7 +3190,7 @@ async function alertTenantMisconfigured(env, tenant, accountSid) {
 // El turno del USUARIO se guarda aquí, no antes: así el mensaje y su respuesta entran en
 // el mismo batch y no queda un mensaje huérfano si el modelo falla a mitad.
 async function settleTwilioReply(config, env, ctx, tenant, from, message, conv, rawReply, attachment = null) {
-  let reply = String(rawReply || '');
+  let reply = await nayaSafeBookingReply(env, conv, message, String(rawReply || ''));
   const wantsHuman = WANTS_HUMAN.test(reply);
   reply = reply.replace(WANTS_HUMAN, '').trim();
   if (wantsHuman) {
@@ -4610,6 +4615,10 @@ export async function processConversationFollowups(env, now = new Date().toISOSt
   for (const c of rows) {
     const team = String(c.team_whatsapp || '').split(',').map((v) => v.trim()).filter(Boolean);
     if (c.demo || team.includes(c.external_id) || FOLLOWUP_CLOSED_RE.test(String(c.last_text || ''))) continue;
+    if (c.tenant_id === NAYA_TENANT_ID) {
+      const history = (await env.DB.prepare('SELECT role,text FROM conv_messages WHERE conversation_id=? ORDER BY id').bind(c.id).all()).results || [];
+      if (!nayaFollowupPending(history)) continue;
+    }
     const claimedAt = new Date().toISOString();
     const claim = await env.DB.prepare(`UPDATE conversations
       SET followup_sent_at=?,followup_attempts=COALESCE(followup_attempts,0)+1
