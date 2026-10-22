@@ -264,3 +264,14 @@ test('logo del QR de reservas: R2 con clave fija por tenant, tipo real, 2 MB, aj
   const notas = (await f.DB.prepare("SELECT note FROM tenant_versions WHERE tenant_id=? AND field='calendar' ORDER BY id").bind(MEDIA_TENANT).all()).results.map((r) => r.note);
   assert.deepEqual(notas, ['logo del QR de reservas subido (png, 0 KB)', 'logo del QR de reservas eliminado']);
 });
+
+test('bandeja: el hilo trae el nombre público del asistente del cliente, o null si no tiene', async (t) => {
+  const f=await fixture(t);
+  const conv={id:crypto.randomUUID(),isNew:true,tenant:MEDIA_TENANT,channel:'web',externalId:crypto.randomUUID(),msgs:0};
+  await testing.convAppend(f.env,conv,[{role:'user',content:'Hola'}]);
+  const ask=async()=>(await (await f.request(new Request(`https://admin.hirevai.com/api/admin/inbox?conversation=${conv.id}`))).json()).thread;
+  await f.DB.prepare('UPDATE tenants SET bot_name=? WHERE id=?').bind('Lía',MEDIA_TENANT).run();
+  const con=await ask();assert.equal(con.assistantName,'Lía');assert.equal('bot_name' in con.conversation,false);
+  await f.DB.prepare('UPDATE tenants SET bot_name=NULL WHERE id=?').bind(MEDIA_TENANT).run();
+  assert.equal((await ask()).assistantName,null);
+});
