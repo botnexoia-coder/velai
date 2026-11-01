@@ -36,7 +36,7 @@ configuracion.get('/api/admin/me', async (c) => {
   if (workspace.canSwitch) {
     try { workspace.options = await espaciosVelai(env); } catch (_) { workspace.options = [{ id: 'velai', label: 'Velai · Admin' }]; }
   }
-  return json({ workspace, tenantSlug, editorialEditable, role: scope.role, socio: esSocio(env, scope), tenantName, tenantLogo, tenantId: scope.tenantId, plan: scope.plan ?? null, modulos: scope.modulos ?? [] }, 200, NO_STORE);
+  return json({ email: scope.email || null, workspace, tenantSlug, editorialEditable, role: scope.role, socio: esSocio(env, scope), tenantName, tenantLogo, tenantId: scope.tenantId, plan: scope.plan ?? null, modulos: scope.modulos ?? [] }, 200, NO_STORE);
 });
 
 configuracion.get('/api/admin/stats', async (c) => {

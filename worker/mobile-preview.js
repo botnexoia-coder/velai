@@ -7,9 +7,9 @@ const READ_ROUTES = [
   /^(me|stats|events|tenants|plantillas|planes|escalations|inbox|alerts|availability|appointments|solicitudes|channels|admins|permisos|ai-usage|ai-balance)$/,
   new RegExp(`^(leads|conversations)(/(export\\.csv|${UUID}))?$`, 'i'),
   new RegExp(`^tenants/${UUID}(/(versions|users|plan|channels|whatsapp|telegram|calendar|editorial|booking|services|booking/qr-logo|media|provision))?$`, 'i'),
-  /^finanzas\/(socios|conceptos|movimientos|resumen|repartos|export\.csv)$/,
-  /^gestion\/(catalogos|entidades|cuentas|prestamos|compras|resumen|documentos|facturas|fiscal\/resumen|fiscal\/export\.csv|cierres)$/,
-  new RegExp(`^gestion/(eventos/${UUID}/resumen|prestamos/${UUID}(/resumen)?|compras/${UUID}(/pagos)?|documentos/${UUID}/archivo|facturas/${UUID})$`, 'i'),
+  /^finanzas\/(socios|conceptos|movimientos|resumen|repartos|traspasos|recurrentes|export\.csv)$/,
+  /^gestion\/(catalogos|entidades|cuentas|prestamos|equipo-prestamos|compras|resumen|documentos|facturas|fiscal\/resumen|fiscal\/export\.csv|cierres)$/,
+  new RegExp(`^gestion/(eventos/${UUID}/resumen|prestamos/${UUID}(/resumen)?|equipo-prestamos/${UUID}|compras/${UUID}(/pagos)?|documentos/${UUID}/archivo|facturas/${UUID})$`, 'i'),
 ];
 
 export function previewTarget(path, method, scope) {

@@ -26,6 +26,8 @@ export interface WorkspaceOption { id: string; label: string }
 
 /** GET /api/admin/me */
 export interface Me {
+  /** Identidad propia para aprobación independiente. */
+  email?: string | null;
   /** current: 'velai' o el slug del cliente; options solo llega con canSwitch (migración 0058). */
   workspace?: { current: string; canSwitch: boolean; canAttend?: boolean; label?: string; options?: WorkspaceOption[] };
   tenantSlug?: string | null;
@@ -1026,6 +1028,7 @@ export interface FinMovimiento {
   tenant_id: string | null; tenant_name: string | null;
   beneficiario: string | null; reparto_id: string | null; created_by: string; created_at: string;
   /** Optional para cachés del libro anterior a la migración 0050. */
+  equipo_prestamo_id?:string|null;
   naturaleza?: FinNaturaleza; signo?: 1 | -1; origen_tipo?: FinOrigen | null; origen_id?: string | null;
   cuenta_id?: string | null; entidad_id?: string | null; evento_id?: string | null; evento_nombre?: string | null;
   requiere_conciliacion?: 0 | 1; conciliacion_socio?: string | null; conciliada?: 0 | 1;
@@ -1048,7 +1051,7 @@ export interface FinObligaciones {
 export interface FinResumen {
   monedas: Record<FinMoneda, FinTotales>;
   desglose?:Record<FinMoneda,FinDesglose>;
-  acumulado?:Record<FinMoneda,FinDesglose & {caja:number;financiacion_entradas:number;financiacion_salidas:number}>;
+  acumulado?:Record<FinMoneda,FinDesglose & {caja:number;financiacion_entradas:number;financiacion_salidas:number;prestamos_equipo_entregados?:number;prestamos_equipo_recuperados?:number}>;
   obligaciones?:Record<FinMoneda,FinObligaciones>;
   tesoreria?:Record<FinMoneda,{
     cuentas:{id:string;nombre:string;conciliada:boolean;saldo_inicial:number;fecha_saldo:string|null;movimientos:number;saldo:number}[];
@@ -1083,6 +1086,24 @@ export interface FinMovimientoInput {
 }
 export interface FinRepartoInput {
   fecha: string; moneda: FinMoneda; nota: string; lineas: { beneficiario: string; importe: number }[];
+}
+export type FinRecurrenteMoneda = FinMoneda | 'USD';
+export type FinRecurrenteTipo = 'cuota_fija' | 'recarga_automatica' | 'consumo_variable';
+export type FinRecurrenteFrecuencia = 'mensual' | 'anual' | 'variable';
+export type FinRecurrenteEstado = 'activo' | 'revision' | 'pausado' | 'cancelado';
+export interface FinRecurrente {
+  id:string; nombre:string; proveedor:string; proyecto:string; tenant_id:string|null; tenant_name:string|null;
+  tipo_cobro:FinRecurrenteTipo; frecuencia:FinRecurrenteFrecuencia; moneda:FinRecurrenteMoneda;
+  importe_estimado:number|null; pagador_socio:string|null; pagador_nombre:string|null; metodo_pago:string|null;
+  incluido_en_finanzas:0|1; estado:FinRecurrenteEstado; proxima_fecha:string|null; nota:string|null;
+  created_by:string; created_at:string; updated_by:string; updated_at:string;
+}
+export interface FinRecurrentes { recurrentes:FinRecurrente[] }
+export interface FinRecurrenteInput {
+  nombre:string; proveedor:string; proyecto:string; tenant_id:string|null; tipo_cobro:FinRecurrenteTipo;
+  frecuencia:FinRecurrenteFrecuencia; moneda:FinRecurrenteMoneda; importe_estimado:number|null;
+  pagador_socio:string|null; metodo_pago:string; incluido_en_finanzas:boolean; estado:FinRecurrenteEstado;
+  proxima_fecha:string|null; nota:string;
 }
 
 export type MediaKind = 'image' | 'pdf' | 'audio' | 'video';

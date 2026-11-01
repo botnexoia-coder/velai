@@ -24,7 +24,7 @@ test.use({ locale: 'es-ES', timezoneId: 'Europe/Madrid' });
 
 test('libro real: registrar, corregir, repartir, catálogo y borrar con caja actualizada', async ({ page, fin }) => {
   const errors: string[] = []; page.on('pageerror', (e) => errors.push(e.message));
-  await page.goto('/finanzas');
+  await page.goto('/finanzas?tab=movimientos');
   await expect(page.getByRole('navigation', { name: 'Administración' })).toBeVisible();
   await page.getByRole('button', { name: 'Registrar movimiento' }).click();
   let dialog = page.getByRole('dialog', { name: 'Registrar movimiento' });
@@ -81,7 +81,7 @@ test('libro real: registrar, corregir, repartir, catálogo y borrar con caja act
   await page.getByRole('dialog').getByRole('button', { name: 'Desactivar', exact: true }).click();
   await expect(concepto).toContainText('Inactivo');
 
-  await page.getByRole('button', { name: 'Movimientos', exact: true }).click();
+  await page.getByRole('button', { name: 'Todos los movimientos', exact: true }).click();
   await page.getByRole('button', { name: 'Cuota mensual de cliente', exact: true }).click();
   dialog = page.getByRole('dialog', { name: 'Detalle del movimiento' });
   await expect(dialog.getByLabel('Concepto')).toContainText('(inactivo)');
@@ -97,7 +97,7 @@ test('libro real: registrar, corregir, repartir, catálogo y borrar con caja act
 
 test('móvil, tema oscuro y acceso cerrado a un administrador no socio', async ({ page, fin }) => {
   await page.setViewportSize({ width: 390, height: 844 });
-  await page.goto('/finanzas');
+  await page.goto('/finanzas?tab=movimientos');
   await expect(page.getByRole('region', { name: 'Resumen EUR' }).locator('.fin-caja')).toContainText('€ 0,00');
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
   await page.screenshot({ path: test.info().outputPath('finanzas-mobile.png'), fullPage: true });
@@ -155,7 +155,7 @@ test('traspaso interno real: banco a caja, resultado cero, reverso y vista móvi
 
 test('tablet: permite corregir el tipo desde Detalle del movimiento', async ({ page, fin }) => {
   await page.setViewportSize({ width: 820, height: 1180 });
-  await page.goto('/finanzas');
+  await page.goto('/finanzas?tab=movimientos');
   await page.getByRole('button', { name: 'Registrar movimiento' }).click();
   let dialog = page.getByRole('dialog', { name: 'Registrar movimiento' });
   await dialog.getByLabel('Importe (EUR)').fill('25');
@@ -174,7 +174,7 @@ test('tablet: permite corregir el tipo desde Detalle del movimiento', async ({ p
 test('tablet: avisa y limpia los datos sin guardar al cambiar de tipo o cerrar', async ({ page, fin }) => {
   void fin;
   await page.setViewportSize({ width: 820, height: 1180 });
-  await page.goto('/finanzas');
+  await page.goto('/finanzas?tab=movimientos');
   await page.getByRole('button', { name: 'Registrar movimiento' }).click();
   let dialog = page.getByRole('dialog', { name: 'Registrar movimiento' });
   await dialog.getByLabel('Importe (EUR)').fill('87,50');

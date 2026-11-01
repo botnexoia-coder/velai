@@ -996,3 +996,77 @@ test('catálogo de empresas: alta repetida sin duplicados y proveedores fuera de
  await assert.rejects(()=>call(`gestion/compras/${c.id}`,'PATCH',{version:c.version,proveedor:'Otra inventada'}),error(400,'empresa_desconocida'));
  await assert.rejects(()=>call(`gestion/compras/${c.id}/comprar`,'POST',{version:c.version,real:50000,proveedor:'Otra inventada'}),error(400,'empresa_desconocida'));
 });
+
+// Piloto concedido al equipo: datos sintéticos, dinero y documentación locales.
+const diaEquipo=()=>new Date().toLocaleDateString('sv-SE',{timeZone:'Europe/Madrid'});
+async function equipoFixture(t,{saldo=200000}={}){
+ const f=await fixture(t);await f.DB.prepare("INSERT INTO fin_socios(email,nombre) VALUES ('tres@velai.test','Tres')").run();
+ const cuenta=(await f.cuenta({saldo_inicial:saldo,fecha_saldo:'2025-01-01',conciliada:1})).item;
+ const crear=async(ps=[{email:'dos@velai.test',importe:50000}])=>(await f.api('gestion/equipo-prestamos','POST',{id:nuevo(),titulo:'Apoyo de prueba',cuenta_id:cuenta.id,importe:ps.reduce((s,p)=>s+p.importe,0),vencimiento:diaEquipo(),participantes:ps,nota:null})).item;
+ const actuar=(l,accion,b={})=>f.api(`gestion/equipo-prestamos/${l.id}/${accion}`,'POST',{id:nuevo(),version:l.version,...b});
+ const doc=async(l,clase)=>{const fd=new FormData();fd.set('id',nuevo());fd.set('tipo','prestamo');fd.set('objeto_id',l.id);fd.set('clase',clase);fd.set('nombre',`Evidencia ${clase}`);fd.set('archivo',new Blob([bytesDe('%PDF-1.7 '+nuevo())],{type:'application/pdf'}),'evidencia.pdf');return (await f.api('gestion/documentos','POST',fd)).item;};
+ const entregar=async(l)=>{const d=await doc(l,'entrega');return (await actuar(l,'desembolso',{fecha:diaEquipo(),destino_titular:'Persona receptora',destino_referencia:'Cuenta de prueba · 1234',comprobante_id:d.id,transferencia_verificada:true})).item;};
+ return {...f,cuenta,crear,actuar,doc,entregar};
+}
+test('equipo: guardas de socio antes de D1 para lectura y todas las mutaciones',async t=>{
+ const f=await fixture(t),db=f.env.DB;f.env.DB={prepare(){assert.fail('no tocar DB');},batch(){assert.fail('no tocar DB');}};
+ for(const [path,method]of [['equipo-prestamos','GET'],['equipo-prestamos','POST'],...['aprobar','desembolso','devoluciones','cancelar'].map(a=>[`equipo-prestamos/${nuevo()}/${a}`,'POST'])])await assert.rejects(f.api(`gestion/${path}`,method,method==='POST'?{}:undefined,{role:'cliente',tenantId:'otro',email:'cliente@test.es'}),error(403,'not_authorized'));
+ f.env.DB=db;
+});
+test('equipo: grupo de 1000 EUR respeta 500 por persona, entrega por transferencia y libro separado',async t=>{
+ const f=await equipoFixture(t),l=await f.crear([{email:'dos@velai.test',importe:50000},{email:'tres@velai.test',importe:50000}]);
+ assert.equal((await f.movimientos()).length,0);
+ const a=(await f.actuar(l,'aprobar')).item;assert.equal(a.estado,'aprobado');assert.equal((await f.movimientos()).length,0);
+ await assert.rejects(f.actuar(a,'desembolso',{fecha:diaEquipo()}),error(400,'equipo_transferencia_no_verificada'));
+ const delivered=await f.entregar(a);assert.equal(delivered.estado,'vigente');
+ const moves=await f.movimientos();assert.equal(moves.length,1);assert.equal(moves[0].equipo_prestamo_id,l.id);assert.equal(moves[0].tipo,'egreso');
+ const fondos=await f.api('gestion/resumen?moneda=EUR');assert.equal(fondos.totales.saldo,100000);
+ const libro=await f.legado();assert.equal(libro.monedas.EUR.gastos,0);assert.equal(libro.monedas.EUR.ingresos,0);assert.equal(libro.financiacion.EUR.entradas,0);assert.equal(libro.acumulado.EUR.prestamos_equipo_entregados,100000);
+});
+test('equipo: autoaprobación, miembros inactivos, reparto incoherente y exceso individual se rechazan',async t=>{
+ const f=await equipoFixture(t),l=await f.crear([{email:SOCIO.email,importe:10000},{email:'dos@velai.test',importe:10000}]);
+ await assert.rejects(f.actuar(l,'aprobar'),error(409,'equipo_autoaprobacion'));
+ await assert.rejects(f.crear([{email:'dos@velai.test',importe:50001}]),error(400,'equipo_limite_persona'));
+ await f.DB.prepare("UPDATE fin_socios SET activo=0 WHERE email='dos@velai.test'").run();
+ await assert.rejects(f.crear(),error(409,'equipo_participantes_invalidos'));
+});
+test('equipo: aprobaciones simultáneas suman la exposición por persona y reservan liquidez',async t=>{
+ const f=await equipoFixture(t),a=await f.crear([{email:'dos@velai.test',importe:30000}]),b=await f.crear([{email:'dos@velai.test',importe:30000}]);
+ const results=await Promise.allSettled([f.actuar(a,'aprobar'),f.actuar(b,'aprobar')]);
+ assert.equal(results.filter(r=>r.status==='fulfilled').length,1);assert.equal(results.filter(r=>r.status==='rejected'&&r.reason.code==='equipo_limite_persona').length,1);
+ assert.equal((await f.api('gestion/equipo-prestamos')).capacidad.disponible,170000);assert.equal((await f.movimientos()).length,0);
+});
+test('equipo: protege compras comprometidas y vuelve a comprobar el saldo al entregar',async t=>{
+ const f=await equipoFixture(t,{saldo:60000});await f.compra({moneda:'EUR',estimado:20000,estado:'comprometida'});
+ const l=await f.crear();await assert.rejects(f.actuar(l,'aprobar'),error(409,'equipo_sin_liquidez'));
+ const f2=await equipoFixture(t,{saldo:60000}),l2=await f2.crear(),a=(await f2.actuar(l2,'aprobar')).item;
+ await f2.compra({moneda:'EUR',estimado:20000,estado:'comprometida'});
+ await assert.rejects(f2.entregar(a),error(409,'equipo_sin_liquidez'));assert.equal((await f2.movimientos()).length,0);
+});
+test('equipo: reserva de cuotas del crédito recibido queda protegida',async t=>{
+ const f=await equipoFixture(t,{saldo:0});const p=(await f.prestamo(f.cuenta.id,{principal:100000,apertura:0,cuota:10000,meses:10,reserva_cuotas:10,tin_bp:0,tae_bp:0})).item;
+ await f.api(`gestion/prestamos/${p.id}/desembolso`,'POST',{id:nuevo(),fecha:diaEquipo(),importe:100000,apertura:0});
+ const l=await f.crear();await assert.rejects(f.actuar(l,'aprobar'),error(409,'equipo_sin_liquidez'));
+ assert.equal((await f.api('gestion/equipo-prestamos')).capacidad.reserva,100000);
+});
+test('equipo: devolución requiere comprobante propio, revisión y persona; no reutiliza evidencia',async t=>{
+ const f=await equipoFixture(t),l=await f.crear(),a=(await f.actuar(l,'aprobar')).item,loan=await f.entregar(a);
+ const comprobante=await f.doc(loan,'devolucion');
+ assert.equal((await f.api(`gestion/equipo-prestamos/${l.id}`)).item.devuelto,0);
+ const b={id:nuevo(),version:loan.version,fecha:diaEquipo(),importe:10000,participante_email:'dos@velai.test',comprobante_id:comprobante.id,verificado:true};
+ const path=`gestion/equipo-prestamos/${loan.id}/devoluciones`;
+ await assert.rejects(f.api(path,'POST',{...b,verificado:false}),error(400,'equipo_transferencia_no_verificada'));
+ const returned=await f.api(path,'POST',b);assert.equal(returned.item.pendiente,40000);
+ assert.equal((await f.api(path,'POST',b)).item.devuelto,10000);assert.equal((await f.movimientos()).length,2);
+ await assert.rejects(f.api(path,'POST',{...b,id:nuevo(),version:returned.item.version}),error(409,'equipo_comprobante_usado'));
+ assert.equal((await f.movimientos()).length,2);assert.equal((await f.api('gestion/resumen?moneda=EUR')).totales.saldo,160000);
+ const libro=await f.legado();assert.equal(libro.monedas.EUR.ingresos,0);assert.equal(libro.financiacion.EUR.entradas,0);assert.equal(libro.acumulado.EUR.prestamos_equipo_recuperados,10000);
+});
+test('equipo: una devolución concurrente no sobrepaga ni duplica caja y entrega es idempotente',async t=>{
+ const f=await equipoFixture(t),a=(await f.actuar(await f.crear(),'aprobar')).item,d=await f.doc(a,'entrega');
+ const b={id:nuevo(),version:a.version,fecha:diaEquipo(),destino_titular:'Persona Dos',destino_referencia:'Cuenta prueba',comprobante_id:d.id,transferencia_verificada:true},path=`gestion/equipo-prestamos/${a.id}/desembolso`;
+ const loan=(await f.api(path,'POST',b)).item;await f.api(path,'POST',b);assert.equal((await f.movimientos()).length,1);
+ const docs=await Promise.all([f.doc(loan,'devolucion'),f.doc(loan,'devolucion')]);
+ const results=await Promise.allSettled(docs.map(doc=>f.actuar(loan,'devoluciones',{fecha:diaEquipo(),importe:40000,participante_email:'dos@velai.test',comprobante_id:doc.id,verificado:true})));
+ assert.equal(results.filter(r=>r.status==='fulfilled').length,1);assert.equal((await f.api(`gestion/equipo-prestamos/${loan.id}`)).item.devuelto,40000);assert.equal((await f.movimientos()).length,2);
+});

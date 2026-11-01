@@ -233,7 +233,10 @@ export async function tablaExiste(env, nombre) {
 // ¿Existe el objeto al que se adjunta? Las facturas viven en el módulo fiscal (tabla
 // g_facturas, migración posterior): si aún no existe la tabla, el objeto no existe.
 export async function objetoExiste(env, tipo, id) {
-  if (tipo === 'prestamo') return Boolean(await env.DB.prepare('SELECT id FROM g_prestamos WHERE id=?').bind(id).first());
+  if (tipo === 'prestamo') {
+    if (await env.DB.prepare('SELECT id FROM g_prestamos WHERE id=?').bind(id).first()) return true;
+    return await tablaExiste(env,'g_equipo_prestamos') && Boolean(await env.DB.prepare('SELECT id FROM g_equipo_prestamos WHERE id=?').bind(id).first());
+  }
   if (tipo === 'compra') return Boolean(await env.DB.prepare('SELECT id FROM g_compras WHERE id=?').bind(id).first());
   if (tipo === 'movimiento') return Boolean(await env.DB.prepare('SELECT id FROM fin_movimientos WHERE id=?').bind(id).first());
   if (tipo === 'factura') {

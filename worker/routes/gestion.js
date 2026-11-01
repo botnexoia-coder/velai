@@ -15,7 +15,9 @@ import {
   auditoria, versionAplicada, reclamarVersion, errorEscrituraGestion, huella, idempotente,
 } from '../gestion-financiera.js';
 
+import { equipoPrestamos } from '../prestamos-equipo.js';
 export const gestion = new Hono();
+gestion.route('/',equipoPrestamos);
 const BASE = '/api/admin/gestion';
 
 // La puerta, idéntica en todos los handlers: 403 sin una sola consulta.

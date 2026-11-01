@@ -74,6 +74,26 @@ test('el permiso «finanzas» de admin_permisos abre el libro; quitarlo lo cierr
   assert.equal(esSocio(env, await testing.resolveScope(env, email)), false);
 });
 
+test('recurrentes separa catálogo de cargos, pagador y alcance sin crear movimientos', async (t) => {
+  const { api } = await fixture(t);
+  const inicial = await api('finanzas/recurrentes');
+  assert.ok(inicial.recurrentes.some((r) => r.nombre === 'Créditos API para bots' && r.tipo_cobro === 'recarga_automatica'));
+  assert.equal(inicial.recurrentes.some((r) => r.nombre === 'Claude Pro'), false, 'Claude Pro fue cancelado y no debe generar un recurrente de Nexo');
+  const antes = (await api('finanzas/movimientos')).movimientos.length;
+  const body = { nombre:'Monitorización', proveedor:'Ejemplo', proyecto:'Cliente demo', tenant_id:null, tipo_cobro:'cuota_fija', frecuencia:'mensual', moneda:'EUR', importe_estimado:999,
+    pagador_socio:SOCIO.email, metodo_pago:'Tarjeta de prueba', incluido_en_finanzas:false, estado:'revision', proxima_fecha:'2026-11-01', nota:'Proyecto separado' };
+  const creado = await api('finanzas/recurrentes', 'POST', body);
+  let fila = (await api('finanzas/recurrentes?estado=revision')).recurrentes.find((r) => r.id === creado.id);
+  assert.equal(fila.pagador_nombre, 'Uno');
+  assert.equal(fila.incluido_en_finanzas, 0);
+  assert.equal((await api('finanzas/movimientos')).movimientos.length, antes, 'el catálogo no contabiliza el gasto');
+  await api(`finanzas/recurrentes/${creado.id}`, 'PATCH', { estado:'pausado', incluido_en_finanzas:true });
+  fila = (await api('finanzas/recurrentes?estado=pausado')).recurrentes.find((r) => r.id === creado.id);
+  assert.equal(fila.incluido_en_finanzas, 1);
+  await assert.rejects(api('finanzas/recurrentes', 'POST', body), error(409, 'recurrente_duplicado'));
+  await assert.rejects(api('finanzas/recurrentes', 'POST', { ...body, nombre:'Otro', pagador_socio:'nadie@velai.test' }), error(400, 'beneficiario_desconocido'));
+});
+
 test('aritmética de ambas monedas: caja de origen, beneficio del periodo y reparto por persona', async (t) => {
   const { mov, reparto, api } = await fixture(t);
   await mov('ingreso', 'EUR', 10000, '2025-01-01');

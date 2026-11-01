@@ -845,8 +845,11 @@ export function useFinCuentas(enabled = true) {
 export function useFinSocios() {
   return useQuery({ queryKey: ['finanzas', 'socios'], queryFn: () => api<import('../api/types').FinSocios>('/api/admin/finanzas/socios?todos=1') });
 }
+export function useFinRecurrentes(estado = '') {
+  return useQuery({ queryKey: ['finanzas', 'recurrentes', estado], queryFn: () => api<import('../api/types').FinRecurrentes>(`/api/admin/finanzas/recurrentes${estado ? `?estado=${encodeURIComponent(estado)}` : ''}`) });
+}
 // Invalidar el dominio completo: una corrección también cambia caja, desglose y reparto.
-export function useFinMutacion<T>(recurso: 'movimientos' | 'conceptos' | 'repartos' | 'socios' | 'traspasos') {
+export function useFinMutacion<T>(recurso: 'movimientos' | 'conceptos' | 'repartos' | 'socios' | 'traspasos' | 'recurrentes') {
   const client = useQueryClient();
   return useMutation({
     mutationFn: ({ method, id, body }: { method: 'POST' | 'PATCH' | 'DELETE'; id?: string | number; body?: T }) => {

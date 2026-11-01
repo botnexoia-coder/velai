@@ -8,6 +8,10 @@ import { HttpError, json, NO_STORE, readJson, csvCell, PANEL_EMAIL_RE } from '..
 export const finanzas = new Hono();
 const TIPOS = ['ingreso', 'gasto', 'egreso'];
 const MONEDAS = ['EUR', 'COP'];
+const MONEDAS_RECURRENTES = ['EUR', 'COP', 'USD'];
+const TIPOS_RECURRENTES = ['cuota_fija', 'recarga_automatica', 'consumo_variable'];
+const FRECUENCIAS_RECURRENTES = ['mensual', 'anual', 'variable'];
+const ESTADOS_RECURRENTES = ['activo', 'revision', 'pausado', 'cancelado'];
 const NATURALEZAS = ['operativo', 'financiacion', 'financiero', 'reembolso_socio', 'compra'];
 // Una compra etiquetada aporta el tenant de su evento a pagos y reversos sin
 // cambiar el tenant_id original del libro. Solo afecta filtros/etiquetas de socios.
@@ -30,6 +34,7 @@ async function bodyOf(request) {
 }
 function writeError(e) {
   if (/UNIQUE constraint failed: fin_conceptos/.test(e.message)) throw new HttpError(409, 'concepto_duplicado');
+  if (/UNIQUE constraint failed: fin_recurrentes/.test(e.message)) throw new HttpError(409, 'recurrente_duplicado');
   if (/UNIQUE constraint failed:.*fin_socios/.test(e.message)) throw new HttpError(409, 'socio_duplicado');
   if (e.message.includes('fin_beneficiario_inactivo')) fail('beneficiario_desconocido');
   // Partida creada por Administración (0050): inmutable también por debajo del panel.
@@ -43,6 +48,30 @@ function writeError(e) {
 function socioEmail(value) {
   if (typeof value !== 'string' || value.trim().length > 200 || !PANEL_EMAIL_RE.test(value.trim())) fail('email_invalido');
   return value.trim().toLowerCase();
+}
+const textoCorto = (v, code = 'campo_invalido', max = 160) => typeof v === 'string' && v.trim() && v.trim().length <= max ? v.trim() : fail(code);
+const textoOpcional = (v, code = 'campo_invalido', max = 160) => v == null || v === '' ? null : textoCorto(v, code, max);
+async function validateRecurrente(env, b) {
+  const importe = b.importe_estimado == null || b.importe_estimado === '' ? null
+    : Number.isSafeInteger(b.importe_estimado) && b.importe_estimado >= 0 ? b.importe_estimado : fail('importe_invalido');
+  const tenant_id = uuidOpcional(b.tenant_id, 'cliente_invalido');
+  if (tenant_id && !await env.DB.prepare('SELECT id FROM tenants WHERE id=?').bind(tenant_id).first()) fail('cliente_invalido');
+  const pagador_socio = b.pagador_socio ? socioEmail(b.pagador_socio) : null;
+  if (pagador_socio && !await env.DB.prepare('SELECT email FROM fin_socios WHERE lower(email)=?').bind(pagador_socio).first()) fail('beneficiario_desconocido');
+  const proxima_fecha = b.proxima_fecha == null || b.proxima_fecha === '' ? null : b.proxima_fecha;
+  if (proxima_fecha && !fechaReal(proxima_fecha)) fail('fecha_invalida');
+  if (![0, 1, true, false].includes(b.incluido_en_finanzas)) fail('alcance_invalido');
+  return {
+    nombre: textoCorto(b.nombre, 'nombre_invalido', 120), proveedor: textoCorto(b.proveedor, 'proveedor_invalido', 120),
+    proyecto: textoCorto(b.proyecto, 'proyecto_invalido', 160), tenant_id,
+    tipo_cobro: enumValue(b.tipo_cobro, TIPOS_RECURRENTES, 'tipo_cobro_invalido'),
+    frecuencia: enumValue(b.frecuencia, FRECUENCIAS_RECURRENTES, 'frecuencia_invalida'),
+    moneda: enumValue(b.moneda, MONEDAS_RECURRENTES, 'moneda_invalida'), importe_estimado: importe,
+    pagador_socio, metodo_pago: textoOpcional(b.metodo_pago, 'metodo_pago_invalido', 120),
+    incluido_en_finanzas: b.incluido_en_finanzas === true || b.incluido_en_finanzas === 1 ? 1 : 0,
+    estado: enumValue(b.estado, ESTADOS_RECURRENTES, 'estado_invalido'), proxima_fecha,
+    nota: nota(b.nota),
+  };
 }
 async function socioByEmail(env, email) {
   const row = await env.DB.prepare('SELECT email,nombre,activo FROM fin_socios WHERE lower(email)=?').bind(socioEmail(email)).first();
@@ -83,7 +112,9 @@ const ORDER = ' ORDER BY m.fecha DESC, m.created_at DESC, m.id DESC';
 // Desde 0050 cada partida lleva naturaleza y signo (reversos = -1). La financiación
 // (abono de préstamo, devolución de principal) entra y sale de CAJA pero no es venta
 // ni beneficio: se suma aparte. Las filas anteriores son 'operativo' con signo 1.
-const TOTALS = `SELECT moneda, SUM(CASE WHEN tipo='ingreso' AND naturaleza<>'financiacion' THEN importe*signo ELSE 0 END) AS ingresos,
+const TOTALS = `SELECT moneda,
+  SUM(CASE WHEN equipo_prestamo_id IS NOT NULL AND tipo='ingreso' THEN importe*signo ELSE 0 END) AS equipo_entradas,
+  SUM(CASE WHEN equipo_prestamo_id IS NOT NULL AND tipo='egreso' THEN importe*signo ELSE 0 END) AS equipo_salidas, SUM(CASE WHEN tipo='ingreso' AND naturaleza<>'financiacion' THEN importe*signo ELSE 0 END) AS ingresos,
   SUM(CASE WHEN tipo='gasto' AND naturaleza<>'compra' THEN importe*signo ELSE 0 END) AS gastos,
   SUM(CASE WHEN naturaleza='compra' THEN importe*signo ELSE 0 END) AS compras,
   SUM(CASE WHEN tipo='egreso' AND naturaleza<>'financiacion' THEN importe*signo ELSE 0 END) AS egresos,
@@ -114,7 +145,7 @@ function cuentas(periodo, acumulado) {
 // lo fija el panel): entradas = abonos de préstamo, salidas = principal devuelto.
 const financiacion = (periodo) => Object.fromEntries(MONEDAS.map((moneda) => {
   const p = periodo.find((r) => r.moneda === moneda) || VACIO;
-  return [moneda, { entradas: p.fin_entradas, salidas: p.fin_salidas, neto: p.fin_entradas - p.fin_salidas }];
+  return [moneda, { entradas: p.fin_entradas-(p.equipo_entradas||0), salidas: p.fin_salidas-(p.equipo_salidas||0), neto: p.fin_entradas-(p.equipo_entradas||0)-p.fin_salidas+(p.equipo_salidas||0) }];
 }));
 // Desglose del libro, sin atribuir naturaleza a partir de notas, cuentas o préstamos.
 function detalleLibro(rows, global = false) {
@@ -126,7 +157,7 @@ function detalleLibro(rows, global = false) {
       resultado_tras_financieros: ingresos_operativos - gastos_operativos - gastos_financieros,
       compras_pagadas: r.compras || 0, reembolsos_socios: r.reembolsos_socios || 0, repartos: r.repartos || 0, otros_egresos: r.otros_egresos || 0 };
     if (global) Object.assign(detalle, { caja: cuentas([], rows)[moneda].caja,
-      financiacion_entradas: r.fin_entradas || 0, financiacion_salidas: r.fin_salidas || 0 });
+      financiacion_entradas: (r.fin_entradas||0)-(r.equipo_entradas||0), financiacion_salidas: (r.fin_salidas||0)-(r.equipo_salidas||0), prestamos_equipo_entregados:r.equipo_salidas||0, prestamos_equipo_recuperados:r.equipo_entradas||0 });
     return [moneda, detalle];
   }));
 }
@@ -298,6 +329,46 @@ finanzas.delete('/api/admin/finanzas/socios/:email', async (c) => {
   ]);
   console.log(JSON.stringify({ level: 'warn', code: 'fin_socio_baja', email: old.email, actor }));
   return json({ ok: true, desactivado: result[2].results.length > 0 }, 200, NO_STORE);
+});
+
+// ── Servicios recurrentes ───────────────────────────────────────────────────
+// Inventario de obligaciones potenciales; no crea movimientos ni salidas de caja.
+finanzas.get('/api/admin/finanzas/recurrentes', async (c) => {
+  const { env, scope, url } = partesAdmin(c);
+  if (!esSocio(env, scope)) throw new HttpError(403, 'not_authorized');
+  const estado = url.searchParams.get('estado');
+  if (estado && !ESTADOS_RECURRENTES.includes(estado)) fail('estado_invalido');
+  const rows = (await env.DB.prepare(`SELECT r.*,t.name AS tenant_name,COALESCE(s.nombre,r.pagador_socio) AS pagador_nombre
+    FROM fin_recurrentes r LEFT JOIN tenants t ON t.id=r.tenant_id LEFT JOIN fin_socios s ON lower(s.email)=r.pagador_socio
+    ${estado ? 'WHERE r.estado=?' : ''} ORDER BY CASE r.estado WHEN 'revision' THEN 0 WHEN 'activo' THEN 1 WHEN 'pausado' THEN 2 ELSE 3 END,
+      COALESCE(r.proxima_fecha,'9999-12-31'),r.proveedor COLLATE NOCASE,r.nombre COLLATE NOCASE`).bind(...(estado ? [estado] : [])).all()).results;
+  return json({ recurrentes: rows }, 200, NO_STORE);
+});
+finanzas.post('/api/admin/finanzas/recurrentes', async (c) => {
+  const { env, scope, request, actor } = partesAdmin(c);
+  if (!esSocio(env, scope)) throw new HttpError(403, 'not_authorized');
+  const r = await validateRecurrente(env, await bodyOf(request)), id = crypto.randomUUID(), now = new Date().toISOString();
+  try {
+    await env.DB.prepare(`INSERT INTO fin_recurrentes
+      (id,nombre,proveedor,proyecto,tenant_id,tipo_cobro,frecuencia,moneda,importe_estimado,pagador_socio,metodo_pago,incluido_en_finanzas,estado,proxima_fecha,nota,created_by,created_at,updated_by,updated_at)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
+      .bind(id,r.nombre,r.proveedor,r.proyecto,r.tenant_id,r.tipo_cobro,r.frecuencia,r.moneda,r.importe_estimado,r.pagador_socio,r.metodo_pago,r.incluido_en_finanzas,r.estado,r.proxima_fecha,r.nota,actor,now,actor,now).run();
+  } catch (e) { writeError(e); }
+  return json({ ok: true, id }, 201, NO_STORE);
+});
+finanzas.patch('/api/admin/finanzas/recurrentes/:id', async (c) => {
+  const { env, scope, request, actor } = partesAdmin(c);
+  if (!esSocio(env, scope)) throw new HttpError(403, 'not_authorized');
+  const old = await exists(env, 'fin_recurrentes', c.req.param('id')), b = await bodyOf(request);
+  if (Object.keys(b).some((k) => !['nombre','proveedor','proyecto','tenant_id','tipo_cobro','frecuencia','moneda','importe_estimado','pagador_socio','metodo_pago','incluido_en_finanzas','estado','proxima_fecha','nota'].includes(k))) fail('campo_no_editable');
+  const r = await validateRecurrente(env, { ...old, ...b });
+  let result;
+  try {
+    result = await env.DB.prepare(`UPDATE fin_recurrentes SET nombre=?,proveedor=?,proyecto=?,tenant_id=?,tipo_cobro=?,frecuencia=?,moneda=?,importe_estimado=?,pagador_socio=?,metodo_pago=?,incluido_en_finanzas=?,estado=?,proxima_fecha=?,nota=?,updated_by=?,updated_at=? WHERE id=?`)
+      .bind(r.nombre,r.proveedor,r.proyecto,r.tenant_id,r.tipo_cobro,r.frecuencia,r.moneda,r.importe_estimado,r.pagador_socio,r.metodo_pago,r.incluido_en_finanzas,r.estado,r.proxima_fecha,r.nota,actor,new Date().toISOString(),old.id).run();
+  } catch (e) { writeError(e); }
+  if (!result.meta.changes) throw new HttpError(404, 'not_found');
+  return json({ ok: true }, 200, NO_STORE);
 });
 
 // ── Traspasos internos ───────────────────────────────────────────────────────
