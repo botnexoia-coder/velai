@@ -1,3 +1,5 @@
+import { handlePuenteInboundOptout, handlePuenteTwilioStatus, PUENTE_EVENTS_CRON, runPuenteEventsTick } from './puente-whatsapp-events.js';
+import { handlePuenteWhatsApp } from './puente-whatsapp-bridge.js';
 import { PLANES, MODULOS, REDES, modulosDe, redesDe, canalesOcupados } from './planes.js';
 import { assertPlanChannelLimit, assertTenantModulo, tieneModulo, redActiva } from './tenant-planes.js';
 import { Hono } from 'hono';
@@ -3332,6 +3334,8 @@ export async function handleTwilio(request, env, ctx, config) {
     console.log(JSON.stringify({ level: 'info', code: 'channel_disabled', tenant: tenant.slug, kind: red }));
     return new Response(EMPTY_TWIML, { headers: { 'Content-Type': 'text/xml; charset=utf-8' } });
   }
+  const puenteOptout = await handlePuenteInboundOptout(env, tenant, params);
+  if (puenteOptout) return puenteOptout;
   // Twilio reintenta el webhook si la respuesta tarda o falla: sin dedupe, el mismo
   // mensaje se procesaba (y se pagaba al modelo) DOS veces. La clave se escribe ANTES
   // de llamar al modelo: si el modelo falla se pierde esa respuesta, pero nunca se
@@ -4688,6 +4692,8 @@ export async function processConversationFollowups(env, now = new Date().toISOSt
 }
 
 async function scheduled(env, cron) {
+  // Independent invocation budget: never enter lead/AI/takeover jobs on this tick.
+  if (cron === PUENTE_EVENTS_CRON) { await runPuenteEventsTick(env); return; }
   if (!env.DB) return;
   const now = new Date().toISOString();
   // El reloj de CADA MINUTO solo atiende la cola de espera: es lo único que necesita
@@ -4850,6 +4856,8 @@ function buildApp(config) {
   // nuevo no puede registrarse fuera de ella (esa es la mejora de fondo).
   app.use('/api/admin/*', mwAdminHost, mwAdminCors, mwAdminIdentity, mwResolveScope);
   app.all('/api/admin/*', (c) => adminRouter(c.req.raw, c.env, c.executionCtx, c.req.path, new URL(c.req.url), c.get('config'), c.get('scope')));
+  app.all('/integrations/puente/whatsapp/status', (c) => handlePuenteTwilioStatus(c.req.raw, c.env, validTwilioSignature));
+  app.all('/integrations/puente/whatsapp', (c) => handlePuenteWhatsApp(c.req.raw, c.env));
   app.route('/', publico);
   // El 404 se LANZA (no se responde) para que pase por errorAlCuerpo como cualquier
   // otro error: mismo cuerpo, mismo log, mismo CORS.

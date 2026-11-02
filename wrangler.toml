@@ -133,7 +133,7 @@ enabled = true
 head_sampling_rate = 1
 
 [triggers]
-# DOS relojes a propósito:
+# Los dos relojes históricos de Velai:
 #  - cada MINUTO: solo los tiempos de la cola de espera (handoff con toma de control,
 #    en docs/IMPLEMENTADO.md). Con */5, «5
 #    minutos» eran en realidad 5-10 y «15» eran 15-20.
@@ -141,7 +141,9 @@ head_sampling_rate = 1
 #    hace un LISTADO de KV por tick y el plan gratuito da 1.000 listados/día: a 1.440 ticks
 #    se pasaría, y los listados son el segundo cuello real del sistema (ver
 #    docs/VOLUMEN-Y-ALMACENAMIENTO.md). Además multiplicaría por 5 los reintentos a Twilio.
-crons = ["* * * * *", "*/5 * * * *"]
+# PUENTE events have their OWN invocation budget (one event, two bounded cleanups).
+# No external traffic unless its dedicated EVENTS flags+secret are configured.
+crons = ["* * * * *", "*/5 * * * *", "*/2 * * * *"]
 
 # Biblioteca y logos nuevos en R2; los logos antiguos siguen accesibles en KV.
 [[r2_buckets]]
