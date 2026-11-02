@@ -71,14 +71,22 @@ test('only configured API host allowed and idempotency keys preserve case',async
  for(const key of ['A'.repeat(43),'a'.repeat(43)])assert.equal((await handlePuenteWhatsApp(f.request(f.body,key),f.env,{fetcher:f.fetcher})).status,200);
  assert.equal(f.calls(),2);assert.equal((await f.DB.prepare('SELECT COUNT(*) AS n FROM puente_whatsapp_dispatch').first()).n,2);
 });
-test('outer deadline fences fetch ignoring abort and keeps reservation nonrepeatable',async t=>{
- const f=await fixture(t);let calls=0;const fetcher=()=>{calls++;return new Promise(()=>{});};const start=Date.now();
- assert.equal((await handlePuenteWhatsApp(f.request(),f.env,{fetcher,timeoutMs:100})).status,502);assert.ok(Date.now()-start<1000);
+test('outer deadline fences fetch ignoring abort and keeps reservation nonrepeatable',{timeout:60000},async t=>{
+ const f=await fixture(t);let calls=0,started;const entered=new Promise(resolve=>{started=resolve;});
+ const fetcher=()=>{calls++;started();return new Promise(()=>{});};
+ t.mock.timers.enable({apis:['setTimeout']});
+ let settled=false;const pending=handlePuenteWhatsApp(f.request(),f.env,{fetcher,timeoutMs:100});void pending.then(()=>{settled=true;});
+ await entered;t.mock.timers.tick(99);await Promise.resolve();assert.equal(settled,false);
+ t.mock.timers.tick(1);assert.equal((await pending).status,502);
  assert.equal((await handlePuenteWhatsApp(f.request(),f.env,{fetcher})).status,409);assert.equal(calls,1);
 });
-test('outer deadline fences provider stream ignoring abort',async t=>{
- const f=await fixture(t);let calls=0;const fetcher=async()=>{calls++;return new Response(new ReadableStream({pull(){return new Promise(()=>{});},cancel(){return new Promise(()=>{});}}),{status:201});};
- assert.equal((await handlePuenteWhatsApp(f.request(),f.env,{fetcher,timeoutMs:100})).status,502);
+test('outer deadline fences provider stream ignoring abort',{timeout:60000},async t=>{
+ const f=await fixture(t);let calls=0,started;const reading=new Promise(resolve=>{started=resolve;});
+ const fetcher=async()=>{calls++;return new Response(new ReadableStream({pull(){started();return new Promise(()=>{});},cancel(){return new Promise(()=>{});}},{highWaterMark:0}),{status:201});};
+ t.mock.timers.enable({apis:['setTimeout']});
+ let settled=false;const pending=handlePuenteWhatsApp(f.request(),f.env,{fetcher,timeoutMs:100});void pending.then(()=>{settled=true;});
+ await reading;t.mock.timers.tick(99);await Promise.resolve();assert.equal(settled,false);
+ t.mock.timers.tick(1);assert.equal((await pending).status,502);
  assert.equal((await handlePuenteWhatsApp(f.request(),f.env,{fetcher})).status,409);assert.equal(calls,1);
 });
 async function eventsFixture(t){

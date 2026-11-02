@@ -22,7 +22,7 @@ const resumen: FinResumen = { monedas: {
   EUR:{cuentas:[{id:'cuenta-eur',nombre:'Cuenta común EUR',conciliada:false,saldo_inicial:0,fecha_saldo:null,movimientos:96900,saldo:96900}],sin_cuenta:3100,movimientos_sin_cuenta:2,pendiente_socios:0,conciliaciones_pendientes:0,saldo_ubicado:100000,saldo_neto:100000},
   COP:{cuentas:[],sin_cuenta:-50000,movimientos_sin_cuenta:2,pendiente_socios:0,conciliaciones_pendientes:0,saldo_ubicado:-50000,saldo_neto:-50000},
 }, conceptos: [], repartido: [] };
-function mount({ socio = true, role = 'velai', path = '/finanzas', movimientos = [] as FinMovimiento[], cuentas = [ {id:'cuenta-eur',nombre:'Cuenta común EUR',moneda:'EUR',entidad_id:null}, {id:'cuenta-cop',nombre:'Cuenta COP',moneda:'COP',entidad_id:null} ] as FinCuenta[], extraConceptos = [] as FinConceptos['conceptos']['ingreso'] } = {}) {
+function mount({ socio = true, role = 'velai', path = '/finanzas?tab=movimientos', movimientos = [] as FinMovimiento[], cuentas = [ {id:'cuenta-eur',nombre:'Cuenta común EUR',moneda:'EUR',entidad_id:null}, {id:'cuenta-cop',nombre:'Cuenta COP',moneda:'COP',entidad_id:null} ] as FinCuenta[], extraConceptos = [] as FinConceptos['conceptos']['ingreso'] } = {}) {
   const calls: { path: string; method: string; body?: Record<string, unknown> }[] = [];
   vi.stubGlobal('fetch', vi.fn(async (input: string, init?: RequestInit) => {
     const url = new URL(String(input), 'https://panel.test'), method = init?.method || 'GET';
@@ -38,6 +38,10 @@ function mount({ socio = true, role = 'velai', path = '/finanzas', movimientos =
       '/api/admin/finanzas/movimientos': { movimientos, nextCursor: null },
       '/api/admin/finanzas/repartos': { socios: [{ email: 'uno@velai.test', nombre: 'Uno' }], repartido: [], repartos: [] },
       '/api/admin/finanzas/traspasos': { traspasos: [] },
+      '/api/admin/finanzas/recurrentes': { recurrentes: [
+        { id:'api-bots',nombre:'Créditos API para bots',proveedor:'Anthropic',proyecto:'Velai · bots de clientes',tenant_id:null,tenant_name:null,tipo_cobro:'recarga_automatica',frecuencia:'variable',moneda:'USD',importe_estimado:null,pagador_socio:'uno+fin@velai.test',pagador_nombre:'Uno',metodo_pago:'Mastercard ···· 8545',incluido_en_finanzas:1,estado:'activo',proxima_fecha:null,nota:'Saldo común',created_by:'migracion',created_at:'2026-10-13',updated_by:'migracion',updated_at:'2026-10-13' },
+        { id:'railway',nombre:'Railway Hobby / uso',proveedor:'Railway',proyecto:'Nexobot Polymarket · Sebastián + Juan',tenant_id:null,tenant_name:null,tipo_cobro:'consumo_variable',frecuencia:'mensual',moneda:'USD',importe_estimado:844,pagador_socio:'uno+fin@velai.test',pagador_nombre:'Uno',metodo_pago:'Mastercard ···· 8545',incluido_en_finanzas:0,estado:'revision',proxima_fecha:'2026-10-29',nota:'Proyecto separado',created_by:'migracion',created_at:'2026-10-13',updated_by:'migracion',updated_at:'2026-10-13' },
+      ] },
       '/api/admin/finanzas/socios': { socios: [
         { email: 'uno+fin@velai.test', nombre: 'Uno', activo: 1, tiene_repartos: 1 },
         { email: 'dos@velai.test', nombre: 'Dos', activo: 0, tiene_repartos: 1 },
@@ -114,6 +118,24 @@ it('un traspaso mueve dinero entre cuentas sin presentarlo como ingreso o gasto'
   const body=calls.find(c=>c.method==='POST'&&c.path.endsWith('/traspasos'))?.body as Record<string,unknown>;
   expect(body).toMatchObject({importe:3000,cuenta_origen_id:'cuenta-eur',cuenta_destino_id:'caja-eur'});
   expect(body.id).toMatch(/^[0-9a-f-]{36}$/i);
+});
+it('recurrentes distingue la API común de Anthropic del proyecto separado de Polymarket',async()=>{
+  const {user,calls}=mount({path:'/finanzas?tab=recurrentes'});
+  expect(await screen.findByText('Créditos API para bots')).toBeInTheDocument();
+  expect(screen.getByText('Nexobot Polymarket · Sebastián + Juan')).toBeInTheDocument();
+  expect(screen.getByText('Incluido en Velai')).toBeInTheDocument();
+  expect(screen.getByText('Proyecto separado')).toBeInTheDocument();
+  expect(screen.queryByText('Claude Pro')).not.toBeInTheDocument();
+  await user.click(screen.getByRole('button',{name:'Añadir recurrente'}));
+  const modal=within(screen.getByRole('dialog',{name:'Añadir recurrente'}));
+  await user.type(modal.getByLabelText('Servicio'),'Dominio de prueba');
+  await user.type(modal.getByLabelText('Proveedor'),'Cloudflare');
+  await user.type(modal.getByLabelText('Proyecto'),'Cliente demo');
+  await user.type(modal.getByLabelText('Importe estimado'),'10,46');
+  await user.selectOptions(modal.getByLabelText('Quién paga'),'uno+fin@velai.test');
+  await user.click(modal.getByRole('button',{name:'Guardar recurrente'}));
+  await waitFor(()=>expect(calls.some(c=>c.method==='POST'&&c.path.endsWith('/recurrentes'))).toBe(true));
+  expect(calls.find(c=>c.method==='POST'&&c.path.endsWith('/recurrentes'))?.body).toMatchObject({nombre:'Dominio de prueba',proveedor:'Cloudflare',proyecto:'Cliente demo',moneda:'EUR',importe_estimado:1046,pagador_socio:'uno+fin@velai.test',incluido_en_finanzas:true});
 });
 it('el reparto avisa en vivo de caja negativa, permite guardar y conserva aviso del servidor', async () => {
   const { user, calls } = mount({ path: '/finanzas?tab=repartos' });

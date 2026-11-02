@@ -62,7 +62,7 @@ test('presupuesto SQLite real: Hecho solo avance y cambio de evento aislado, fil
  await expect(page.getByRole('dialog',{name:'Registrar cobro del evento'}).getByLabel('Importe cobrado (EUR)')).toHaveValue('');
  await page.keyboard.press('Escape');
  await mkdir('/tmp/velai-event-finance-qa',{recursive:true});await page.screenshot({path:'/tmp/velai-event-finance-qa/event-budget-desktop.png',fullPage:true});
- await page.goto('/finanzas');
+ await page.goto('/finanzas?tab=movimientos');
  await page.getByRole('combobox',{name:'Evento',exact:true}).selectOption(eventB);
  await expect.poll(()=>seen.filter(c=>c.path.startsWith('/api/admin/finanzas/resumen?')).at(-1)?.path).toContain(`evento=${eventB}`);
  await expect.poll(()=>seen.filter(c=>c.path.startsWith('/api/admin/finanzas/movimientos?')).at(-1)?.path).toContain(`evento=${eventB}`);

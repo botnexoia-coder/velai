@@ -3,13 +3,16 @@ import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { Link, Navigate, useSearchParams } from 'react-router';
 import { qs } from '../api/client';
 import { traducir } from '../api/errors';
-import type { FinConcepto, FinCuenta, FinMoneda, FinNaturaleza, FinMovimiento, FinMovimientoInput, FinRepartoInput, FinResumen, FinSocio, FinSocioInput, FinSocioRegistro, FinTipo, FinTraspasoInput, TenantRow } from '../api/types';
+import type { FinConcepto, FinCuenta, FinMoneda, FinNaturaleza, FinMovimiento, FinMovimientoInput, FinRecurrente, FinRecurrenteEstado, FinRecurrenteFrecuencia, FinRecurrenteInput, FinRecurrenteMoneda, FinRecurrenteTipo, FinRepartoInput, FinResumen, FinSocio, FinSocioInput, FinSocioRegistro, FinTipo, FinTraspasoInput, TenantRow } from '../api/types';
 import { confirmar } from '../components/Confirmar';
 import { TenantChip } from '../components/Pills';
 import { useToast } from '../components/Toasts';
-import { useMe, useTenants, useEvents, useFinConceptos, useFinMovimientos, useFinMutacion, useFinRepartos, useFinResumen, useFinSocios, useFinCuentas, useFinTraspasos, useFinTraspasoReverso, type FinFilters } from '../hooks/queries';
+import { useMe, useTenants, useEvents, useFinConceptos, useFinMovimientos, useFinMutacion, useFinRecurrentes, useFinRepartos, useFinResumen, useFinSocios, useFinCuentas, useFinTraspasos, useFinTraspasoReverso, type FinFilters } from '../hooks/queries';
 import { finDinero, finImporte } from '../lib/format';
 import { Documentos } from './gestion/shared';
+import { DashboardFinanzas } from './gestion/DashboardFinanzas';
+import { PrestamosEquipo } from './gestion/PrestamosEquipo';
+import './gestion/finanzas-hub.css';
 
 const TIPOS: FinTipo[] = ['ingreso', 'gasto', 'egreso'];
 const MONEDAS: FinMoneda[] = ['EUR', 'COP'];
@@ -46,6 +49,14 @@ const ERRORS: Record<string, string> = {
   traspaso_inmutable: 'Los traspasos no se editan: anula el original y registra uno nuevo.',
   traspaso_ya_revertido: 'Este traspaso ya está anulado.',
   fecha_anterior: 'La anulación no puede tener una fecha anterior al traspaso.',
+  recurrente_duplicado: 'Ese servicio ya está registrado para este proyecto.',
+  proveedor_invalido: 'Introduce un proveedor válido.',
+  proyecto_invalido: 'Introduce el proyecto al que pertenece.',
+  tipo_cobro_invalido: 'Selecciona cómo se genera el cobro.',
+  frecuencia_invalida: 'Selecciona una frecuencia válida.',
+  moneda_invalida: 'Selecciona una moneda válida.',
+  estado_invalido: 'Selecciona un estado válido.',
+  alcance_invalido: 'Indica si este servicio pertenece a las finanzas comunes.',
 };
 const mensaje = (e: unknown) => ERRORS[e instanceof Error ? e.message : ''] || traducir(e);
 const hoy = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };
@@ -59,6 +70,7 @@ function ErrorFin({ error }: { error: unknown }) { return error ? <p className="
 function TipoPill({ tipo, naturaleza }: { tipo: FinTipo; naturaleza?:FinNaturaleza }) { return <span className={`pill fin-${tipo}`}>{naturaleza === 'financiacion' ? 'Financiación' : naturaleza === 'reembolso_socio' ? 'Reembolso a socio' : naturaleza === 'financiero' ? 'Gasto financiero' : naturaleza === 'compra' ? 'Pago de compra' : LABEL[tipo]}</span>; }
 function importeFirmado(m:FinMovimiento) { return m.importe * (m.signo ?? 1); }
 function origenMovimiento(m:FinMovimiento) {
+  if(m.equipo_prestamo_id)return {ruta:'/finanzas?tab=prestamos',nombre:'Préstamos al equipo'};
   const credito=m.origen_tipo?.startsWith('prestamo_') || (m.origen_tipo==='reverso' && (m.naturaleza==='financiacion'||m.naturaleza==='financiero'));
   return credito ? {ruta:'/credito',nombre:'Crédito'} : {ruta:'/compras',nombre:'Compras'};
 }
@@ -74,20 +86,26 @@ export function Finanzas() {
 }
 function FinanzasSocio() {
   const [params, setParams] = useSearchParams();
-  const tab = ['traspasos', 'repartos', 'conceptos', 'socios'].includes(params.get('tab') || '') ? params.get('tab')! : 'movimientos';
+  const tabs: Record<string,string> = {dashboard:'Dashboard',ingresos:'Ingresos',gastos:'Gastos',prestamos:'Préstamos al equipo',movimientos:'Todos los movimientos',traspasos:'Traspasos',repartos:'Repartos',recurrentes:'Recurrentes',conceptos:'Conceptos',socios:'Socios'};
+  const tab = Object.hasOwn(tabs,params.get('tab')||'') ? params.get('tab')! : 'dashboard';
+  const listado = ['movimientos','ingresos','gastos'].includes(tab);
+  const texts:Record<string,string>={dashboard:'Visión de caja, reservas, compromisos y próximos vencimientos.',ingresos:'Cobros registrados. La financiación y las devoluciones de principal no son ventas.',gastos:'Gastos operativos y costes financieros. Los préstamos al equipo no son gasto operativo.',prestamos:'Velai presta a sus integrantes: hasta 500 € pendientes por persona, según liquidez.'};
   const [p, setP] = useState('mes');
   const [custom, setCustom] = useState<FinFilters>(periodo('mes'));
   const dates = p === 'personalizado' ? custom : periodo(p);
   const [f, setF] = useState<FinFilters>({});
-  const filters = { ...dates, ...f };
-  const resumen = useFinResumen(filters, tab === 'movimientos');
+  const filters = { ...dates, ...f, ...(tab === 'ingresos'?{tipo:'ingreso'}:tab === 'gastos'?{tipo:'gasto'}:{}) };
+  const resumen = useFinResumen(filters, listado);
   return <div className="finanzas">
-    <div className="vhead"><div><h1>Finanzas</h1><p>Operación, financiación y compras: cada importe en su lugar.</p></div></div>
+    <div className="vhead"><div><h1>Finanzas</h1><p>Caja, actividad y apoyo al equipo: cada operación en su lugar.</p></div></div>
     <nav className="fin-tabs" aria-label="Secciones de Finanzas">
-      {['movimientos', 'traspasos', 'repartos', 'conceptos', 'socios'].map((t) => <button type="button" key={t} className={`btn ${tab === t ? '' : 'alt'}`} aria-pressed={tab === t} onClick={() => setParams((prev) => { const next = new URLSearchParams(prev); next.set('tab', t); return next; })}>{t[0]!.toUpperCase() + t.slice(1)}</button>)}
+      {Object.entries(tabs).filter(([t])=>['dashboard','ingresos','gastos','prestamos'].includes(t)).map(([t,label]) => <button type="button" key={t} className={`btn ${tab === t ? '' : 'alt'}`} aria-pressed={tab === t} onClick={() => {setF({});setParams((prev) => { const next = new URLSearchParams(prev); next.set('tab', t); return next; });}}>{label}</button>)}
+      <Link className="btn alt" to="/credito">Créditos recibidos ↗</Link>
     </nav>
-    {tab === 'movimientos' ? <>
-      <FiltrosFin f={f} setF={setF} />
+    <nav className="fin-tabs fin-tools" aria-label="Libro y ajustes de Finanzas">{Object.entries(tabs).filter(([t])=>!['dashboard','ingresos','gastos','prestamos'].includes(t)).map(([t,label])=><button type="button" key={t} className={`btn ${tab===t?'':'alt'}`} aria-pressed={tab===t} onClick={()=>{setF({});setParams({tab:t});}}>{label}</button>)}</nav>
+    {texts[tab]?<p className="fin-section-description">{texts[tab]}</p>:null}
+    {tab === 'dashboard'?<DashboardFinanzas/>:tab === 'prestamos'?<PrestamosEquipo/>:listado ? <>
+      <FiltrosFin f={{...f,...(tab==='ingresos'?{tipo:'ingreso'}:tab==='gastos'?{tipo:'gasto'}:{})}} setF={setF} tipoFijo={tab==='ingresos'||tab==='gastos'} />
       <div className="fin-overview">
         <div className="fin-period"><label>Periodo<select value={p} onChange={(e) => setP(e.target.value)}><option value="mes">Mes actual</option><option value="trimestre">Trimestre actual</option><option value="año">Año actual</option><option value="todo">Todo</option><option value="personalizado">Elegir fechas</option></select></label>
           {p === 'personalizado' ? <><label>Desde<input type="date" value={custom.desde || ''} onChange={(e) => setCustom({ ...custom, desde: e.target.value })} /></label><label>Hasta<input type="date" value={custom.hasta || ''} onChange={(e) => setCustom({ ...custom, hasta: e.target.value })} /></label></> : null}
@@ -101,13 +119,13 @@ function FinanzasSocio() {
       <p className="muted">Un gasto pagado con crédito sigue siendo gasto; el préstamo financia la caja. El resultado del libro no incluye compras, amortizaciones ni operaciones todavía sin registrar. Consulta <Link to="/credito?vista=destino">Fondos del proyecto</Link> para ver cuentas, reservas y compromisos.</p>
       <Movimientos filters={filters} />
       {resumen.data ? <details className="fin-breakdown"><summary>Desglose por concepto · periodo y filtros seleccionados</summary><div className="fin-table"><table><thead><tr><th>Concepto</th><th>Tipo</th><th>Moneda</th><th>Importe</th></tr></thead><tbody>{resumen.data.conceptos.map((r) => <tr key={`${r.concepto_id}-${r.moneda}-${r.naturaleza||'operativo'}`}><td>{r.nombre}</td><td><TipoPill tipo={r.tipo} naturaleza={r.naturaleza} /></td><td>{r.moneda}</td><td><Dinero value={r.importe} moneda={r.moneda} /></td></tr>)}</tbody></table></div>{!resumen.data.conceptos.length ? <p className="empty">No hay movimientos en este periodo.</p> : null}</details> : null}
-    </> : tab === 'traspasos' ? <Traspasos /> : tab === 'repartos' ? <Repartos /> : tab === 'socios' ? <Socios /> : <Conceptos />}
+    </> : tab === 'traspasos' ? <Traspasos /> : tab === 'repartos' ? <Repartos /> : tab === 'recurrentes' ? <Recurrentes /> : tab === 'socios' ? <Socios /> : <Conceptos />}
   </div>;
 }
-function FiltrosFin({ f, setF }: {f:FinFilters;setF:(next:FinFilters)=>void}) {
+function FiltrosFin({ f, setF, tipoFijo=false }: {f:FinFilters;setF:(next:FinFilters)=>void;tipoFijo?:boolean}) {
   const conceptos=useFinConceptos(true), tenants=useTenants(true), events=useEvents();
   return <><div className="fin-toolbar fin-shared-filters"><div className="fin-filters">
-    <label>Tipo<select value={f.tipo || ''} onChange={e=>setF({...f,tipo:e.target.value,concepto:''})}><option value="">Todos los tipos</option>{TIPOS.map(t=><option key={t} value={t}>{LABEL[t]}</option>)}</select></label>
+    <label>Tipo<select disabled={tipoFijo} value={f.tipo || ''} onChange={e=>setF({...f,tipo:e.target.value,concepto:''})}><option value="">Todos los tipos</option>{TIPOS.map(t=><option key={t} value={t}>{LABEL[t]}</option>)}</select></label>
     <label>Moneda<select value={f.moneda || ''} onChange={e=>setF({...f,moneda:e.target.value})}><option value="">EUR y COP</option>{MONEDAS.map(m=><option key={m}>{m}</option>)}</select></label>
     <label>Clasificación<select value={f.naturaleza || ''} onChange={e=>setF({...f,naturaleza:e.target.value})}><option value="">Todas las operaciones</option>{Object.entries(NATURALEZAS).map(([key,label])=><option key={key} value={key}>{label}</option>)}</select></label>
     <label>Concepto<select value={f.concepto || ''} onChange={e=>setF({...f,concepto:e.target.value})}><option value="">Todos los conceptos</option>{TIPOS.filter(t=>!f.tipo||t===f.tipo).flatMap(t=>conceptos.data?.conceptos[t]||[]).map(c=><option key={c.id} value={c.id}>{c.nombre}{c.activo?'':' (inactivo)'}</option>)}</select></label>
@@ -135,6 +153,8 @@ function ResumenMoneda({moneda,resumen}:{moneda:FinMoneda;resumen:FinResumen|und
     <div className="fin-metrics">
       <MetricaFin label="Préstamos recibidos" value={a?.financiacion_entradas??resumen?.financiacion?.[moneda]?.entradas} moneda={moneda}/>
       <MetricaFin label="Capital devuelto" value={a?.financiacion_salidas??resumen?.financiacion?.[moneda]?.salidas} moneda={moneda}/>
+      <MetricaFin label="Préstamos entregados al equipo" value={a?.prestamos_equipo_entregados} moneda={moneda}/>
+      <MetricaFin label="Capital recuperado del equipo" value={a?.prestamos_equipo_recuperados} moneda={moneda}/>
       <MetricaFin label="Pagos de compras desde cuentas" value={a?.compras_pagadas} moneda={moneda}/>
       <MetricaFin label="Reembolsos a socios" value={a?.reembolsos_socios} moneda={moneda}/>
       <MetricaFin label="Repartos al equipo" value={a?.repartos} moneda={moneda}/>
@@ -362,6 +382,50 @@ function RepartoModal({ socios, resumen, onClose, onSaved }: { socios: FinSocio[
     <div className="fin-preview" aria-live="polite"><p>Total a repartir <Dinero value={total} moneda={moneda} /></p><p>Queda en caja después <Dinero value={despues} moneda={moneda} /></p>{despues < 0 ? <p className="fin-warning" role="alert">La caja quedará negativa. Puedes guardar el reparto igualmente.</p> : null}</div>
     <ErrorFin error={error} /><button className="btn" disabled={mutation.isPending || !llenas.length}>Guardar reparto</button>
   </form></Modal>;
+}
+const REC_TIPOS:Record<FinRecurrenteTipo,string>={cuota_fija:'Cuota fija',recarga_automatica:'Recarga automática',consumo_variable:'Consumo variable'};
+const REC_FRECUENCIAS:Record<FinRecurrenteFrecuencia,string>={mensual:'Mensual',anual:'Anual',variable:'Según consumo'};
+const REC_ESTADOS:Record<FinRecurrenteEstado,string>={activo:'Activo',revision:'Revisar',pausado:'Pausado',cancelado:'Cancelado'};
+function dineroRecurrente(value:number|null,moneda:FinRecurrenteMoneda) {
+  if(value==null)return 'Sin importe fijo';
+  return new Intl.NumberFormat('es-ES',{style:'currency',currency:moneda,maximumFractionDigits:moneda==='COP'?0:2}).format(value/(moneda==='COP'?1:100));
+}
+function Recurrentes() {
+  const [estado,setEstado]=useState(''), query=useFinRecurrentes(estado), [editing,setEditing]=useState<FinRecurrente|'new'|null>(null);
+  const rows=query.data?.recurrentes||[], separados=rows.filter(r=>!r.incluido_en_finanzas).length, revision=rows.filter(r=>r.estado==='revision').length;
+  return <>
+    <div className="fin-toolbar"><div><h2>Servicios recurrentes</h2><p className="muted">Inventario de cargos que pueden repetirse. No crea gastos ni duplica movimientos del libro.</p></div><button className="btn" type="button" onClick={()=>setEditing('new')}>Añadir recurrente</button></div>
+    <div className="fin-rec-summary" aria-label="Resumen de recurrentes"><span><strong>{rows.length}</strong> visibles</span><span><strong>{revision}</strong> por revisar</span><span><strong>{separados}</strong> de proyectos separados</span></div>
+    <div className="fin-toolbar"><label>Estado<select value={estado} onChange={e=>setEstado(e.target.value)}><option value="">Todos</option>{Object.entries(REC_ESTADOS).map(([v,l])=><option key={v} value={v}>{l}</option>)}</select></label></div>
+    <ErrorFin error={query.error}/>{query.isPending?<p role="status">Cargando servicios recurrentes…</p>:null}
+    <div className="fin-table fin-rec-table"><table><thead><tr><th>Servicio</th><th>Cobro</th><th>Proyecto</th><th>Pagador</th><th>Próximo</th><th>Estado</th><th></th></tr></thead><tbody>{rows.map(r=><tr key={r.id} className={r.estado==='revision'?'fin-rec-review':''}>
+      <td data-label="Servicio"><strong>{r.nombre}</strong><small>{r.proveedor}</small></td>
+      <td data-label="Cobro"><strong>{dineroRecurrente(r.importe_estimado,r.moneda)}</strong><small>{REC_TIPOS[r.tipo_cobro]} · {REC_FRECUENCIAS[r.frecuencia]}</small></td>
+      <td data-label="Proyecto"><strong>{r.tenant_name||r.proyecto}</strong><span className={`pill ${r.incluido_en_finanzas?'fin-rec-in':'fin-rec-out'}`}>{r.incluido_en_finanzas?'Incluido en Velai':'Proyecto separado'}</span></td>
+      <td data-label="Pagador"><strong>{r.pagador_nombre||r.pagador_socio||'Sin asignar'}</strong><small>{r.metodo_pago||'Método pendiente'}</small></td>
+      <td data-label="Próximo">{r.proxima_fecha||'Según consumo'}</td><td data-label="Estado"><span className={`pill fin-rec-${r.estado}`}>{REC_ESTADOS[r.estado]}</span></td>
+      <td><button className="btn alt btnsm" type="button" onClick={()=>setEditing(r)}>Editar</button></td>
+    </tr>)}</tbody></table>{query.data&&!rows.length?<p className="empty">No hay servicios con este estado.</p>:null}</div>
+    {editing?<RecurrenteModal initial={editing==='new'?null:editing} onClose={()=>setEditing(null)}/>:null}
+  </>;
+}
+function RecurrenteModal({initial,onClose}:{initial:FinRecurrente|null;onClose:()=>void}) {
+  const mutation=useFinMutacion<FinRecurrenteInput>('recurrentes'), socios=useFinSocios(), tenants=useTenants(true), toast=useToast();
+  const [nombre,setNombre]=useState(initial?.nombre||''),[proveedor,setProveedor]=useState(initial?.proveedor||''),[proyecto,setProyecto]=useState(initial?.proyecto||'');
+  const [tenant,setTenant]=useState(initial?.tenant_id||''),[tipo,setTipo]=useState<FinRecurrenteTipo>(initial?.tipo_cobro||'cuota_fija'),[frecuencia,setFrecuencia]=useState<FinRecurrenteFrecuencia>(initial?.frecuencia||'mensual');
+  const [moneda,setMoneda]=useState<FinRecurrenteMoneda>(initial?.moneda||'EUR'),[importe,setImporte]=useState(initial?.importe_estimado==null?'':String(initial.importe_estimado/(initial.moneda==='COP'?1:100)));
+  const [pagador,setPagador]=useState(initial?.pagador_socio||''),[metodo,setMetodo]=useState(initial?.metodo_pago||''),[incluido,setIncluido]=useState(initial?Boolean(initial.incluido_en_finanzas):true);
+  const [estado,setEstado]=useState<FinRecurrenteEstado>(initial?.estado||'activo'),[proxima,setProxima]=useState(initial?.proxima_fecha||''),[nota,setNota]=useState(initial?.nota||''),[error,setError]=useState<unknown>(null);
+  async function guardar(e:React.FormEvent){e.preventDefault();setError(null);const parsed=importe.trim()===''?null:Number(importe.replace(',','.'));const centimos=parsed==null?null:Math.round(parsed*(moneda==='COP'?1:100));if(parsed!=null&&(!Number.isFinite(parsed)||parsed<0)){setError(new Error('importe_invalido'));return;}try{await mutation.mutateAsync({method:initial?'PATCH':'POST',id:initial?.id,body:{nombre,proveedor,proyecto,tenant_id:tenant||null,tipo_cobro:tipo,frecuencia,moneda,importe_estimado:centimos,pagador_socio:pagador||null,metodo_pago:metodo,incluido_en_finanzas:incluido,estado,proxima_fecha:proxima||null,nota}});toast(initial?'Servicio recurrente actualizado':'Servicio recurrente añadido');onClose();}catch(e){setError(e);}}
+  return <Modal title={initial?'Editar recurrente':'Añadir recurrente'} close={onClose} busy={mutation.isPending}><form onSubmit={e=>void guardar(e)}><div className="fin-form">
+    <label>Servicio<input required maxLength={120} value={nombre} onChange={e=>setNombre(e.target.value)}/></label><label>Proveedor<input required maxLength={120} value={proveedor} onChange={e=>setProveedor(e.target.value)}/></label>
+    <label>Proyecto<input required maxLength={160} value={proyecto} onChange={e=>setProyecto(e.target.value)}/></label><label>Cliente del panel (opcional)<select value={tenant} onChange={e=>setTenant(e.target.value)}><option value="">Sin cliente vinculado</option>{tenants.data?.tenants.map(t=><option key={t.id} value={t.id}>{t.name}</option>)}</select></label>
+    <label>Modelo de cobro<select value={tipo} onChange={e=>setTipo(e.target.value as FinRecurrenteTipo)}>{Object.entries(REC_TIPOS).map(([v,l])=><option key={v} value={v}>{l}</option>)}</select></label><label>Frecuencia<select value={frecuencia} onChange={e=>setFrecuencia(e.target.value as FinRecurrenteFrecuencia)}>{Object.entries(REC_FRECUENCIAS).map(([v,l])=><option key={v} value={v}>{l}</option>)}</select></label>
+    <label>Moneda<select value={moneda} onChange={e=>{setMoneda(e.target.value as FinRecurrenteMoneda);setImporte('');}}>{['EUR','USD','COP'].map(m=><option key={m}>{m}</option>)}</select></label><label>Importe estimado<input inputMode="decimal" placeholder="Vacío si varía" value={importe} onChange={e=>setImporte(e.target.value)}/></label>
+    <label>Quién paga<select value={pagador} onChange={e=>setPagador(e.target.value)}><option value="">Sin asignar</option>{socios.data?.socios.filter(s=>s.activo||s.email===pagador).map(s=><option key={s.email} value={s.email}>{s.nombre}</option>)}</select></label><label>Método (solo referencia)<input maxLength={120} placeholder="Ej. Mastercard ···· 8545" value={metodo} onChange={e=>setMetodo(e.target.value)}/></label>
+    <label>Estado<select value={estado} onChange={e=>setEstado(e.target.value as FinRecurrenteEstado)}>{Object.entries(REC_ESTADOS).map(([v,l])=><option key={v} value={v}>{l}</option>)}</select></label><label>Próxima fecha<input type="date" value={proxima} onChange={e=>setProxima(e.target.value)}/></label>
+    <label className="fin-full fin-check"><input type="checkbox" checked={incluido} onChange={e=>setIncluido(e.target.checked)}/><span>Incluir en las finanzas comunes de Velai</span></label><label className="fin-full">Nota<textarea rows={3} maxLength={2000} value={nota} onChange={e=>setNota(e.target.value)}/></label>
+  </div><p className="muted">Guardar aquí solo documenta la obligación. El cargo real se registra una única vez en Movimientos cuando ocurra.</p><ErrorFin error={error||socios.error||tenants.error}/><button className="btn" disabled={mutation.isPending}>Guardar recurrente</button></form></Modal>;
 }
 function Conceptos() {
   const query = useFinConceptos(true), mutation = useFinMutacion<Partial<FinConcepto>>('conceptos'), toast = useToast();

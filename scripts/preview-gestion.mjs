@@ -23,12 +23,14 @@ async function call(path,method='GET',data){
  if(!res.ok)throw new Error(`${path}: ${res.status} ${await res.text()}`);
  return res.json();
 }
+await DB.exec("DELETE FROM fin_socios; INSERT INTO fin_socios(email,nombre,activo) VALUES ('persona1@velai.test','Persona Uno',1),('persona2@velai.test','Persona Dos',1);");
 const uuid=()=>crypto.randomUUID(),entity=uuid(),account=uuid(),loan=uuid(),purchase=uuid();
 await DB.prepare('INSERT OR IGNORE INTO fin_socios(email,nombre,activo,created_by,created_at) VALUES (?,?,?,?,?)').bind(actor,'Socio de prueba',1,actor,new Date().toISOString()).run();
 await call('entidades','POST',{id:entity,nombre:'Velai · sociedad pendiente',tipo:'sociedad',nif:null,direccion:null});
-await call('cuentas','POST',{id:account,nombre:'Cuenta de demostración',entidad_id:entity,moneda:'EUR',saldo_inicial:0,fecha_saldo:null,conciliada:0});
+await call('cuentas','POST',{id:account,nombre:'Cuenta de demostración',entidad_id:entity,moneda:'EUR',saldo_inicial:0,fecha_saldo:'2026-09-30',conciliada:1});
 await call('prestamos','POST',{id:loan,nombre:'Préstamo del proyecto · ejemplo',cuenta_id:account,principal:5000000,apertura:150000,cuota:88264,tin_bp:1200,tae_bp:1382,meses:84,reserva_cuotas:6,primer_vencimiento:'2026-11-01',condiciones:[{concepto:'Finalidad',valor:'Fondo común para tres actividades',fuente:'Ejemplo de prueba'},{concepto:'Reserva de cuotas',valor:'Se mantiene en la cuenta para el cobro mensual',fuente:'Ejemplo de prueba'}]});
 await call(`prestamos/${loan}/desembolso`,'POST',{id:uuid(),fecha:'2026-10-01',importe:5000000,apertura:150000});
+await call('terceros','POST',{id:uuid(),nombre:'Proveedor de ejemplo'});
 await call('compras','POST',{id:purchase,concepto:'Equipo audiovisual de ejemplo',negocio:'dialogos',entidad_id:entity,prestamo_id:loan,moneda:'EUR',estimado:90000,estado:'comprometida',comprador:'Persona Uno',categoria:'Equipamiento',fecha_prevista:null,nota:'Datos de prueba; no es un movimiento real.'});
 await call(`compras/${purchase}/comprar`,'POST',{version:1,real:79675,fecha:'2026-10-02',comprador:'Persona Uno',proveedor:'Proveedor de ejemplo'});
 await call(`compras/${purchase}/pagos`,'POST',{id:uuid(),fecha:'2026-10-02',importe:79675,pagador:'cuenta',cuenta_id:account,socio:null,nota:'Pago de prueba'});
