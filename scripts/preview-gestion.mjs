@@ -35,6 +35,11 @@ await call('compras','POST',{id:purchase,concepto:'Equipo audiovisual de ejemplo
 await call(`compras/${purchase}/comprar`,'POST',{version:1,real:79675,fecha:'2026-10-02',comprador:'Persona Uno',proveedor:'Proveedor de ejemplo'});
 await call(`compras/${purchase}/pagos`,'POST',{id:uuid(),fecha:'2026-10-02',importe:79675,pagador:'cuenta',cuenta_id:account,socio:null,nota:'Pago de prueba'});
 await call('compras','POST',{id:uuid(),concepto:'Vehículo para evaluar',negocio:'coches',entidad_id:entity,prestamo_id:loan,moneda:'EUR',estimado:1800000,estado:'prevista',comprador:'Persona Dos',categoria:'Vehículos',fecha_prevista:null,nota:'Presupuesto orientativo de demostración.'});
+// Borrador ficticio para probar numeración e impresión sin escribir en producción.
+const invoiceDraft=uuid();
+await call('terceros','POST',{id:uuid(),nombre:'CLIENTE DE EJEMPLO, S.L.'});
+await call('facturas','POST',{id:invoiceDraft,entidad_id:entity,negocio:'coches',tipo:'emitida',estado:'borrador',origen:'borrador',clase:'ordinaria',tratamiento_fiscal:'general',moneda:'EUR',contraparte_nombre:'CLIENTE DE EJEMPLO, S.L.',contraparte_nif:null,contraparte_direccion:null,numero:null,fecha_emision:'2027-02-15',fecha_operacion:null,lineas:[{descripcion:'Mercedes-Benz Vito usada · VIN 00000000000000000 · Matrícula 0000 XXX',cantidad:'1',precio_unitario:1800000,descuento:0,iva_bp:2100,retencion_bp:0}]});
+console.log(`Facturación local: http://127.0.0.1:8796/facturacion?factura=${invoiceDraft}`);
 const template=await readFile(new URL('../panel/public/formatos/Formatos_Factura_Velai.pdf',import.meta.url));
 const form=new FormData();form.set('id',uuid());form.set('tipo','prestamo');form.set('objeto_id',loan);form.set('clase','otro');form.set('nombre','Documento de prueba · plantilla de factura');form.set('archivo',new Blob([template],{type:'application/pdf'}),'documento-ejemplo.pdf');
 const docReq=new Request('http://127.0.0.1:8796/api/admin/gestion/documentos',{method:'POST',body:form});

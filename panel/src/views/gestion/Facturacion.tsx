@@ -5,6 +5,7 @@ import { Link, useSearchParams } from 'react-router';
 import { api } from '../../api/client';
 import { Card, Documentos, EntityOptions, Fields, FormModal, GestionGate, Modal, Money, Notice, negocios, opt, str, useGestion, useGuardar, type Catalogos, type Compra, type Entidad, type Moneda, type Negocio } from './shared';
 import './fiscal.css';
+import { GenerarPrueba, HistorialPruebas, VerPrueba } from './FacturaPrueba';
 
 type Tratamiento = 'pendiente' | 'general' | 'exento' | 'no_sujeto' | 'inversion' | 'rebu';
 type EstadoFactura = 'borrador' | 'registrada' | 'validada';
@@ -55,9 +56,12 @@ function FacturacionContent(){
  const query=new URLSearchParams({entidad_id:entityId,moneda});if(tipo)query.set('tipo',tipo);if(estado)query.set('estado',estado);
  const list=useFacturas(`facturas?${query}`,!!entityId);const rows=list.data?.pages.flatMap(p=>p.items)||[];
  const closeDetail=()=>{const next=new URLSearchParams(params);next.delete('factura');setParams(next,{replace:true});};
- const open=(id:string)=>{const next=new URLSearchParams(params);next.set('factura',id);setParams(next);};
+ const open=(id:string)=>{const next=new URLSearchParams(params);next.delete('prueba');next.set('factura',id);setParams(next);};
+ const openPrueba=(id:string)=>{const next=new URLSearchParams(params);next.delete('factura');next.set('prueba',id);setParams(next);};
+ const closePrueba=()=>{const next=new URLSearchParams(params);next.delete('prueba');setParams(next,{replace:true});};
  return <>
   <div className="fiscal-head"><div><p className="fiscal-eyebrow">ADMINISTRACIÓN · VELAI</p><h1>Facturación</h1><p>Prepara tus borradores y conserva las facturas de cada negocio.</p></div><div className="g-inline"><button type="button" className="btn alt" disabled={!entityId} onClick={()=>setEditor('borrador')}>Preparar borrador</button><button type="button" className="btn" disabled={!entityId} onClick={()=>setEditor('externa')}>Registrar factura externa</button></div></div>
+  <Notice>Las pruebas se numeran automáticamente con una serie PR por emisor y año. Las series reales F y R están reservadas para el flujo de emisión fiscal, todavía sin activar. Las facturas de proveedores conservan su número original.</Notice>
   <Card title="Emisor de Velai"><div className="fiscal-filters"><label>Emisor<select value={entityId} onChange={e=>setEntidad(e.target.value)}><option value="">Seleccionar emisor</option>{cat.data?.entidades.map(e=><option value={e.id} key={e.id}>{e.nombre}</option>)}</select></label><label>Moneda<select value={moneda} onChange={e=>setMoneda(e.target.value as Moneda)}><option value="EUR">EUR · euros</option><option value="COP">COP · pesos colombianos</option></select></label><div className="g-inline"><EntityOptions onDone={()=>void cat.refetch()}/></div></div><FiscalError error={cat.error}/>{cat.isPending?<p role="status">Cargando emisores…</p>:issuer?<p className="fiscal-profile"><strong>{issuer.nombre}</strong><span>{issuer.nif?`NIF: ${issuer.nif}`:'NIF pendiente'} · {issuer.direccion||'Domicilio fiscal pendiente'}</span><span className={`fiscal-tag ${entidadCompleta(issuer)?'is-valid':''}`}>{entidadCompleta(issuer)?'Datos fiscales completos':'Configuración fiscal pendiente'}</span></p>:<p className="g-empty">Añade el emisor de Velai para preparar el primer borrador.</p>}{issuer&&!entidadCompleta(issuer)?<Notice>Puedes guardar y editar borradores ahora. La validación y los cierres se habilitan al completar y verificar los datos fiscales de Velai.</Notice>:null}</Card>
   <Card title="Facturas y borradores" action={<a href="/formatos/Formatos_Factura_Velai.pdf" target="_blank" rel="noreferrer">Ver formato de referencia (sin valor fiscal)</a>}>
    <div className="fiscal-filters"><label>Tipo de factura<select value={tipo} onChange={e=>setTipo(e.target.value)}><option value="">Todas</option><option value="recibida">Recibidas · proveedores</option><option value="emitida">Emitidas · clientes</option></select></label><label>Estado<select value={estado} onChange={e=>setEstado(e.target.value)}><option value="">Todos</option><option value="borrador">Borradores</option><option value="registrada">Pendientes de revisión</option><option value="validada">Validadas</option></select></label></div>
@@ -67,7 +71,8 @@ function FacturacionContent(){
   </Card>
   <div className="fiscal-bottom"><Link to="/impuestos">Revisar impuestos y preparar el libro para asesoría →</Link><span>Los borradores no son facturas emitidas.</span></div>
   {editor&&entityId?<InvoiceEditor mode={editor} entidadId={entityId} moneda={moneda} close={()=>setEditor(null)} saved={id=>{setEditor(null);open(id);}}/>:null}
-  {params.get('factura')?<InvoiceDetail id={params.get('factura')!} entidades={cat.data?.entidades||[]} close={closeDetail} open={open}/>:null}
+  {params.get('prueba')?<VerPrueba id={params.get('prueba')!} close={closePrueba}/>:null}
+  {params.get('factura')?<InvoiceDetail id={params.get('factura')!} entidades={cat.data?.entidades||[]} close={closeDetail} open={open} openPrueba={openPrueba}/>:null}
  </>;
 }
 
@@ -113,8 +118,8 @@ function InvoiceEditor({mode,entidadId,moneda,item,close,saved}:{mode:'borrador'
  </fieldset><FiscalError error={error}/><div className="g-form-actions"><button className="btn" disabled={save.isPending}>{save.isPending?'Guardando…':mode==='corregir'?'Guardar corrección interna':externa?'Guardar registro':'Guardar borrador'}</button></div></form></Modal>;
 }
 
-function InvoiceDetail({id,entidades,close,open}:{id:string;entidades:Entidad[];close:()=>void;open:(id:string)=>void}){
- const query=useGestion<{item:Factura}>(`facturas/${encodeURIComponent(id)}`);const save=useGuardar();const [edit,setEdit]=useState<'editar'|'corregir'|null>(null),[validar,setValidar]=useState(false);
+function InvoiceDetail({id,entidades,close,open,openPrueba}:{id:string;entidades:Entidad[];close:()=>void;open:(id:string)=>void;openPrueba:(id:string)=>void}){
+ const query=useGestion<{item:Factura}>(`facturas/${encodeURIComponent(id)}`);const save=useGuardar();const [edit,setEdit]=useState<'editar'|'corregir'|null>(null),[validar,setValidar]=useState(false),[prueba,setPrueba]=useState(false);
  const f=query.data?.item;const issuer=entidades.find(e=>e.id===f?.entidad_id);const frozen=f?.snapshot?.entidad;
  const reasons=f?[
   ...(!entidadCompleta(issuer)?['Completa y verifica los datos fiscales de Velai.']:[]),
@@ -137,7 +142,9 @@ function InvoiceDetail({id,entidades,close,open}:{id:string;entidades:Entidad[];
   {f.correccion_de?<p>Corrección interna de <button type="button" className="fiscal-text-button" onClick={()=>open(f.correccion_de!)}>ver registro anterior</button>. {f.motivo_correccion}</p>:null}{f.rectifica_id?<p>Documento rectificativo relacionado: <button type="button" className="fiscal-text-button" onClick={()=>open(f.rectifica_id!)}>Ver factura original</button></p>:null}
   {f.estado==='validada'?<Notice>Original validado e inmutable. {f.revision}{f.snapshot?` Revisado por ${f.snapshot.revisada_por}, ${new Date(f.snapshot.revisada_en).toLocaleString('es-ES')}.`:''}</Notice>:reasons.length?<div className="fiscal-pending"><strong>Para validar faltan estos pasos</strong><ul>{reasons.map(reason=><li key={reason}>{reason}</li>)}</ul></div>:null}
   <div className="g-inline fiscal-detail-actions">{f.estado==='validada'?<button type="button" className="btn alt" onClick={()=>setEdit('corregir')}>Preparar corrección interna</button>:<><button type="button" className="btn alt" onClick={()=>setEdit('editar')}>Editar registro</button><button type="button" className="btn" disabled={reasons.length>0} onClick={()=>setValidar(true)}>Revisar y validar</button></>}</div>
+  {f.origen==='borrador'&&f.tipo==='emitida'?<><div className="g-inline fiscal-detail-actions"><button type="button" className="btn" onClick={()=>setPrueba(true)}>Generar factura de prueba</button><button type="button" className="btn alt" disabled>Emisión real pendiente de configurar</button></div><HistorialPruebas facturaId={f.id} open={openPrueba}/></>:null}
   <Documentos tipo="factura" objetoId={f.id}/>
+  {prueba?<GenerarPrueba factura={f} close={()=>setPrueba(false)} open={openPrueba}/>:null}
   {edit?<InvoiceEditor mode={edit} entidadId={f.entidad_id} moneda={f.moneda} item={f} close={()=>setEdit(null)} saved={newId=>{setEdit(null);if(newId!==id)open(newId);}}/>:null}
   {validar?<FormModal title="Validar el original y su tratamiento fiscal" close={()=>setValidar(false)} label="Confirmar revisión" fields={[...(f.tipo==='recibida'?[{name:'iva_deducible',label:`IVA deducible revisado (${f.moneda})`,value:'0',required:true,help:'Por defecto, cero. Confirma con asesoría qué cuota resulta deducible.'}]:[]),{name:'revision',label:'Qué se revisó y fundamento de la deducción',type:'textarea',required:true}]} submit={d=>save.mutateAsync({path:`facturas/${f.id}/validar`,body:{version:f.version,iva_deducible:f.tipo==='recibida'?parseMinor(str(d,'iva_deducible'),f.moneda,true):0,revision:str(d,'revision')}})}><Notice>La validación conserva una copia de los datos y las referencias a los originales. No acredita el pago ni presenta impuestos.</Notice></FormModal>:null}
  </>:null}</Modal>;

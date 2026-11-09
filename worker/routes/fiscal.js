@@ -5,6 +5,7 @@ import { esSocio, partesAdmin } from '../middleware.js';
 import { HttpError, json, NO_STORE, readJson } from '../app.js';
 import { fail, choice, textField, uuid, integer, versionOf, day, canonical, digest, FIELDS, MONEDAS,
   normalizeInvoice, fromRow, scopeOf, summarize, invoiceIssues, csvSafe, moneyText } from '../fiscal.js';
+import { ejercicioDe, reservarNumero, insertarNumerado, errorNumeracion } from '../facturas-numeracion.js';
 
 export const fiscal = new Hono();
 const ROOT = '/api/admin/gestion';
@@ -187,6 +188,83 @@ fiscal.post(`${ROOT}/facturas/:id/corregir`, async (c) => {
   const result = await create(env.DB, { ...data, ...b, estado: 'registrada' }, actor, old);
   return json({ item: result.item, aviso: 'Corrección del registro interno; no emite una factura rectificativa. La revisión anterior sigue en cifras hasta validar esta corrección.' }, result.status, NO_STORE);
 });
+// ── Numeración: emisión real cerrada, muestras PR ────────────────────────────
+// Emitir de verdad (series F/R) exige un sistema de emisión integrado y verificado.
+// Hasta entonces: 409 incondicional tras la autorización, sin leer ni reservar nada.
+// No hay bandera de entorno ni cuerpo que abra esta puerta.
+fiscal.post(`${ROOT}/facturas/:id/emitir`, async (c) => {
+  const { env, scope } = partesAdmin(c);
+  if (!esSocio(env, scope)) throw new HttpError(403, 'not_authorized');
+  return fail('emision_fiscal_no_configurada', 409);
+});
+// Muestra numerada PR de un borrador de venta: copia congelada de entidad + factura en
+// la versión indicada. Sin validez fiscal (admite entidad incompleta y sin originales),
+// no modifica g_facturas ni la caja y no comparte contador con F/R.
+const MARCA_PRUEBA = 'PRUEBA · SIN VALIDEZ FISCAL';
+const SELECT_PRUEBA = 'SELECT * FROM g_facturas_prueba WHERE id=?';
+function pruebaItem(row) {
+  const { snapshot_json, request_hash, ...item } = row;
+  return { ...item, marca: MARCA_PRUEBA, snapshot: JSON.parse(snapshot_json) };
+}
+fiscal.post(`${ROOT}/facturas/:id/pruebas`, async (c) => {
+  const { env, scope, actor, request } = partesAdmin(c);
+  if (!esSocio(env, scope)) throw new HttpError(403, 'not_authorized');
+  const facturaId = uuid(c.req.param('id')), b = await bodyOf(request, ['id', 'version', 'fecha_emision']);
+  const id = uuid(b.id), version = versionOf(b.version), fecha_emision = day(b.fecha_emision, true), ejercicio = ejercicioDe(fecha_emision);
+  const request_hash = await digest({ factura_id: facturaId, version, fecha_emision });
+  // Reintento: manda la copia guardada aunque el borrador o la entidad cambiaran después.
+  const previa = await env.DB.prepare(SELECT_PRUEBA).bind(id).first();
+  if (previa) {
+    if (previa.factura_id !== facturaId || previa.request_hash !== request_hash) fail('id_reutilizado', 409);
+    return json({ item: pruebaItem(previa) }, 200, NO_STORE);
+  }
+  const old = await invoice(env.DB, facturaId);
+  if (old.origen !== 'borrador' || old.tipo !== 'emitida') fail('prueba_solo_borrador_emitida', 409);
+  if (old.version !== version) fail('version_desactualizada', 409);
+  const issuer = await entity(env.DB, old.entidad_id), now = new Date().toISOString();
+  const numeracion = { entidad_id: old.entidad_id, familia: 'PR', ejercicio };
+  const snapshot = { entidad: { nombre: issuer.nombre, nif: issuer.nif, direccion: issuer.direccion }, factura: fromRow(old),
+    fecha_emision, validez_fiscal: 'ninguna', marca: MARCA_PRUEBA, generado_por: actor, generado_en: now };
+  const raw = canonical(snapshot), sha = await digest(raw);
+  try {
+    const results = await env.DB.batch([
+      reservarNumero(env.DB, { ...numeracion, now }),
+      insertarNumerado(env.DB, 'g_facturas_prueba', ['id', 'factura_id', 'fecha_emision', 'version_origen', 'snapshot_json', 'sha256', 'request_hash', 'created_by', 'created_at'],
+        [id, old.id, fecha_emision, version, raw, sha, request_hash, actor, now], numeracion),
+      audit(env.DB, 'factura_prueba', id, actor, now, { factura_id: old.id, version, fecha_emision, ejercicio }, true),
+    ]);
+    // El SELECT del documento lee el contador reservado en la misma transacción: una
+    // reserva sin documento no es posible por construcción; si ocurriera, se dice.
+    if (!results[1].meta.changes) throw new HttpError(500, 'numeracion_inconsistente');
+  } catch (e) {
+    // Un POST concurrente idéntico devuelve el mismo recurso; su batch se revirtió entero.
+    const concurrent = await env.DB.prepare(SELECT_PRUEBA).bind(id).first();
+    if (concurrent) {
+      if (concurrent.request_hash !== request_hash) fail('id_reutilizado', 409);
+      return json({ item: pruebaItem(concurrent) }, 200, NO_STORE);
+    }
+    errorNumeracion(e);
+  }
+  return json({ item: pruebaItem(await env.DB.prepare(SELECT_PRUEBA).bind(id).first()) }, 201, NO_STORE);
+});
+fiscal.get(`${ROOT}/facturas/:id/pruebas`, async (c) => {
+  const { env, scope } = partesAdmin(c);
+  if (!esSocio(env, scope)) throw new HttpError(403, 'not_authorized');
+  const old = await invoice(env.DB, c.req.param('id'));
+  // Acotada: un borrador tiene pocas muestras; si hay más de 100, se dice.
+  const rows = (await env.DB.prepare('SELECT * FROM g_facturas_prueba WHERE factura_id=? ORDER BY created_at DESC, id LIMIT 101').bind(old.id).all()).results;
+  const mas = rows.length > 100; if (mas) rows.pop();
+  return json({ items: rows.map(pruebaItem), mas, limite: 100 }, 200, NO_STORE);
+});
+// Reimpresión: siempre la copia guardada, nunca el borrador actual. Leer no reserva.
+fiscal.get(`${ROOT}/facturas-prueba/:id`, async (c) => {
+  const { env, scope } = partesAdmin(c);
+  if (!esSocio(env, scope)) throw new HttpError(403, 'not_authorized');
+  const row = await env.DB.prepare(SELECT_PRUEBA).bind(uuid(c.req.param('id'))).first();
+  if (!row) fail('prueba_no_encontrada', 404);
+  return json({ item: pruebaItem(row) }, 200, NO_STORE);
+});
+
 fiscal.get(`${ROOT}/fiscal/resumen`, async (c) => {
   const { env, scope, url } = partesAdmin(c);
   if (!esSocio(env, scope)) throw new HttpError(403, 'not_authorized');

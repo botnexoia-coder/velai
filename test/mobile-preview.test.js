@@ -46,3 +46,13 @@ test('bindings de prueba bloquean SQL y almacenamiento incluso en handlers GET',
   }
   assert.equal(writes, 0);
 });
+
+test('pruebas de factura en móvil solo permiten consultar copias sin asignar números', () => {
+  const id='00000000-0000-4000-8000-000000000001';
+  for(const suffix of [`gestion/facturas/${id}/pruebas`,`gestion/facturas-prueba/${id}`]){
+    assert.equal(previewTarget('/api/admin/mobile-preview/'+suffix,'GET',{role:'velai'}),'/api/admin/'+suffix);
+    assert.throws(()=>previewTarget('/api/admin/mobile-preview/'+suffix,'POST',{role:'velai'}),{status:405});
+    assert.throws(()=>previewTarget('/api/admin/mobile-preview/'+suffix,'GET',{role:'cliente'}),{status:403});
+  }
+  assert.throws(()=>previewTarget(`/api/admin/mobile-preview/gestion/facturas/${id}/emitir`,'GET',{role:'velai'}),{status:403});
+});
