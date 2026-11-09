@@ -13,3 +13,4 @@ dialog.g-modal .invoice-trial-sheet table{min-width:0;table-layout:fixed}
 .invoice-trial-sheet th:nth-child(4),.invoice-trial-sheet td:nth-child(4){width:14%}
 .invoice-trial-sheet th:nth-child(5),.invoice-trial-sheet td:nth-child(5){width:19%}
 @media screen and (max-width:600px){dialog.g-modal .invoice-trial-sheet table{min-width:500px}}
+@media print{html:has(.invoice-trial-sheet){background:white!important;color-scheme:light!important}}
