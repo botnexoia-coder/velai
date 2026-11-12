@@ -2,11 +2,11 @@
    Velai — funnel.js
    Fundación de medición para los funnels de pauta y SEO.
 
-   Hace 4 cosas, todas respetando RGPD:
+   Medición con consentimiento separado y minimización de parámetros:
      1. Google Consent Mode v2 (por defecto DENEGADO hasta que el usuario acepta).
      2. Banner de consentimiento bilingüe (ES/EN), self-hosted, sin CMP externo.
-     3. Captura y persistencia de UTM / gclid / fbclid (atribución end-to-end).
-     4. Wiring de eventos de conversión + anexado de UTM a los enlaces wa.me.
+     3. Captura de campaña acotada después del permiso, sin texto libre.
+     4. Eventos de embudo y conversiones en los destinos propios de VELAI.
 
    CONFIGURACIÓN: se lee de objetos globales definidos INLINE en cada HTML
    (que tiene cache corto), no aquí (este archivo es immutable 1 año):
@@ -15,7 +15,7 @@
        window.VELAI_TRACK = { ga4:'', ads:'', adsLabel:'', pixel:'' };
        window.VELAI_WA    = '15706160059';   // número del bot Vai (Twilio)
      </script>
-     <script src="/assets/funnel.js?v=4" defer></script>
+     <script src="/assets/funnel.js?v=10" defer></script>
 
    Mientras los IDs estén vacíos, el banner y los UTM funcionan igual; los
    tags de Google/Meta simplemente no se cargan. Rellena los IDs y redeploy.
@@ -26,7 +26,8 @@
 
   var CFG = window.VELAI_TRACK || {};
   var WA = window.VELAI_WA || '15706160059';
-  var LS_CONSENT = 'velai-consent';      // 'granted' | 'denied'
+  var LS_CONSENT = 'velai-consent-v2';
+  var consent = { analytics: false, advertising: false };
   var SS_UTM = 'velai-utm';              // first-touch UTM (sessionStorage)
 
   // ── idioma (compartido con el resto del sitio) ──
@@ -54,7 +55,9 @@
   });
 
   var storedConsent = null;
-  try { storedConsent = localStorage.getItem(LS_CONSENT); } catch (e) {}
+  try { var saved = JSON.parse(localStorage.getItem(LS_CONSENT)); if (saved && saved.version === 2) storedConsent = saved; } catch (e) {}
+  gtag('set', 'ads_data_redaction', true);
+  gtag('set', 'url_passthrough', false);
 
   // ════ UTM: capturar y persistir (first-touch) ════
   function captureUTM() {
@@ -64,7 +67,7 @@
     var hasFresh = false;
     keys.forEach(function (k) {
       var v = params.get(k);
-      if (v) { fresh[k] = v; hasFresh = true; }
+      if (v && /^[a-zA-Z0-9_.~-]{1,160}$/.test(v) && !/\d{7,}/.test(v) && (consent.advertising || (k !== 'gclid' && k !== 'fbclid'))) { fresh[k] = v; hasFresh = true; }
     });
     var stored = {};
     try { stored = JSON.parse(sessionStorage.getItem(SS_UTM) || '{}'); } catch (e) {}
@@ -73,9 +76,12 @@
       try { sessionStorage.setItem(SS_UTM, JSON.stringify(fresh)); } catch (e) {}
       return fresh;
     }
-    return Object.keys(stored).length ? stored : fresh;
+    var result = Object.keys(stored).length ? stored : fresh;
+    var clean = {};
+    keys.forEach(function(k){ var v=result[k]; if(typeof v==='string' && /^[a-zA-Z0-9_.~-]{1,160}$/.test(v) && !/\d{7,}/.test(v) && (consent.advertising || (k!=='gclid' && k!=='fbclid'))) clean[k]=v; });
+    return clean;
   }
-  var UTM = captureUTM();
+  var UTM = {};
   window.VELAI_getUTM = function () { return UTM; };
 
   // Turnstile se carga solo cuando el usuario intenta enviar datos o el primer
@@ -153,80 +159,73 @@
   }
 
   // ════ Carga de tags (solo si hay IDs configurados) ════
-  var googleLoaded = false;
-  function loadGoogle() {
-    if (googleLoaded || (!CFG.ga4 && !CFG.ads)) return;
-    googleLoaded = true;
-    var id = CFG.ga4 || CFG.ads;
-    var s = document.createElement('script');
-    s.async = true;
-    s.src = 'https://www.googletagmanager.com/gtag/js?id=' + encodeURIComponent(id);
-    document.head.appendChild(s);
-    gtag('js', new Date());
-    if (CFG.ga4) gtag('config', CFG.ga4, { anonymize_ip: true });
-    if (CFG.ads) gtag('config', CFG.ads);
+  var googleLoaded = false, gaConfigured = false, adsConfigured = false;
+  function safePage() {
+    var u = new URL(location.origin + location.pathname);
+    ['utm_source','utm_medium','utm_campaign','utm_term','utm_content'].forEach(function(k){if(UTM[k])u.searchParams.set(k,UTM[k]);});
+    return u.href;
   }
-
+  function safeReferrer(){try{var u=new URL(document.referrer);return u.origin+u.pathname;}catch(_){return '';}}
+  function loadGoogle() {
+    if (!googleLoaded && ((consent.analytics && CFG.ga4) || (consent.advertising && CFG.ads))) {
+      googleLoaded = true;
+      var s = document.createElement('script');s.async=true;
+      s.src='https://www.googletagmanager.com/gtag/js?id='+encodeURIComponent(consent.analytics && CFG.ga4 ? CFG.ga4 : CFG.ads);
+      document.head.appendChild(s);gtag('js',new Date());
+    }
+    if(consent.analytics && CFG.ga4 && !gaConfigured){
+      gaConfigured=true;
+      gtag('config',CFG.ga4,{send_page_view:false,page_location:safePage(),page_referrer:safeReferrer(),allow_google_signals:false,allow_ad_personalization_signals:false,allow_enhanced_conversions:false});
+      gtag('event','page_view',{send_to:CFG.ga4,page_location:safePage(),page_referrer:safeReferrer()});
+    }
+    if(consent.advertising && CFG.ads && !adsConfigured){adsConfigured=true;gtag('config',CFG.ads,{send_page_view:false,allow_enhanced_conversions:false});}
+  }
   var pixelLoaded = false;
   function loadPixel() {
-    if (pixelLoaded || !CFG.pixel) return;
-    pixelLoaded = true;
-    /* eslint-disable */
-    !function (f, b, e, v, n, t, s) {
-      if (f.fbq) return; n = f.fbq = function () { n.callMethod ? n.callMethod.apply(n, arguments) : n.queue.push(arguments); };
-      if (!f._fbq) f._fbq = n; n.push = n; n.loaded = !0; n.version = '2.0'; n.queue = [];
-      t = b.createElement(e); t.async = !0; t.src = v; s = b.getElementsByTagName(e)[0]; s.parentNode.insertBefore(t, s);
-    }(window, document, 'script', 'https://connect.facebook.net/en_US/fbevents.js');
-    /* eslint-enable */
-    window.fbq('init', CFG.pixel);
-    window.fbq('track', 'PageView');
+    if(pixelLoaded || !CFG.pixel || !consent.advertising)return;
+    pixelLoaded=true;
+    !function(f,b,e,v,n,t,s){if(f.fbq)return;n=f.fbq=function(){n.callMethod?n.callMethod.apply(n,arguments):n.queue.push(arguments)};if(!f._fbq)f._fbq=n;n.push=n;n.loaded=true;n.version='2.0';n.queue=[];t=b.createElement(e);t.async=true;t.src=v;s=b.getElementsByTagName(e)[0];s.parentNode.insertBefore(t,s)}(window,document,'script','https://connect.facebook.net/en_US/fbevents.js');
+    window.fbq('set','autoConfig',false,CFG.pixel);window.fbq('consent','grant');window.fbq('init',CFG.pixel);window.fbq('trackSingle',CFG.pixel,'PageView');
   }
-
-  var cloudflareLoaded = false;
-  function loadCloudflareAnalytics() {
-    if (cloudflareLoaded || document.querySelector('script[data-cf-beacon]')) return;
-    cloudflareLoaded = true;
-    var s = document.createElement('script');
-    s.defer = true;
-    s.src = 'https://static.cloudflareinsights.com/beacon.min.js';
-    s.dataset.cfBeacon = JSON.stringify({ token: 'cfa66a7600f94512ac2e595181c8d04d' });
-    document.head.appendChild(s);
+  var cloudflareLoaded=false;
+  function loadCloudflareAnalytics(){
+    if(!consent.analytics || cloudflareLoaded || document.querySelector('script[data-cf-beacon]'))return;
+    cloudflareLoaded=true;var s=document.createElement('script');s.defer=true;s.src='https://static.cloudflareinsights.com/beacon.min.js';s.dataset.cfBeacon=JSON.stringify({token:'cfa66a7600f94512ac2e595181c8d04d'});document.head.appendChild(s);
   }
-
-  // Google Consent Mode permite cargar gtag bajo 'denied' (pings sin cookies →
-  // conversiones modeladas). Meta Pixel lo cargamos solo tras aceptación (RGPD).
-  function applyConsent(state) {
-    if (state === 'granted') {
-      gtag('consent', 'update', {
-        ad_storage: 'granted', ad_user_data: 'granted',
-        ad_personalization: 'granted', analytics_storage: 'granted'
-      });
-      loadGoogle();
-      loadPixel();
-      loadCloudflareAnalytics();
-    } else {
-      // denegado explícito: cargamos Google en modo cookieless (opcional) y NO pixel
-      loadGoogle();
-    }
+  function clearMeasurementCookies(){
+    document.cookie.split(';').forEach(function(part){var name=part.trim().split('=')[0];if(!/^(_ga($|_)|_gid$|_gat($|_)|_gcl_|_fbp$|_fbc$)/.test(name))return;
+      ['',location.hostname,'.'+location.hostname,'.hirevai.com'].forEach(function(domain){document.cookie=name+'=; Max-Age=0; path=/'+(domain?'; domain='+domain:'')+'; SameSite=Lax';});
+    });
   }
-
-  // ════ 4. EVENTOS DE CONVERSIÓN ════
-  // Eventos de alta intención que cuentan como conversión en pauta.
-  var CONV = { whatsapp_click: 1, demo_click: 1, lead_submit: 1, calc_complete: 1, quiz_complete: 1, quote_complete: 1 };
-
-  window.velaiTrack = function (name, params) {
-    params = params || {};
-    if (Object.keys(UTM).length) params = Object.assign({}, params, UTM);
-    try { gtag('event', name, params); } catch (e) {}
-    // Google Ads: registra la conversión (necesita `ads` AND `adsLabel`).
-    // Sin esto, Google Ads no puede medir ni optimizar a conversión → pauta a ciegas.
-    if (CFG.ads && CFG.adsLabel && CONV[name]) {
-      try { gtag('event', 'conversion', { send_to: CFG.ads + '/' + CFG.adsLabel }); } catch (e) {}
+  function applyConsent(next,persist){
+    var old=consent;consent={analytics:next.analytics===true,advertising:next.advertising===true};
+    window['ga-disable-'+CFG.ga4]=!consent.analytics;
+    gtag('consent','update',{analytics_storage:consent.analytics?'granted':'denied',ad_storage:consent.advertising?'granted':'denied',ad_user_data:consent.advertising?'granted':'denied',ad_personalization:consent.advertising?'granted':'denied'});
+    if(!consent.advertising && window.fbq)window.fbq('consent','revoke');
+    var persisted=!persist;
+    if(persist){try{localStorage.setItem(LS_CONSENT,JSON.stringify({version:2,analytics:consent.analytics,advertising:consent.advertising}));persisted=true;}catch(_){}}
+    if((old.analytics&&!consent.analytics)||(old.advertising&&!consent.advertising)){
+      clearMeasurementCookies();try{sessionStorage.removeItem(SS_UTM);}catch(_){}UTM={};
+      if(persisted){location.reload();return;}
     }
-    if (window.fbq) {
-      var fbMap = { whatsapp_click: 'Contact', demo_click: 'Lead', lead_submit: 'Lead', calc_complete: 'Lead', quiz_complete: 'Lead', quote_complete: 'Lead' };
-      try { window.fbq('trackCustom', name, params); if (fbMap[name]) window.fbq('track', fbMap[name], params); } catch (e) {}
-    }
+    if(consent.analytics || consent.advertising)UTM=captureUTM();
+    decorateWaLinks();loadGoogle();loadPixel();loadCloudflareAnalytics();
+  }
+  var CONV={whatsapp_click:1,demo_click:1,lead_submit:1,calc_complete:1,quiz_complete:1,quote_complete:1};
+  var EVENTS=['whatsapp_click','demo_click','lead_submit','lead_disqualified','lead_error','calc_complete','quiz_complete','quote_complete','quiz_lead_saved','wa_link_generated','wa_link_test','chat_view','chat_teaser_shown','chat_open','chat_first_message','chat_message','chat_reply','chat_error','chat_cta_blog','chat_cta_resultado','demo_chat_click','chat_cta_click','chat_cta_pricing','geo_chatgpt','geo_claude','geo_perplexity'];
+  function cleanParams(params){
+    var clean={page_location:safePage(),page_referrer:safeReferrer()};
+    ['location','source','demo','sector','plan','stored','test'].forEach(function(k){var v=params[k];if(typeof v==='string' && /^[a-zA-Z0-9_. -]{1,60}$/.test(v) && !/\d{7,}/.test(v))clean[k]=v;});
+    ['n','score','volume'].forEach(function(k){if(typeof params[k]==='number' && Number.isFinite(params[k]))clean[k]=params[k];});
+    return clean;
+  }
+  window.VELAI_measurementPreferences=function(){return Object.assign({},consent);};
+  window.velaiTrack=function(name,params){
+    if(!EVENTS.includes(name))return;
+    var clean=cleanParams(params||{});
+    if(consent.analytics && CFG.ga4)gtag('event',name,Object.assign({send_to:CFG.ga4},clean));
+    if(consent.advertising && CFG.ads && CFG.adsLabel && CONV[name])gtag('event','conversion',{send_to:CFG.ads+'/'+CFG.adsLabel,page_location:safePage(),page_referrer:safeReferrer()});
+    if(consent.advertising && window.fbq){var fbMap={whatsapp_click:'Contact',demo_click:'Lead',lead_submit:'Lead',calc_complete:'Lead',quiz_complete:'Lead',quote_complete:'Lead'};window.fbq('trackSingleCustom',CFG.pixel,name,clean);if(fbMap[name])window.fbq('trackSingle',CFG.pixel,fbMap[name],clean);}
   };
 
   function wireEvents() {
@@ -249,97 +248,25 @@
   // re-procesar enlaces/CTAs añadidos dinámicamente (quiz, formularios, etc.)
   window.VELAI_decorate = function () { decorateWaLinks(); wireEvents(); };
 
-  // ════ 2. BANNER DE CONSENTIMIENTO (bilingüe, self-hosted) ════
-  var TXT = {
-    es: {
-      msg: 'Usamos cookies propias y de terceros para medir el tráfico y mejorar nuestra publicidad. Puedes aceptarlas o seguir solo con las esenciales.',
-      accept: 'Aceptar', reject: 'Solo esenciales', more: 'Más información sobre privacidad'
-    },
-    en: {
-      msg: 'We use first- and third-party cookies to measure traffic and improve our advertising. You can accept them or keep only the essential ones.',
-      accept: 'Accept', reject: 'Essentials only', more: 'Privacy information'
-    }
-  };
-
-  function injectStyles() {
-    if (document.getElementById('velai-consent-style')) return;
-    var css = '' +
-      '#velai-consent{position:fixed;left:16px;right:16px;bottom:16px;z-index:9999;max-width:760px;margin:0 auto;' +
-      'background:rgba(17,13,19,0.97);color:#FFF8F4;border:1px solid rgba(255,107,26,0.28);border-radius:16px;' +
-      'box-shadow:0 18px 50px rgba(0,0,0,0.45);backdrop-filter:blur(14px);padding:18px 20px;' +
-      'font-family:Satoshi,system-ui,sans-serif;font-size:.9rem;line-height:1.55;' +
-      'display:flex;gap:16px;align-items:center;flex-wrap:wrap;justify-content:space-between;' +
-      'opacity:0;transform:translateY(12px);transition:opacity .3s ease,transform .3s ease;}' +
-      '#velai-consent.show{opacity:1;transform:translateY(0);}' +
-      'body.light #velai-consent{background:rgba(245,240,236,0.98);color:#1A0D05;border-color:rgba(160,70,15,0.28);}' +
-      '#velai-consent p{margin:0;flex:1 1 280px;color:inherit;}' +
-      '#velai-consent a{color:#FF8C40;text-decoration:underline;text-underline-offset:2px;}' +
-      '#velai-consent .vc-btns{display:flex;gap:10px;flex-shrink:0;}' +
-      '#velai-consent button{font-family:Satoshi,system-ui,sans-serif;font-weight:700;font-size:.85rem;' +
-      'border-radius:9px;padding:.6rem 1.05rem;cursor:pointer;border:1px solid transparent;transition:all .18s ease;white-space:nowrap;}' +
-      '#velai-consent .vc-accept{background:#C74712;color:#fff;}' +
-      '#velai-consent .vc-accept:hover{background:#A83A0E;}' +
-      '#velai-consent .vc-reject{background:transparent;color:inherit;border-color:rgba(255,107,26,0.4);}' +
-      '#velai-consent .vc-reject:hover{background:rgba(255,107,26,0.1);}' +
-      'html:has(#velai-consent.show) #vaiWidget{display:none!important;}' +
-      '@media(max-width:560px){#velai-consent{flex-direction:column;align-items:stretch;}#velai-consent p{flex:0 0 auto;}#velai-consent .vc-btns{justify-content:stretch;}#velai-consent button{flex:1;}}';
-    var st = document.createElement('style');
-    st.id = 'velai-consent-style';
-    st.textContent = css;
-    document.head.appendChild(st);
+  // ════ Preferencias: categorías independientes, sin proveedores antes del permiso ════
+  var TXT={es:{msg:'Tú decides: la analítica mide visitas e interacciones; la publicidad mide campañas con Google Ads y Meta. Son opcionales.',accept:'Aceptar todas',reject:'Solo esenciales',settings:'Configurar',save:'Guardar preferencias',close:'Cerrar',analytics:'Analítica',advertising:'Publicidad',more:'Privacidad y cookies',manage:'Configurar cookies'},en:{msg:'Your choice: analytics measures visits and interactions; advertising measures campaigns with Google Ads and Meta. Both are optional.',accept:'Accept all',reject:'Essentials only',settings:'Settings',save:'Save preferences',close:'Close',analytics:'Analytics',advertising:'Advertising',more:'Privacy and cookies',manage:'Cookie settings'}};
+  var returnFocus=null;
+  function injectStyles(){if(document.getElementById('velai-consent-style'))return;var st=document.createElement('style');st.id='velai-consent-style';st.textContent='#velai-consent{position:fixed;left:16px;right:16px;bottom:16px;z-index:10001;max-width:760px;margin:auto;background:#170f17;color:#fff8f4;border:1px solid #e68b60;border-radius:16px;padding:20px;font:15px/1.55 system-ui;box-shadow:0 18px 50px #0007;max-height:calc(100dvh - 32px);overflow:auto}#velai-consent p{margin:0 0 14px}#velai-consent a{color:#ffb48b}#velai-consent .vc-btns{display:flex;gap:10px;flex-wrap:wrap}#velai-consent button{font:700 14px system-ui;min-height:44px;padding:10px 14px;cursor:pointer;border:1px solid #ffb48b;border-radius:9px;background:#fff4ed;color:#54230e}#velai-consent button:focus-visible,#velai-consent input:focus-visible{outline:3px solid #ffa53e;outline-offset:3px}#velai-consent label{display:flex;justify-content:space-between;gap:20px;padding:12px 0;border-top:1px solid #ffffff30}#velai-consent input{width:24px;height:24px;accent-color:#ef6d2c}html:has(#velai-consent) #vaiWidget{visibility:hidden!important}#velai-cookie-manage{position:fixed;left:12px;bottom:8px;z-index:10000;min-height:34px;background:#fff4ed;color:#54230e;border:1px solid #b76a3e;border-radius:8px;font:12px system-ui;padding:7px 10px;cursor:pointer}@media(max-width:560px){#velai-consent{padding:16px}#velai-consent .vc-btns button{flex:1 1 120px}}';document.head.appendChild(st);}
+  function showBanner(settings){
+    if(document.getElementById('velai-consent'))return;
+    injectStyles();returnFocus=document.activeElement;var t=TXT[lang()],el=document.createElement('section');el.id='velai-consent';el.className='show';el.setAttribute('role','dialog');el.setAttribute('aria-modal','true');el.setAttribute('aria-label',t.manage);
+    el.innerHTML='<p>'+t.msg+' <a href="/privacidad/">'+t.more+'</a>.</p>'+(settings?'<label>'+t.analytics+'<input type="checkbox" name="analytics" '+(consent.analytics?'checked':'')+'></label><label>'+t.advertising+'<input type="checkbox" name="advertising" '+(consent.advertising?'checked':'')+'></label>':'')+'<div class="vc-btns">'+(settings?'<button type="button" data-action="save">'+t.save+'</button><button type="button" data-action="close">'+t.close+'</button>':'<button type="button" data-action="accept">'+t.accept+'</button><button type="button" data-action="reject">'+t.reject+'</button><button type="button" data-action="settings">'+t.settings+'</button>')+'</div>';
+    function close(){el.remove();if(returnFocus&&returnFocus.isConnected)returnFocus.focus();}
+    el.querySelectorAll('[data-action]').forEach(function(b){b.onclick=function(){var a=b.dataset.action;if(a==='settings'){close();showBanner(true);return;}if(a==='close'){close();return;}var next=a==='accept'?{analytics:true,advertising:true}:a==='save'?{analytics:el.querySelector('[name=analytics]').checked,advertising:el.querySelector('[name=advertising]').checked}:{};applyConsent(next,true);close();};});
+    el.addEventListener('keydown',function(e){if(e.key==='Escape'){e.preventDefault();close();}if(e.key==='Tab'){var nodes=el.querySelectorAll('a,input,button'),first=nodes[0],last=nodes[nodes.length-1];if(e.shiftKey&&document.activeElement===first){e.preventDefault();last.focus();}else if(!e.shiftKey&&document.activeElement===last){e.preventDefault();first.focus();}}});
+    document.body.appendChild(el);el.querySelector('input,button').focus();
   }
-
-  function showBanner() {
-    var t = TXT[lang()];
-    injectStyles();
-    var el = document.createElement('div');
-    el.id = 'velai-consent';
-    el.setAttribute('role', 'dialog');
-    el.setAttribute('aria-label', 'Cookies');
-    el.innerHTML =
-      '<p>' + t.msg + ' <a href="/privacidad/" rel="nofollow">' + t.more + '</a></p>' +
-      '<div class="vc-btns">' +
-      '<button class="vc-reject" type="button">' + t.reject + '</button>' +
-      '<button class="vc-accept" type="button">' + t.accept + '</button>' +
-      '</div>';
-    document.body.appendChild(el);
-    requestAnimationFrame(function () { el.classList.add('show'); });
-    function close(decision) {
-      try { localStorage.setItem(LS_CONSENT, decision); } catch (e) {}
-      applyConsent(decision);
-      el.classList.remove('show');
-      setTimeout(function () { el.remove(); }, 320);
-      window.velaiTrack('consent_' + decision, {});
-    }
-    el.querySelector('.vc-accept').addEventListener('click', function () { close('granted'); });
-    el.querySelector('.vc-reject').addEventListener('click', function () { close('denied'); });
+  window.VELAI_openConsent=function(){showBanner(true);};
+  function init(){
+    decorateWaLinks();wireEvents();injectStyles();
+    var manage=document.createElement('button');manage.id='velai-cookie-manage';manage.type='button';manage.textContent=TXT[lang()].manage;manage.onclick=window.VELAI_openConsent;document.body.appendChild(manage);
+    if(storedConsent)applyConsent(storedConsent,false);else showBanner(false);
+    window.addEventListener('storage',function(e){if(e.key===LS_CONSENT){try{var next=JSON.parse(e.newValue);if(next&&next.version===2)applyConsent(next,false);}catch(_){}}});
   }
-
-  // ════ INIT ════
-  function init() {
-    decorateWaLinks();
-    wireEvents();
-    // Consent Mode v2: cargamos Google de inmediato en modo cookieless (el
-    // consentimiento sigue 'denied' por defecto, sin cookies). Así la etiqueta
-    // es detectable por Google y mide desde la primera visita, aunque el
-    // usuario aún no haya tocado el banner. El Pixel de Meta NO se carga aquí.
-    loadGoogle();
-    if (storedConsent === 'granted' || storedConsent === 'denied') {
-      applyConsent(storedConsent);   // ya decidió antes: aplica (carga Pixel si aceptó)
-    } else {
-      showBanner();                  // primera visita: pedir consentimiento
-    }
-  }
-
-  // Retirada/cambio del consentimiento sin borrar datos del navegador: cualquier
-  // página puede reabrir el banner con un enlace «Configurar cookies».
-  window.VELAI_openConsent = function () {
-    if (!document.getElementById('velai-consent')) showBanner();
-  };
-
-  if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', init);
-  } else {
-    init();
-  }
+  if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',init);else init();
 })();
