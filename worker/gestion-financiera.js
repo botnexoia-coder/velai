@@ -9,7 +9,15 @@ export const MONEDAS = ['EUR', 'COP'];
 export const TIPOS_ENTIDAD = ['autonomo', 'sociedad', 'promotores'];
 export const ESTADOS_ENTIDAD = ['pendiente', 'activa'];
 export const ESTADOS_COMPRA = ['prevista', 'comprometida', 'comprada', 'cancelada'];
-export const TIPOS_DOCUMENTO = ['prestamo', 'compra', 'factura', 'movimiento'];
+export const TIPOS_DOCUMENTO = ['prestamo', 'compra', 'factura', 'movimiento', 'vehiculo', 'viaje'];
+// Control por vehículo y viaje (negocio Coches, migración 0063).
+export const TIPOS_VEHICULO = ['coche', 'camioneta', 'furgoneta', 'moto', 'otro'];
+export const ESTADOS_VEHICULO = ['previsto', 'comprado', 'preparado', 'anunciado', 'vendido', 'cancelado'];
+export const ESTADOS_VIAJE = ['previsto', 'en_curso', 'cerrado', 'cancelado'];
+export const REPARTOS_VIAJE = ['igual', 'manual'];
+// Tipología de gasto, la misma para gastos del viaje y del vehículo. Solo se exige
+// cuando la compra lleva vehículo o viaje; el resto de compras conserva texto libre.
+export const CATEGORIAS_VEHICULO = ['adquisicion', 'gasolina', 'peajes', 'viaticos', 'transporte', 'seguro', 'matriculacion', 'itv', 'gestoria', 'reparacion', 'limpieza', 'publicidad', 'otros'];
 export const PAGADORES = ['cuenta', 'socio'];
 // Solo EUR en los préstamos iniciales (contrato): la cuenta del préstamo debe ser EUR.
 export const MONEDAS_PRESTAMO = ['EUR'];
@@ -198,12 +206,77 @@ export function compraItem(row) {
   return { id: row.id, concepto: row.concepto, negocio: row.negocio, entidad_id: row.entidad_id, prestamo_id: row.prestamo_id, moneda: row.moneda,
     evento_id: row.evento_id ?? null, hecho: row.hecho || 0, hecho_fecha: row.hecho_fecha ?? null, hecho_por: row.hecho_por ?? null, plan_pagos: JSON.parse(row.plan_pagos || '[]'),
     estimado: row.estimado, real: row.real, estado: row.estado, comprador: row.comprador, proveedor: row.proveedor, fecha_prevista: row.fecha_prevista,
-    fecha_compra: row.fecha_compra, categoria: row.categoria, nota: row.nota, version: row.version, pagado, pendiente, documentos_count: row.documentos_count || 0 };
+    fecha_compra: row.fecha_compra, categoria: row.categoria, nota: row.nota, version: row.version, pagado, pendiente, documentos_count: row.documentos_count || 0,
+    vehiculo_id: row.vehiculo_id ?? null, viaje_id: row.viaje_id ?? null };
 }
 export const SELECT_COMPRA = `SELECT c.*,
   COALESCE((SELECT SUM(p.importe) FROM g_pagos p WHERE p.objeto_tipo='compra' AND p.objeto_id=c.id AND p.clase='pago' AND p.estado='activo'),0) AS pagado,
   (SELECT COUNT(*) FROM g_documentos d WHERE d.tipo='compra' AND d.objeto_id=c.id) AS documentos_count
   FROM g_compras c`;
+
+// ── Vehículos y viajes ───────────────────────────────────────────────────────
+// Reparte un importe entero entre participantes según pesos (basis points) con suma
+// exacta: la parte entera va por división y el resto, céntimo a céntimo, a los de
+// mayor fracción (desempate: mayor peso, luego id). BigInt evita perder precisión.
+export function repartir(importe, participantes) {
+  const total = participantes.reduce((s, p) => s + p.peso_bp, 0);
+  if (!participantes.length) return [];
+  if (total <= 0 || importe <= 0) return participantes.map((p) => ({ vehiculo_id: p.vehiculo_id, importe: 0 }));
+  const I = BigInt(importe), T = BigInt(total);
+  const base = participantes.map((p) => { const n = I * BigInt(p.peso_bp); return { vehiculo_id: p.vehiculo_id, importe: Number(n / T), resto: Number(n % T), peso_bp: p.peso_bp }; });
+  let faltan = importe - base.reduce((s, b) => s + b.importe, 0);
+  for (const b of [...base].sort((a, b) => b.resto - a.resto || b.peso_bp - a.peso_bp || (a.vehiculo_id < b.vehiculo_id ? -1 : 1))) { if (!faltan) break; b.importe += 1; faltan -= 1; }
+  return base.map(({ vehiculo_id, importe }) => ({ vehiculo_id, importe }));
+}
+// Pesos efectivos de un viaje: a partes iguales (peso 1 cada uno) o los manuales.
+export const pesosViaje = (viaje, participantes) => participantes.map((p) => ({ vehiculo_id: p.vehiculo_id, peso_bp: viaje.reparto === 'manual' ? p.peso_bp : 1 }));
+// Imputación de los gastos conjuntos de un viaje a sus vehículos. Es un cálculo del
+// resumen: no crea pagos ni movimientos. Gasto a gasto, para que el detalle del
+// viaje y la ficha de cada vehículo coincidan al céntimo.
+export function imputarViaje(viaje, participantes, conjuntos) {
+  const pesos = pesosViaje(viaje, participantes);
+  const por_vehiculo = Object.fromEntries(participantes.map((p) => [p.vehiculo_id, { coste: 0, pagado: 0 }]));
+  let total = 0, pagado = 0;
+  for (const c of conjuntos) {
+    if (c.estado === 'cancelada') continue;
+    const coste = c.estado === 'comprada' ? c.real : c.estimado;
+    total += coste; pagado += c.pagado;
+    for (const r of repartir(coste, pesos)) por_vehiculo[r.vehiculo_id].coste += r.importe;
+    for (const r of repartir(c.pagado, pesos)) por_vehiculo[r.vehiculo_id].pagado += r.importe;
+  }
+  return { total, pagado, por_vehiculo, sin_repartir: participantes.length ? 0 : total };
+}
+export function vehiculoItem(row) {
+  if (!row) return null;
+  const coste_directo = row.coste_directo || 0, pagado_directo = row.pagado_directo || 0;
+  return { id: row.id, referencia: row.referencia, tipo: row.tipo, marca: row.marca, modelo: row.modelo, matricula: row.matricula, vin: row.vin, moneda: row.moneda, estado: row.estado,
+    fecha_compra: row.fecha_compra, fecha_venta: row.fecha_venta, precio_venta: row.precio_venta, prestamo_id: row.prestamo_id, entidad_id: row.entidad_id, nota: row.nota, version: row.version,
+    compras_count: row.compras_count || 0, viajes_count: row.viajes_count || 0, documentos_count: row.documentos_count || 0,
+    coste_directo, pagado_directo, pendiente_directo: Math.max(0, coste_directo - pagado_directo) };
+}
+export const SELECT_VEHICULO = `SELECT v.*,
+  (SELECT COUNT(*) FROM g_compras c WHERE c.vehiculo_id=v.id AND c.estado<>'cancelada') AS compras_count,
+  (SELECT COUNT(*) FROM g_viaje_vehiculos vv WHERE vv.vehiculo_id=v.id) AS viajes_count,
+  (SELECT COUNT(*) FROM g_documentos d WHERE d.tipo='vehiculo' AND d.objeto_id=v.id) AS documentos_count,
+  COALESCE((SELECT SUM(CASE WHEN c.estado='comprada' THEN c.real WHEN c.estado IN ('prevista','comprometida') THEN c.estimado ELSE 0 END) FROM g_compras c WHERE c.vehiculo_id=v.id),0) AS coste_directo,
+  COALESCE((SELECT SUM(p.importe) FROM g_pagos p JOIN g_compras c ON c.id=p.objeto_id WHERE p.objeto_tipo='compra' AND p.clase='pago' AND p.estado='activo' AND c.vehiculo_id=v.id),0) AS pagado_directo
+  FROM g_vehiculos v`;
+export function viajeItem(row) {
+  if (!row) return null;
+  const n = row.vehiculos_count || 0, coste_conjunto = row.coste_conjunto || 0, coste_directo = row.coste_directo || 0, pagado = row.pagado || 0;
+  const coste_total = coste_conjunto + coste_directo;
+  return { id: row.id, nombre: row.nombre, moneda: row.moneda, fecha_inicio: row.fecha_inicio, fecha_fin: row.fecha_fin, estado: row.estado, reparto: row.reparto, nota: row.nota, version: row.version,
+    vehiculos_count: n, documentos_count: row.documentos_count || 0, coste_conjunto, coste_directo, coste_total, pagado, pendiente: Math.max(0, coste_total - pagado),
+    parte_conjunta: row.reparto === 'igual' && n ? Math.floor(coste_conjunto / n) : null };
+}
+const COSTE_COMPRA_SQL = "CASE WHEN c.estado='comprada' THEN c.real WHEN c.estado IN ('prevista','comprometida') THEN c.estimado ELSE 0 END";
+export const SELECT_VIAJE = `SELECT t.*,
+  (SELECT COUNT(*) FROM g_viaje_vehiculos vv WHERE vv.viaje_id=t.id) AS vehiculos_count,
+  (SELECT COUNT(*) FROM g_documentos d WHERE d.tipo='viaje' AND d.objeto_id=t.id) AS documentos_count,
+  COALESCE((SELECT SUM(${COSTE_COMPRA_SQL}) FROM g_compras c WHERE c.viaje_id=t.id AND c.vehiculo_id IS NULL),0) AS coste_conjunto,
+  COALESCE((SELECT SUM(${COSTE_COMPRA_SQL}) FROM g_compras c WHERE c.viaje_id=t.id AND c.vehiculo_id IS NOT NULL),0) AS coste_directo,
+  COALESCE((SELECT SUM(p.importe) FROM g_pagos p JOIN g_compras c ON c.id=p.objeto_id WHERE p.objeto_tipo='compra' AND p.clase='pago' AND p.estado='activo' AND c.viaje_id=t.id),0) AS pagado
+  FROM g_viajes t`;
 
 // ── Documentos privados ──────────────────────────────────────────────────────
 export function detectarDocumento(bytes) {
@@ -239,6 +312,8 @@ export async function objetoExiste(env, tipo, id) {
   }
   if (tipo === 'compra') return Boolean(await env.DB.prepare('SELECT id FROM g_compras WHERE id=?').bind(id).first());
   if (tipo === 'movimiento') return Boolean(await env.DB.prepare('SELECT id FROM fin_movimientos WHERE id=?').bind(id).first());
+  if (tipo === 'vehiculo') return await tablaExiste(env, 'g_vehiculos') && Boolean(await env.DB.prepare('SELECT id FROM g_vehiculos WHERE id=?').bind(id).first());
+  if (tipo === 'viaje') return await tablaExiste(env, 'g_viajes') && Boolean(await env.DB.prepare('SELECT id FROM g_viajes WHERE id=?').bind(id).first());
   if (tipo === 'factura') {
     if (!await tablaExiste(env, 'g_facturas')) return false;
     return Boolean(await env.DB.prepare('SELECT id FROM g_facturas WHERE id=?').bind(id).first());

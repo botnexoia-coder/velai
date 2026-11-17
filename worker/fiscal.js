@@ -64,7 +64,7 @@ export async function digest(value) {
   const bytes = new TextEncoder().encode(typeof value === 'string' ? value : canonical(value));
   return [...new Uint8Array(await crypto.subtle.digest('SHA-256', bytes))].map((b) => b.toString(16).padStart(2, '0')).join('');
 }
-export const FIELDS = ['entidad_id', 'negocio', 'tipo', 'estado', 'origen', 'clase', 'tratamiento_fiscal', 'nota_fiscal', 'contraparte_nif', 'contraparte_nombre', 'contraparte_direccion', 'numero', 'fecha_emision', 'fecha_operacion', 'fecha_recepcion', 'moneda', 'compra_id', 'proveedor_emision', 'nota', 'rectifica_id', 'lineas'];
+export const FIELDS = ['entidad_id', 'negocio', 'tipo', 'estado', 'origen', 'clase', 'tratamiento_fiscal', 'nota_fiscal', 'contraparte_nif', 'contraparte_nombre', 'contraparte_direccion', 'numero', 'fecha_emision', 'fecha_operacion', 'fecha_recepcion', 'moneda', 'compra_id', 'vehiculo_id', 'proveedor_emision', 'nota', 'rectifica_id', 'lineas'];
 export function normalizeInvoice(b) {
   const clase = choice(b.clase ?? 'ordinaria', ['ordinaria', 'rectificativa'], 'clase');
   const amounts = calculateLines(b.lineas, clase);
@@ -77,7 +77,7 @@ export function normalizeInvoice(b) {
     contraparte_nif: textField(b.contraparte_nif, 50), contraparte_nombre: textField(b.contraparte_nombre, 200),
     contraparte_direccion: textField(b.contraparte_direccion, 500), numero: textField(b.numero, 100),
     fecha_emision: day(b.fecha_emision), fecha_operacion: day(b.fecha_operacion), fecha_recepcion: day(b.fecha_recepcion),
-    moneda: choice(b.moneda, MONEDAS, 'moneda'), compra_id: b.compra_id ? uuid(b.compra_id) : null,
+    moneda: choice(b.moneda, MONEDAS, 'moneda'), compra_id: b.compra_id ? uuid(b.compra_id) : null, vehiculo_id: b.vehiculo_id ? uuid(b.vehiculo_id) : null,
     proveedor_emision: textField(b.proveedor_emision, 100), nota: textField(b.nota, 2000),
     rectifica_id: b.rectifica_id ? uuid(b.rectifica_id) : null,
     ...amounts,

@@ -38,8 +38,14 @@ async function linkedRecords(db, item) {
   await entity(db, item.entidad_id);
   await empresaDeCatalogo(db,item.contraparte_nombre);
   if (item.compra_id) {
-    const purchase = await db.prepare('SELECT entidad_id,moneda FROM g_compras WHERE id=?').bind(item.compra_id).first();
+    const purchase = await db.prepare('SELECT entidad_id,moneda,vehiculo_id FROM g_compras WHERE id=?').bind(item.compra_id).first();
     if (!purchase || item.tipo !== 'recibida' || purchase.entidad_id !== item.entidad_id || purchase.moneda !== item.moneda) fail('compra_incompatible');
+    if (purchase.vehiculo_id && item.vehiculo_id && purchase.vehiculo_id !== item.vehiculo_id) fail('vehiculo_incompatible');
+  }
+  // Vehículo (0063): relación adicional a la compra, en la misma moneda.
+  if (item.vehiculo_id) {
+    const vehicle = await db.prepare('SELECT id,moneda FROM g_vehiculos WHERE id=?').bind(item.vehiculo_id).first();
+    if (!vehicle || vehicle.moneda !== item.moneda) fail('vehiculo_incompatible');
   }
   if (item.rectifica_id) {
     const ref = await invoice(db, item.rectifica_id);

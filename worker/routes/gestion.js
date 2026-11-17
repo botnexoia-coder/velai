@@ -7,7 +7,7 @@ import { empresaDeCatalogo } from '../catalogos-financieros.js';
 import { esSocio, partesAdmin } from '../middleware.js';
 import { HttpError, json, NO_STORE, readJson } from '../app.js';
 import {
-  NEGOCIOS, MONEDAS, MONEDAS_PRESTAMO, TIPOS_ENTIDAD, ESTADOS_ENTIDAD, ESTADOS_COMPRA, TIPOS_DOCUMENTO, PAGADORES,
+  NEGOCIOS, MONEDAS, MONEDAS_PRESTAMO, TIPOS_ENTIDAD, ESTADOS_ENTIDAD, ESTADOS_COMPRA, TIPOS_DOCUMENTO, PAGADORES, CATEGORIAS_VEHICULO,
   DOC_MAX_BYTES, DOC_HEADERS, PRINCIPAL_MAX, TIN_BP_MAX, SELECT_COMPRA,
   fail, uuid, uuidOpcional, fechaCivil, fechaReal, fechaOpcional, entero, importePositivo, importeNoNegativo, enumValor, texto,
   versionDe, soloCampos, socioEmail, planPagos, validarPlanImporte, hechoCompra, EVENTO_MOVIMIENTO_SQL, condiciones, validarCalendario, prestamoItem, pagoItem, resumenPrestamo, compraItem,
@@ -16,8 +16,10 @@ import {
 } from '../gestion-financiera.js';
 
 import { equipoPrestamos } from '../prestamos-equipo.js';
+import { vehiculos } from '../vehiculos.js';
 export const gestion = new Hono();
 gestion.route('/',equipoPrestamos);
+gestion.route('/', vehiculos);
 const BASE = '/api/admin/gestion';
 
 // La puerta, idéntica en todos los handlers: 403 sin una sola consulta.
@@ -65,14 +67,17 @@ async function actualizar(env, tabla, id, version, set, args, audit) {
 // ── Catálogos ────────────────────────────────────────────────────────────────
 gestion.get(`${BASE}/catalogos`, async (c) => {
   const { env } = abrir(c);
-  const [entidades, cuentas, socios, eventos] = await env.DB.batch([
+  const [entidades, cuentas, socios, eventos, vehiculosCat, viajesCat] = await env.DB.batch([
     env.DB.prepare('SELECT * FROM g_entidades ORDER BY nombre COLLATE NOCASE, id'),
     env.DB.prepare('SELECT * FROM g_cuentas ORDER BY moneda, nombre COLLATE NOCASE, id'),
     // Solo nombre y correo de los socios internos: no concede ni refleja accesos.
     env.DB.prepare('SELECT email,nombre FROM fin_socios WHERE activo=1 ORDER BY nombre COLLATE NOCASE, email'),
     env.DB.prepare('SELECT e.id,e.tenant_id,e.name,e.starts_at,e.status,t.name AS tenant_name FROM tenant_events e JOIN tenants t ON t.id=e.tenant_id ORDER BY e.starts_at DESC,e.name'),
+    env.DB.prepare('SELECT id,referencia,tipo,marca,modelo,estado,moneda FROM g_vehiculos ORDER BY referencia COLLATE NOCASE, id'),
+    env.DB.prepare('SELECT id,nombre,estado,moneda,reparto FROM g_viajes ORDER BY COALESCE(fecha_inicio,created_at) DESC, id'),
   ]);
-  return json({ entidades: entidades.results.map(entidadItem), cuentas: cuentas.results.map(cuentaItem), socios: socios.results, negocios: NEGOCIOS, eventos: eventos.results }, 200, NO_STORE);
+  return json({ entidades: entidades.results.map(entidadItem), cuentas: cuentas.results.map(cuentaItem), socios: socios.results, negocios: NEGOCIOS, eventos: eventos.results,
+    vehiculos: vehiculosCat.results, viajes: viajesCat.results, categorias_vehiculo: CATEGORIAS_VEHICULO }, 200, NO_STORE);
 });
 
 // Empresas externas: alta explícita, sin duplicar una empresa por mayúsculas.
@@ -376,9 +381,14 @@ gestion.get(`${BASE}/compras`, async (c) => {
     const v = url.searchParams.get(key);
     if (v) { enumValor(v, values, `${key}_invalido`); clauses.push(`c.${key}=?`); args.push(v); }
   }
-  for (const key of ['entidad_id', 'prestamo_id', 'evento_id']) {
+  for (const key of ['entidad_id', 'prestamo_id', 'evento_id', 'vehiculo_id', 'viaje_id']) {
     const value = url.searchParams.get(key);
     if (value) { clauses.push(`c.${key}=?`); args.push(uuid(value, `${key}_invalido`)); }
+  }
+  // Gastos conjuntos de un viaje: con viaje y sin vehículo.
+  if (url.searchParams.has('sin_vehiculo')) {
+    if (url.searchParams.get('sin_vehiculo') !== '1') fail('filtro_vehiculo_invalido');
+    clauses.push('c.vehiculo_id IS NULL');
   }
   if (url.searchParams.has('sin_evento')) {
     if (url.searchParams.get('sin_evento') !== '1') fail('filtro_evento_invalido');
@@ -397,9 +407,27 @@ async function referenciasCompra(env, n) {
     if (!await env.DB.prepare('SELECT id FROM tenant_events WHERE id=?').bind(n.evento_id).first()) fail('evento_invalido');
   }
   if (n.prestamo_id && !await env.DB.prepare('SELECT id FROM g_prestamos WHERE id=?').bind(n.prestamo_id).first()) fail('prestamo_invalido');
+  // Vehículo y viaje (0063): misma moneda, negocio Coches y tipología cerrada. Un
+  // gasto con vehículo y viaje exige que ese vehículo participe en el viaje.
+  if (n.vehiculo_id || n.viaje_id) {
+    if (n.negocio !== 'coches') fail('vehiculo_negocio_incoherente');
+    if (!CATEGORIAS_VEHICULO.includes(n.categoria)) fail('categoria_invalida');
+  }
+  if (n.vehiculo_id) {
+    const v = await env.DB.prepare('SELECT id,moneda FROM g_vehiculos WHERE id=?').bind(n.vehiculo_id).first();
+    if (!v) fail('vehiculo_invalido');
+    if (v.moneda !== n.moneda) fail('vehiculo_moneda_distinta');
+  }
+  if (n.viaje_id) {
+    const t = await env.DB.prepare('SELECT id,moneda FROM g_viajes WHERE id=?').bind(n.viaje_id).first();
+    if (!t) fail('viaje_invalido');
+    if (t.moneda !== n.moneda) fail('viaje_moneda_distinta');
+    if (n.vehiculo_id && !await env.DB.prepare('SELECT 1 FROM g_viaje_vehiculos WHERE viaje_id=? AND vehiculo_id=?').bind(n.viaje_id, n.vehiculo_id).first()) fail('vehiculo_fuera_del_viaje');
+  }
 }
 const campoCompra = {
   evento_id: (v) => uuidOpcional(v, 'evento_invalido'), hecho: hechoCompra,
+  vehiculo_id: (v) => uuidOpcional(v, 'vehiculo_invalido'), viaje_id: (v) => uuidOpcional(v, 'viaje_invalido'),
   concepto: (v) => texto(v, 200, 'concepto_invalido'), negocio: (v) => enumValor(v, NEGOCIOS, 'negocio_invalido'),
   entidad_id: (v) => uuidOpcional(v, 'entidad_invalida'), prestamo_id: (v) => uuidOpcional(v, 'prestamo_invalido'),
   comprador: (v) => texto(v, 120, 'comprador_invalido', { opcional: true }), proveedor: (v) => texto(v, 160, 'proveedor_invalido', { opcional: true }),
@@ -437,9 +465,9 @@ gestion.post(`${BASE}/compras`, async (c) => {
   q.hecho_fecha = q.hecho ? now : null; q.hecho_por = q.hecho ? actor : null;
   await referenciasCompra(env, q);
   const { repetida } = await idempotente(env, { id: q.id, ruta: 'compras', huella: huellaCompra, actor, now }, () => [
-    env.DB.prepare(`INSERT INTO g_compras (id,concepto,negocio,entidad_id,prestamo_id,moneda,estimado,estado,comprador,proveedor,fecha_prevista,categoria,nota,evento_id,hecho,hecho_fecha,hecho_por,plan_pagos,version,created_by,created_at,updated_at)
-      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,1,?,?,?)`).bind(q.id, q.concepto, q.negocio, q.entidad_id, q.prestamo_id, q.moneda, q.estimado, q.estado, q.comprador, q.proveedor, q.fecha_prevista, q.categoria, q.nota, q.evento_id, q.hecho, q.hecho_fecha, q.hecho_por, JSON.stringify(q.plan_pagos), actor, now, now),
-    auditoria(env, { actor, accion: 'compra_alta', objeto_tipo: 'compra', objeto_id: q.id, detalle: { concepto: q.concepto, negocio: q.negocio, estimado: q.estimado, estado: q.estado }, now }),
+    env.DB.prepare(`INSERT INTO g_compras (id,concepto,negocio,entidad_id,prestamo_id,moneda,estimado,estado,comprador,proveedor,fecha_prevista,categoria,nota,evento_id,hecho,hecho_fecha,hecho_por,plan_pagos,vehiculo_id,viaje_id,version,created_by,created_at,updated_at)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,1,?,?,?)`).bind(q.id, q.concepto, q.negocio, q.entidad_id, q.prestamo_id, q.moneda, q.estimado, q.estado, q.comprador, q.proveedor, q.fecha_prevista, q.categoria, q.nota, q.evento_id, q.hecho, q.hecho_fecha, q.hecho_por, JSON.stringify(q.plan_pagos), q.vehiculo_id, q.viaje_id, actor, now, now),
+    auditoria(env, { actor, accion: 'compra_alta', objeto_tipo: 'compra', objeto_id: q.id, detalle: { concepto: q.concepto, negocio: q.negocio, estimado: q.estimado, estado: q.estado, vehiculo_id: q.vehiculo_id, viaje_id: q.viaje_id }, now }),
   ]);
   return json({ item: await compraCompleta(env, q.id) }, repetida ? 200 : 201, NO_STORE);
 });
@@ -482,8 +510,8 @@ gestion.patch(`${BASE}/compras/:id`, async (c) => {
   if (n.estado === 'prevista' && old.pagado) throw new HttpError(409, 'compra_con_pagos');
   if (n.estado !== 'comprada' && n.estimado < old.pagado) fail('estimado_inferior_a_pagado');
   await referenciasCompra(env, n);
-  await actualizar(env, 'g_compras', old.id, version, 'concepto=?, negocio=?, entidad_id=?, prestamo_id=?, moneda=?, estimado=?, estado=?, comprador=?, proveedor=?, fecha_prevista=?, categoria=?, nota=?, fecha_compra=?, evento_id=?, hecho=?, hecho_fecha=?, hecho_por=?, plan_pagos=?',
-    [n.concepto, n.negocio, n.entidad_id, n.prestamo_id, n.moneda, n.estimado, n.estado, n.comprador, n.proveedor, n.fecha_prevista, n.categoria, n.nota, n.fecha_compra, n.evento_id, n.hecho, n.hecho_fecha, n.hecho_por, JSON.stringify(n.plan_pagos)],
+  await actualizar(env, 'g_compras', old.id, version, 'concepto=?, negocio=?, entidad_id=?, prestamo_id=?, moneda=?, estimado=?, estado=?, comprador=?, proveedor=?, fecha_prevista=?, categoria=?, nota=?, fecha_compra=?, evento_id=?, hecho=?, hecho_fecha=?, hecho_por=?, plan_pagos=?, vehiculo_id=?, viaje_id=?',
+    [n.concepto, n.negocio, n.entidad_id, n.prestamo_id, n.moneda, n.estimado, n.estado, n.comprador, n.proveedor, n.fecha_prevista, n.categoria, n.nota, n.fecha_compra, n.evento_id, n.hecho, n.hecho_fecha, n.hecho_por, JSON.stringify(n.plan_pagos), n.vehiculo_id, n.viaje_id],
     { actor, accion: 'compra_cambio', objeto_tipo: 'compra', objeto_id: old.id, detalle: { de: compraItem(old), a: n }, now });
   return json({ item: await compraCompleta(env, old.id) }, 200, NO_STORE);
 });
@@ -735,7 +763,9 @@ gestion.post(`${BASE}/documentos`, async (c) => {
   try { form = await request.formData(); } catch (_) { fail('multipart_invalido'); }
   const archivo = form.get('archivo');
   if (!archivo || typeof archivo === 'string' || typeof archivo.arrayBuffer !== 'function') fail('archivo_requerido');
-  const d = { id: uuid(form.get('id')), tipo: enumValor(form.get('tipo'), TIPOS_DOCUMENTO, 'tipo_invalido'), objeto_id: uuid(form.get('objeto_id'), 'objeto_invalido'), clase: claseDoc(form.get('clase')) };
+  const d = { id: uuid(form.get('id')), tipo: enumValor(form.get('tipo'), TIPOS_DOCUMENTO, 'tipo_invalido'), objeto_id: uuid(form.get('objeto_id'), 'objeto_invalido'), clase: claseDoc(form.get('clase')),
+    // Vencimiento opcional (seguro, ITV, permiso): informa, no bloquea ni crea nada.
+    vence: typeof form.get('vence') === 'string' && form.get('vence') ? fechaCivil(form.get('vence'), 'vence_invalida') : null };
   const bytes = new Uint8Array(await archivo.arrayBuffer());
   if (!bytes.byteLength) fail('archivo_vacio');
   if (bytes.byteLength > DOC_MAX_BYTES) throw new HttpError(413, 'archivo_demasiado_grande');
@@ -764,9 +794,11 @@ gestion.post(`${BASE}/documentos`, async (c) => {
   catch (_) { throw new HttpError(503, 'documento_no_guardado'); }
   try {
     const resultado = await idempotente(env, { id: d.id, ruta: 'documentos', huella: h, actor, now }, () => [
-      env.DB.prepare(`INSERT INTO g_documentos (id,tipo,objeto_id,clase,nombre,mime,ext,bytes,sha256,key,version,autor,created_at)
-        VALUES (?,?,?,?,?,?,?,?,?,?,(SELECT COALESCE(MAX(version),0)+1 FROM g_documentos WHERE tipo=? AND objeto_id=? AND clase=? AND nombre=?),?,?)`)
-        .bind(d.id, d.tipo, d.objeto_id, d.clase, d.nombre, formato.mime, formato.ext, bytes.byteLength, d.sha256, key, d.tipo, d.objeto_id, d.clase, d.nombre, actor, now),
+      // `vence` (0063) solo se nombra cuando viene informado: sin vencimiento la
+      // sentencia es la de siempre y sigue válida sobre el esquema anterior.
+      env.DB.prepare(`INSERT INTO g_documentos (id,tipo,objeto_id,clase,nombre,mime,ext,bytes,sha256,key,version,autor,created_at${d.vence ? ',vence' : ''})
+        VALUES (?,?,?,?,?,?,?,?,?,?,(SELECT COALESCE(MAX(version),0)+1 FROM g_documentos WHERE tipo=? AND objeto_id=? AND clase=? AND nombre=?),?,?${d.vence ? ',?' : ''})`)
+        .bind(d.id, d.tipo, d.objeto_id, d.clase, d.nombre, formato.mime, formato.ext, bytes.byteLength, d.sha256, key, d.tipo, d.objeto_id, d.clase, d.nombre, actor, now, ...(d.vence ? [d.vence] : [])),
       auditoria(env, { actor, accion: 'documento_alta', objeto_tipo: d.tipo, objeto_id: d.objeto_id, detalle: { documento_id: d.id, clase: d.clase, nombre: d.nombre, bytes: bytes.byteLength, sha256: d.sha256 }, now }),
     ]);
     if (resultado.repetida) {

@@ -104,6 +104,7 @@ function filters(url) {
     const evento = uuidOpcional(p.get('evento'), 'evento_invalido');
     clauses.push(`${EVENTO_MOVIMIENTO_SQL}=?`); args.push(evento);
   }
+  if (p.get('vehiculo')) { clauses.push('m.vehiculo_id=?'); args.push(uuidOpcional(p.get('vehiculo'), 'vehiculo_invalido')); }
   return { sql: clauses.join(' AND '), args };
 }
 const SELECT_MOV = `SELECT m.*, ${EVENTO_MOVIMIENTO_SQL} AS evento_id_efectivo, ${TENANT_MOVIMIENTO_SQL} AS tenant_id_efectivo, c.nombre AS concepto_nombre, t.name AS tenant_name, e.name AS evento_nombre FROM fin_movimientos m
@@ -249,6 +250,14 @@ async function validateMovimiento(env, b, previous) {
     if (cuenta.moneda !== moneda) fail('moneda_distinta');
     entidad_id = cuenta.entidad_id;
   }
+  // Vehículo (0063): etiqueta de ingreso o gasto manual, en la moneda del vehículo.
+  const vehiculo_id = uuidOpcional(b.vehiculo_id, 'vehiculo_invalido');
+  if (vehiculo_id) {
+    const vehiculo = await env.DB.prepare('SELECT id,moneda FROM g_vehiculos WHERE id=?').bind(vehiculo_id).first();
+    if (!vehiculo) fail('vehiculo_invalido');
+    if (vehiculo.moneda !== moneda) fail('vehiculo_moneda_distinta');
+    if (tipo === 'egreso') fail('vehiculo_tipo_invalido');
+  }
   const requiere_conciliacion = b.requiere_conciliacion === true || b.requiere_conciliacion === 1 ? 1 : 0;
   const conciliada = b.conciliada === true || b.conciliada === 1 ? 1 : 0;
   let conciliacion_socio = null, conciliacion_fecha = null;
@@ -262,15 +271,15 @@ async function validateMovimiento(env, b, previous) {
       if (conciliacion_fecha < dia) fail('conciliacion_fecha_anterior');
     } else if (cuenta_id) fail('conciliacion_pendiente_con_cuenta');
   } else if (conciliada || b.conciliacion_socio || b.conciliacion_fecha) fail('conciliacion_invalida');
-  return { tipo, moneda, importe, fecha: dia, concepto_id, nota: nota(b.nota), tenant_id, cuenta_id, entidad_id, evento_id,
+  return { tipo, moneda, importe, fecha: dia, concepto_id, nota: nota(b.nota), tenant_id, cuenta_id, entidad_id, evento_id, vehiculo_id,
     requiere_conciliacion, conciliacion_socio, conciliada, conciliacion_fecha };
 }
 function insertMovimiento(env, m, actor, now, repartoId = null, beneficiario = null) {
   return env.DB.prepare(`INSERT INTO fin_movimientos
     (id,tipo,concepto_id,fecha,moneda,importe,nota,tenant_id,beneficiario,reparto_id,created_by,created_at,cuenta_id,entidad_id,evento_id,
-     requiere_conciliacion,conciliacion_socio,conciliada,conciliacion_fecha,conciliada_por)
-    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).bind(m.id, m.tipo, m.concepto_id, m.fecha, m.moneda, m.importe, m.nota, m.tenant_id, beneficiario, repartoId, actor, now, m.cuenta_id ?? null, m.entidad_id ?? null, m.evento_id ?? null,
-      m.requiere_conciliacion ?? 0, m.conciliacion_socio ?? null, m.conciliada ?? 0, m.conciliacion_fecha ?? null, m.conciliada ? actor : null);
+     requiere_conciliacion,conciliacion_socio,conciliada,conciliacion_fecha,conciliada_por,vehiculo_id)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).bind(m.id, m.tipo, m.concepto_id, m.fecha, m.moneda, m.importe, m.nota, m.tenant_id, beneficiario, repartoId, actor, now, m.cuenta_id ?? null, m.entidad_id ?? null, m.evento_id ?? null,
+      m.requiere_conciliacion ?? 0, m.conciliacion_socio ?? null, m.conciliada ?? 0, m.conciliacion_fecha ?? null, m.conciliada ? actor : null, m.vehiculo_id ?? null);
 }
 const logBorrado = (id, actor) => console.log(JSON.stringify({ level: 'warn', code: 'fin_borrado', id, actor }));
 
@@ -513,12 +522,12 @@ finanzas.patch('/api/admin/finanzas/movimientos/:id', async (c) => {
   // corrigen desde su operación, nunca a mano; el trigger de 0050 lo garantiza.
   if (old.origen_tipo) throw new HttpError(409, 'movimiento_de_gestion');
   const b = await bodyOf(request);
-  if (Object.keys(b).some((k) => !['tipo', 'importe', 'fecha', 'concepto_id', 'nota', 'tenant_id', 'cuenta_id', 'evento_id','requiere_conciliacion','conciliacion_socio','conciliada','conciliacion_fecha'].includes(k))) fail('campo_no_editable');
+  if (Object.keys(b).some((k) => !['tipo', 'importe', 'fecha', 'concepto_id', 'nota', 'tenant_id', 'cuenta_id', 'evento_id', 'vehiculo_id','requiere_conciliacion','conciliacion_socio','conciliada','conciliacion_fecha'].includes(k))) fail('campo_no_editable');
   const m = await validateMovimiento(env, { ...old, ...b }, old);
   let result;
   try {
-    result = await env.DB.prepare('UPDATE fin_movimientos SET tipo=?, importe=?, fecha=?, concepto_id=?, nota=?, tenant_id=?, cuenta_id=?, entidad_id=?, evento_id=?, requiere_conciliacion=?, conciliacion_socio=?, conciliada=?, conciliacion_fecha=?, conciliada_por=? WHERE id=?')
-      .bind(m.tipo, m.importe, m.fecha, m.concepto_id, m.nota, m.tenant_id, m.cuenta_id, m.entidad_id, m.evento_id, m.requiere_conciliacion, m.conciliacion_socio, m.conciliada, m.conciliacion_fecha, m.conciliada ? actor : null, old.id).run();
+    result = await env.DB.prepare('UPDATE fin_movimientos SET tipo=?, importe=?, fecha=?, concepto_id=?, nota=?, tenant_id=?, cuenta_id=?, entidad_id=?, evento_id=?, vehiculo_id=?, requiere_conciliacion=?, conciliacion_socio=?, conciliada=?, conciliacion_fecha=?, conciliada_por=? WHERE id=?')
+      .bind(m.tipo, m.importe, m.fecha, m.concepto_id, m.nota, m.tenant_id, m.cuenta_id, m.entidad_id, m.evento_id, m.vehiculo_id, m.requiere_conciliacion, m.conciliacion_socio, m.conciliada, m.conciliacion_fecha, m.conciliada ? actor : null, old.id).run();
   } catch (e) { writeError(e); }
   if (!result.meta.changes) throw new HttpError(404, 'not_found');
   return json({ ok: true }, 200, NO_STORE);

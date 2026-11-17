@@ -23,6 +23,7 @@ const Credito = lazy(() => import('./views/gestion/Credito').then(m=>({default:m
 const Compras = lazy(() => import('./views/gestion/Compras').then(m=>({default:m.Compras})));
 const Facturacion = lazy(() => import('./views/gestion/Facturacion').then(m=>({default:m.Facturacion})));
 const Impuestos = lazy(() => import('./views/gestion/Impuestos').then(m=>({default:m.Impuestos})));
+const Vehiculos = lazy(() => import('./views/gestion/Vehiculos').then(m=>({default:m.Vehiculos})));
 
 export function App() {
   return (
@@ -41,6 +42,7 @@ export function App() {
           <Route path="/compras" element={<Suspense fallback={<p role="status">Cargando…</p>}><Compras/></Suspense>} />
           <Route path="/facturacion" element={<Suspense fallback={<p role="status">Cargando…</p>}><Facturacion/></Suspense>} />
           <Route path="/impuestos" element={<Suspense fallback={<p role="status">Cargando…</p>}><Impuestos/></Suspense>} />
+          <Route path="/vehiculos" element={<Suspense fallback={<p role="status">Cargando…</p>}><Vehiculos/></Suspense>} />
           <Route path="/canales" element={<Canales />} />
           <Route path="/plantillas" element={<Plantillas />} />
           <Route path="/configuracion" element={<Configuracion />} />
