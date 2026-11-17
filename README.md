@@ -21,6 +21,7 @@ docs/OPERATIONS.md         ★ Runbook: puesta en marcha, deploy, degradación, 
 docs/GUIA-WORKERS.md       ★ Para el equipo: cómo crear/consumir Workers (arquitectura vigente)
 docs/ESTRUCTURA.md         Mapa del repo y reglas (qué es público, qué no)
 docs/STACK-TECNOLOGICO.md  Referencia de arquitectura y servicios
+docs/ALMA-VOZ-WHATSAPP.md  Borrador del piloto de voz: investigación, validaciones Meta y plan técnico
 ```
 
 ## Desarrollo
