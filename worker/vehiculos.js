@@ -10,7 +10,7 @@ import { esSocio, partesAdmin } from './middleware.js';
 import {
   MONEDAS, TIPOS_VEHICULO, ESTADOS_VEHICULO, ESTADOS_VIAJE, REPARTOS_VIAJE, SELECT_COMPRA, SELECT_VEHICULO, SELECT_VIAJE,
   fail, uuid, uuidOpcional, fechaReal, fechaCivil, fechaOpcional, entero, importePositivo, importeNoNegativo, enumValor, texto, versionDe, soloCampos,
-  compraItem, vehiculoItem, viajeItem, imputarViaje, auditoria, versionAplicada, errorEscrituraGestion, huella, idempotente,
+  compraItem, vehiculoItem, viajeItem, imputarViaje, repartir, auditoria, versionAplicada, errorEscrituraGestion, huella, idempotente,
 } from './gestion-financiera.js';
 
 export const vehiculos = new Hono();
@@ -152,20 +152,27 @@ vehiculos.get(`${BASE}/vehiculos/:id/resumen`, async (c) => {
   const v = vehiculoItem(row);
   const [compras, pagos, viajesRows, facturas, movimientos, documentos, prestamo] = await env.DB.batch([
     env.DB.prepare(`${SELECT_COMPRA} WHERE c.vehiculo_id=? ORDER BY COALESCE(c.fecha_compra,c.fecha_prevista,c.created_at), c.created_at, c.id`).bind(id),
-    env.DB.prepare(`SELECT p.id,p.fecha,p.importe,p.pagador,p.socio,p.cuenta_id,p.objeto_id AS compra_id,c.concepto FROM g_pagos p JOIN g_compras c ON c.id=p.objeto_id
-      WHERE p.objeto_tipo='compra' AND p.clase='pago' AND p.estado='activo' AND c.vehiculo_id=? ORDER BY p.fecha, p.created_at, p.id`).bind(id),
+    env.DB.prepare(`SELECT p.id,p.fecha,p.importe,p.pagador,p.socio,p.cuenta_id,cu.nombre AS cuenta_nombre,p.objeto_id AS compra_id,c.concepto FROM g_pagos p JOIN g_compras c ON c.id=p.objeto_id LEFT JOIN g_cuentas cu ON cu.id=p.cuenta_id
+      WHERE p.objeto_tipo='compra' AND p.clase='pago' AND p.estado='activo' AND (c.vehiculo_id=? OR (c.vehiculo_id IS NULL AND c.viaje_id IN (SELECT viaje_id FROM g_viaje_vehiculos WHERE vehiculo_id=?))) ORDER BY p.fecha, p.created_at, p.id`).bind(id,id),
     env.DB.prepare(`${SELECT_VIAJE} WHERE t.id IN (SELECT viaje_id FROM g_viaje_vehiculos WHERE vehiculo_id=?) ORDER BY COALESCE(t.fecha_inicio,t.created_at), t.id`).bind(id),
-    env.DB.prepare(`SELECT f.id,f.numero,f.tipo,f.estado,f.origen,f.total,f.moneda,f.fecha_emision,f.contraparte_nombre,f.compra_id FROM g_facturas f WHERE f.vehiculo_id=? ORDER BY COALESCE(f.fecha_emision,f.created_at), f.id`).bind(id),
-    env.DB.prepare(`SELECT m.id,m.tipo,m.fecha,m.moneda,m.importe,m.signo,m.nota,m.cuenta_id,m.origen_tipo,m.naturaleza FROM fin_movimientos m WHERE m.vehiculo_id=? ORDER BY m.fecha, m.created_at, m.id`).bind(id),
+    env.DB.prepare(`SELECT f.id,f.numero,f.tipo,f.estado,f.origen,f.total,f.moneda,f.fecha_emision,f.contraparte_nombre,f.compra_id,f.vehiculo_id,f.iva,f.tratamiento_fiscal,f.lineas_json,(SELECT COUNT(*) FROM g_documentos fd WHERE fd.tipo='factura' AND fd.objeto_id=f.id AND fd.clase='factura') AS originales_count FROM g_facturas f WHERE f.vehiculo_id=? OR f.compra_id IN (SELECT id FROM g_compras WHERE vehiculo_id=? OR (vehiculo_id IS NULL AND viaje_id IN (SELECT viaje_id FROM g_viaje_vehiculos WHERE vehiculo_id=?))) ORDER BY COALESCE(f.fecha_emision,f.created_at), f.id`).bind(id,id,id),
+    env.DB.prepare(`SELECT m.id,m.tipo,m.fecha,m.moneda,m.importe,m.signo,m.nota,m.cuenta_id,cu.nombre AS cuenta_nombre,m.origen_tipo,m.naturaleza FROM fin_movimientos m LEFT JOIN g_cuentas cu ON cu.id=m.cuenta_id WHERE m.vehiculo_id=? ORDER BY m.fecha, m.created_at, m.id`).bind(id),
     env.DB.prepare(`SELECT d.id,d.tipo,d.objeto_id,d.clase,d.nombre,d.mime,d.bytes,d.vence,d.created_at FROM g_documentos d
-      WHERE (d.tipo='vehiculo' AND d.objeto_id=?) OR (d.tipo='compra' AND d.objeto_id IN (SELECT id FROM g_compras WHERE vehiculo_id=?))
-         OR (d.tipo='factura' AND d.objeto_id IN (SELECT id FROM g_facturas WHERE vehiculo_id=?)) ORDER BY d.created_at, d.id`).bind(id, id, id),
+      WHERE (d.tipo='vehiculo' AND d.objeto_id=?) OR (d.tipo='compra' AND d.objeto_id IN (SELECT id FROM g_compras WHERE vehiculo_id=? OR (vehiculo_id IS NULL AND viaje_id IN (SELECT viaje_id FROM g_viaje_vehiculos WHERE vehiculo_id=?))))
+         OR (d.tipo='factura' AND d.objeto_id IN (SELECT id FROM g_facturas WHERE vehiculo_id=?)) ORDER BY d.created_at, d.id`).bind(id, id, id, id),
     env.DB.prepare('SELECT id,nombre FROM g_prestamos WHERE id=?').bind(row.prestamo_id || ''),
   ]);
-  const viajes = [];
+  const viajes = [], compartidos = [];
+
   for (const t of viajesRows.results) {
     const participantes = await participantesDe(env, t.id);
-    const imp = imputarViaje(t, participantes, await conjuntosDe(env, t.id));
+    const conjuntos = await conjuntosDe(env, t.id);
+    const imp = imputarViaje(t, participantes, conjuntos);
+    for (const compra of conjuntos.filter(x=>x.estado!=='cancelada')) {
+      const partes=imputarViaje(t,participantes,[compra]).por_vehiculo;
+      const parte=partes[id] || {coste:0,pagado:0};
+      compartidos.push({compra,importe:parte.coste,pagado:parte.pagado,partes_pagadas:partes,origen:`Parte del viaje · ${t.nombre}`});
+    }
     const mia = imp.por_vehiculo[id] || { coste: 0, pagado: 0 };
     viajes.push({ viaje: viajeItem(t), vehiculos: participantes.length, conjunto_total: imp.total, conjunto_pagado: imp.pagado, parte: mia.coste, parte_pagada: mia.pagado });
   }
@@ -177,7 +184,7 @@ vehiculos.get(`${BASE}/vehiculos/:id/resumen`, async (c) => {
   const gastos_manuales = suma(movs.filter((m) => m.tipo === 'gasto' && !m.origen_tipo), (m) => m.importe * m.signo);
   const cobros = movs.filter((m) => m.tipo === 'ingreso');
   const cobrado = suma(cobros, (m) => m.importe * m.signo), cobrado_en_cuenta = suma(cobros.filter((m) => m.cuenta_id), (m) => m.importe * m.signo);
-  const facturado_venta = suma(facturas.results.filter((f) => f.tipo === 'emitida'), (f) => f.total);
+  const facturado_venta = suma(facturas.results.filter((f) => f.tipo === 'emitida'&&f.vehiculo_id===id), (f) => f.total);
   const coste_total = coste_directo + imputado_viajes + gastos_manuales;
   const invertido_confirmado = pagado_directo + imputado_viajes_pagado + gastos_manuales;
   const venta = v.precio_venta ?? (facturado_venta || null);
@@ -191,15 +198,42 @@ vehiculos.get(`${BASE}/vehiculos/:id/resumen`, async (c) => {
     margen_sin_viajes: venta == null ? null : venta - coste_directo - gastos_manuales,
     margen_confirmado: cobrado_en_cuenta - invertido_confirmado,
   };
+  // Una fila por fuente de coste; facturas y pagos informan, nunca se suman de nuevo.
+  const facturasInformadas = facturas.results.map(({lineas_json,...f})=>{
+    let lineas;try{lineas=JSON.parse(lineas_json);}catch{lineas=[];}
+    return {...f,iva_informado:Array.isArray(lineas)&&lineas.length>0&&lineas.every(l=>l&&l.iva_bp!=null)};
+  });
+  const facturasVehiculo=facturasInformadas.filter(f=>f.vehiculo_id===id);
+  const comprasCoste=[...activas.map(compra=>({compra,importe:costeDe(compra),pagado:compra.pagado,origen:compra.viaje_id?'Gasto propio en viaje':'Compra directa'})),...compartidos];
+  const pagosDetalle=[];
+  const costes = comprasCoste.map(({compra:x,importe,pagado,origen,partes_pagadas})=>{
+    const pp=pagos.results.filter(p=>p.compra_id===x.id);
+    // Redondeo acotado por las partes ya calculadas de cada vehículo. Así
+    // la suma por vehículo Y la suma de cada pago conservan todos sus céntimos.
+    const pendientes=partes_pagadas?Object.entries(partes_pagadas).map(([vehiculo_id,p])=>({vehiculo_id,peso_bp:p.pagado})):null;
+    for(const p of pp){
+      let parte=p.importe;
+      if(pendientes){const reparto=repartir(p.importe,pendientes);parte=reparto.find(r=>r.vehiculo_id===id)?.importe||0;for(const r of reparto)pendientes.find(x=>x.vehiculo_id===r.vehiculo_id).peso_bp-=r.importe;}
+      pagosDetalle.push({...p,importe:parte,origen});
+    }
+    const ff=facturasInformadas.filter(f=>f.compra_id===x.id&&f.tipo==='recibida');
+    const docs=documentos.results.filter(d=>d.tipo==='compra'&&d.objeto_id===x.id);
+    return {id:x.id,fecha:x.fecha_compra||x.fecha_prevista,categoria:x.categoria,nota:x.nota,concepto:x.concepto,estado:x.estado,hecho:Boolean(x.hecho),importe,pagado,origen,
+      documentos:docs.length,facturas:ff,compartido:origen.startsWith('Parte del viaje'),importe_origen:costeDe(x)};
+  });
+  for(const m of movs.filter(m=>m.tipo==='gasto'&&!m.origen_tipo)){
+    costes.push({id:m.id,fecha:m.fecha,categoria:'otros',nota:null,concepto:m.nota||'Gasto manual',estado:'comprada',hecho:true,importe:m.importe*m.signo,pagado:m.importe*m.signo,origen:'Libro de finanzas',documentos:0,facturas:[],compartido:false,importe_origen:m.importe*m.signo});
+    pagosDetalle.push({id:m.id,fecha:m.fecha,importe:m.importe*m.signo,pagador:m.cuenta_id?'cuenta':'sin_conciliar',cuenta_id:m.cuenta_id,cuenta_nombre:m.cuenta_nombre,socio:null,origen:'Libro de finanzas'});
+  }
   const fechaCompra = (x) => x.fecha_compra || x.fecha_prevista || null;
   const cronologia = [
     ...activas.map((x) => ({ fecha: fechaCompra(x), clase: 'compra', titulo: x.concepto, detalle: `${x.categoria} · ${x.estado}${x.viaje_id ? ' · en viaje' : ''}`, importe: costeDe(x), ref: { tipo: 'compra', id: x.id } })),
-    ...pagos.results.map((p) => ({ fecha: p.fecha, clase: 'pago', titulo: `Pago: ${p.concepto}`, detalle: p.pagador === 'socio' ? `anticipo de ${p.socio}` : 'desde cuenta', importe: p.importe, ref: { tipo: 'compra', id: p.compra_id } })),
+    ...pagos.results.filter(p=>compras.results.some(x=>x.id===p.compra_id)).map((p) => ({ fecha: p.fecha, clase: 'pago', titulo: `Pago: ${p.concepto}`, detalle: p.pagador === 'socio' ? `anticipo de ${p.socio}` : 'desde cuenta', importe: p.importe, ref: { tipo: 'compra', id: p.compra_id } })),
     ...viajes.map((t) => ({ fecha: t.viaje.fecha_inicio, clase: 'viaje', titulo: t.viaje.nombre, detalle: `${t.vehiculos} vehículo(s) · su parte de los gastos conjuntos`, importe: t.parte, ref: { tipo: 'viaje', id: t.viaje.id } })),
-    ...facturas.results.map((f) => ({ fecha: f.fecha_emision, clase: 'factura', titulo: `${f.tipo === 'emitida' ? 'Factura de venta' : 'Factura recibida'} ${f.numero || ''}`.trim(), detalle: `${f.contraparte_nombre || ''} · ${f.estado}`.trim(), importe: f.total, ref: { tipo: 'factura', id: f.id } })),
+    ...facturasVehiculo.map((f) => ({ fecha: f.fecha_emision, clase: 'factura', titulo: `${f.tipo === 'emitida' ? 'Factura de venta' : 'Factura recibida'} ${f.numero || ''}`.trim(), detalle: `${f.contraparte_nombre || ''} · ${f.estado}`.trim(), importe: f.total, ref: { tipo: 'factura', id: f.id } })),
     ...movs.map((m) => ({ fecha: m.fecha, clase: m.tipo === 'ingreso' ? 'cobro' : 'gasto', titulo: m.nota || (m.tipo === 'ingreso' ? 'Cobro' : 'Gasto'), detalle: m.cuenta_id ? 'en cuenta' : 'sin cuenta · pendiente de conciliar', importe: m.importe * m.signo, ref: { tipo: 'movimiento', id: m.id } })),
   ].sort((a, b) => String(a.fecha || '9999').localeCompare(String(b.fecha || '9999')) || a.clase.localeCompare(b.clase));
-  return json({ vehiculo: v, prestamo: prestamo.results[0] || null, compras: compras.results.map(compraItem), viajes, facturas: facturas.results, cobros, gastos_manuales: movs.filter((m) => m.tipo === 'gasto'),
+  return json({ vehiculo: v, prestamo: prestamo.results[0] || null, compras: compras.results.map(compraItem), viajes, facturas: facturasVehiculo, costes, pagos:pagosDetalle, cobros, gastos_manuales: movs.filter((m) => m.tipo === 'gasto'),
     documentos: documentos.results, por_categoria: porCategoria(activas), totales, cronologia }, 200, NO_STORE);
 });
 // Cobro de la venta: UNA entrada operativa con vehiculo_id, idempotente y auditada.
