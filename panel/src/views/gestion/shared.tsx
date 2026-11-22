@@ -23,6 +23,37 @@ export const tiposVehiculo:Record<string,string>={coche:'Coche',camioneta:'Camio
 export const estadosVehiculo:Record<string,string>={previsto:'Previsto',comprado:'Comprado',preparado:'En preparación',anunciado:'Anunciado',vendido:'Vendido',cancelado:'Cancelado'};
 export const estadosViaje:Record<string,string>={previsto:'Previsto',en_curso:'En curso',cerrado:'Cerrado',cancelado:'Cancelado'};
 export const categoriasVehiculo:Record<string,string>={adquisicion:'Compra del vehículo',gasolina:'Gasolina',peajes:'Peajes',viaticos:'Viáticos · comida y alojamiento',transporte:'Transporte · grúa, ferry, billetes',seguro:'Seguro',matriculacion:'Matriculación y placas',itv:'ITV',gestoria:'Gestoría y documentación',reparacion:'Reparación y preparación',limpieza:'Limpieza',publicidad:'Publicidad',otros:'Otros'};
+export const gruposCosteVehiculo:Record<string,string>={compra:'Compra',traslado:'Traslado y viaje',preparacion:'Matriculación, administración y preparación',pendiente:'Pendientes de clasificar / otros'};
+export const subtiposCosteVehiculo=[
+ {id:'adquisicion',grupo:'compra',categoria:'adquisicion',label:'Adquisición'},
+ {id:'gasolina',grupo:'traslado',categoria:'gasolina',label:'Gasolina'}, {id:'peajes',grupo:'traslado',categoria:'peajes',label:'Peajes'},
+ {id:'viaticos',grupo:'traslado',categoria:'viaticos',label:'Comida y hotel'},
+ {id:'personas',grupo:'traslado',categoria:'transporte',label:'Transporte de personas'}, {id:'ninera',grupo:'traslado',categoria:'transporte',label:'Camión portavehículos / niñera'},
+ {id:'transporte',grupo:'traslado',categoria:'transporte',label:'Transporte (registro anterior / otros)'},
+ {id:'itv',grupo:'preparacion',categoria:'itv',label:'ITV'}, {id:'ficha',grupo:'preparacion',categoria:'gestoria',label:'Ficha técnica / perito'},
+ {id:'gestoria',grupo:'preparacion',categoria:'gestoria',label:'Gestoría y documentación'}, {id:'matriculacion',grupo:'preparacion',categoria:'matriculacion',label:'Matriculación y placas'},
+ {id:'impuestos',grupo:'preparacion',categoria:'otros',label:'Impuestos'}, {id:'seguro',grupo:'preparacion',categoria:'seguro',label:'Seguro'},
+ {id:'mecanico',grupo:'preparacion',categoria:'reparacion',label:'Mecánico'}, {id:'reparacion',grupo:'preparacion',categoria:'reparacion',label:'Reparación y preparación'},
+ {id:'limpieza',grupo:'preparacion',categoria:'limpieza',label:'Limpieza'}, {id:'publicidad',grupo:'preparacion',categoria:'publicidad',label:'Publicidad'},
+];
+const subtipoMarcador=/^\[Subtipo vehículo: ([a-z]+)\]\n?/;
+export function clasificarCosteVehiculo(categoria:string,nota?:string|null){
+ const marker=nota?.match(subtipoMarcador)?.[1];
+ const subtipo=subtiposCosteVehiculo.find(s=>s.id===marker&&s.categoria===categoria)||subtiposCosteVehiculo.find(s=>s.id===categoria&&s.categoria===categoria);
+ return {grupo:subtipo?.grupo||'pendiente',subtipo:subtipo?.id||'anterior',label:subtipo?.label||categoriasVehiculo[categoria]||categoria||'Sin categoría'};
+}
+export function notaLibreVehiculo(nota?:string|null){
+ const raw=nota||'',marker=raw.match(subtipoMarcador)?.[1];
+ return subtiposCosteVehiculo.some(s=>s.id===marker)?raw.replace(subtipoMarcador,''):raw;
+}
+export function datosCosteVehiculo(d:FormData){
+ const categoria=str(d,'categoria_vehiculo')||str(d,'categoria'),id=str(d,'subtipo_vehiculo');
+ const subtype=subtiposCosteVehiculo.find(s=>s.id===id&&s.categoria===categoria);
+ if((str(d,'vehiculo_id')||str(d,'viaje_id'))&&(!categoria||(!subtype&&id!=='anterior')))throw new Error('Selecciona un grupo y subtipo de gasto.');
+ const raw=str(d,'nota'),nota=id?notaLibreVehiculo(raw):raw;
+ return {categoria,nota:(subtype&&subtype.id!==subtype.categoria?`[Subtipo vehículo: ${subtype.id}]\n`:'')+nota||null};
+}
+
 export const vehiculoNombre=(v?:{referencia:string;marca?:string|null;modelo?:string|null}|null)=>v?`${v.referencia}${v.marca||v.modelo?` · ${[v.marca,v.modelo].filter(Boolean).join(' ')}`:''}`:'';
 export const fecha=(d?:string|null)=>d?d.split('-').reverse().join('/'):'Por confirmar';
 export interface Prestamo { id:string;nombre:string;cuenta_id:string;principal:number;apertura:number;cuota:number;tin_bp:number;tae_bp:number;meses:number;reserva_cuotas:number;fecha_abono:string|null;primer_vencimiento:string|null;condiciones:{concepto:string;valor:string;fuente:string}[];version:number }
@@ -76,8 +107,9 @@ const clasesPorTipo:Record<TipoDocumento,{value:string;label:string}[]>={
  viaje:opciones([['reserva','Reserva'],['billete','Billete'],['ticket','Ticket o recibo'],['factura','Factura del proveedor'],['otro','Otro']]),
 };
 export const claseDocumentoLabel=(clase:string)=>claseDocumento[clase]||clase;
-export function Documentos({tipo,objetoId,equipo=false}:{tipo:TipoDocumento;objetoId:string;equipo?:boolean}) {
+export function Documentos({tipo,objetoId,equipo=false,abrirInicial=false}:{tipo:TipoDocumento;objetoId:string;equipo?:boolean;abrirInicial?:boolean}) {
  const query=useGestion<{items:Documento[]}>(`documentos?tipo=${tipo}&objeto_id=${encodeURIComponent(objetoId)}`),save=useGuardar();const [open,setOpen]=useState(false);
+ useEffect(()=>{if(abrirInicial&&!MOBILE_PREVIEW)setOpen(true);},[abrirInicial]);
  const evidencia=tipo==='compra'||tipo==='movimiento',papeles=tipo==='vehiculo'||tipo==='viaje';
  const titulo=equipo?'Documentos del préstamo al equipo':tipo==='prestamo'?'Documentos del crédito':tipo==='compra'?'Evidencias de la compra':tipo==='movimiento'?'Comprobante de conciliación':tipo==='vehiculo'?'Papeles del vehículo':tipo==='viaje'?'Documentos del viaje':'Documentos';
  const clases=equipo?opciones([['acuerdo','Acuerdo del préstamo'],['entrega','Comprobante de entrega'],['devolucion','Comprobante de devolución'],['otro','Otro']]):clasesPorTipo[tipo];

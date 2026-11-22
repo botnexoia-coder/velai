@@ -5,8 +5,8 @@ import { MemoryRouter, Route, Routes } from 'react-router';
 import { afterEach, expect, it, vi } from 'vitest';
 import { createQueryClient } from '../../api/queryClient';
 import { ConfirmarHost } from '../../components/Confirmar';
-import { Compras } from './Compras';
-import { EntityOptions, amount } from './shared';
+import { Compras, VehicleFields } from './Compras';
+import { EntityOptions, amount, datosCosteVehiculo, clasificarCosteVehiculo, notaLibreVehiculo, FormModal } from './shared';
 const previewMode=vi.hoisted(()=>({value:false}));
 vi.mock('../../mobilePreview',async importOriginal=>({...await importOriginal<typeof import('../../mobilePreview')>(),get MOBILE_PREVIEW(){return previewMode.value;}}));
 
@@ -31,6 +31,7 @@ function mount({ socio=true, bought=false, retry=false, entities=false, extended
    '/api/admin/gestion/documentos':{items:[]},
    '/api/admin/gestion/compras/compra/pagos':{items:[]},
   };
+  if(url.pathname==='/api/admin/gestion/compras/compra')return Response.json({item:(data['/api/admin/gestion/compras'] as {items:unknown[]}).items.at(-1)});
   return Response.json(data[url.pathname]||{});
  }));
  render(<QueryClientProvider client={createQueryClient()}><MemoryRouter initialEntries={[initialUrl]}><Routes><Route path="/compras" element={entities?<EntityOptions onDone={()=>{}}/>:<Compras/>}/><Route path="/" element={<h1>Inicio</h1>}/></Routes><ConfirmarHost/></MemoryRouter></QueryClientProvider>);
@@ -228,4 +229,64 @@ it('editar compra permite seleccionar dos compradores sin duplicar compra ni reg
  await waitFor(()=>expect(calls.some(c=>c.method==='PATCH')).toBe(true));
  expect(calls.find(c=>c.method==='PATCH')?.body).toMatchObject({comprador:'Persona Dos y Persona Uno',version:1});
  expect(calls.filter(c=>c.method!=='GET')).toHaveLength(1);
+});
+
+
+it('grupo y subtipo dependientes no conservan un subtipo ajeno y guardan niñera sin schema nuevo',async()=>{
+ const user=userEvent.setup();let body:ReturnType<typeof datosCosteVehiculo>|undefined;
+ render(<form onSubmit={e=>{e.preventDefault();body=datosCosteVehiculo(new FormData(e.currentTarget));}}><textarea name="nota" defaultValue="Nota libre"/><VehicleFields vehiculoId="demo"/><button>Enviar demo</button></form>);
+ expect(screen.getByLabelText('Grupo de gasto')).toHaveValue('');
+ await user.selectOptions(screen.getByLabelText('Grupo de gasto'),'traslado');
+ await user.selectOptions(screen.getByLabelText('Subtipo de gasto'),'ninera');
+ await user.selectOptions(screen.getByLabelText('Grupo de gasto'),'preparacion');
+ expect(screen.getByLabelText('Subtipo de gasto')).toHaveValue('');
+ expect(screen.queryByRole('option',{name:'Camión portavehículos / niñera'})).not.toBeInTheDocument();
+ await user.selectOptions(screen.getByLabelText('Grupo de gasto'),'traslado');await user.selectOptions(screen.getByLabelText('Subtipo de gasto'),'ninera');await user.click(screen.getByText('Enviar demo'));
+ expect(body).toEqual({categoria:'transporte',nota:'[Subtipo vehículo: ninera]\nNota libre'});
+ expect(clasificarCosteVehiculo(body!.categoria,body!.nota)).toMatchObject({grupo:'traslado',subtipo:'ninera'});
+});
+it('edición conserva otros y notas antiguas; cambiar subtipo elimina solo marcador reconocido',()=>{
+ const d=new FormData();d.set('categoria_vehiculo','otros');d.set('subtipo_vehiculo','anterior');d.set('nota','Texto antiguo');
+ expect(datosCosteVehiculo(d)).toEqual({categoria:'otros',nota:'Texto antiguo'});expect(clasificarCosteVehiculo('otros','Texto antiguo').grupo).toBe('pendiente');
+ d.set('categoria_vehiculo','itv');d.set('subtipo_vehiculo','itv');d.set('nota','[Subtipo vehículo: ninera]\nNota libre');expect(datosCosteVehiculo(d)).toEqual({categoria:'itv',nota:'Nota libre'});
+ d.set('nota','[Subtipo vehículo: desconocido]\nTexto histórico');expect(datosCosteVehiculo(d).nota).toBe('[Subtipo vehículo: desconocido]\nTexto histórico');
+});
+
+it('marcadores obsoletos caen a la categoría válida y la nota libre queda separada',()=>{
+ expect(clasificarCosteVehiculo('gasolina','[Subtipo vehículo: ninera]\nTexto').grupo).toBe('traslado');
+ expect(clasificarCosteVehiculo('gasolina','[Subtipo vehículo: ninera]\nTexto').subtipo).toBe('gasolina');
+ expect(clasificarCosteVehiculo('itv','[Subtipo vehículo: desconocido]\nTexto').subtipo).toBe('itv');
+ expect(notaLibreVehiculo('[Subtipo vehículo: ninera]\nTexto editable')).toBe('Texto editable');
+ const d=new FormData();d.set('vehiculo_id','demo');d.set('categoria_vehiculo','transporte');d.set('subtipo_vehiculo','ninera');d.set('nota','Texto añadido delante');
+ const encoded=datosCosteVehiculo(d);expect(encoded.nota).toBe('[Subtipo vehículo: ninera]\nTexto añadido delante');
+ d.set('nota',notaLibreVehiculo(encoded.nota));expect(datosCosteVehiculo(d)).toEqual(encoded);
+});
+it('formulario bloquea el envío vinculado sin grupo o subtipo y acepta la selección completa',async()=>{
+ const user=userEvent.setup(),submit=vi.fn(async()=>{});
+ render(<FormModal title="Gasto vinculado QA" close={()=>{}} fields={[]} submit={submit}><VehicleFields vehiculoId="demo"/></FormModal>);
+ await user.click(screen.getByRole('button',{name:'Guardar'}));expect(submit).not.toHaveBeenCalled();
+ await user.selectOptions(screen.getByLabelText('Grupo de gasto'),'traslado');await user.click(screen.getByRole('button',{name:'Guardar'}));expect(submit).not.toHaveBeenCalled();
+ await user.selectOptions(screen.getByLabelText('Subtipo de gasto'),'ninera');await user.click(screen.getByRole('button',{name:'Guardar'}));await waitFor(()=>expect(submit).toHaveBeenCalledOnce());
+ const d=new FormData();d.set('vehiculo_id','demo');expect(()=>datosCosteVehiculo(d)).toThrow('Selecciona');
+});
+
+// Un enlace de conciliación solo abre el registro original; no cambia dinero.
+it('abre el soporte del gasto enlazado y permite cerrar sin escrituras',async()=>{
+ const {calls,user}=mount({initialUrl:'/compras?compra=compra&tarea=soporte'});
+ const upload=await screen.findByRole('dialog',{name:'Adjuntar documento privado'});
+ expect(within(upload).getByLabelText(/Nombre del documento/)).toBeInTheDocument();
+ expect(screen.getByRole('dialog',{name:'Equipo de ejemplo'})).toBeInTheDocument();
+ expect(calls.filter(c=>c.method!=='GET')).toHaveLength(0);
+ await user.click(within(upload).getByRole('button',{name:'Cerrar'}));
+ await user.click(within(screen.getByRole('dialog',{name:'Equipo de ejemplo'})).getByRole('button',{name:'Cerrar'}));
+ expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+ expect(calls.filter(c=>c.method!=='GET')).toHaveLength(0);
+});
+it('revisar pago muestra el historial sin iniciar un pago',async()=>{
+ const {calls}=mount({bought:true,initialUrl:'/compras?compra=compra&tarea=pago'});
+ const detail=await screen.findByRole('dialog',{name:'Equipo de ejemplo'});
+ expect(within(detail).getByText(/Que un pago no esté registrado no significa/)).toBeInTheDocument();
+ expect(within(detail).getByRole('button',{name:'Registrar pago'})).toBeInTheDocument();
+ expect(screen.queryByRole('dialog',{name:'Registrar pago de la compra'})).not.toBeInTheDocument();
+ expect(calls.filter(c=>c.method!=='GET')).toHaveLength(0);
 });

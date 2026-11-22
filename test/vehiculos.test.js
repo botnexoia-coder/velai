@@ -88,7 +88,7 @@ test('vehículos y viajes: gasto conjunto repartido entre dos coches, compra dir
   await assert.rejects(api('gestion/viajes', 'POST', { id: nuevo(), nombre: 'Mal', reparto: 'manual', vehiculos: [{ vehiculo_id: a.id, peso_bp: 6000 }, { vehiculo_id: b.id, peso_bp: 3000 }] }), error(400, 'pesos_invalidos'));
   await assert.rejects(api('gestion/viajes', 'POST', { id: nuevo(), nombre: 'Mal', vehiculos: [{ vehiculo_id: a.id }, { vehiculo_id: a.id }] }), error(400, 'vehiculos_repetidos'));
   // Gasto conjunto del viaje (gasolina de los dos coches): UNA compra, sin vehículo.
-  const gasolina = (await compra({ concepto: 'Gasolina ida', viaje_id: viaje.item.id, estimado: 30001 })).item;
+  const gasolina = (await compra({ concepto: 'Gasolina ida', viaje_id: viaje.item.id, estimado: 30001, entidad_id:E })).item;
   assert.equal(gasolina.viaje_id, viaje.item.id); assert.equal(gasolina.vehiculo_id, null);
   await pagar(gasolina.id, 30001, q.id);
   // Guardas: tipología cerrada, negocio, moneda y pertenencia al viaje.
@@ -120,6 +120,11 @@ test('vehículos y viajes: gasto conjunto repartido entre dos coches, compra dir
   assert.equal(ra.totales.coste_directo, 502000); assert.equal(ra.totales.pagado_directo, 500000); assert.equal(ra.totales.pendiente_directo, 2000);
   assert.equal(ra.totales.imputado_viajes, parteA); assert.equal(ra.totales.imputado_viajes_pagado, parteA);
   assert.equal(ra.totales.coste_total, 502000 + parteA); assert.equal(ra.totales.invertido_confirmado, 500000 + parteA);
+  assert.equal(ra.costes.reduce((s,c)=>s+c.importe,0),ra.totales.coste_total);
+  assert.equal(ra.pagos.reduce((s,p)=>s+p.importe,0),ra.totales.invertido_confirmado);
+  assert.equal(ra.costes.find(c=>c.id===gasolina.id).importe,parteA);
+  assert.equal(ra.costes.filter(c=>c.id===peaje.id).length,1);
+  assert.equal(ra.pagos.find(p=>p.compra_id===adq.id).cuenta_nombre,q.nombre);
   assert.equal(ra.totales.venta, null); assert.equal(ra.totales.margen_estimado, null); assert.equal(ra.viajes.length, 1); assert.equal(ra.viajes[0].parte, parteA);
   // Viaje (01/03), compra y pago de la adquisición (02/03) y el peaje sin fecha al final.
   assert.deepEqual(ra.cronologia.map((e) => e.clase), ['viaje', 'compra', 'pago', 'compra']);
@@ -154,6 +159,27 @@ test('vehículos y viajes: gasto conjunto repartido entre dos coches, compra dir
   await assert.rejects(api('gestion/facturas', 'POST', factura({ tipo: 'recibida', compra_id: adq.id, vehiculo_id: b.id })), error(400, 'vehiculo_incompatible'));
   ra = await api(`gestion/vehiculos/${a.id}/resumen`);
   assert.equal(ra.facturas.length, 1); assert.equal(ra.totales.facturado_venta, 700000);
+  assert.equal(ra.facturas[0].iva_informado,true);assert.equal(ra.facturas[0].iva,0);
+  const recibida=await api('gestion/facturas','POST',factura({tipo:'recibida',compra_id:adq.id,vehiculo_id:a.id,tratamiento_fiscal:'pendiente',lineas:[{descripcion:'Original con IVA no informado',cantidad:'1',precio_unitario:450000,iva_bp:null}]}));
+  ra=await api(`gestion/vehiculos/${a.id}/resumen`);
+  const coste=ra.costes.find(c=>c.id===adq.id),f=coste.facturas.find(f=>f.id===recibida.item.id);
+  assert.equal(f.iva_informado,false);assert.equal(f.originales_count,0);assert.equal(f.total,450000);
+  assert.equal(coste.importe,500000);assert.equal(ra.totales.coste_total,502000+ra.totales.imputado_viajes);
+  assert.equal(ra.totales.facturado_venta,700000);
+  const compartida=await api('gestion/facturas','POST',factura({tipo:'recibida',compra_id:gasolina.id,tratamiento_fiscal:'general',lineas:[{descripcion:'Viaje completo',cantidad:'1',precio_unitario:30001,iva_bp:0}]}));
+  for(const veh of [a,b]){
+    const r=await api(`gestion/vehiculos/${veh.id}/resumen`);
+    assert.equal(r.facturas.some(f=>f.id===compartida.item.id),false);
+    assert.equal(r.cronologia.some(e=>e.ref.id===compartida.item.id),false);
+    assert.equal(r.costes.find(c=>c.id===gasolina.id).facturas[0].total,30001);
+  }
+  // El esquema exige texto no NULL, pero un JSON literal null puede proceder de un histórico.
+  await DB.prepare('UPDATE g_facturas SET lineas_json=? WHERE id=?').bind('null',recibida.item.id).run();
+  const defensivo=await api(`gestion/vehiculos/${a.id}/resumen`);
+  assert.equal(defensivo.costes.find(c=>c.id===adq.id).facturas[0].iva_informado,false);
+  // La API impide cancelar una compra con pagos: no hay desaparición por ese flujo.
+  await assert.rejects(api(`gestion/compras/${gasolina.id}`,'PATCH',{version:(await DB.prepare('SELECT version FROM g_compras WHERE id=?').bind(gasolina.id).first()).version,estado:'cancelada'}),error(409,'compra_con_pagos'));
+
 });
 
 test('documentos del vehículo: tipo propio con vencimiento, y la ficha reúne los suyos y los de sus compras', async (t) => {
@@ -177,4 +203,26 @@ test('documentos del vehículo: tipo propio con vencimiento, y la ficha reúne l
   const ra = await api(`gestion/vehiculos/${a.id}/resumen`);
   assert.deepEqual(ra.documentos.map((d) => [d.tipo, d.clase, d.vence]), [['vehiculo', 'seguro', '2027-03-31'], ['compra', 'factura', null]]);
   assert.equal(ra.vehiculo.documentos_count, 1);
+});
+
+
+test('desglose: pagos compartidos por cuenta cuadran al céntimo; otros y avance provisional conservados',async(t)=>{
+ const {api,vehiculo,compra,cuenta,pagar}=await fixture(t);
+ const a=(await vehiculo({referencia:'DEMO-A'})).item,b=(await vehiculo({referencia:'DEMO-B'})).item,z=(await vehiculo({referencia:'DEMO-C'})).item;
+ const q1=(await cuenta({nombre:'Origen uno'})).item,q2=(await cuenta({nombre:'Origen dos'})).item;
+ const trip=(await api('gestion/viajes','POST',{id:nuevo(),nombre:'Viaje QA',vehiculos:[{vehiculo_id:a.id},{vehiculo_id:b.id},{vehiculo_id:z.id}]})).item;
+ const c=(await compra({viaje_id:trip.id,estimado:3})).item;
+ await pagar(c.id,1,q1.id);await pagar(c.id,2,q2.id);
+ const provisional=(await compra({vehiculo_id:a.id,categoria:'otros',estimado:987,nota:'Nota histórica sin clasificación'})).item;
+ await api(`gestion/compras/${provisional.id}`,'PATCH',{version:provisional.version,hecho:true});
+ const porCuenta={};
+ for(const v of [a,b,z]){
+  const r=await api(`gestion/vehiculos/${v.id}/resumen`);
+  for(const p of r.pagos)porCuenta[p.cuenta_id]=(porCuenta[p.cuenta_id]||0)+p.importe;
+  assert.equal(r.costes.reduce((s,x)=>s+x.importe,0),r.totales.coste_total);
+  assert.equal(r.pagos.reduce((s,x)=>s+x.importe,0),r.totales.invertido_confirmado);
+  assert.deepEqual(new Set(r.pagos.map(p=>p.cuenta_nombre)),new Set(['Origen uno','Origen dos']));
+  if(v.id===a.id){const x=r.costes.find(x=>x.id===provisional.id);assert.equal(x.hecho,true);assert.equal(x.estado,'comprometida');assert.equal(x.pagado,0);assert.equal(x.nota,'Nota histórica sin clasificación');assert.deepEqual(x.facturas,[]);}
+ }
+ assert.equal(porCuenta[q1.id],1);assert.equal(porCuenta[q2.id],2);
 });
