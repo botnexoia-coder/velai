@@ -27,8 +27,8 @@ export function DashboardFinanzas(){
   <div className="fin-dashboard-metrics">
    <Card title="Dinero en cuentas"><strong className="fin-big"><Money value={total?.saldo}/></strong><p>Saldo registrado; comprueba la conciliación de cada cuenta.</p></Card>
    <Card title="Reserva de cuotas"><strong className="fin-big"><Money value={total?.reservas}/></strong><p>Fondos protegidos para devolver los créditos recibidos.</p></Card>
-   <Card title="Pendiente del equipo"><strong className="fin-big"><Money value={equipo.data?.resumen.pendiente}/></strong><p>Capital por recuperar. No se cuenta como efectivo disponible.</p></Card>
-   <Card title="Capacidad del piloto"><strong className="fin-big"><Money value={disponible}/></strong><p>Según liquidez y límites individuales de 500 €. Cada solicitud vuelve a validarse.</p></Card>
+   <Card title="Pendiente del equipo"><strong className="fin-big"><Money value={equipo.data?.resumen.pendiente}/></strong><p>Capital por recuperar. No se cuenta como efectivo disponible.</p>{equipo.data?.resumen.historicos?.reserva_prestada?<p className="muted">Incluye <Money value={equipo.data.resumen.historicos.reserva_prestada}/> de fondos de cuotas del crédito prestados temporalmente (a reponer; ya incluidos, no se suman).</p>:null}</Card>
+   <Card title="Capacidad del piloto"><strong className="fin-big"><Money value={disponible}/></strong><p>Según liquidez y límites individuales de 1.000 €. Cada solicitud vuelve a validarse.</p></Card>
   </div>
   <div className="fin-roadmap">
    <Card title="¿Y si las devoluciones se retrasan 30 días?">

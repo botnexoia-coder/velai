@@ -3,6 +3,7 @@
 // dato bancario ni archivo real.
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
 import { Hono } from 'hono';
 import { HttpError } from '../worker/app.js';
 import { gestion } from '../worker/routes/gestion.js';
@@ -1026,15 +1027,15 @@ test('equipo: grupo de 1000 EUR respeta 500 por persona, entrega por transferenc
 test('equipo: autoaprobación, miembros inactivos, reparto incoherente y exceso individual se rechazan',async t=>{
  const f=await equipoFixture(t),l=await f.crear([{email:SOCIO.email,importe:10000},{email:'dos@velai.test',importe:10000}]);
  await assert.rejects(f.actuar(l,'aprobar'),error(409,'equipo_autoaprobacion'));
- await assert.rejects(f.crear([{email:'dos@velai.test',importe:50001}]),error(400,'equipo_limite_persona'));
+ await assert.rejects(f.crear([{email:'dos@velai.test',importe:100001}]),error(400,'equipo_limite_persona'));
  await f.DB.prepare("UPDATE fin_socios SET activo=0 WHERE email='dos@velai.test'").run();
  await assert.rejects(f.crear(),error(409,'equipo_participantes_invalidos'));
 });
 test('equipo: aprobaciones simultáneas suman la exposición por persona y reservan liquidez',async t=>{
- const f=await equipoFixture(t),a=await f.crear([{email:'dos@velai.test',importe:30000}]),b=await f.crear([{email:'dos@velai.test',importe:30000}]);
+ const f=await equipoFixture(t),a=await f.crear([{email:'dos@velai.test',importe:60000}]),b=await f.crear([{email:'dos@velai.test',importe:60000}]);
  const results=await Promise.allSettled([f.actuar(a,'aprobar'),f.actuar(b,'aprobar')]);
  assert.equal(results.filter(r=>r.status==='fulfilled').length,1);assert.equal(results.filter(r=>r.status==='rejected'&&r.reason.code==='equipo_limite_persona').length,1);
- assert.equal((await f.api('gestion/equipo-prestamos')).capacidad.disponible,170000);assert.equal((await f.movimientos()).length,0);
+ assert.equal((await f.api('gestion/equipo-prestamos')).capacidad.disponible,140000);assert.equal((await f.movimientos()).length,0);
 });
 test('equipo: protege compras comprometidas y vuelve a comprobar el saldo al entregar',async t=>{
  const f=await equipoFixture(t,{saldo:60000});await f.compra({moneda:'EUR',estimado:20000,estado:'comprometida'});
@@ -1069,4 +1070,112 @@ test('equipo: una devolución concurrente no sobrepaga ni duplica caja y entrega
  const docs=await Promise.all([f.doc(loan,'devolucion'),f.doc(loan,'devolucion')]);
  const results=await Promise.allSettled(docs.map(doc=>f.actuar(loan,'devoluciones',{fecha:diaEquipo(),importe:40000,participante_email:'dos@velai.test',comprobante_id:doc.id,verificado:true})));
  assert.equal(results.filter(r=>r.status==='fulfilled').length,1);assert.equal((await f.api(`gestion/equipo-prestamos/${loan.id}`)).item.devuelto,40000);assert.equal((await f.movimientos()).length,2);
+});
+test('equipo: límite de 1000 EUR por persona: 1000 válido, 1000,01 rechazado y exposición acumulada',async t=>{
+ const f=await equipoFixture(t),a=(await f.actuar(await f.crear([{email:'dos@velai.test',importe:100000}]),'aprobar')).item;
+ assert.equal(a.estado,'aprobado');
+ await assert.rejects(f.crear([{email:'dos@velai.test',importe:100001}]),error(400,'equipo_limite_persona'));
+ const extra=await f.crear([{email:'dos@velai.test',importe:1}]);
+ await assert.rejects(f.actuar(extra,'aprobar'),error(409,'equipo_limite_persona'));
+ // El CHECK de la tabla recreada por 0064 también protege frente a escrituras directas.
+ await assert.rejects(f.DB.prepare('INSERT INTO g_equipo_participantes(prestamo_id,email,importe) VALUES (?,?,?)').bind(extra.id,'tres@velai.test',100001).run(),/CHECK|constraint/i);
+ // La autoaprobación sigue prohibida con el nuevo límite.
+ const propio=await f.crear([{email:SOCIO.email,importe:100000}]);await assert.rejects(f.actuar(propio,'aprobar'),error(409,'equipo_autoaprobacion'));
+});
+// Regularización histórica: datos sintéticos; fechas futuras fijas solo para el vencimiento.
+const VENCE='2099-03-31',CARGO='2099-04-01';
+const historico=(f,extra={})=>f.api('gestion/equipo-prestamos/historicos','POST',{id:nuevo(),titulo:'Regularización de prueba',cuenta_id:f.cuenta.id,importe:90000,vencimiento:VENCE,participantes:[{email:'dos@velai.test',importe:90000}],nota:'Nota ficticia',deudor_declarado:'Deudor ficticio',destinatario:'Destinatario ficticio',motivo_excepcion:'Motivo ficticio',...extra});
+async function confirmar(f,l,extra={}){const d=await f.doc(l,'entrega');return f.actuar(l,'historico/confirmar',{fecha:diaEquipo(),destino_titular:'Titular ficticio',destino_referencia:'Cuenta ficticia · 0000',comprobante_id:d.id,comprobante_revisado:true,ya_ejecutada:true,...extra});}
+test('equipo histórico: el borrador no mueve dinero ni se aprueba ni se desembolsa por la vía normal',async t=>{
+ const f=await equipoFixture(t),antes=(await f.api('gestion/equipo-prestamos')).capacidad.disponible,{item:l}=await historico(f);
+ assert.equal(l.estado,'borrador_historico');assert.equal(l.aprobado_por,null);assert.equal(l.historico.ratificacion,'pendiente');
+ assert.equal((await f.movimientos()).length,0);
+ const lista=await f.api('gestion/equipo-prestamos');assert.equal(lista.capacidad.disponible,antes);assert.equal(lista.resumen.pendiente,0);assert.equal(lista.resumen.solicitudes,0);assert.equal(lista.resumen.historicos.borradores,1);
+ await assert.rejects(f.actuar(l,'aprobar'),error(409,'equipo_historico_ruta_propia'));
+ await assert.rejects(f.actuar(l,'desembolso',{fecha:diaEquipo()}),error(409,'equipo_historico_ruta_propia'));
+ await assert.rejects(f.DB.prepare("UPDATE g_equipo_prestamos SET estado='aprobado',aprobado_por='uno@velai.test',version=version+1 WHERE id=?").bind(l.id).run(),/equipo_estado_invalido/);
+ await assert.rejects(f.DB.prepare("UPDATE g_equipo_prestamos SET estado='vigente',version=version+1 WHERE id=?").bind(l.id).run(),/equipo_historico_incompleto|equipo_historico_invalido/);
+ // Faltan campos del alta: no se inventa deudor, destinatario, motivo ni notas.
+ for(const campo of ['deudor_declarado','destinatario','motivo_excepcion','nota'])await assert.rejects(historico(f,{[campo]:''}),e=>e.status===400);
+ assert.equal((await f.api(`gestion/equipo-prestamos/${l.id}/cancelar`,'POST',{id:nuevo(),version:l.version,motivo:'Borrador erróneo'})).item.estado,'cancelado');
+});
+test('equipo histórico: confirmación exige comprobante real, fecha no futura y verificación; registra una salida única',async t=>{
+ const f=await equipoFixture(t),{item:l}=await historico(f);
+ await assert.rejects(f.actuar(l,'historico/confirmar',{fecha:diaEquipo(),destino_titular:'T',destino_referencia:'R',comprobante_id:nuevo(),comprobante_revisado:true,ya_ejecutada:true}),error(400,'equipo_comprobante_requerido'));
+ await assert.rejects(confirmar(f,l,{comprobante_revisado:false}),error(400,'equipo_historico_confirmacion_requerida'));
+ await assert.rejects(confirmar(f,l,{ya_ejecutada:undefined}),error(400,'equipo_historico_confirmacion_requerida'));
+ await assert.rejects(confirmar(f,l,{fecha:'2099-01-01'}),error(400,'fecha_invalida'));
+ await assert.rejects(confirmar(f,l,{destino_titular:''}),error(400,'equipo_destino_requerido'));
+ assert.equal((await f.movimientos()).length,0);
+ const d=await f.doc(l,'entrega'),body={id:nuevo(),version:l.version,fecha:diaEquipo(),destino_titular:'Titular ficticio',destino_referencia:'Cuenta ficticia · 0000',comprobante_id:d.id,comprobante_revisado:true,ya_ejecutada:true},path=`gestion/equipo-prestamos/${l.id}/historico/confirmar`;
+ const hecho=(await f.api(path,'POST',body)).item;
+ assert.equal(hecho.estado,'vigente');assert.equal(hecho.aprobado_por,null);assert.equal(hecho.historico.ratificacion,'pendiente');assert.equal(hecho.historico.ratificado_por,null);
+ assert.ok(hecho.historico.desvios.includes('sin_aprobacion_independiente'));assert.ok(hecho.historico.desvios.includes('plazo_superior_a_un_mes'));
+ const moves=await f.movimientos();assert.equal(moves.length,1);assert.equal(moves[0].tipo,'egreso');assert.equal(moves[0].importe,90000);assert.equal(moves[0].equipo_prestamo_id,l.id);assert.match(moves[0].nota,/^Registro histórico pendiente de ratificación/);
+ // Idempotencia: mismo id repetido no duplica; otro id no puede volver a entregar.
+ assert.equal((await f.api(path,'POST',body)).item.estado,'vigente');assert.equal((await f.movimientos()).length,1);
+ await assert.rejects(f.api(path,'POST',{...body,id:nuevo(),version:hecho.version}),error(409,'equipo_estado_invalido'));
+ await assert.rejects(f.api(path,'POST',{...body,fecha:'2025-02-01'}),error(409,'idempotencia_conflicto'));
+ assert.equal((await f.movimientos()).length,1);
+ // Sin reverso no se cancela el débito histórico, ni por la API ni por SQL directo.
+ await assert.rejects(f.actuar(hecho,'cancelar',{motivo:'No procede'}),error(409,'equipo_reverso_requerido'));
+ await assert.rejects(f.DB.prepare("UPDATE g_equipo_prestamos SET estado='cancelado',version=version+1 WHERE id=?").bind(l.id).run(),/equipo_reverso_requerido/);
+ await assert.rejects(f.DB.prepare("INSERT INTO fin_movimientos(id,tipo,concepto_id,fecha,moneda,importe,created_by,created_at,naturaleza,signo,origen_tipo,origen_id,cuenta_id,equipo_prestamo_id) SELECT ?,tipo,concepto_id,fecha,moneda,importe,created_by,created_at,naturaleza,signo,origen_tipo,?,cuenta_id,equipo_prestamo_id FROM fin_movimientos WHERE equipo_prestamo_id=?").bind(nuevo(),nuevo(),l.id).run(),/UNIQUE|constraint/i);
+ // Libro: principal concedido, ni gasto ni ingreso ni financiación recibida; cuenta a cobrar única.
+ const libro=await f.legado();assert.equal(libro.monedas.EUR.gastos,0);assert.equal(libro.monedas.EUR.ingresos,0);assert.equal(libro.financiacion.EUR.entradas,0);assert.equal(libro.acumulado.EUR.prestamos_equipo_entregados,90000);
+ const lista=await f.api('gestion/equipo-prestamos');assert.equal(lista.resumen.pendiente,90000);assert.equal(lista.resumen.historicos.pendiente,90000);assert.equal(lista.resumen.historicos.pendiente_ratificacion,1);
+ // La devolución sigue su camino normal y no fabrica una ratificación.
+ const dev=await f.doc(hecho,'devolucion'),pagado=(await f.actuar(hecho,'devoluciones',{fecha:diaEquipo(),importe:90000,participante_email:'dos@velai.test',comprobante_id:dev.id,verificado:true})).item;
+ assert.equal(pagado.estado,'devuelto');assert.equal(pagado.historico.ratificacion,'pendiente');
+});
+test('equipo histórico: desvíos de la política solo en la vía histórica y exposición ≤ 1000 por persona',async t=>{
+ const f=await equipoFixture(t,{saldo:10000}),{item:l}=await historico(f);
+ // Una solicitud normal por el mismo importe sigue sujeta a liquidez y a plazo de un mes.
+ const normal=await f.crear([{email:'tres@velai.test',importe:90000}]);await assert.rejects(f.actuar(normal,'aprobar'),error(409,'equipo_sin_liquidez'));
+ const hecho=(await confirmar(f,l)).item;assert.ok(hecho.historico.desvios.includes('liquidez_insuficiente'));assert.equal(hecho.estado,'vigente');
+ // La exposición histórica ya cuenta: la misma persona no puede acumular más de 1000.
+ const g=await equipoFixture(t),previo=(await g.actuar(await g.crear([{email:'dos@velai.test',importe:50000}]),'aprobar')).item,{item:h2}=await historico(g);
+ await assert.rejects(confirmar(g,h2),error(409,'equipo_limite_persona'));assert.equal((await g.movimientos()).length,0);assert.equal(previo.estado,'aprobado');
+ await assert.rejects(historico(g,{importe:100001,participantes:[{email:'dos@velai.test',importe:100001}]}),error(400,'equipo_limite_persona'));
+ // Participante inactivo: no se confirma.
+ const h3=(await historico(g,{participantes:[{email:'tres@velai.test',importe:90000}]})).item;await g.DB.prepare("UPDATE fin_socios SET activo=0 WHERE email='tres@velai.test'").run();
+ await assert.rejects(confirmar(g,h3),error(409,'equipo_participantes_invalidos'));
+});
+test('equipo histórico: cuota del crédito recibido se desglosa sin tocar su reserva ni sumar el principal dos veces',async t=>{
+ const f=await equipoFixture(t,{saldo:0}),credito=(await f.prestamo(f.cuenta.id,{principal:529584,apertura:0,cuota:88264,meses:6,reserva_cuotas:6,tin_bp:0,tae_bp:0})).item;
+ await f.api(`gestion/prestamos/${credito.id}/desembolso`,'POST',{id:nuevo(),fecha:diaEquipo(),importe:529584,apertura:0});
+ const reservaAntes=(await f.api('gestion/equipo-prestamos')).capacidad.reserva,ref={id:credito.id,cuota:6,importe_cuota:88264,importe_adicional:1736,fecha_cuota_proyectada:CARGO};
+ await assert.rejects(historico(f,{credito:{...ref,importe_cuota:90000,importe_adicional:0}}),error(400,'equipo_desglose_invalido'));
+ await assert.rejects(historico(f,{credito:{...ref,importe_adicional:1000}}),error(400,'equipo_desglose_invalido'));
+ await assert.rejects(historico(f,{credito:{...ref,cuota:7}}),error(400,'equipo_cuota_invalida'));
+ await assert.rejects(historico(f,{vencimiento:CARGO,credito:ref}),error(400,'equipo_historico_plazo_invalido'));
+ const otra=(await f.api('gestion/cuentas','POST',{id:nuevo(),nombre:'Otra cuenta ficticia',moneda:'EUR',saldo_inicial:0})).item;await assert.rejects(historico(f,{cuenta_id:otra.id,credito:ref}),error(400,'equipo_credito_invalido'));
+ const {item:l}=await historico(f,{credito:ref}),hecho=(await confirmar(f,l)).item;
+ assert.equal(hecho.historico.credito.fecha_confirmada,false);assert.ok(hecho.historico.desvios.includes('fondos_de_cuota_prestados'));
+ assert.equal(hecho.historico.reserva_prestada,88264);assert.equal(hecho.historico.resto_libre,1736);assert.equal(hecho.pendiente,90000);
+ const lista=await f.api('gestion/equipo-prestamos');assert.equal(lista.capacidad.reserva,reservaAntes);assert.equal(lista.resumen.pendiente,90000);assert.equal(lista.resumen.historicos.reserva_prestada+lista.resumen.historicos.resto_libre,lista.resumen.historicos.pendiente);
+ // El crédito recibido no cambia: ni pagos ni principal ni calendario.
+ assert.equal((await f.api(`gestion/prestamos/${credito.id}`)).item.principal,529584);assert.equal(await f.contar('g_pagos',"objeto_tipo='prestamo'"),0);
+ const dev=await f.doc(hecho,'devolucion'),parcial=(await f.actuar(hecho,'devoluciones',{fecha:diaEquipo(),importe:1736,participante_email:'dos@velai.test',comprobante_id:dev.id,verificado:true})).item;
+ assert.equal(parcial.historico.resto_libre,0);assert.equal(parcial.historico.reserva_prestada,88264);assert.equal(parcial.pendiente,88264);
+});
+
+test('migración 0064 conserva préstamos con devoluciones, documentos, movimientos y claves foráneas',async t=>{
+ const f=await fixture(t,{through:'0063'}),cuenta=(await f.cuenta({saldo_inicial:200000,fecha_saldo:'2025-01-01',conciliada:1})).item;
+ const solicitud=async importe=>(await f.api('gestion/equipo-prestamos','POST',{id:nuevo(),titulo:'Préstamo ficticio previo',cuenta_id:cuenta.id,importe,vencimiento:diaEquipo(),participantes:[{email:'dos@velai.test',importe}],nota:null})).item;
+ const operar=(l,accion,body={})=>f.api(`gestion/equipo-prestamos/${l.id}/${accion}`,'POST',{id:nuevo(),version:l.version,...body});
+ const adjuntar=async(l,clase)=>{const fd=new FormData();fd.set('id',nuevo());fd.set('tipo','prestamo');fd.set('objeto_id',l.id);fd.set('clase',clase);fd.set('nombre',`Justificante ${clase}`);fd.set('archivo',new Blob([bytesDe('%PDF-1.7 '+nuevo())],{type:'application/pdf'}),'prueba.pdf');return(await f.api('gestion/documentos','POST',fd)).item;};
+ const aprobado=(await operar(await solicitud(50000),'aprobar')).item,entrega=await adjuntar(aprobado,'entrega');
+ const vigente=(await operar(aprobado,'desembolso',{fecha:diaEquipo(),destino_titular:'Persona Dos',destino_referencia:'Cuenta ficticia',comprobante_id:entrega.id,transferencia_verificada:true})).item;
+ const devolucion=await adjuntar(vigente,'devolucion');await operar(vigente,'devoluciones',{fecha:diaEquipo(),importe:10000,participante_email:'dos@velai.test',comprobante_id:devolucion.id,verificado:true});
+ const tablas=['g_equipo_prestamos','g_equipo_participantes','g_equipo_devoluciones','g_documentos','fin_movimientos','g_auditoria'];
+ const snapshot=async()=>Promise.all(tablas.map(async tabla=>(await f.DB.prepare(`SELECT * FROM ${tabla} ORDER BY rowid`).all()).results));
+ const antes=await snapshot(),migracion=await readFile(new URL('../migrations/0064_prestamos_equipo_1000_historico.sql',import.meta.url),'utf8');
+ await f.DB.exec(`BEGIN;\n${migracion}\nCOMMIT;`);
+ assert.deepEqual(await snapshot(),antes);
+ assert.deepEqual((await f.DB.prepare('PRAGMA foreign_key_check').all()).results,[]);
+ assert.equal((await f.DB.prepare('PRAGMA integrity_check').first()).integrity_check,'ok');
+ assert.equal((await f.DB.prepare('SELECT pendiente FROM g_equipo_exposicion WHERE prestamo_id=?').bind(vigente.id).first()).pendiente,40000);
+ assert.equal((await operar(await solicitud(60000),'aprobar')).item.estado,'aprobado');
+ await assert.rejects(operar(await solicitud(1),'aprobar'),error(409,'equipo_limite_persona'));
 });

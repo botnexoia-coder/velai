@@ -17,8 +17,10 @@ futuros. Cuotas sin fecha o consultas fallidas impiden dar la evaluación por co
 
 ## Piloto del equipo
 
-- Máximo de 500 EUR pendientes POR PERSONA, entre todas sus solicitudes individuales
-  y conjuntas; no es un máximo global de 500 EUR para el equipo.
+- Máximo de 1.000 EUR pendientes POR PERSONA (autorizado por el usuario el 26/11/2026,
+  antes 500; migración 0064), entre todas sus solicitudes individuales y conjuntas; no
+  es un máximo global para el equipo. Los préstamos nuevos conservan plazo de un mes,
+  aprobación independiente, cuentas conciliadas y liquidez.
 - En grupos se registra la responsabilidad de principal de cada integrante; no se
   infiere solidaridad ni una compensación contra repartos.
 - Devolución en un mes calendario como máximo; cero interés en la primera fase.
@@ -38,7 +40,35 @@ futuros. Cuotas sin fecha o consultas fallidas impiden dar la evaluación por co
 
 ## Modalidades futuras
 
-La ampliación para el equipo a 1.000 EUR y tres meses permanece en evaluación.
+El límite de 1.000 EUR ya rige (ver arriba). El plazo de tres meses y el interés
+permanecen en evaluación.
+
+## Registrar préstamo ya entregado (regularización histórica, 0064)
+
+Modalidad aparte, para dinero que YA salió; no solicita, aprueba ni desembolsa nada nuevo.
+- **Borrador** (`POST equipo-prestamos/historicos`): fila base en `solicitado` + fila en
+  `g_equipo_historico`. Sin movimiento, sin exposición, sin reserva de capacidad. Se
+  muestra como «Borrador histórico». Aprobar/desembolsar por la vía normal se rechaza
+  (API y trigger). Se pueden subir comprobantes (clase `entrega`) al borrador.
+- **Confirmación** (`POST equipo-prestamos/:id/historico/confirmar`, con `version`):
+  comprobante privado real, fecha real no futura (posterior al saldo de la cuenta),
+  titular y referencia de destino, verificación y declaración «ya ejecutada». Crea UNA
+  salida de principal (`prestamo_desembolso`, no gasto) y pasa de `solicitado` a `vigente`
+  sin `aprobado_por`. Idempotente por id; un índice único impide un segundo desembolso.
+  Una vez entregado no se cancela sin reverso (API y trigger).
+- Datos declarados, no verificados: `deudor_declarado`, `destinatario`, `motivo_excepcion`
+  y notas. La **ratificación independiente** queda `pendiente` y visible; ninguna ruta la
+  cambia todavía (requiere migración/endpoint posterior). Tampoco se afirma conciliación bancaria.
+- Desvíos reconocidos y guardados (`desvios`): sin aprobación independiente, plazo > 1 mes,
+  cuenta no conciliada, liquidez insuficiente, fondos de cuota prestados. Solo esta vía los
+  admite. El límite de 1.000 por persona SÍ se exige, sumando la exposición viva.
+- Crédito recibido (opcional): `credito{id,cuota,importe_cuota,importe_adicional,fecha_cuota_proyectada}`.
+  Mismo cuenta que la salida; `importe_cuota` = cuota real del crédito (no se redondea al
+  importe prestado); cuota ≤ reserva_cuotas; vencimiento anterior a la fecha proyectada, que
+  es una proyección sin confirmar con el banco. La reserva del crédito NO se modifica ni se
+  marca pagada: se informa `reserva_prestada` (a reponer antes del cargo) y `resto_libre`,
+  que desglosan el pendiente SIN sumarlo otra vez. Las devoluciones se imputan primero al resto libre.
+- El libro muestra la salida con la nota «Registro histórico pendiente de ratificación · …».
 
 La vista «Préstamos a terceros · Próximamente» se presenta en gris y desactivada.
 Muestra persona destinataria, responsable del equipo que negocia y gestiona,
