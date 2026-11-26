@@ -24,6 +24,7 @@ const Compras = lazy(() => import('./views/gestion/Compras').then(m=>({default:m
 const Facturacion = lazy(() => import('./views/gestion/Facturacion').then(m=>({default:m.Facturacion})));
 const Impuestos = lazy(() => import('./views/gestion/Impuestos').then(m=>({default:m.Impuestos})));
 const Vehiculos = lazy(() => import('./views/gestion/Vehiculos').then(m=>({default:m.Vehiculos})));
+const Conductores = lazy(() => import('./views/gestion/Conductores').then(m=>({default:m.Conductores})));
 
 export function App() {
   return (
@@ -43,6 +44,7 @@ export function App() {
           <Route path="/facturacion" element={<Suspense fallback={<p role="status">Cargando…</p>}><Facturacion/></Suspense>} />
           <Route path="/impuestos" element={<Suspense fallback={<p role="status">Cargando…</p>}><Impuestos/></Suspense>} />
           <Route path="/vehiculos" element={<Suspense fallback={<p role="status">Cargando…</p>}><Vehiculos/></Suspense>} />
+          <Route path="/conductores" element={<Suspense fallback={<p role="status">Cargando…</p>}><Conductores/></Suspense>} />
           <Route path="/canales" element={<Canales />} />
           <Route path="/plantillas" element={<Plantillas />} />
           <Route path="/configuracion" element={<Configuracion />} />

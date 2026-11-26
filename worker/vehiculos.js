@@ -1,3 +1,4 @@
+import { normalizarMatricula } from './expediente.js';
 // Control económico por vehículo y por viaje (negocio Coches, migración 0063).
 // Enlaza registros que ya existen —compras, facturas, cobros, documentos— y calcula
 // resúmenes. Enlazar o imputar NUNCA crea pagos, cobros ni movimientos de caja: el
@@ -10,7 +11,7 @@ import { esSocio, partesAdmin } from './middleware.js';
 import {
   MONEDAS, TIPOS_VEHICULO, ESTADOS_VEHICULO, ESTADOS_VIAJE, REPARTOS_VIAJE, SELECT_COMPRA, SELECT_VEHICULO, SELECT_VIAJE,
   fail, uuid, uuidOpcional, fechaReal, fechaCivil, fechaOpcional, entero, importePositivo, importeNoNegativo, enumValor, texto, versionDe, soloCampos,
-  compraItem, vehiculoItem, viajeItem, imputarViaje, repartir, auditoria, versionAplicada, errorEscrituraGestion, huella, idempotente,
+  compraItem, vehiculoItem, viajeItem, documentoItem, imputarViaje, repartir, auditoria, versionAplicada, errorEscrituraGestion, huella, idempotente,
 } from './gestion-financiera.js';
 
 export const vehiculos = new Hono();
@@ -68,6 +69,8 @@ const campoVehiculo = {
   marca: (v) => texto(v, 80, 'marca_invalida', { opcional: true }),
   modelo: (v) => texto(v, 80, 'modelo_invalido', { opcional: true }),
   matricula: (v) => mayus(v, 20, 'matricula_invalida'),
+  matricula_tipo: (v) => v == null ? 'desconocida' : enumValor(v, ['desconocida','provisional','definitiva'], 'matricula_tipo_invalido'),
+  matricula_pais: (v) => { const p = mayus(v, 2, 'matricula_pais_invalido'); if(p && !/^[A-Z]{2}$/.test(p)) fail('matricula_pais_invalido'); return p; },
   vin: (v) => mayus(v, 30, 'vin_invalido'),
   fecha_compra: (v) => fechaOpcional(v, fechaReal, 'fecha_compra_invalida'),
   fecha_venta: (v) => fechaOpcional(v, fechaReal, 'fecha_venta_invalida'),
@@ -91,6 +94,8 @@ vehiculos.get(`${BASE}/vehiculos`, async (c) => {
     const v = url.searchParams.get(key);
     if (v) { enumValor(v, values, `${key}_invalido`); clauses.push(`v.${key}=?`); args.push(v); }
   }
+  const q = url.searchParams.get('q');
+  if(q) { const raw = texto(q,120,'busqueda_invalida'); const normalized=normalizarMatricula(raw); clauses.push(`(instr(upper(COALESCE(v.referencia,'') || ' ' || COALESCE(v.marca,'') || ' ' || COALESCE(v.modelo,'')),upper(?))>0 OR instr(replace(replace(upper(COALESCE(v.matricula,'')),' ',''),'-',''),?)>0 OR EXISTS (SELECT 1 FROM g_vehiculo_matriculas h WHERE h.vehiculo_id=v.id AND instr(replace(replace(upper(h.matricula),' ',''),'-',''),?)>0))`); args.push(raw,normalized,normalized); }
   const rows = (await env.DB.prepare(`${SELECT_VEHICULO} WHERE ${clauses.join(' AND ')} ORDER BY v.created_at DESC, v.id LIMIT 501`).bind(...args).all()).results;
   const mas = rows.length > 500; if (mas) rows.pop();
   return json({ items: rows.map(vehiculoItem), mas }, 200, NO_STORE);
@@ -102,11 +107,14 @@ vehiculos.post(`${BASE}/vehiculos`, async (c) => {
   const q = { id: uuid(b.id), moneda: b.moneda == null ? 'EUR' : enumValor(b.moneda, MONEDAS, 'moneda_invalida'), estado: b.estado == null ? 'previsto' : enumValor(b.estado, ESTADOS_VEHICULO, 'estado_invalido'),
     ...Object.fromEntries(Object.entries(campoVehiculo).map(([k, fn]) => [k, fn(b[k])])) };
   await referenciasVehiculo(env, q);
+  const identidadAlta={...q};
+  // Reintentos del cuerpo legado conservan la huella anterior al expediente.
+  if(b.matricula_tipo === undefined && b.matricula_pais === undefined) { delete identidadAlta.matricula_tipo; delete identidadAlta.matricula_pais; }
   let repetida;
   try {
-    ({ repetida } = await idempotente(env, { id: q.id, ruta: 'vehiculos', huella: await huella(q), actor, now }, () => [
-      env.DB.prepare(`INSERT INTO g_vehiculos (id,referencia,tipo,marca,modelo,matricula,vin,moneda,estado,fecha_compra,fecha_venta,precio_venta,prestamo_id,entidad_id,nota,version,created_by,created_at,updated_at)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,1,?,?,?)`).bind(q.id, q.referencia, q.tipo, q.marca, q.modelo, q.matricula, q.vin, q.moneda, q.estado, q.fecha_compra, q.fecha_venta, q.precio_venta, q.prestamo_id, q.entidad_id, q.nota, actor, now, now),
+    ({ repetida } = await idempotente(env, { id: q.id, ruta: 'vehiculos', huella: await huella(identidadAlta), actor, now }, () => [
+      env.DB.prepare(`INSERT INTO g_vehiculos (id,referencia,tipo,marca,modelo,matricula,matricula_tipo,matricula_pais,vin,moneda,estado,fecha_compra,fecha_venta,precio_venta,prestamo_id,entidad_id,nota,version,created_by,created_at,updated_at)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,1,?,?,?)`).bind(q.id, q.referencia, q.tipo, q.marca, q.modelo, q.matricula, q.matricula ? q.matricula_tipo : 'desconocida', q.matricula_pais, q.vin, q.moneda, q.estado, q.fecha_compra, q.fecha_venta, q.precio_venta, q.prestamo_id, q.entidad_id, q.nota, actor, now, now),
       auditoria(env, { actor, accion: 'vehiculo_alta', objeto_tipo: 'vehiculo', objeto_id: q.id, detalle: { referencia: q.referencia, tipo: q.tipo, estado: q.estado, moneda: q.moneda }, now }),
     ]));
   } catch (e) { referenciaDuplicada(e); }
@@ -127,6 +135,10 @@ vehiculos.patch(`${BASE}/vehiculos/:id`, async (c) => {
   if (version !== old.version) throw new HttpError(409, 'version_conflicto');
   const n = { moneda: b.moneda === undefined ? old.moneda : enumValor(b.moneda, MONEDAS, 'moneda_invalida'), estado: b.estado === undefined ? old.estado : enumValor(b.estado, ESTADOS_VEHICULO, 'estado_invalido'),
     ...Object.fromEntries(Object.entries(campoVehiculo).map(([k, fn]) => [k, b[k] === undefined ? old[k] : fn(b[k])])) };
+  const placaCambiada = n.matricula !== old.matricula;
+  if (!n.matricula || (placaCambiada && b.matricula_tipo === undefined)) n.matricula_tipo='desconocida';
+  if (placaCambiada && b.matricula_pais === undefined) n.matricula_pais=null;
+  const historial = placaCambiada && old.matricula ? [env.DB.prepare('INSERT INTO g_vehiculo_matriculas (id,vehiculo_id,matricula,matricula_tipo,matricula_pais,changed_by,changed_at) SELECT ?,?,?,?,?,?,? WHERE changes()>0').bind(crypto.randomUUID(),old.id,old.matricula,old.matricula_tipo,old.matricula_pais,actor,now)] : [];
   // La moneda fija la de todas sus operaciones: con registros enlazados no cambia.
   if (n.moneda !== old.moneda) {
     const uso = await env.DB.prepare(`SELECT (SELECT COUNT(*) FROM g_compras WHERE vehiculo_id=?)+(SELECT COUNT(*) FROM g_viaje_vehiculos WHERE vehiculo_id=?)
@@ -135,9 +147,9 @@ vehiculos.patch(`${BASE}/vehiculos/:id`, async (c) => {
   }
   await referenciasVehiculo(env, n);
   try {
-    await actualizar(env, 'g_vehiculos', old.id, version, 'referencia=?, tipo=?, marca=?, modelo=?, matricula=?, vin=?, moneda=?, estado=?, fecha_compra=?, fecha_venta=?, precio_venta=?, prestamo_id=?, entidad_id=?, nota=?',
-      [n.referencia, n.tipo, n.marca, n.modelo, n.matricula, n.vin, n.moneda, n.estado, n.fecha_compra, n.fecha_venta, n.precio_venta, n.prestamo_id, n.entidad_id, n.nota],
-      { actor, accion: 'vehiculo_cambio', objeto_tipo: 'vehiculo', objeto_id: old.id, detalle: { de: vehiculoItem(old), a: n }, now });
+    await actualizar(env, 'g_vehiculos', old.id, version, 'referencia=?, tipo=?, marca=?, modelo=?, matricula=?, matricula_tipo=?, matricula_pais=?, vin=?, moneda=?, estado=?, fecha_compra=?, fecha_venta=?, precio_venta=?, prestamo_id=?, entidad_id=?, nota=?',
+      [n.referencia, n.tipo, n.marca, n.modelo, n.matricula, n.matricula_tipo, n.matricula_pais, n.vin, n.moneda, n.estado, n.fecha_compra, n.fecha_venta, n.precio_venta, n.prestamo_id, n.entidad_id, n.nota],
+      { actor, accion: 'vehiculo_cambio', objeto_tipo: 'vehiculo', objeto_id: old.id, detalle: { de: vehiculoItem(old), a: n }, now }, historial);
   } catch (e) { referenciaDuplicada(e); }
   return json({ item: await vehiculoCompleto(env, old.id) }, 200, NO_STORE);
 });
@@ -157,7 +169,7 @@ vehiculos.get(`${BASE}/vehiculos/:id/resumen`, async (c) => {
     env.DB.prepare(`${SELECT_VIAJE} WHERE t.id IN (SELECT viaje_id FROM g_viaje_vehiculos WHERE vehiculo_id=?) ORDER BY COALESCE(t.fecha_inicio,t.created_at), t.id`).bind(id),
     env.DB.prepare(`SELECT f.id,f.numero,f.tipo,f.estado,f.origen,f.total,f.moneda,f.fecha_emision,f.contraparte_nombre,f.compra_id,f.vehiculo_id,f.iva,f.tratamiento_fiscal,f.lineas_json,(SELECT COUNT(*) FROM g_documentos fd WHERE fd.tipo='factura' AND fd.objeto_id=f.id AND fd.clase='factura') AS originales_count FROM g_facturas f WHERE f.vehiculo_id=? OR f.compra_id IN (SELECT id FROM g_compras WHERE vehiculo_id=? OR (vehiculo_id IS NULL AND viaje_id IN (SELECT viaje_id FROM g_viaje_vehiculos WHERE vehiculo_id=?))) ORDER BY COALESCE(f.fecha_emision,f.created_at), f.id`).bind(id,id,id),
     env.DB.prepare(`SELECT m.id,m.tipo,m.fecha,m.moneda,m.importe,m.signo,m.nota,m.cuenta_id,cu.nombre AS cuenta_nombre,m.origen_tipo,m.naturaleza FROM fin_movimientos m LEFT JOIN g_cuentas cu ON cu.id=m.cuenta_id WHERE m.vehiculo_id=? ORDER BY m.fecha, m.created_at, m.id`).bind(id),
-    env.DB.prepare(`SELECT d.id,d.tipo,d.objeto_id,d.clase,d.nombre,d.mime,d.bytes,d.vence,d.created_at FROM g_documentos d
+    env.DB.prepare(`SELECT d.* FROM g_documentos d
       WHERE (d.tipo='vehiculo' AND d.objeto_id=?) OR (d.tipo='compra' AND d.objeto_id IN (SELECT id FROM g_compras WHERE vehiculo_id=? OR (vehiculo_id IS NULL AND viaje_id IN (SELECT viaje_id FROM g_viaje_vehiculos WHERE vehiculo_id=?))))
          OR (d.tipo='factura' AND d.objeto_id IN (SELECT id FROM g_facturas WHERE vehiculo_id=?)) ORDER BY d.created_at, d.id`).bind(id, id, id, id),
     env.DB.prepare('SELECT id,nombre FROM g_prestamos WHERE id=?').bind(row.prestamo_id || ''),
@@ -234,7 +246,7 @@ vehiculos.get(`${BASE}/vehiculos/:id/resumen`, async (c) => {
     ...movs.map((m) => ({ fecha: m.fecha, clase: m.tipo === 'ingreso' ? 'cobro' : 'gasto', titulo: m.nota || (m.tipo === 'ingreso' ? 'Cobro' : 'Gasto'), detalle: m.cuenta_id ? 'en cuenta' : 'sin cuenta · pendiente de conciliar', importe: m.importe * m.signo, ref: { tipo: 'movimiento', id: m.id } })),
   ].sort((a, b) => String(a.fecha || '9999').localeCompare(String(b.fecha || '9999')) || a.clase.localeCompare(b.clase));
   return json({ vehiculo: v, prestamo: prestamo.results[0] || null, compras: compras.results.map(compraItem), viajes, facturas: facturasVehiculo, costes, pagos:pagosDetalle, cobros, gastos_manuales: movs.filter((m) => m.tipo === 'gasto'),
-    documentos: documentos.results, por_categoria: porCategoria(activas), totales, cronologia }, 200, NO_STORE);
+    documentos: documentos.results.map(documentoItem), por_categoria: porCategoria(activas), totales, cronologia }, 200, NO_STORE);
 });
 // Cobro de la venta: UNA entrada operativa con vehiculo_id, idempotente y auditada.
 // Sin cuenta queda como cobro pendiente de conciliar; con cuenta, en su moneda.

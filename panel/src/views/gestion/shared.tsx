@@ -16,7 +16,7 @@ export interface Entidad { id:string;nombre:string;tipo:string;nif:string|null;d
 export interface Cuenta { id:string;nombre:string;moneda:Moneda;entidad_id:string|null;saldo_inicial:number;fecha_saldo:string|null;conciliada:number;version:number }
 export interface EventoCompra { id:string;name:string;tenant_id?:string;tenant_name?:string;starts_at?:string|null }
 export interface PlanPago { fecha:string;importe:number }
-export interface VehiculoCat { id:string;referencia:string;tipo:string;marca:string|null;modelo:string|null;estado:string;moneda:Moneda }
+export interface VehiculoCat { id:string;referencia:string;tipo:string;marca:string|null;modelo:string|null;matricula?:string|null;estado:string;moneda:Moneda }
 export interface ViajeCat { id:string;nombre:string;estado:string;moneda:Moneda;reparto:string }
 export interface Catalogos { eventos?:EventoCompra[];entidades:Entidad[];cuentas:Cuenta[];socios:{email:string;nombre:string}[];negocios:Negocio[];vehiculos?:VehiculoCat[];viajes?:ViajeCat[];categorias_vehiculo?:string[] }
 export const tiposVehiculo:Record<string,string>={coche:'Coche',camioneta:'Camioneta',furgoneta:'Furgoneta',moto:'Moto',otro:'Otro'};
@@ -54,7 +54,7 @@ export function datosCosteVehiculo(d:FormData){
  return {categoria,nota:(subtype&&subtype.id!==subtype.categoria?`[Subtipo vehículo: ${subtype.id}]\n`:'')+nota||null};
 }
 
-export const vehiculoNombre=(v?:{referencia:string;marca?:string|null;modelo?:string|null}|null)=>v?`${v.referencia}${v.marca||v.modelo?` · ${[v.marca,v.modelo].filter(Boolean).join(' ')}`:''}`:'';
+export const vehiculoNombre=(v?:{referencia:string;marca?:string|null;modelo?:string|null;matricula?:string|null}|null)=>v?[v.matricula,v.referencia,[v.marca,v.modelo].filter(Boolean).join(' ')].filter(Boolean).join(' · '):'';
 export const fecha=(d?:string|null)=>d?d.split('-').reverse().join('/'):'Por confirmar';
 export interface Prestamo { id:string;nombre:string;cuenta_id:string;principal:number;apertura:number;cuota:number;tin_bp:number;tae_bp:number;meses:number;reserva_cuotas:number;fecha_abono:string|null;primer_vencimiento:string|null;condiciones:{concepto:string;valor:string;fuente:string}[];version:number }
 export interface Cuota { numero:number;fecha:string|null;cuota:number;interes:number;capital:number;saldo:number;pagado:number;capital_pagado:number;estado:string }

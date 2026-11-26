@@ -1,15 +1,18 @@
 // Control económico por vehículo y por viaje (negocio Coches). Todo lo que se ve
 // aquí son registros ya existentes (compras, pagos, facturas, cobros, documentos)
 // relacionados por vehículo o viaje. Enlazar e imputar no mueve dinero.
+import { VehiculoConductores } from './VehiculoConductores';
+import { ExpedienteVehiculo } from './ExpedienteVehiculo';
+import { coincideVehiculo, type MatriculaDatos } from './vehiculos-expediente';
 import { MOBILE_PREVIEW } from '../../mobilePreview';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Link, useSearchParams } from 'react-router';
 import { api } from '../../api/client';
 import type { FinConceptos } from '../../api/types';
 import { Card, Notice, Money, ErrorBox, FormModal, Modal, Documentos, GestionGate, useGestion, useGuardar, amount, str, opt, options, hoy, fecha, tiposVehiculo, estadosVehiculo, estadosViaje, categoriasVehiculo, gruposCosteVehiculo, clasificarCosteVehiculo, vehiculoNombre, claseDocumentoLabel, type Catalogos, type Compra, type Moneda, type Prestamo, type Documento } from './shared';
 
-export interface Vehiculo { id:string;referencia:string;tipo:string;marca:string|null;modelo:string|null;matricula:string|null;vin:string|null;moneda:Moneda;estado:string;fecha_compra:string|null;fecha_venta:string|null;precio_venta:number|null;prestamo_id:string|null;entidad_id:string|null;nota:string|null;version:number;compras_count:number;viajes_count:number;documentos_count:number;coste_directo:number;pagado_directo:number;pendiente_directo:number }
+export interface Vehiculo extends MatriculaDatos { id:string;referencia:string;tipo:string;marca:string|null;modelo:string|null;matricula:string|null;vin:string|null;moneda:Moneda;estado:string;fecha_compra:string|null;fecha_venta:string|null;precio_venta:number|null;prestamo_id:string|null;entidad_id:string|null;nota:string|null;version:number;compras_count:number;viajes_count:number;documentos_count:number;coste_directo:number;pagado_directo:number;pendiente_directo:number }
 export interface Viaje { id:string;nombre:string;moneda:Moneda;fecha_inicio:string|null;fecha_fin:string|null;estado:string;reparto:'igual'|'manual';nota:string|null;version:number;vehiculos_count:number;documentos_count:number;coste_conjunto:number;coste_directo:number;coste_total:number;pagado:number;pendiente:number;parte_conjunta:number|null;vehiculos?:{vehiculo_id:string;referencia:string}[] }
 interface Participante { vehiculo_id:string;peso_bp:number;referencia:string;tipo:string;marca:string|null;modelo:string|null;estado:string;parte_conjunta:number;parte_conjunta_pagada:number;directo:number;directo_pagado:number;total:number;total_pagado:number }
 interface Totales { precio_compra:number;precio_compra_confirmado:boolean;otros_costes_directos:number;coste_directo:number;pagado_directo:number;pendiente_directo:number;imputado_viajes:number;imputado_viajes_pagado:number;gastos_manuales:number;coste_total:number;invertido_confirmado:number;pendiente_pago:number;precio_venta:number|null;facturado_venta:number;venta:number|null;cobrado:number;cobrado_en_cuenta:number;cobrado_pendiente_conciliar:number;pendiente_cobro:number|null;margen_estimado:number|null;margen_sin_viajes:number|null;margen_confirmado:number }
@@ -31,15 +34,18 @@ export function Vehiculos(){
 }
 
 function VehiculosPanel({abierto,abrir}:{abierto:string|null;abrir:(id:string|null)=>void}){
- const list=useGestion<{items:Vehiculo[];mas?:boolean}>('vehiculos'),cat=useGestion<Catalogos>('catalogos');
- const [creating,setCreating]=useState(false),[estado,setEstado]=useState('todos'),[tipo,setTipo]=useState('todos');
- const all=list.data?.items||[];const rows=all.filter(v=>(estado==='todos'||v.estado===estado)&&(tipo==='todos'||v.tipo===tipo));
+ const [creating,setCreating]=useState(false),[estado,setEstado]=useState('todos'),[tipo,setTipo]=useState('todos'),[busqueda,setBusqueda]=useState(''),[consulta,setConsulta]=useState('');
+ useEffect(()=>{const timer=setTimeout(()=>setConsulta(busqueda.trim()),250);return()=>clearTimeout(timer);},[busqueda]);
+ const list=useGestion<{items:Vehiculo[];mas?:boolean}>(consulta?`vehiculos?q=${encodeURIComponent(consulta)}`:'vehiculos'),cat=useGestion<Catalogos>('catalogos');
+ const all=list.data?.items||[];const rows=all.filter(v=>(estado==='todos'||v.estado===estado)&&(tipo==='todos'||v.tipo===tipo)&&coincideVehiculo(v,busqueda));
  const vivos=all.filter(v=>v.estado!=='cancelado');
  return <>
   <div className="g-metrics"><div><strong>{vivos.length}</strong><span>vehículos</span></div><div><strong>{vivos.filter(v=>v.estado==='vendido').length}</strong><span>vendidos</span></div><div><strong><Money value={vivos.filter(v=>v.moneda==='EUR').reduce((s,v)=>s+v.pagado_directo,0)}/></strong><span>pagado en gastos directos · EUR</span></div><div><strong><Money value={vivos.filter(v=>v.moneda==='EUR').reduce((s,v)=>s+v.pendiente_directo,0)}/></strong><span>sin pago registrado · EUR</span></div></div>
   <Card title="Listado de vehículos" action={<div className="g-inline"><label>Estado<select value={estado} onChange={e=>setEstado(e.target.value)}><option value="todos">Todos</option>{Object.entries(estadosVehiculo).map(([k,l])=><option value={k} key={k}>{l}</option>)}</select></label><label>Tipo<select value={tipo} onChange={e=>setTipo(e.target.value)}><option value="todos">Todos</option>{Object.entries(tiposVehiculo).map(([k,l])=><option value={k} key={k}>{l}</option>)}</select></label>{!MOBILE_PREVIEW?<button className="btn" onClick={()=>setCreating(true)}>Añadir vehículo</button>:null}</div>}>
+   <label className="ve-search">Buscar por matrícula actual o anterior, marca, modelo o referencia<input type="search" value={busqueda} onChange={e=>setBusqueda(e.target.value)} placeholder="Matrícula, marca o modelo"/></label>
    <ErrorBox error={list.error||cat.error}/>
-   {list.isPending?<p role="status">Cargando vehículos…</p>:rows.length?<div className="g-table"><table><thead><tr><th>Vehículo</th><th>Tipo</th><th>Estado</th><th>Gastos directos</th><th>Pagado</th><th>Por conciliar</th><th>Viajes</th></tr></thead><tbody>{rows.map(v=><tr key={v.id}><td><button type="button" className="g-row-button" onClick={()=>abrir(v.id)}><strong>{v.referencia}</strong><small>{[v.marca,v.modelo,v.matricula].filter(Boolean).join(' · ')||'Sin datos'}</small></button></td><td>{tiposVehiculo[v.tipo]||v.tipo}</td><td>{estadosVehiculo[v.estado]||v.estado}</td><td><Money value={v.coste_directo} moneda={v.moneda}/></td><td><Money value={v.pagado_directo} moneda={v.moneda}/></td><td><Money value={v.pendiente_directo} moneda={v.moneda}/></td><td>{v.viajes_count}</td></tr>)}</tbody></table></div>:<p className="g-empty">Todavía no hay vehículos. Crea la ficha de cada uno y luego relaciona sus compras, viajes, facturas y cobros.</p>}
+   {list.isPending?<p role="status">Cargando vehículos…</p>:rows.length?<div className="g-table"><table><thead><tr><th>Vehículo</th><th>Tipo</th><th>Estado</th><th>Gastos directos</th><th>Pagado</th><th>Por conciliar</th><th>Viajes</th></tr></thead><tbody>{rows.map(v=><tr key={v.id}><td><button type="button" className="g-row-button" onClick={()=>abrir(v.id)}><strong>{v.matricula||v.referencia}</strong><small>{[v.referencia,v.marca,v.modelo].filter(Boolean).join(' · ')||'Sin datos'}</small></button></td><td>{tiposVehiculo[v.tipo]||v.tipo}</td><td>{estadosVehiculo[v.estado]||v.estado}</td><td><Money value={v.coste_directo} moneda={v.moneda}/></td><td><Money value={v.pagado_directo} moneda={v.moneda}/></td><td><Money value={v.pendiente_directo} moneda={v.moneda}/></td><td>{v.viajes_count}</td></tr>)}</tbody></table></div>:<p className="g-empty">{all.length?'No hay vehículos que coincidan con la búsqueda y los filtros.':'Todavía no hay vehículos. Crea la ficha de cada uno y luego relaciona sus compras, viajes, facturas y cobros.'}</p>}
+   {list.data?.mas?<Notice>El listado tiene más resultados. Afina la búsqueda por matrícula o referencia para encontrar el vehículo.</Notice>:null}
    <Notice>La parte de los gastos de viaje no aparece en este listado: se calcula en la ficha de cada vehículo según los vehículos de cada viaje.</Notice>
   </Card>
   {creating?<VehicleForm cat={cat.data} close={()=>setCreating(false)} saved={id=>{setCreating(false);abrir(id);}}/>:null}
@@ -53,15 +59,15 @@ function VehicleForm({item,cat,close,saved}:{item?:Vehiculo;cat?:Catalogos;close
   {name:'referencia',label:'Referencia (cómo lo llamáis)',value:item?.referencia,required:true,help:'Única y fácil de reconocer. Ej.: Camioneta azul 2024.'},
   {name:'tipo',label:'Tipo',value:item?.tipo||'camioneta',options:Object.entries(tiposVehiculo).map(([value,label])=>({value,label}))},
   {name:'marca',label:'Marca',value:item?.marca},{name:'modelo',label:'Modelo',value:item?.modelo},
-  {name:'matricula',label:'Matrícula o placas (si ya existe)',value:item?.matricula},{name:'vin',label:'Bastidor / VIN (opcional)',value:item?.vin},
+  {name:'matricula',label:'Matrícula o placas (si ya existe)',value:item?.matricula},{name:'matricula_tipo',label:'Tipo de matrícula confirmado',value:item?.matricula_tipo||'desconocida',options:[{value:'desconocida',label:'Por confirmar'},{value:'provisional',label:'Provisional'},{value:'definitiva',label:'Definitiva'}],help:'No se deduce del número o del color de la placa.'},{name:'matricula_pais',label:'País de la matrícula (código ISO de 2 letras)',value:item?.matricula_pais,help:'Ej.: ES o DE. Déjalo vacío si no está confirmado.'},{name:'vin',label:'Bastidor / VIN (opcional)',value:item?.vin},
   ...(item?[{name:'estado',label:'Estado',value:item.estado,options:Object.entries(estadosVehiculo).map(([value,label])=>({value,label}))}]:[{name:'moneda',label:'Moneda de sus operaciones',value:'EUR',options:[{value:'EUR',label:'EUR'},{value:'COP',label:'COP'}]}]),
   {name:'prestamo_id',label:'Origen principal de los fondos',value:item?.prestamo_id,options:options(loans.data?.items||[],'Sin préstamo asignado')},
   {name:'fecha_compra',label:'Fecha de compra',type:'date',value:item?.fecha_compra},{name:'fecha_venta',label:'Fecha de venta',type:'date',value:item?.fecha_venta},
   {name:'precio_venta',label:`Precio de venta acordado (${moneda})`,value:item?.precio_venta!=null?item.precio_venta/(moneda==='EUR'?100:1):'',help:'Solo el precio acordado. El cobro real se registra aparte.'},
   {name:'nota',label:'Notas',type:'textarea',value:item?.nota},
  ]} submit={async(d,id)=>{
-  const precio=str(d,'precio_venta');
-  const body={referencia:str(d,'referencia'),tipo:str(d,'tipo'),marca:opt(d,'marca'),modelo:opt(d,'modelo'),matricula:opt(d,'matricula'),vin:opt(d,'vin'),prestamo_id:opt(d,'prestamo_id'),fecha_compra:opt(d,'fecha_compra'),fecha_venta:opt(d,'fecha_venta'),precio_venta:precio?amount(d,'precio_venta',moneda):null,nota:opt(d,'nota')};
+  const precio=str(d,'precio_venta');if(str(d,'matricula_pais')&&!/^[a-z]{2}$/i.test(str(d,'matricula_pais')))throw new Error('Indica el país con dos letras o déjalo vacío.');
+  const body={referencia:str(d,'referencia'),tipo:str(d,'tipo'),marca:opt(d,'marca'),modelo:opt(d,'modelo'),matricula:opt(d,'matricula'),matricula_tipo:str(d,'matricula_tipo'),matricula_pais:opt(d,'matricula_pais')?.toUpperCase()||null,vin:opt(d,'vin'),prestamo_id:opt(d,'prestamo_id'),fecha_compra:opt(d,'fecha_compra'),fecha_venta:opt(d,'fecha_venta'),precio_venta:precio?amount(d,'precio_venta',moneda):null,nota:opt(d,'nota')};
   if(item){await save.mutateAsync({path:`vehiculos/${item.id}`,method:'PATCH',body:{version:item.version,estado:str(d,'estado'),...body}});saved(item.id);}
   else{await save.mutateAsync({path:'vehiculos',body:{id,moneda:str(d,'moneda'),...body}});saved(id);}
  }}><Notice>La ficha no registra compras ni pagos. Después relaciona desde Compras su adquisición, reparaciones y viajes, y desde aquí el cobro de la venta.</Notice>{!cat?.cuentas.length?null:null}</FormModal>;
@@ -80,7 +86,10 @@ function CobroForm({v,cat,close}:{v:Vehiculo;cat?:Catalogos;close:()=>void}){
 function VehicleDetail({id,cat,close}:{id:string;cat?:Catalogos;close:()=>void}){
  const query=useGestion<ResumenVehiculo>(`vehiculos/${encodeURIComponent(id)}/resumen`);const [action,setAction]=useState<'editar'|'cobro'|null>(null);
  const r=query.data;const v=r?.vehiculo;const t=r?.totales;const m=v?.moneda||'EUR';
- return <Modal key={id} title={v?`${v.referencia} · ${tiposVehiculo[v.tipo]||v.tipo}`:'Ficha del vehículo'} close={close}><ErrorBox error={query.error}/>{query.isPending?<p role="status">Cargando ficha…</p>:r&&v&&t?<>
+ return <Modal key={id} title="Carpeta del vehículo" close={close}><ErrorBox error={query.error}/>{query.isPending?<p role="status">Cargando ficha…</p>:r&&v&&t?<div className="vehiculo-expediente">
+  <ExpedienteVehiculo vehiculo={v} editar={()=>setAction('editar')}/>
+  <VehiculoConductores id={v.id}/>
+  <details className="ve-finances"><summary><span>Costes y operaciones del vehículo</span><span>Total registrado: <Money value={t.coste_total} moneda={m}/></span></summary>
   <dl className="g-definition"><div><dt>Datos</dt><dd>{[v.marca,v.modelo].filter(Boolean).join(' ')||'Sin marca'} · {v.matricula||'sin matrícula'}{v.vin?` · ${v.vin}`:''}</dd></div><div><dt>Estado</dt><dd>{estadosVehiculo[v.estado]||v.estado}</dd></div><div><dt>Compra / venta</dt><dd>{fecha(v.fecha_compra)} / {fecha(v.fecha_venta)}</dd></div><div><dt>Fondos</dt><dd>{r.prestamo?`Préstamo ${r.prestamo.nombre} (financiación, no es coste ni venta)`:'Sin préstamo asignado'}</dd></div></dl>
   <div className="g-metrics"><div><strong><Money value={t.precio_compra} moneda={m}/></strong><span>{t.precio_compra_confirmado?'precio de compra':'compra prevista (sin confirmar)'}</span></div><div><strong><Money value={t.otros_costes_directos} moneda={m}/></strong><span>otros gastos propios</span></div><div><strong><Money value={t.imputado_viajes} moneda={m}/></strong><span>su parte de los viajes</span></div><div><strong><Money value={t.coste_total} moneda={m}/></strong><span>coste total (estimación)</span></div></div>
   <VehicleCosts r={r} moneda={m}/>
@@ -93,10 +102,10 @@ function VehicleDetail({id,cat,close}:{id:string;cat?:Catalogos;close:()=>void})
   {r.por_categoria.length?<Card title="Gastos propios por tipo"><div className="g-chart">{r.por_categoria.map(c=><div className="g-chart-row" key={c.categoria}><span>{categoriasVehiculo[c.categoria]||c.categoria}</span><meter min="0" max={Math.max(1,t.coste_directo)} value={c.importe} aria-label={categoriasVehiculo[c.categoria]||c.categoria}/><Money value={c.importe} moneda={m}/></div>)}</div></Card>:null}
   <Card title="Cronología"><div className="g-table"><table><thead><tr><th>Fecha</th><th>Qué</th><th>Importe</th></tr></thead><tbody>{r.cronologia.length?r.cronologia.map((e,i)=><tr key={i}><td>{fecha(e.fecha)}</td><td><strong>{claseCrono[e.clase]||e.clase}: {e.titulo}</strong><small>{e.detalle}</small></td><td><Money value={e.importe} moneda={m}/></td></tr>):<tr><td colSpan={3}><p className="g-empty">Aún no hay operaciones relacionadas con este vehículo.</p></td></tr>}</tbody></table></div><Notice>Cada línea es un registro original de Compras, Facturación o Finanzas. Para corregirlo, hazlo desde su origen; aquí no se duplica.</Notice></Card>
   {r.facturas.length?<Card title="Facturas relacionadas"><div className="g-table"><table><thead><tr><th>Factura</th><th>Tipo</th><th>Estado</th><th>Importe</th></tr></thead><tbody>{r.facturas.map(f=><tr key={f.id}><td><Link to={`/facturacion?factura=${f.id}`}>{f.numero||'Sin número'}</Link><small>{f.contraparte_nombre||''}</small></td><td>{f.tipo==='emitida'?'Venta':'Recibida'}</td><td>{f.estado}</td><td><Money value={f.total} moneda={m}/></td></tr>)}</tbody></table></div></Card>:null}
-  <Documentos tipo="vehiculo" objetoId={v.id}/>
   {r.documentos.some(d=>d.tipo!=='vehiculo')?<Card title="Documentos de sus compras y facturas"><div className="g-table"><table><thead><tr><th>Documento</th><th>Tipo</th><th>Origen</th></tr></thead><tbody>{r.documentos.filter(d=>d.tipo!=='vehiculo').map(d=><tr key={d.id}><td><strong>{d.nombre}</strong></td><td>{claseDocumentoLabel(d.clase)}</td><td>{d.tipo==='compra'?<Link to={`/compras?vehiculo=${v.id}`}>Compra</Link>:<Link to={`/facturacion?factura=${d.objeto_id}`}>Factura</Link>}</td></tr>)}</tbody></table></div></Card>:null}
+  </details>
   {action==='editar'?<VehicleForm item={v} cat={cat} close={()=>setAction(null)} saved={()=>setAction(null)}/>:action==='cobro'?<CobroForm v={v} cat={cat} close={()=>setAction(null)}/>:null}
- </>:null}</Modal>;
+ </div>:null}</Modal>;
 }
 
 function enlaceGasto(c:CosteVehiculo,tarea?:string){return `/compras?compra=${encodeURIComponent(c.id)}${tarea?`&tarea=${tarea}`:''}`;}

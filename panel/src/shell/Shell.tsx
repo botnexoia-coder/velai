@@ -187,6 +187,7 @@ export function Shell() {
               <Tab to="/credito" label="Créditos recibidos" icon={<IcoDashboard />} />
               <Tab to="/compras" label="Compras" icon={<IcoBriefcase />} />
               <Tab to="/vehiculos" label="Vehículos y viajes" icon={<IcoBriefcase />} />
+              {!MOBILE_PREVIEW ? <Tab to="/conductores" label="Conductores" icon={<IcoLeads />} /> : null}
               <Tab to="/facturacion" label="Facturación" icon={<IcoTemplate />} />
               <Tab to="/impuestos" label="Impuestos y asesoría" icon={<IcoSliders />} />
             </nav>
