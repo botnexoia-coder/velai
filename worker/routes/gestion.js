@@ -17,9 +17,11 @@ import {
 
 import { equipoPrestamos } from '../prestamos-equipo.js';
 import { vehiculos } from '../vehiculos.js';
+import { retiros } from '../retiros.js';
 export const gestion = new Hono();
 gestion.route('/',equipoPrestamos);
 gestion.route('/', vehiculos);
+gestion.route('/', retiros);
 const BASE = '/api/admin/gestion';
 
 // La puerta, idéntica en todos los handlers: 403 sin una sola consulta.

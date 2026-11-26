@@ -12,6 +12,7 @@ import { finDinero, finImporte } from '../lib/format';
 import { Documentos } from './gestion/shared';
 import { DashboardFinanzas } from './gestion/DashboardFinanzas';
 import { PrestamosEquipo } from './gestion/PrestamosEquipo';
+import { ConciliacionRetiros } from './gestion/ConciliacionRetiros';
 import './gestion/finanzas-hub.css';
 
 const TIPOS: FinTipo[] = ['ingreso', 'gasto', 'egreso'];
@@ -86,10 +87,10 @@ export function Finanzas() {
 }
 function FinanzasSocio() {
   const [params, setParams] = useSearchParams();
-  const tabs: Record<string,string> = {dashboard:'Dashboard',ingresos:'Ingresos',gastos:'Gastos',prestamos:'Préstamos al equipo',movimientos:'Todos los movimientos',traspasos:'Traspasos',repartos:'Repartos',recurrentes:'Recurrentes',conceptos:'Conceptos',socios:'Socios'};
+  const tabs: Record<string,string> = {dashboard:'Dashboard',ingresos:'Ingresos',gastos:'Gastos',prestamos:'Préstamos al equipo',movimientos:'Todos los movimientos',traspasos:'Traspasos',retiros:'Conciliación de retiros',repartos:'Repartos',recurrentes:'Recurrentes',conceptos:'Conceptos',socios:'Socios'};
   const tab = Object.hasOwn(tabs,params.get('tab')||'') ? params.get('tab')! : 'dashboard';
   const listado = ['movimientos','ingresos','gastos'].includes(tab);
-  const texts:Record<string,string>={dashboard:'Visión de caja, reservas, compromisos y próximos vencimientos.',ingresos:'Cobros registrados. La financiación y las devoluciones de principal no son ventas.',gastos:'Gastos operativos y costes financieros. Los préstamos al equipo no son gasto operativo.',prestamos:'Velai presta a sus integrantes: hasta 500 € pendientes por persona, según liquidez.'};
+  const texts:Record<string,string>={dashboard:'Visión de caja, reservas, compromisos y próximos vencimientos.',ingresos:'Cobros registrados. La financiación y las devoluciones de principal no son ventas.',gastos:'Gastos operativos y costes financieros. Los préstamos al equipo no son gasto operativo.',prestamos:'Velai presta a sus integrantes: hasta 500 € pendientes por persona, según liquidez.',retiros:'Salidas del banco, efectivo real y usos de cada retiro. Es un control aparte: no crea ni cambia movimientos.'};
   const [p, setP] = useState('mes');
   const [custom, setCustom] = useState<FinFilters>(periodo('mes'));
   const dates = p === 'personalizado' ? custom : periodo(p);
@@ -119,7 +120,7 @@ function FinanzasSocio() {
       <p className="muted">Un gasto pagado con crédito sigue siendo gasto; el préstamo financia la caja. El resultado del libro no incluye compras, amortizaciones ni operaciones todavía sin registrar. Consulta <Link to="/credito?vista=destino">Fondos del proyecto</Link> para ver cuentas, reservas y compromisos.</p>
       <Movimientos filters={filters} />
       {resumen.data ? <details className="fin-breakdown"><summary>Desglose por concepto · periodo y filtros seleccionados</summary><div className="fin-table"><table><thead><tr><th>Concepto</th><th>Tipo</th><th>Moneda</th><th>Importe</th></tr></thead><tbody>{resumen.data.conceptos.map((r) => <tr key={`${r.concepto_id}-${r.moneda}-${r.naturaleza||'operativo'}`}><td>{r.nombre}</td><td><TipoPill tipo={r.tipo} naturaleza={r.naturaleza} /></td><td>{r.moneda}</td><td><Dinero value={r.importe} moneda={r.moneda} /></td></tr>)}</tbody></table></div>{!resumen.data.conceptos.length ? <p className="empty">No hay movimientos en este periodo.</p> : null}</details> : null}
-    </> : tab === 'traspasos' ? <Traspasos /> : tab === 'repartos' ? <Repartos /> : tab === 'recurrentes' ? <Recurrentes /> : tab === 'socios' ? <Socios /> : <Conceptos />}
+    </> : tab === 'traspasos' ? <Traspasos /> : tab === 'retiros' ? <ConciliacionRetiros /> : tab === 'repartos' ? <Repartos /> : tab === 'recurrentes' ? <Recurrentes /> : tab === 'socios' ? <Socios /> : <Conceptos />}
   </div>;
 }
 function FiltrosFin({ f, setF, tipoFijo=false }: {f:FinFilters;setF:(next:FinFilters)=>void;tipoFijo?:boolean}) {
