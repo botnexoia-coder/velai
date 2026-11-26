@@ -34,7 +34,7 @@ function mount(path='/finanzas?tab=prestamos',email='uno@velai.test',item:Presta
 afterEach(()=>vi.unstubAllGlobals());
 it('abre Finanzas en dashboard y conserva las modalidades separadas',async()=>{
  mount('/finanzas');
- expect(await screen.findByRole('heading',{name:'Dinero en cuentas'})).toBeInTheDocument();
+ expect(await screen.findByRole('heading',{name:'Saldo contable total'})).toBeInTheDocument();
  expect(screen.getByRole('link',{name:/Créditos recibidos/})).toHaveAttribute('href','/credito');
  await screen.findByText('Las obligaciones registradas mantienen cobertura con el saldo actual.');
  expect(screen.queryByRole('button',{name:'Registrar movimiento'})).not.toBeInTheDocument();
