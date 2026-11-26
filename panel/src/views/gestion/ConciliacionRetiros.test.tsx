@@ -96,8 +96,8 @@ it('crea un lote con id propio y sin tocar otros endpoints', async () => {
   await waitFor(() => expect(calls.find((c) => c.method === 'POST')?.body).toMatchObject({ nombre: 'Lote ficticio nuevo', moneda: 'EUR', nota: null }));
   const escrituras = calls.filter((c) => c.method !== 'GET');
   expect(escrituras).toHaveLength(1);
-  expect(escrituras[0].url.pathname).toBe('/api/admin/gestion/retiros');
-  expect(typeof escrituras[0].body?.id).toBe('string');
+  expect(escrituras[0]!.url.pathname).toBe('/api/admin/gestion/retiros');
+  expect(typeof escrituras[0]!.body?.id).toBe('string');
 });
 
 it('declara un uso sin fecha ni compra: se envía como declaración y no crea pagos ni movimientos', async () => {

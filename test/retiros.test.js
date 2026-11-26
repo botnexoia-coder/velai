@@ -353,3 +353,21 @@ test('candidatos: solo traspasos y salidas sin enlazar, sin anulados; pagos con 
   assert.deepEqual(c.traspasos.map((x) => x.id), [libre]);
   assert.equal(c.pagos.find((p) => p.id === pago).disponible, 60 * EUR);
 });
+
+
+test('una salida enlazada que cambia a ingreso deja de contar como fuente y mantiene la alerta', async (t) => {
+  const f = await fixture(t);
+  const mid = await f.movimiento('egreso', 8000);
+  const lote = (await f.crearLote()).item;
+  await f.fuente(lote.id, 'movimiento', mid, { clasificacion: 'cajero_verificado', evidencia: 'extracto', comision: 0, coste_estado: 'confirmado' });
+  assert.equal((await f.detalle(lote.id)).totales.efectivo_confirmado, 8000);
+  await f.run("INSERT INTO fin_conceptos (tipo,nombre,position,created_by,created_at) VALUES ('ingreso','Cambio ficticio',99,'qa','2026-11-01')");
+  const concepto = await f.DB.prepare("SELECT id FROM fin_conceptos WHERE nombre='Cambio ficticio'").first();
+  await f.run("UPDATE fin_movimientos SET tipo='ingreso',concepto_id=? WHERE id=?", concepto.id, mid);
+  const d = await f.detalle(lote.id);
+  assert.equal(d.totales.total_salidas, 0);
+  assert.equal(d.totales.efectivo_confirmado, 0);
+  assert.equal(d.fuentes.length, 1);
+  assert.ok(f.codigos(d).includes('fuentes_anuladas'));
+  assert.equal(d.estado, 'abierta');
+});

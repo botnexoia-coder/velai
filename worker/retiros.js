@@ -148,7 +148,7 @@ async function origenVivo(env, f) {
     CASE WHEN m.origen_tipo IN ${PAGOS_REVERTIBLES} THEN (SELECT p.estado FROM g_pagos p WHERE p.id=m.origen_id) END AS pago_estado
     FROM fin_movimientos m LEFT JOIN g_cuentas cu ON cu.id=m.cuenta_id WHERE m.id=?`).bind(f.origen_id).first();
   if (!m) return { estado: 'no_encontrado' };
-  const estado = m.signo !== 1 || m.pago_estado === 'revertido' ? 'anulado' : m.importe !== f.importe || m.moneda !== f.moneda ? 'corregido' : 'activo';
+  const estado = m.signo !== 1 || m.tipo === 'ingreso' || m.pago_estado === 'revertido' ? 'anulado' : m.importe !== f.importe || m.moneda !== f.moneda ? 'corregido' : 'activo';
   return { estado, fecha: m.fecha, nota: m.nota, importe_actual: m.importe, tipo: m.tipo, cuenta_origen: m.cuenta, cuenta_destino: null, reverso_id: null };
 }
 const pagoVivo = (env, id) => env.DB.prepare(`SELECT p.id,p.fecha,p.importe,p.moneda,p.clase,p.estado,p.pagador,p.objeto_tipo,p.objeto_id,cu.nombre AS cuenta_nombre,c.concepto AS compra_concepto,
