@@ -71,7 +71,7 @@ function ErrorFin({ error }: { error: unknown }) { return error ? <p className="
 function TipoPill({ tipo, naturaleza }: { tipo: FinTipo; naturaleza?:FinNaturaleza }) { return <span className={`pill fin-${tipo}`}>{naturaleza === 'financiacion' ? 'Financiación' : naturaleza === 'reembolso_socio' ? 'Reembolso a socio' : naturaleza === 'financiero' ? 'Gasto financiero' : naturaleza === 'compra' ? 'Pago de compra' : LABEL[tipo]}</span>; }
 function importeFirmado(m:FinMovimiento) { return m.importe * (m.signo ?? 1); }
 function origenMovimiento(m:FinMovimiento) {
-  if(m.equipo_prestamo_id)return {ruta:'/finanzas?tab=prestamos',nombre:'Préstamos al equipo'};
+  if(m.equipo_prestamo_id)return {ruta:'/finanzas?tab=prestamos',nombre:m.nota?.startsWith('Registro histórico')?'Préstamos al equipo · histórico pendiente de ratificación':'Préstamos al equipo'};
   const credito=m.origen_tipo?.startsWith('prestamo_') || (m.origen_tipo==='reverso' && (m.naturaleza==='financiacion'||m.naturaleza==='financiero'));
   return credito ? {ruta:'/credito',nombre:'Crédito'} : {ruta:'/compras',nombre:'Compras'};
 }
@@ -90,7 +90,8 @@ function FinanzasSocio() {
   const tabs: Record<string,string> = {dashboard:'Dashboard',ingresos:'Ingresos',gastos:'Gastos',prestamos:'Préstamos al equipo',movimientos:'Todos los movimientos',traspasos:'Traspasos',retiros:'Conciliación de retiros',repartos:'Repartos',recurrentes:'Recurrentes',conceptos:'Conceptos',socios:'Socios'};
   const tab = Object.hasOwn(tabs,params.get('tab')||'') ? params.get('tab')! : 'dashboard';
   const listado = ['movimientos','ingresos','gastos'].includes(tab);
-  const texts:Record<string,string>={dashboard:'Visión de caja, reservas, compromisos y próximos vencimientos.',ingresos:'Cobros registrados. La financiación y las devoluciones de principal no son ventas.',gastos:'Gastos operativos y costes financieros. Los préstamos al equipo no son gasto operativo.',prestamos:'Velai presta a sus integrantes: hasta 500 € pendientes por persona, según liquidez.',retiros:'Salidas del banco, efectivo real y usos de cada retiro. Es un control aparte: no crea ni cambia movimientos.'};
+  const texts:Record<string,string>={dashboard:'Visión de caja, reservas, compromisos y próximos vencimientos.',ingresos:'Cobros registrados. La financiación y las devoluciones de principal no son ventas.',gastos:'Gastos operativos y costes financieros. Los préstamos al equipo no son gasto operativo.',prestamos:'Velai presta a sus integrantes: hasta 1.000 € pendientes por persona, según liquidez.',retiros:'Salidas del banco, efectivo real y usos de cada retiro. Es un control aparte: no crea ni cambia movimientos.'};
+
   const [p, setP] = useState('mes');
   const [custom, setCustom] = useState<FinFilters>(periodo('mes'));
   const dates = p === 'personalizado' ? custom : periodo(p);
