@@ -1,3 +1,5 @@
+import { conductores } from '../conductores.js';
+import { CATEGORIAS_DOCUMENTALES, datosExpediente } from '../expediente.js';
 // Administración financiera (docs/SPEC-ADMINISTRACION-FINANCIERA.md): entidades,
 // cuentas, préstamos, compras, resumen y documentos privados. Como en Finanzas, la
 // guarda esSocio vive en CADA handler antes de tocar D1 o R2, además de clienteGate.
@@ -21,6 +23,7 @@ import { retiros } from '../retiros.js';
 export const gestion = new Hono();
 gestion.route('/',equipoPrestamos);
 gestion.route('/', vehiculos);
+gestion.route('/', conductores);
 gestion.route('/', retiros);
 const BASE = '/api/admin/gestion';
 
@@ -75,7 +78,7 @@ gestion.get(`${BASE}/catalogos`, async (c) => {
     // Solo nombre y correo de los socios internos: no concede ni refleja accesos.
     env.DB.prepare('SELECT email,nombre FROM fin_socios WHERE activo=1 ORDER BY nombre COLLATE NOCASE, email'),
     env.DB.prepare('SELECT e.id,e.tenant_id,e.name,e.starts_at,e.status,t.name AS tenant_name FROM tenant_events e JOIN tenants t ON t.id=e.tenant_id ORDER BY e.starts_at DESC,e.name'),
-    env.DB.prepare('SELECT id,referencia,tipo,marca,modelo,estado,moneda FROM g_vehiculos ORDER BY referencia COLLATE NOCASE, id'),
+    env.DB.prepare('SELECT id,referencia,tipo,marca,modelo,matricula,matricula_tipo,matricula_pais,estado,moneda FROM g_vehiculos ORDER BY COALESCE(matricula,referencia) COLLATE NOCASE, referencia COLLATE NOCASE, id'),
     env.DB.prepare('SELECT id,nombre,estado,moneda,reparto FROM g_viajes ORDER BY COALESCE(fecha_inicio,created_at) DESC, id'),
   ]);
   return json({ entidades: entidades.results.map(entidadItem), cuentas: cuentas.results.map(cuentaItem), socios: socios.results, negocios: NEGOCIOS, eventos: eventos.results,
@@ -773,6 +776,7 @@ gestion.post(`${BASE}/documentos`, async (c) => {
   if (bytes.byteLength > DOC_MAX_BYTES) throw new HttpError(413, 'archivo_demasiado_grande');
   const formato = detectarDocumento(bytes);
   if (!formato) fail('formato_invalido');
+  if (d.clase === 'foto' && !formato.mime.startsWith('image/')) fail('foto_invalida');
   d.nombre = nombreSeguro(typeof form.get('nombre') === 'string' ? form.get('nombre') : archivo.name, formato.ext);
   if (!await objetoExiste(env, d.tipo, d.objeto_id)) throw new HttpError(404, 'not_found');
   d.sha256 = await sha256Hex(bytes);
@@ -821,6 +825,32 @@ gestion.post(`${BASE}/documentos`, async (c) => {
     throw new HttpError(503, 'documento_no_guardado');
   }
   return json({ item: documentoItem(await fila(env, 'g_documentos', d.id)) }, 201, NO_STORE);
+});
+gestion.patch(`${BASE}/documentos/:id`, async (c) => {
+  const { env, request, actor, now } = abrir(c);
+  const old = await fila(env,'g_documentos',idRuta(c));
+  if(old.tipo !== 'vehiculo' || !await objetoExiste(env,'vehiculo',old.objeto_id)) throw new HttpError(404,'not_found');
+  const b=await bodyOf(request);
+  soloCampos(b,['metadata_version','revision_confirmada','categoria_documental','estado_revision','fecha_inicio','vence','nota','kilometros']);
+  const version=entero(b.metadata_version,{min:1,code:'version_invalida'});
+  if(version!==old.metadata_version) throw new HttpError(409,'version_conflicto');
+  const n={ categoria_documental:b.categoria_documental===undefined ? old.categoria_documental : enumValor(b.categoria_documental,CATEGORIAS_DOCUMENTALES,'categoria_documental_invalida'), estado_revision:b.estado_revision===undefined ? old.estado_revision : enumValor(b.estado_revision,['pendiente','revisado','sustituido'],'estado_revision_invalido'), fecha_inicio:b.fecha_inicio===undefined ? old.fecha_inicio : fechaOpcional(b.fecha_inicio,fechaCivil,'fecha_inicio_invalida'), vence:b.vence===undefined ? old.vence : fechaOpcional(b.vence,fechaCivil,'vence_invalida'), nota:b.nota===undefined ? old.nota : texto(b.nota,2000,'nota_invalida',{opcional:true}), kilometros:b.kilometros===undefined ? old.kilometros : b.kilometros==null ? null : entero(b.kilometros,{max:10000000,code:'kilometros_invalidos'}) };
+  if(n.fecha_inicio && n.vence && n.fecha_inicio>n.vence) fail('fechas_incoherentes');
+  if(n.categoria_documental==='foto' && !old.mime.startsWith('image/')) fail('foto_invalida');
+  const invalidada=(n.categoria_documental!==datosExpediente(old).categoria_documental && n.categoria_documental!==old.categoria_documental) || ['fecha_inicio','vence'].some(k=>n[k]!==old[k]);
+  if(invalidada && n.estado_revision==='revisado') n.estado_revision='pendiente';
+  if(b.estado_revision==='revisado' && b.revision_confirmada!==true) fail('revision_no_confirmada');
+  const nuevaRevision=n.estado_revision==='revisado' && b.estado_revision==='revisado';
+  const revisadoPor=nuevaRevision ? actor : invalidada ? null : old.revisado_por;
+  const revisadoAt=nuevaRevision ? now : invalidada ? null : old.revisado_at;
+  const anteriorPor=invalidada ? old.revisado_por || old.ultima_revision_por : old.ultima_revision_por;
+  const anteriorAt=invalidada ? old.revisado_at || old.ultima_revision_at : old.ultima_revision_at;
+  const result=await env.DB.batch([
+    env.DB.prepare(`UPDATE g_documentos SET categoria_documental=?,estado_revision=?,fecha_inicio=?,vence=?,nota=?,kilometros=?,revisado_por=?,revisado_at=?,ultima_revision_por=?,ultima_revision_at=?,metadata_version=metadata_version+1 WHERE id=? AND metadata_version=? AND tipo='vehiculo'`).bind(n.categoria_documental,n.estado_revision,n.fecha_inicio,n.vence,n.nota,n.kilometros,revisadoPor,revisadoAt,anteriorPor,anteriorAt,old.id,version),
+    auditoria(env,{actor,accion:'documento_metadata',objeto_tipo:'vehiculo',objeto_id:old.objeto_id,detalle:{documento_id:old.id,de:{categoria_documental:old.categoria_documental,estado_revision:old.estado_revision,fecha_inicio:old.fecha_inicio,vence:old.vence,nota:old.nota,kilometros:old.kilometros},a:n},now,si:versionAplicada()}),
+  ]);
+  if(!result[0].meta.changes) throw new HttpError(409,'version_conflicto');
+  return json({item:documentoItem(await fila(env,'g_documentos',old.id))},200,NO_STORE);
 });
 gestion.get(`${BASE}/documentos/:id/archivo`, async (c) => {
   const { env, url } = abrir(c);

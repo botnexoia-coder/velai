@@ -1,3 +1,4 @@
+import { datosExpediente } from './expediente.js';
 // Administración financiera: reglas puras (calendario, importes, fechas, nombres de
 // archivo) y ayudas de persistencia compartidas por worker/routes/gestion.js y por el
 // futuro módulo fiscal. Sin red y sin estado de módulo: todo recibe env/DB.
@@ -249,12 +250,13 @@ export function imputarViaje(viaje, participantes, conjuntos) {
 export function vehiculoItem(row) {
   if (!row) return null;
   const coste_directo = row.coste_directo || 0, pagado_directo = row.pagado_directo || 0;
-  return { id: row.id, referencia: row.referencia, tipo: row.tipo, marca: row.marca, modelo: row.modelo, matricula: row.matricula, vin: row.vin, moneda: row.moneda, estado: row.estado,
+  return { id: row.id, referencia: row.referencia, tipo: row.tipo, marca: row.marca, modelo: row.modelo, matricula: row.matricula, matricula_tipo:row.matricula_tipo || 'desconocida', matricula_pais:row.matricula_pais || null, matriculas_anteriores:row.matriculas_anteriores_json ? JSON.parse(row.matriculas_anteriores_json) : [], vin: row.vin, moneda: row.moneda, estado: row.estado,
     fecha_compra: row.fecha_compra, fecha_venta: row.fecha_venta, precio_venta: row.precio_venta, prestamo_id: row.prestamo_id, entidad_id: row.entidad_id, nota: row.nota, version: row.version,
     compras_count: row.compras_count || 0, viajes_count: row.viajes_count || 0, documentos_count: row.documentos_count || 0,
     coste_directo, pagado_directo, pendiente_directo: Math.max(0, coste_directo - pagado_directo) };
 }
 export const SELECT_VEHICULO = `SELECT v.*,
+  (SELECT json_group_array(json_object('matricula',h.matricula,'matricula_tipo',h.matricula_tipo,'matricula_pais',h.matricula_pais,'changed_at',h.changed_at)) FROM (SELECT * FROM g_vehiculo_matriculas WHERE vehiculo_id=v.id ORDER BY changed_at,id) h) AS matriculas_anteriores_json,
   (SELECT COUNT(*) FROM g_compras c WHERE c.vehiculo_id=v.id AND c.estado<>'cancelada') AS compras_count,
   (SELECT COUNT(*) FROM g_viaje_vehiculos vv WHERE vv.vehiculo_id=v.id) AS viajes_count,
   (SELECT COUNT(*) FROM g_documentos d WHERE d.tipo='vehiculo' AND d.objeto_id=v.id) AS documentos_count,
@@ -295,7 +297,7 @@ export const DOC_HEADERS = { 'Cache-Control': 'no-store', 'X-Content-Type-Option
 export function documentoItem(row) {
   if (!row) return null;
   const { key, ...rest } = row;
-  return rest;
+  return row.tipo === 'vehiculo' ? { ...rest, ...datosExpediente(row) } : rest;
 }
 export const sha256Hex = async (bytes) => Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', bytes)), (x) => x.toString(16).padStart(2, '0')).join('');
 
