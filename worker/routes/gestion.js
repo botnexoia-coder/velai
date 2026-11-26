@@ -784,7 +784,8 @@ gestion.post(`${BASE}/documentos`, async (c) => {
   const previa = await env.DB.prepare('SELECT ruta,huella,resultado_id FROM g_idempotencia WHERE clave=?').bind(d.id).first();
   if (previa) {
     if (previa.ruta !== 'documentos' || previa.huella !== h) throw new HttpError(409, 'idempotencia_conflicto');
-    return json({ item: documentoItem(await fila(env, 'g_documentos', previa.resultado_id || d.id)) }, 200, NO_STORE);
+    const guardado = await fila(env, 'g_documentos', previa.resultado_id || d.id);
+    return json({ item: documentoItem(guardado), duplicado: guardado.id !== d.id }, 200, NO_STORE);
   }
   // Un ID distinto que deduplica también queda vinculado a su resultado: reutilizarlo
   // después con otro archivo/cuerpo sigue siendo un conflicto, sin otra copia R2.
@@ -811,7 +812,7 @@ gestion.post(`${BASE}/documentos`, async (c) => {
       const operacion = await env.DB.prepare('SELECT resultado_id FROM g_idempotencia WHERE clave=?').bind(d.id).first();
       const guardado = await fila(env, 'g_documentos', operacion?.resultado_id || d.id);
       if (guardado.key !== key) await limpiarIntentoDocumento(env, key, d.id);
-      return json({ item: documentoItem(guardado) }, 200, NO_STORE);
+      return json({ item: documentoItem(guardado), duplicado: guardado.id !== d.id }, 200, NO_STORE);
     }
   } catch (e) {
     // Si no podemos confirmar la escritura, preservar bytes; nunca borrar un objeto
@@ -841,10 +842,12 @@ gestion.patch(`${BASE}/documentos/:id`, async (c) => {
   if(invalidada && n.estado_revision==='revisado') n.estado_revision='pendiente';
   if(b.estado_revision==='revisado' && b.revision_confirmada!==true) fail('revision_no_confirmada');
   const nuevaRevision=n.estado_revision==='revisado' && b.estado_revision==='revisado';
-  const revisadoPor=nuevaRevision ? actor : invalidada ? null : old.revisado_por;
-  const revisadoAt=nuevaRevision ? now : invalidada ? null : old.revisado_at;
-  const anteriorPor=invalidada ? old.revisado_por || old.ultima_revision_por : old.ultima_revision_por;
-  const anteriorAt=invalidada ? old.revisado_at || old.ultima_revision_at : old.ultima_revision_at;
+  const pendiente=n.estado_revision==='pendiente';
+  const archivarRevision=Boolean(old.revisado_at) && (nuevaRevision || pendiente);
+  const revisadoPor=nuevaRevision ? actor : pendiente ? null : old.revisado_por;
+  const revisadoAt=nuevaRevision ? now : pendiente ? null : old.revisado_at;
+  const anteriorPor=archivarRevision ? old.revisado_por : old.ultima_revision_por;
+  const anteriorAt=archivarRevision ? old.revisado_at : old.ultima_revision_at;
   const result=await env.DB.batch([
     env.DB.prepare(`UPDATE g_documentos SET categoria_documental=?,estado_revision=?,fecha_inicio=?,vence=?,nota=?,kilometros=?,revisado_por=?,revisado_at=?,ultima_revision_por=?,ultima_revision_at=?,metadata_version=metadata_version+1 WHERE id=? AND metadata_version=? AND tipo='vehiculo'`).bind(n.categoria_documental,n.estado_revision,n.fecha_inicio,n.vence,n.nota,n.kilometros,revisadoPor,revisadoAt,anteriorPor,anteriorAt,old.id,version),
     auditoria(env,{actor,accion:'documento_metadata',objeto_tipo:'vehiculo',objeto_id:old.objeto_id,detalle:{documento_id:old.id,de:{categoria_documental:old.categoria_documental,estado_revision:old.estado_revision,fecha_inicio:old.fecha_inicio,vence:old.vence,nota:old.nota,kilometros:old.kilometros},a:n},now,si:versionAplicada()}),

@@ -331,7 +331,8 @@ conductores.post(`${BASE}/conductores/:id/documentos`, async c => {
     const saved = await row(env, 'g_conductor_documentos', previa.resultado_id || d.id);
     if (saved.retirado_at) throw new HttpError(409, 'documento_retirado');
     return json({
-      item: documentoItem(saved)
+      item: documentoItem(saved),
+      duplicado: saved.id !== d.id
     }, 200, NO_STORE);
   }
   const duplicate = async old => {
@@ -386,7 +387,8 @@ conductores.post(`${BASE}/conductores/:id/documentos`, async c => {
       const saved = await row(env, 'g_conductor_documentos', op.resultado_id || d.id);
       if (saved.retirado_at) throw new HttpError(409, 'documento_retirado');
       return json({
-        item: documentoItem(saved)
+        item: documentoItem(saved),
+      duplicado: saved.id !== d.id
       }, 200, NO_STORE);
     }
   } catch (e) {
@@ -430,13 +432,15 @@ conductores.patch(`${BASE}/conductores/:id/documentos/:docId`, async c => {
   const invalidada = n.clase !== old.clase || n.fecha_inicio !== old.fecha_inicio || n.vence !== old.vence;
   const restaurado = Boolean(old.retirado_at) && b.retirado === false;
   if (old.retirado_at && b.retirado !== false) throw new HttpError(409, 'documento_retirado');
-  if (invalidada || restaurado) n.estado_revision = 'pendiente';
+  if ((invalidada && n.estado_revision === 'revisado') || (restaurado && n.estado_revision !== 'sustituido')) n.estado_revision = 'pendiente';
   const nuevaRevision = n.estado_revision === 'revisado' && b.estado_revision === 'revisado';
   const retiradoAt = b.retirado === undefined ? old.retirado_at : b.retirado ? old.retirado_at || now : null;
-  const anteriorPor = invalidada || restaurado ? old.revisado_por || old.ultima_revision_por : old.ultima_revision_por;
-  const anteriorAt = invalidada || restaurado ? old.revisado_at || old.ultima_revision_at : old.ultima_revision_at;
-  const revisadoPor = nuevaRevision ? actor : invalidada || restaurado ? null : old.revisado_por;
-  const revisadoAt = nuevaRevision ? now : invalidada || restaurado ? null : old.revisado_at;
+  const pendiente = n.estado_revision === 'pendiente';
+  const archivarRevision = Boolean(old.revisado_at) && (nuevaRevision || pendiente);
+  const anteriorPor = archivarRevision ? old.revisado_por : old.ultima_revision_por;
+  const anteriorAt = archivarRevision ? old.revisado_at : old.ultima_revision_at;
+  const revisadoPor = nuevaRevision ? actor : pendiente ? null : old.revisado_por;
+  const revisadoAt = nuevaRevision ? now : pendiente ? null : old.revisado_at;
   const results = await env.DB.batch([env.DB.prepare('UPDATE g_conductor_documentos SET clase=?,nombre=?,estado_revision=?,fecha_inicio=?,vence=?,nota=?,retirado_at=?,revisado_por=?,revisado_at=?,ultima_revision_por=?,ultima_revision_at=?,metadata_version=metadata_version+1 WHERE id=? AND conductor_id=? AND metadata_version=?').bind(n.clase,`${n.clase}.${old.ext}`,n.estado_revision,n.fecha_inicio,n.vence,n.nota,retiradoAt,revisadoPor,revisadoAt,anteriorPor,anteriorAt,old.id,old.conductor_id,version), auditoria(env, {
     actor,
     accion: b.retirado ? 'conductor_documento_retirado' : restaurado ? 'conductor_documento_restaurado' : 'conductor_documento_metadata',

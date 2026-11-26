@@ -425,7 +425,7 @@ test('conductor corrige clase del duplicado, conserva historial de revisión y r
  await assert.rejects(call(`${path}/archivo`),error('not_found'));
  await assert.rejects(api(`conductores/${wrong.id}/documentos/${doc.id}`,'PATCH',{metadata_version:item.metadata_version,retirado:false}),error('not_found'));
  item=(await api(path,'PATCH',{metadata_version:item.metadata_version,retirado:false})).item;
- assert.equal(item.retirado_at,null);assert.equal(item.estado_revision,'pendiente');assert.equal(item.revisado_por,null);assert.equal(item.ultima_revision_por,reviewer);assert.equal(item.ultima_revision_at,reviewedAt);
+ assert.equal(item.retirado_at,null);assert.equal(item.estado_revision,'sustituido');assert.equal(item.revisado_por,reviewer);assert.equal(item.revisado_at,reviewedAt);
  await assert.rejects(api(path,'PATCH',{metadata_version:retiredVersion,retirado:false}),error('version_conflicto'));
  assert.equal((await call(`${path}/archivo`)).status,200);
  await assert.rejects(api(path,'PATCH',{metadata_version:item.metadata_version,clase:'foto'}),error('foto_invalida'));
@@ -454,4 +454,62 @@ test('reintento legado de vehículo mantiene la huella anterior y campos explíc
  await DB.prepare('UPDATE g_idempotencia SET huella=? WHERE clave=?').bind(previousHash,body.id).run();
  const replay=await api('vehiculos','POST',body);assert.equal(replay.item.id,first.id);
  await assert.rejects(api('vehiculos','POST',{...body,matricula_tipo:'desconocida',matricula_pais:null}),error('idempotencia_conflicto'));
+});
+test('respuesta de dedup perdida y carrera idempotente conservan el aviso en vehículo y conductor',async t=>{
+ const {api,upload,vehicle,driver,env,DB,objects}=await fixture(t);
+ const v=await vehicle(),d=await driver();
+ for(const mode of ['vehiculo','conductor']){
+  const table=mode==='vehiculo'?'g_documentos':'g_conductor_documentos';
+  const path=mode==='vehiculo'?'documentos':`conductores/${d.id}/documentos`;
+  const fields=mode==='vehiculo'?{tipo:'vehiculo',objeto_id:v.id,clase:'otro'}:{clase:'otros'};
+  const firstId=nuevo();const original=(await upload(path,{...fields,id:firstId})).item;
+  const duplicateId=nuevo();const attempt={...fields,id:duplicateId,clase:mode==='vehiculo'?'itv':'identidad',vence:'2030-01-01'};
+  // El servidor confirmó el duplicado pero su primera respuesta no llegó al consumidor.
+  await upload(path,attempt);
+  const retried=await upload(path,attempt);
+  assert.equal(retried.duplicado,true);assert.equal(retried.item.id,original.id);assert.equal(retried.item.clase,fields.clase);assert.equal(retried.item.vence,null);
+  const createdReplay=await upload(path,{...fields,id:firstId});assert.equal(createdReplay.duplicado,false);
+  // Fuerza la ventana de carrera: consultas iniciales sin fila, idempotencia ya confirmada al entrar en la transacción.
+  const prepare=DB.prepare;let hiddenOperation=false,hiddenDocument=false;
+  env.DB.prepare=sql=>{const stmt=prepare(sql);const bind=stmt.bind;stmt.bind=(...args)=>{const bound=bind(...args);return {...bound,first:async()=>{
+   if(!hiddenOperation&&sql==='SELECT ruta,huella,resultado_id FROM g_idempotencia WHERE clave=?'&&args[0]===duplicateId){hiddenOperation=true;return null;}
+   if(!hiddenDocument&&sql.startsWith(`SELECT * FROM ${table} WHERE `)&&sql.includes('sha256=?')){hiddenDocument=true;return null;}
+   return bound.first();
+  }};};return stmt;};
+  const raced=await upload(path,attempt);env.DB.prepare=prepare;
+  assert.equal(hiddenOperation,true);assert.equal(hiddenDocument,true);assert.equal(raced.duplicado,true);assert.equal(raced.item.id,original.id);
+  assert.equal((await DB.prepare(`SELECT COUNT(*) n FROM ${table}`).first()).n,1);
+ }
+ assert.equal(objects.size,2);
+});
+test('corregir y restaurar conductor sustituido mantiene su estado histórico',async t=>{
+ const {driver,upload,api,call,DB}=await fixture(t);const d=await driver();const doc=(await upload(`conductores/${d.id}/documentos`,{clase:'otros'})).item;const path=`conductores/${d.id}/documentos/${doc.id}`;
+ let item=(await api(path,'PATCH',{metadata_version:doc.metadata_version,estado_revision:'revisado',revision_confirmada:true})).item;const reviewedAt=item.revisado_at;
+ item=(await api(path,'PATCH',{metadata_version:item.metadata_version,estado_revision:'sustituido'})).item;
+ item=(await api(path,'PATCH',{metadata_version:item.metadata_version,clase:'identidad',vence:'2030-01-01'})).item;
+ assert.equal(item.estado_revision,'sustituido');assert.equal(item.revisado_at,reviewedAt);
+ item=(await api(path,'PATCH',{metadata_version:item.metadata_version,retirado:true})).item;
+ await assert.rejects(call(`${path}/archivo`),error('not_found'));
+ item=(await api(path,'PATCH',{metadata_version:item.metadata_version,retirado:false})).item;
+ assert.equal(item.estado_revision,'sustituido');assert.equal(item.revisado_at,reviewedAt);assert.equal((await call(`${path}/archivo`)).status,200);
+ const stored=await DB.prepare('SELECT estado_revision,clase FROM g_conductor_documentos WHERE id=?').bind(doc.id).first();assert.equal(stored.estado_revision,'sustituido');
+});
+test('revisar otra vez y pasar manualmente a pendiente conserva la revisión anterior en ambos expedientes',async t=>{
+ const {driver,vehicle,upload,api,DB}=await fixture(t);const d=await driver(),v=await vehicle();
+ for(const mode of ['vehiculo','conductor']){
+  const path=mode==='vehiculo'?'documentos':`conductores/${d.id}/documentos`;
+  const table=mode==='vehiculo'?'g_documentos':'g_conductor_documentos';
+  let item=(await upload(path,mode==='vehiculo'?{tipo:'vehiculo',objeto_id:v.id,clase:'itv'}:{clase:'identidad'})).item;
+  const patch=mode==='vehiculo'?`documentos/${item.id}`:`${path}/${item.id}`;
+  // Una revisión ya existente pertenece al pasado, para observar qué revisión se archiva al revisar de nuevo.
+  await DB.prepare(`UPDATE ${table} SET estado_revision='revisado',revisado_por=?,revisado_at=? WHERE id=?`).bind('anterior@velai.test','2026-01-01T10:00:00.000Z',item.id).run();
+  item=(await api(patch,'PATCH',{metadata_version:item.metadata_version,estado_revision:'revisado',revision_confirmada:true,nota:'Nueva revisión explícita'})).item;
+  assert.equal(item.ultima_revision_por,'anterior@velai.test');assert.equal(item.ultima_revision_at,'2026-01-01T10:00:00.000Z');assert.equal(item.revisado_por,SOCIO.email);
+  const latest=item.revisado_at;
+  item=(await api(patch,'PATCH',{metadata_version:item.metadata_version,estado_revision:'pendiente'})).item;
+  assert.equal(item.estado_revision,'pendiente');assert.equal(item.revisado_at,null);assert.equal(item.revisado_por,null);assert.equal(item.ultima_revision_at,latest);assert.equal(item.ultima_revision_por,SOCIO.email);
+  const before=(await DB.prepare('SELECT COUNT(*) n FROM g_auditoria').first()).n;
+  await assert.rejects(api(patch,'PATCH',{metadata_version:item.metadata_version-1,estado_revision:'revisado',revision_confirmada:true}),error('version_conflicto'));
+  assert.equal((await DB.prepare('SELECT COUNT(*) n FROM g_auditoria').first()).n,before);
+ }
 });

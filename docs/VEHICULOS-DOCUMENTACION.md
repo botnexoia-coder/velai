@@ -20,7 +20,7 @@ Administración → Conductores permite crear fichas privadas para socios. Nombr
 
 Las fotografías y documentos se guardan en el almacenamiento privado existente, separados de los documentos financieros. Adjuntar no registra una revisión ni declara aptitud laboral o aseguradora. No se incluyen datos personales en los eventos de auditoría: se registran los campos modificados.
 
-Un duplicado abre el documento existente para corregir su tipo o fechas. Retirar un archivo bloquea su descarga y lo deja en históricos; Restaurar al expediente lo recupera como pendiente de revisar. Ninguna de estas acciones borra sus bytes. La purga definitiva y los plazos de conservación quedan fuera de esta entrega.
+Un duplicado abre el documento existente para corregir su tipo o fechas. Retirar un archivo bloquea su descarga y lo deja en históricos; Restaurar al expediente lo recupera como pendiente de revisar, salvo que ya estuviera sustituido, en cuyo caso conserva ese estado histórico. Ninguna de estas acciones borra sus bytes. La purga definitiva y los plazos de conservación quedan fuera de esta entrega.
 
 Cada asignación guarda vehículo, conductor, inicio y devolución opcional. El formulario trabaja con la hora de Madrid y el servidor conserva instantes UTC. Las horas inexistentes del cambio de horario se rechazan; las repetidas requieren elegir cuál corresponde. Un vehículo no admite asignaciones solapadas. El conductor actual se calcula según el instante de consulta; las asignaciones futuras permanecen programadas. El historial administrativo no acredita quién conducía en un incidente.
 
